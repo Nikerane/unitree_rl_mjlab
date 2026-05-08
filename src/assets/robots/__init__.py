@@ -44,3 +44,10 @@ from .unitree_h2.h2_constants import (
 from .unitree_h2.h2_constants import (
   get_h2_robot_cfg as get_h2_robot_cfg,
 )
+
+from .unitree_z1.z1_constants import (
+  Z1_HAMMER_DELTA_POS_SCALE as Z1_HAMMER_DELTA_POS_SCALE,
+)
+from .unitree_z1.z1_constants import (
+  get_z1_hammer_robot_cfg as get_z1_hammer_robot_cfg,
+)

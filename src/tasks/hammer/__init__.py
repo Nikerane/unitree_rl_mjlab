@@ -1,0 +1,1 @@
+"""Hammer-nail manipulation task."""
