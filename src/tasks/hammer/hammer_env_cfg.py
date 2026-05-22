@@ -146,6 +146,27 @@ def make_hammer_env_cfg() -> ManagerBasedRlEnvCfg:
         "nail_cfg": SceneEntityCfg("nail_block", joint_names=("nail_slide",)),
       },
     ),
+    # Progress reward: max(0, depth - max_depth_so_far). Provides a non-zero
+    # gradient from 0mm onward, where the Gaussian nail_driven_reward above
+    # is near-zero. Tracks per-episode state via ManagerTermBase.reset().
+    "nail_depth_delta": RewardTermCfg(
+      func=hammer_mdp.NailDepthDeltaTerm,
+      weight=500.0,
+      params={
+        "nail_cfg": SceneEntityCfg("nail_block", joint_names=("nail_slide",)),
+      },
+    ),
+    # Sparse task-completion reward. Fires once when nail crosses success_depth.
+    # This is the actual task signal (not shaping); episode terminates on success
+    # via the nail_driven TerminationTermCfg.
+    "completion": RewardTermCfg(
+      func=hammer_mdp.completion_bonus,
+      weight=100.0,
+      params={
+        "success_depth": NAIL_SUCCESS_THRESHOLD,
+        "nail_cfg": SceneEntityCfg("nail_block", joint_names=("nail_slide",)),
+      },
+    ),
     "action_rate": RewardTermCfg(
       func=hammer_mdp.action_rate_penalty,
       weight=-0.01,

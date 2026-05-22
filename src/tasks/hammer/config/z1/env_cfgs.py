@@ -6,6 +6,7 @@ from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.observation_manager import ObservationGroupCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
+from mjlab.sensor import ContactMatch, ContactSensorCfg
 
 from src.assets.robots.unitree_z1.z1_constants import (
   ARM_ACTUATOR_NAMES,
@@ -27,6 +28,17 @@ def z1_hammer_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     "robot": get_z1_hammer_robot_cfg(),
     "nail_block": get_nail_block_entity_cfg(),
   }
+
+  # --- Contact sensor: hammer_head geom vs. nail body ---
+  hammer_nail_contact = ContactSensorCfg(
+    name="hammer_nail_contact",
+    primary=ContactMatch(mode="geom", pattern="hammer_head", entity="robot"),
+    secondary=ContactMatch(mode="body", pattern="nail", entity="nail_block"),
+    fields=("found", "force"),
+    reduce="maxforce",
+    track_air_time=True,
+  )
+  cfg.scene.sensors = (cfg.scene.sensors or ()) + (hammer_nail_contact,)
 
   # --- Wire DifferentialIK to the Z1 arm actuators and hammer_head_site ---
   ik_action = cfg.actions["ik_hammer_head"]

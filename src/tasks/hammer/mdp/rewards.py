@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from mjlab.entity import Entity
+from mjlab.managers.manager_base import ManagerTermBase, ManagerTermBaseCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 
 if TYPE_CHECKING:
@@ -60,3 +61,56 @@ def action_rate_penalty(env: ManagerBasedRlEnv) -> torch.Tensor:
   Penalises jerky motions. Shape: (B,).
   """
   return torch.sum(torch.square(env.action_manager.action - env.action_manager.prev_action), dim=-1)
+
+
+def completion_bonus(
+  env: ManagerBasedRlEnv,
+  success_depth: float,
+  nail_cfg: SceneEntityCfg = _DEFAULT_NAIL_CFG,
+) -> torch.Tensor:
+  """Sparse +1 task-completion reward when nail_slide qpos >= success_depth.
+
+  This is the actual task reward (sparse goal signal), not shaping. Multiplied
+  by weight in the RewardTermCfg. The env terminates on success via the
+  nail_driven TerminationTermCfg, so this fires at most once per episode.
+  Shape: (B,).
+  """
+  nail: Entity = env.scene[nail_cfg.name]
+  depth = nail.data.joint_pos[:, nail_cfg.joint_ids].squeeze(1)
+  return (depth >= success_depth).float()
+
+
+class NailDepthDeltaTerm(ManagerTermBase):
+  """Progress reward: only positive changes in nail depth are rewarded.
+
+  Tracks max_depth_so_far per environment across the episode and returns
+  max(0, current_depth - max_depth_so_far) each step. Provides a non-zero
+  gradient from the very first mm of nail travel, unlike the Gaussian
+  nail_driven_reward which is near-zero at 0mm depth.
+
+  Stateful: requires per-episode reset of _max_depth via reset(env_ids).
+  """
+
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv):
+    super().__init__(env)
+    self._max_depth: torch.Tensor = torch.zeros(
+      env.num_envs, dtype=torch.float32, device=env.device
+    )
+
+  def reset(self, env_ids: torch.Tensor | slice | None) -> None:
+    if env_ids is None:
+      self._max_depth.zero_()
+    else:
+      self._max_depth[env_ids] = 0.0
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    nail_cfg: SceneEntityCfg = _DEFAULT_NAIL_CFG,
+  ) -> torch.Tensor:
+    """Returns shape (B,)."""
+    nail: Entity = env.scene[nail_cfg.name]
+    depth = nail.data.joint_pos[:, nail_cfg.joint_ids].squeeze(1)
+    delta = (depth - self._max_depth).clamp_min(0.0)
+    self._max_depth = torch.maximum(self._max_depth, depth)
+    return delta
