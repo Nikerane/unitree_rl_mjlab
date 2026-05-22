@@ -20,6 +20,21 @@ and sim-to-real deployment.
 </div>
 
 
+## 🔨 Z1 Hammer-Nail (`hammer-z1` branch)
+
+This branch adds **`Unitree-Z1-Hammer`**: Z1 arm + differential IK hammer control.
+Assets live in the sibling repo [`safe_impact_manipulation`](https://github.com/Nikerane/safe_impact_manipulation)
+(`hammer_z1_env/assets/`). Docs: [BASELINE_AUDIT](docs/BASELINE_AUDIT.md),
+[reward design](docs/research/reward-design/).
+
+```bash
+export MUJOCO_GL=egl
+python scripts/train.py Unitree-Z1-Hammer --agent.logger tensorboard --env.scene.num-envs 64
+python scripts/play.py Unitree-Z1-Hammer --checkpoint-file logs/rsl_rl/z1_hammer/<run>/model_xx.pt
+pytest tests/ -m "not integration"
+```
+
+
 ## 📦 Installation and Configuration
 
 Please refer to [setup.md](doc/setup_en.md) for installation and configuration steps.
