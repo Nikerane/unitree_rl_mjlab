@@ -92,10 +92,10 @@ Z1_ARTICULATION = EntityArticulationInfoCfg(
 
 
 ##
-# Initial joint configuration (radians).
-# From the Gym env neutral pose, matches hammer head above the nail.
+# Initial joint configurations (radians).
 ##
 
+# Neutral/home pose from the original Gym env.
 NEUTRAL_JOINT_POS: dict[str, float] = {
     "joint1": -0.000297861,
     "joint2":  1.30495,
@@ -106,9 +106,21 @@ NEUTRAL_JOINT_POS: dict[str, float] = {
     "jointGripper": -0.000964725,
 }
 
+# Manually tuned via viewer (--no-weld, actuator sliders) on 2026-05-27.
+# Captured from a stable keyframe where qpos ≈ ctrl (PD equilibrium).
+NEAR_NAIL_JOINT_POS: dict[str, float] = {
+    "joint1":  0.000358693,
+    "joint2":  1.72026,
+    "joint3": -1.3381,
+    "joint4":  0.834142,
+    "joint5": -0.00578292,
+    "joint6":  1.57008,
+    "jointGripper": -0.001,
+}
+
 INIT_STATE = EntityCfg.InitialStateCfg(
     pos=(0.0, 0.0, 0.0),
-    joint_pos=NEUTRAL_JOINT_POS,
+    joint_pos=NEAR_NAIL_JOINT_POS,
     joint_vel={".*": 0.0},
 )
 
