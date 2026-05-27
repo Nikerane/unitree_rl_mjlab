@@ -128,15 +128,19 @@ def make_hammer_env_cfg() -> ManagerBasedRlEnvCfg:
 
   # --- Rewards ---
   rewards = {
+    # Approach: guide arm near nail, but keep weight low so hovering is never
+    # a stable optimum. Tighter std (0.08) means reward only within ~8 cm.
     "approach": RewardTermCfg(
       func=hammer_mdp.hammer_approach_reward,
-      weight=0.5,
+      weight=0.1,
       params={
-        "std": 0.15,
+        "std": 0.08,
         "robot_cfg": SceneEntityCfg("robot", site_names=()),   # head site, per-robot
         "nail_cfg": SceneEntityCfg("nail_block", site_names=("nail_top",)),
       },
     ),
+    # Gaussian on how far nail has been driven. Still near-zero at 0 mm but
+    # provides pull once nail starts moving.
     "nail_driven": RewardTermCfg(
       func=hammer_mdp.nail_driven_reward,
       weight=2.0,
@@ -151,7 +155,7 @@ def make_hammer_env_cfg() -> ManagerBasedRlEnvCfg:
     # is near-zero. Tracks per-episode state via ManagerTermBase.reset().
     "nail_depth_delta": RewardTermCfg(
       func=hammer_mdp.NailDepthDeltaTerm,
-      weight=500.0,
+      weight=2000.0,
       params={
         "nail_cfg": SceneEntityCfg("nail_block", joint_names=("nail_slide",)),
       },
@@ -173,7 +177,7 @@ def make_hammer_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "joint_pos_limits": RewardTermCfg(
       func=envs_mdp.joint_pos_limits,
-      weight=-1.0,
+      weight=-10.0,
       params={"asset_cfg": SceneEntityCfg("robot", joint_names=(".*",))},
     ),
   }
