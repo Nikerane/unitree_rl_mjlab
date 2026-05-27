@@ -33,7 +33,7 @@ def z1_hammer_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       value_loss_coef=1.0,
       use_clipped_value_loss=True,
       clip_param=0.2,
-      entropy_coef=0.005,
+      entropy_coef=0.02,
       num_learning_epochs=5,
       num_mini_batches=4,
       learning_rate=1.0e-3,
@@ -44,7 +44,7 @@ def z1_hammer_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       max_grad_norm=1.0,
     ),
     experiment_name="z1_hammer",
-    save_interval=100,
+    save_interval=500,
     num_steps_per_env=24,
     max_iterations=5000,
   )
