@@ -34,6 +34,37 @@ python scripts/play.py Unitree-Z1-Hammer --checkpoint-file logs/rsl_rl/z1_hammer
 pytest tests/ -m "not integration"
 ```
 
+### Reward design
+
+At each control step the total reward is:
+
+```
+R = w_approach  · r_approach
+  + w_strike    · r_strike
+  + w_driven    · r_driven
+  + w_delta     · r_delta
+  + w_done      · r_done
+  + w_act       · r_act
+  + w_jlim      · r_jlim
+```
+
+| Term | Equation | Weight | Purpose |
+|---|---|---|---|
+| `approach` | `exp(-‖p_head − p_nail‖² / σ²)`, σ=0.08 m | +0.1 | Guide arm near nail |
+| `strike_vel` | `exp(-‖p_head − p_nail‖² / σ²) · max(0, −vz_head)`, σ=0.08 m | +5.0 | Reward downward swing when close |
+| `nail_driven` | `exp(-(d_goal − d)² / σ²)`, d_goal=0.075 m, σ=0.03 m | +2.0 | Pull toward full depth (near-zero until ~30 mm driven) |
+| `nail_delta` | `max(0, d_t − max_depth_so_far)` | +2000 | Reward every new mm of nail travel from 0 |
+| `completion` | `1 if d ≥ 0.07 m else 0` | +100 | Sparse success bonus |
+| `action_rate` | `−‖a_t − a_{t−1}‖²` | −0.01 | Penalise jerky motion |
+| `joint_limits` | `−Σ max(0, q_i − q_soft,max) + max(0, q_soft,min − q_i)` | −10.0 | Penalise approaching joint limits |
+
+**Key balance:** hovering earns at most ~100/episode (approach × 1000 steps).  
+Fully driving the nail earns ~150 + 100 = 250 (delta + completion).  
+`strike_vel` breaks the hovering local minimum by rewarding the swing itself.
+
+**Why `nail_delta` weight is 2000:** 1 mm of nail travel = 2000 × 0.001 = 2.0 reward.  
+Without this scaling, nail movement is invisible against the approach signal.
+
 
 ## 📦 Installation and Configuration
 
