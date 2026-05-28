@@ -223,7 +223,7 @@ def make_hammer_env_cfg() -> ManagerBasedRlEnvCfg:
         iterations=10,
         ls_iterations=20,
         impratio=10,
-        cone="pyramidal",
+        cone="elliptic",
       ),
     ),
     decimation=10,        # 10 × 0.002 s = 0.02 s control period (50 Hz)
