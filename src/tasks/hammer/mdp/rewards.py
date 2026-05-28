@@ -93,15 +93,32 @@ class NailDepthDeltaTerm(ManagerTermBase):
 
   def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv):
     super().__init__(env)
-    self._max_depth: torch.Tensor = torch.zeros(
-      env.num_envs, dtype=torch.float32, device=env.device
+    self._max_depth: torch.Tensor = torch.full(
+      (env.num_envs,), self._SETTLE_OFFSET, dtype=torch.float32, device=env.device
     )
+
+  # WHY THIS EXISTS:
+  # At qpos=0 (episode reset), MuJoCo's constraint solver has gravity and the
+  # joint-limit spring active simultaneously. The solver is inherently compliant
+  # (all constraints are soft springs via solref) so it finds equilibrium at
+  # ~3.5 mm rather than exactly 0. This drift happens every episode in the first
+  # few physics steps with no arm contact.
+  #
+  # Without this offset, _max_depth starts at 0 and the settling looks like real
+  # progress: delta = 0.0035 → reward = 2000 × 0.0035 = 7.0 per episode for free.
+  # That free reward is consistent but it dilutes the striking signal.
+  #
+  # Setting _max_depth to 0.004 (just above 3.5 mm) creates a dead zone that
+  # absorbs the settling. Reward only fires when the arm drives the nail past 4 mm,
+  # which requires real hammer contact. Training impact is negligible: a single
+  # real strike drives ~66 mm, so the 4 mm threshold is cleared on first contact.
+  _SETTLE_OFFSET: float = 0.004  # 4 mm dead zone above gravity-settling artefact
 
   def reset(self, env_ids: torch.Tensor | slice | None) -> None:
     if env_ids is None:
-      self._max_depth.zero_()
+      self._max_depth.fill_(self._SETTLE_OFFSET)
     else:
-      self._max_depth[env_ids] = 0.0
+      self._max_depth[env_ids] = self._SETTLE_OFFSET
 
   def __call__(
     self,

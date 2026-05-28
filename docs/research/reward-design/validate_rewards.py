@@ -109,6 +109,9 @@ def main() -> None:
   W_DELTA = weights["nail_depth_delta"]
   W_COMPLETION = weights["completion"]
 
+  from src.tasks.hammer.mdp.rewards import NailDepthDeltaTerm
+  SETTLE = NailDepthDeltaTerm._SETTLE_OFFSET
+
   summary: list[tuple[str, dict[str, float]]] = []
   print(f"Active reward terms: {env.reward_manager.active_terms}")
   print(f"Live weights read from env: {weights}\n")
@@ -138,9 +141,9 @@ def main() -> None:
   print("\n--- Phase C: Force nail depth -> 0.010 m ---")
   force_nail_depth(env, 0.010)
   r = recompute_rewards(env)
-  expected_C = 0.010 * W_DELTA
+  expected_C = (0.010 - SETTLE) * W_DELTA
   assert_close(r["nail_depth_delta"], expected_C,
-               f"C: nail_depth_delta should fire 0.010 * {W_DELTA} = {expected_C}")
+               f"C: nail_depth_delta should fire (0.010 - {SETTLE}) * {W_DELTA} = {expected_C}")
   summary.append(("C. Force depth 0.010", r))
   print(f"  PASS  nail_depth_delta={r['nail_depth_delta']:.4f} (expected ~{expected_C:.4f})")
 
@@ -167,9 +170,9 @@ def main() -> None:
   env.reset()
   force_nail_depth(env, 0.005)
   r = recompute_rewards(env)
-  expected_F = 0.005 * W_DELTA
+  expected_F = (0.005 - SETTLE) * W_DELTA
   assert_close(r["nail_depth_delta"], expected_F,
-               f"F: nail_depth_delta should fire 0.005 * {W_DELTA} = {expected_F} (proves reset())")
+               f"F: nail_depth_delta should fire (0.005 - {SETTLE}) * {W_DELTA} = {expected_F} (proves reset())")
   summary.append(("F. Reset + depth 0.005", r))
   print(f"  PASS  nail_depth_delta={r['nail_depth_delta']:.4f} (expected ~{expected_F:.4f})")
 
