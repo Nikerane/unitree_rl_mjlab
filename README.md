@@ -36,34 +36,49 @@ pytest tests/ -m "not integration"
 
 ### Reward design
 
-At each control step the total reward is:
+At each control step $t$ the total reward is a weighted sum of seven terms:
 
-```
-R = w_approach  · r_approach
-  + w_strike    · r_strike
-  + w_driven    · r_driven
-  + w_delta     · r_delta
-  + w_done      · r_done
-  + w_act       · r_act
-  + w_jlim      · r_jlim
-```
+$$
+R_t \;=\; \sum_{k} w_k\, r_k
+\;=\; w_{\text{app}}\,r_{\text{app}}
+   + w_{\text{drv}}\,r_{\text{drv}}
+   + w_{\Delta}\,r_{\Delta}
+   + w_{\text{imp}}\,r_{\text{imp}}
+   + w_{\text{cmp}}\,r_{\text{cmp}}
+   + w_{\text{act}}\,r_{\text{act}}
+   + w_{\text{jl}}\,r_{\text{jl}}
+$$
 
-| Term | Equation | Weight | Purpose |
+**Notation.** $d_t$ = nail depth (slide qpos), goal $d_{\text{goal}}=0.075$ m, success $d_{\text{succ}}=0.07$ m; $\bar d_t=\max_{\tau\le t} d_\tau$ = max depth so far (reset to the $4\,\text{mm}$ settling dead-zone); $p_h,p_n$ = hammer-head / nail-top world positions; $\dot{x}_h$ = hammer-head world velocity (finite difference of position); $\hat{n}=(0,0,-1)$ = nail strike axis; $v_{\text{axial}}=\max\!\big(0,\,\hat{n}\cdot\dot{x}_h\big)$ = downward (axial) impact speed; $c_t$ = first-contact flag (true only on the step a contact begins); $a_t$ = action; $q_i$ = joint $i$ with soft limits $q_i^{\min},q_i^{\max}$; control period $\Delta t=0.02$ s.
+
+**Momentum-gated impact reward** — pays axial impact speed *only* when a fresh contact actually advances the nail (double-gated, so a glancing scrape or any contact that makes no progress earns nothing):
+
+$$
+r_{\text{imp}}
+\;=\;
+\frac{v_{\text{axial}}}{v_{\exp}}
+\;\cdot\;
+\mathbb{1}\!\left[\,c_t\,\right]
+\;\cdot\;
+\mathbb{1}\!\left[\,d_t - \bar d_{t-1} > \varepsilon\,\right],
+\qquad
+v_{\exp}=1\ \text{m/s},\quad \varepsilon = 5\times 10^{-4}\ \text{m}.
+$$
+
+| Term | $r_k$ | $w_k$ | Purpose |
 |---|---|---|---|
-| `approach` | `exp(-‖p_head − p_nail‖² / σ²)`, σ=0.08 m | +0.1 | Guide arm near nail |
-| `strike_vel` | `exp(-‖p_head − p_nail‖² / σ²) · max(0, −vz_head)`, σ=0.08 m | +5.0 | Reward downward swing when close |
-| `nail_driven` | `exp(-(d_goal − d)² / σ²)`, d_goal=0.075 m, σ=0.03 m | +2.0 | Pull toward full depth (near-zero until ~30 mm driven) |
-| `nail_delta` | `max(0, d_t − max_depth_so_far)` | +2000 | Reward every new mm of nail travel from 0 |
-| `completion` | `1 if d ≥ 0.07 m else 0` | +100 | Sparse success bonus |
-| `action_rate` | `−‖a_t − a_{t−1}‖²` | −0.01 | Penalise jerky motion |
-| `joint_limits` | `−Σ max(0, q_i − q_soft,max) + max(0, q_soft,min − q_i)` | −10.0 | Penalise approaching joint limits |
+| `approach`         | $\exp\!\big(-\lVert p_h - p_n\rVert^2 / \sigma_a^2\big),\ \ \sigma_a = 0.08\ \text{m}$ | $+0.1$ | Guide arm near nail |
+| `nail_driven`      | $\exp\!\big(-(d_{\text{goal}} - d_t)^2 / \sigma_d^2\big),\ \ \sigma_d = 0.03\ \text{m}$ | $+2.0$ | Pull toward full depth (near-zero until ~30 mm driven) |
+| `nail_depth_delta` | $\max\!\big(0,\ d_t - \bar d_{t-1}\big)$ | $+600$ | Reward every new mm of nail travel |
+| `impact_progress`  | $\dfrac{v_{\text{axial}}}{v_{\exp}}\,\mathbb{1}[c_t]\,\mathbb{1}\!\left[d_t-\bar d_{t-1}>\varepsilon\right]$ | $+8$ | **(new)** Reward fast, *productive* strikes |
+| `completion`       | $\mathbb{1}\!\left[d_t \ge d_{\text{succ}}\right]$ | $+100$ | Sparse success bonus |
+| `action_rate`      | $\lVert a_t - a_{t-1}\rVert^2$ | $-0.01$ | Penalise jerky motion |
+| `joint_pos_limits` | $\sum_i\big[\max(0,\,q_i - q_i^{\max}) + \max(0,\,q_i^{\min} - q_i)\big]$ | $-10$ | Penalise exceeding soft joint limits |
 
-**Key balance:** hovering earns at most ~100/episode (approach × 1000 steps).  
-Fully driving the nail earns ~150 + 100 = 250 (delta + completion).  
-`strike_vel` breaks the hovering local minimum by rewarding the swing itself.
-
-**Why `nail_delta` weight is 2000:** 1 mm of nail travel = 2000 × 0.001 = 2.0 reward.  
-Without this scaling, nail movement is invisible against the approach signal.
+> **Status / changelog.** This block reflects the agreed reward design (changes **#1 + #2**); see [`docs/research/hammering_reward_design_deep_dive_v2.md`](docs/research/hammering_reward_design_deep_dive_v2.md) §4.3, §5.A.
+> - **#1 rebalance:** `nail_depth_delta` weight $2000 \to 600$, so the full-drive dense total (~30–40) no longer dwarfs the $+100$ completion bonus.
+> - **#2 new term:** `impact_progress` is the double-gated reward above. On this **position-only** differential-IK arm the controllable impact lever is end-effector axial *momentum*, not commanded contact force — so the term rewards pre-impact axial speed, gated on actual nail progress.
+> - The previous README listed a `strike_vel` term ($w=5.0$); that term is **not** present in the code (`src/tasks/hammer/`) and has been removed here.
 
 
 ## 📦 Installation and Configuration

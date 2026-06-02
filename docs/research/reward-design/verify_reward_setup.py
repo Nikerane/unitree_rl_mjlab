@@ -9,6 +9,14 @@ Catches the two silent-zero failure modes:
 
 Plus: every reward term must produce at least one nonzero value within
 N random-policy steps, otherwise the term is dead.
+
+NOTE (2026-06-02): refreshed to the current mjlab manager API
+(`reward_manager.active_terms` + `_step_reward[:, idx]`,
+`action_manager.total_action_dim`; the old `_terms` / `_term_rewards` /
+`action_dim` / `make_z1_hammer_env_cfg` names were stale). The `impact_progress`
+term is EXEMPT from the liveness check — it is an event reward gated on a fresh
+productive strike, which a random policy essentially never produces. Its
+behaviour is covered by validate_rewards.py Phase I and the unit tests.
 """
 
 from __future__ import annotations
@@ -17,17 +25,21 @@ import sys
 import torch
 
 from mjlab.envs import ManagerBasedRlEnv
-from src.tasks.hammer.config.z1.env_cfgs import make_z1_hammer_env_cfg
+from src.tasks.hammer.config.z1.env_cfgs import z1_hammer_env_cfg
 
 
 N_STEPS = 200
 N_ENVS = 16
 
+# Event rewards that are expected to stay silent under a random policy.
+LIVENESS_EXEMPT = {"impact_progress"}
+
 
 def main() -> None:
-    cfg = make_z1_hammer_env_cfg()
+    cfg = z1_hammer_env_cfg()
     cfg.scene.num_envs = N_ENVS
-    env = ManagerBasedRlEnv(cfg)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    env = ManagerBasedRlEnv(cfg, device=device)
 
     # --- Check 1: ContactSensor resolves to expected primaries ---
     sensor = env.scene["hammer_nail_contact"]
@@ -42,7 +54,7 @@ def main() -> None:
     # --- Check 2: site_vel_w is non-zero after the arm moves ---
     obs, _ = env.reset()
     # Drive a large action to force the arm to move
-    big_action = torch.ones(N_ENVS, env.action_manager.action_dim, device=env.device)
+    big_action = torch.ones(N_ENVS, env.action_manager.total_action_dim, device=env.device)
     for _ in range(5):
         env.step(big_action)
 
@@ -54,34 +66,40 @@ def main() -> None:
         f"FAIL: site_vel_w is zero across all envs after 5 steps of max action. "
         f"site_vel_w may be lazy-evaluated or disabled in entity DataCfg. "
         f"Mean head speed: {head_speed.mean().item()}. "
-        f"Consider switching to finite-differenced velocity (see ImpactVelocityBonusTerm)."
+        f"(impact_progress uses finite-differenced velocity and is unaffected, "
+        f"but the head_vel observation reads site_vel_w.)"
     )
     print(f"[OK] site_vel_w populated. Mean head speed at step 5: {head_speed.mean().item():.4f} m/s")
 
-    # --- Check 3: every reward term has fired at least once ---
+    # --- Check 3: every (non-exempt) reward term has fired at least once ---
     env.reset()
-    reward_term_names = list(env.reward_manager._terms.keys())
+    reward_term_names = list(env.reward_manager.active_terms)
     seen_nonzero = {name: False for name in reward_term_names}
 
     for step in range(N_STEPS):
         # Random policy
-        action = (torch.rand(N_ENVS, env.action_manager.action_dim, device=env.device) - 0.5) * 2.0
+        action = (torch.rand(N_ENVS, env.action_manager.total_action_dim, device=env.device) - 0.5) * 2.0
         env.step(action)
 
-        # Inspect per-term reward buffer
-        for name in reward_term_names:
-            term_value = env.reward_manager._term_rewards[name]  # shape [B]
+        # Inspect per-term reward buffer ([B] per term; columns match active_terms).
+        for idx, name in enumerate(reward_term_names):
+            term_value = env.reward_manager._step_reward[:, idx]
             if (term_value.abs() > 1e-8).any():
                 seen_nonzero[name] = True
 
-    dead_terms = [n for n, seen in seen_nonzero.items() if not seen]
+    dead_terms = [
+        n for n, seen in seen_nonzero.items() if not seen and n not in LIVENESS_EXEMPT
+    ]
     if dead_terms:
         print(f"[FAIL] These reward terms NEVER fired in {N_STEPS} random-policy steps:")
         for name in dead_terms:
             print(f"        - {name}")
         sys.exit(1)
 
-    print(f"[OK] All {len(reward_term_names)} reward terms fired at least once.")
+    n_checked = len(reward_term_names) - len(LIVENESS_EXEMPT & set(reward_term_names))
+    exempt_status = {n: seen_nonzero[n] for n in LIVENESS_EXEMPT if n in seen_nonzero}
+    print(f"[OK] All {n_checked} non-exempt reward terms fired at least once.")
+    print(f"     (exempt event rewards, silence expected under random policy: {exempt_status})")
 
     # --- Check 4: collect air_time / impact_speed distributions (resolves Q5) ---
     # Run another batch of random-policy steps and snapshot last_air_time at each contact
@@ -93,7 +111,7 @@ def main() -> None:
     impact_speeds = []
     prev_head_pos = robot.data.site_pos_w[:, head_site_id].clone()
     for _ in range(N_STEPS):
-        action = (torch.rand(N_ENVS, env.action_manager.action_dim, device=env.device) - 0.5) * 2.0
+        action = (torch.rand(N_ENVS, env.action_manager.total_action_dim, device=env.device) - 0.5) * 2.0
         env.step(action)
         first_contact = sensor.compute_first_contact(dt=env.step_dt).any(dim=-1)
         if first_contact.any():

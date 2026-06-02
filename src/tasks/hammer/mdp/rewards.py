@@ -131,3 +131,72 @@ class NailDepthDeltaTerm(ManagerTermBase):
     delta = (depth - self._max_depth).clamp_min(0.0)
     self._max_depth = torch.maximum(self._max_depth, depth)
     return delta
+
+
+class ImpactProgressTerm(ManagerTermBase):
+  """Double-gated momentum reward: (v_axial / v_expected) · 1[first_contact] · 1[Δdepth > ε].
+
+  Pays end-effector axial (downward) impact speed, but ONLY on the control step a
+  fresh hammer→nail contact begins AND only when that contact drives the nail past
+  its previous max depth. The two indicator gates make the speed bonus unfarmable by
+  scraping/tapping that produces no progress (Skalse et al. 2022; Pan et al. 2022).
+
+  On the position-only DifferentialIK action space the controllable impact lever is
+  end-effector momentum, so this term rewards pre-impact axial speed gated on real
+  nail progress. Velocity is finite-differenced from the hammer-head site position
+  (robust to a lazily-updated ``site_vel_w``).
+
+  Stateful: stores the previous head position, the max nail depth so far, and a
+  per-env init flag; all reset per-episode via reset(env_ids).
+  """
+
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv):
+    super().__init__(env)
+    self._prev_head: torch.Tensor = torch.zeros(self.num_envs, 3, device=self.device)
+    self._prev_depth: torch.Tensor = torch.zeros(self.num_envs, device=self.device)
+    self._init: torch.Tensor = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+
+  def reset(self, env_ids: torch.Tensor | slice | None) -> None:
+    if env_ids is None:
+      self._init.fill_(False)
+      self._prev_depth.zero_()
+    else:
+      self._init[env_ids] = False
+      self._prev_depth[env_ids] = 0.0
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    sensor_name: str,
+    robot_cfg: SceneEntityCfg = _DEFAULT_ROBOT_CFG,
+    nail_cfg: SceneEntityCfg = _DEFAULT_NAIL_CFG,
+    axis: tuple[float, float, float] = (0.0, 0.0, -1.0),
+    eps: float = 5e-4,
+    v_expected: float = 1.0,
+  ) -> torch.Tensor:
+    """Returns shape (B,)."""
+    robot: Entity = env.scene[robot_cfg.name]
+    nail: Entity = env.scene[nail_cfg.name]
+    sensor = env.scene[sensor_name]
+    dt = env.step_dt
+
+    # Finite-difference axial speed (downward, along the nail axis). Zeroed on the
+    # first step after a reset so the spawn/teleport cannot register as velocity.
+    head = robot.data.site_pos_w[:, robot_cfg.site_ids].squeeze(1)
+    vel = torch.where(
+      self._init[:, None], (head - self._prev_head) / dt, torch.zeros_like(head)
+    )
+    self._prev_head = head.clone()
+    self._init.fill_(True)
+
+    n = torch.tensor(axis, device=head.device, dtype=head.dtype)
+    v_axial = (vel * n).sum(-1).clamp_min(0.0)
+
+    # Progress gate: nail must advance past its max-so-far by more than eps.
+    depth = nail.data.joint_pos[:, nail_cfg.joint_ids].squeeze(1)
+    advanced = (depth - self._prev_depth > eps).to(head.dtype)
+    self._prev_depth = torch.maximum(self._prev_depth, depth)
+
+    # Contact gate: fire only on the step a fresh contact begins.
+    fc = sensor.compute_first_contact(dt=dt).any(-1).to(head.dtype)
+    return (v_axial / v_expected) * fc * advanced

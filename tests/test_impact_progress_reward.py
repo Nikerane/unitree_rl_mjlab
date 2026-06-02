@@ -1,0 +1,184 @@
+"""Unit tests for the `impact_progress` reward term (ImpactProgressTerm).
+
+Design source: docs/research/reward-design/IMPACT_PROGRESS_IMPL_SPEC.md
+
+The term implements the double-gated momentum reward
+
+    r = (v_axial / v_expected) * 1[first_contact] * 1[depth advanced > eps]
+
+These tests run in isolation against a tiny stub env (no MuJoCo / Warp): the
+three gates are independent tensor values, so scrape-vs-strike is fully
+deterministic. Pure Python + torch → no marker (runs under `-m "not integration"`).
+"""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+import torch
+
+from src.tasks.hammer.mdp.rewards import ImpactProgressTerm
+
+
+# --- Stub env -------------------------------------------------------------
+# ImpactProgressTerm reads only: env.num_envs, env.device, env.step_dt,
+# env.scene[name], robot.data.site_pos_w, nail.data.joint_pos, and
+# sensor.compute_first_contact(dt). All are trivially fakeable.
+
+
+class _StubSensor:
+    def __init__(self, num_envs: int):
+        self._fc = torch.zeros(num_envs, 1, dtype=torch.bool)
+
+    def set_first_contact(self, value: bool) -> None:
+        self._fc.fill_(bool(value))
+
+    def compute_first_contact(self, dt):  # noqa: ARG002 - dt unused by stub
+        return self._fc.clone()
+
+
+# Resolved-SceneEntityCfg stand-ins (the real SceneEntityCfg exposes the same
+# `.name` / `.site_ids` / `.joint_ids` after `.resolve(scene)`).
+_ROBOT_CFG = SimpleNamespace(name="robot", site_ids=[0])
+_NAIL_CFG = SimpleNamespace(name="nail_block", joint_ids=[0])
+_PARAMS = dict(
+    sensor_name="hammer_nail_contact",
+    robot_cfg=_ROBOT_CFG,
+    nail_cfg=_NAIL_CFG,
+    axis=(0.0, 0.0, -1.0),
+    eps=5e-4,
+    v_expected=1.0,
+)
+
+
+def _make_stub_env(num_envs: int = 1, step_dt: float = 0.02):
+    robot = SimpleNamespace(data=SimpleNamespace(site_pos_w=torch.zeros(num_envs, 1, 3)))
+    nail = SimpleNamespace(data=SimpleNamespace(joint_pos=torch.zeros(num_envs, 1)))
+    sensor = _StubSensor(num_envs)
+    scene = {"robot": robot, "nail_block": nail, "hammer_nail_contact": sensor}
+    env = SimpleNamespace(num_envs=num_envs, device="cpu", step_dt=step_dt, scene=scene)
+    return env, robot, nail, sensor
+
+
+def _step(term, env, robot, nail, sensor, *, head_z, depth, first_contact, head_x=0.0):
+    """Set the per-step stub state, then evaluate the term once."""
+    robot.data.site_pos_w[:, 0, 0] = head_x
+    robot.data.site_pos_w[:, 0, 2] = head_z
+    nail.data.joint_pos[:, 0] = depth
+    sensor.set_first_contact(first_contact)
+    return term(env, **_PARAMS)
+
+
+# --- Tests ----------------------------------------------------------------
+
+
+def test_productive_strike_rewards_axial_speed():
+    """Fresh contact + downward speed + real depth advance → positive, scaled reward."""
+    env, robot, nail, sensor = _make_stub_env()
+    term = ImpactProgressTerm(cfg=None, env=env)
+    # Warm-up call establishes prev head position (velocity is 0 on the first step).
+    r0 = _step(term, env, robot, nail, sensor, head_z=0.05, depth=0.0, first_contact=False)
+    assert float(r0) == 0.0
+    # Head drops 1 cm in one 0.02 s step → v_axial = 0.5 m/s; nail advances 1 cm; fresh contact.
+    r1 = _step(term, env, robot, nail, sensor, head_z=0.04, depth=0.01, first_contact=True)
+    assert float(r1) == pytest.approx(0.5)  # (0.5 / 1.0) * 1 * 1
+
+
+def test_scrape_without_depth_advance_is_zero():
+    """Fast contact that does not move the nail earns nothing (depth gate)."""
+    env, robot, nail, sensor = _make_stub_env()
+    term = ImpactProgressTerm(cfg=None, env=env)
+    _step(term, env, robot, nail, sensor, head_z=0.05, depth=0.0, first_contact=False)
+    r = _step(term, env, robot, nail, sensor, head_z=0.04, depth=0.0, first_contact=True)
+    assert float(r) == 0.0
+
+
+def test_contact_at_peak_depth_is_zero():
+    """A contact at or below the max depth so far makes no new progress → zero."""
+    env, robot, nail, sensor = _make_stub_env()
+    term = ImpactProgressTerm(cfg=None, env=env)
+    _step(term, env, robot, nail, sensor, head_z=0.05, depth=0.0, first_contact=False)
+    _step(term, env, robot, nail, sensor, head_z=0.04, depth=0.02, first_contact=True)  # peak = 2 cm
+    r = _step(term, env, robot, nail, sensor, head_z=0.03, depth=0.02, first_contact=True)
+    assert float(r) == 0.0
+
+
+def test_no_first_contact_is_zero():
+    """Downward speed + depth advance but no fresh contact (e.g. resting) → zero."""
+    env, robot, nail, sensor = _make_stub_env()
+    term = ImpactProgressTerm(cfg=None, env=env)
+    _step(term, env, robot, nail, sensor, head_z=0.05, depth=0.0, first_contact=False)
+    r = _step(term, env, robot, nail, sensor, head_z=0.04, depth=0.01, first_contact=False)
+    assert float(r) == 0.0
+
+
+def test_horizontal_motion_has_no_axial_speed():
+    """Purely horizontal head motion → v_axial = 0 even with contact + depth advance."""
+    env, robot, nail, sensor = _make_stub_env()
+    term = ImpactProgressTerm(cfg=None, env=env)
+    _step(term, env, robot, nail, sensor, head_x=0.0, head_z=0.05, depth=0.0, first_contact=False)
+    r = _step(term, env, robot, nail, sensor, head_x=0.02, head_z=0.05, depth=0.01, first_contact=True)
+    assert float(r) == 0.0
+
+
+def test_upward_motion_is_clamped_to_zero():
+    """Retracting (upward) head motion has negative axial speed → clamp_min(0) = 0."""
+    env, robot, nail, sensor = _make_stub_env()
+    term = ImpactProgressTerm(cfg=None, env=env)
+    _step(term, env, robot, nail, sensor, head_z=0.04, depth=0.0, first_contact=False)
+    r = _step(term, env, robot, nail, sensor, head_z=0.05, depth=0.01, first_contact=True)
+    assert float(r) == 0.0
+
+
+def test_depth_advance_below_epsilon_is_zero():
+    """A sub-epsilon depth advance (< 5e-4 m) does not trip the progress gate."""
+    env, robot, nail, sensor = _make_stub_env()
+    term = ImpactProgressTerm(cfg=None, env=env)
+    _step(term, env, robot, nail, sensor, head_z=0.05, depth=0.0, first_contact=False)
+    r = _step(term, env, robot, nail, sensor, head_z=0.04, depth=1e-4, first_contact=True)
+    assert float(r) == 0.0
+
+
+def test_first_step_after_reset_has_no_velocity():
+    """On the very first call (no prior head pos) velocity is 0, so reward is 0."""
+    env, robot, nail, sensor = _make_stub_env()
+    term = ImpactProgressTerm(cfg=None, env=env)
+    r = _step(term, env, robot, nail, sensor, head_z=0.04, depth=0.01, first_contact=True)
+    assert float(r) == 0.0
+
+
+def test_reset_clears_depth_history():
+    """reset() must zero the max-depth tracker so a new episode is scored afresh."""
+    env, robot, nail, sensor = _make_stub_env()
+    term = ImpactProgressTerm(cfg=None, env=env)
+    _step(term, env, robot, nail, sensor, head_z=0.05, depth=0.0, first_contact=False)
+    _step(term, env, robot, nail, sensor, head_z=0.04, depth=0.02, first_contact=True)  # peak = 2 cm
+    term.reset(None)
+    # A fresh strike to 0.5 cm would be 0 if the 2 cm peak persisted; reset → it's rewarded.
+    _step(term, env, robot, nail, sensor, head_z=0.05, depth=0.0, first_contact=False)
+    r = _step(term, env, robot, nail, sensor, head_z=0.04, depth=0.005, first_contact=True)
+    assert float(r) == pytest.approx(0.5)
+
+
+def test_v_expected_normalisation_scales_reward():
+    """Dividing by a larger v_expected shrinks the bonus proportionally."""
+    env, robot, nail, sensor = _make_stub_env()
+    term = ImpactProgressTerm(cfg=None, env=env)
+    params = {**_PARAMS, "v_expected": 2.0}
+    robot.data.site_pos_w[:, 0, 2] = 0.05
+    sensor.set_first_contact(False)
+    term(env, **params)  # warm-up
+    robot.data.site_pos_w[:, 0, 2] = 0.04  # v_axial = 0.5 m/s
+    nail.data.joint_pos[:, 0] = 0.01
+    sensor.set_first_contact(True)
+    r = term(env, **params)
+    assert float(r) == pytest.approx(0.25)  # 0.5 / 2.0
+
+
+def test_returns_per_env_shape():
+    """Reward is shape (num_envs,)."""
+    env, robot, nail, sensor = _make_stub_env(num_envs=3)
+    term = ImpactProgressTerm(cfg=None, env=env)
+    r = _step(term, env, robot, nail, sensor, head_z=0.05, depth=0.0, first_contact=False)
+    assert tuple(r.shape) == (3,)

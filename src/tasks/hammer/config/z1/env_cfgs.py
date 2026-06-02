@@ -65,6 +65,9 @@ def z1_hammer_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # --- Wire approach reward site name ---
   cfg.rewards["approach"].params["robot_cfg"].site_names = (HAMMER_HEAD_SITE_NAME,)
 
+  # --- Wire impact_progress reward head site name (mirrors approach) ---
+  cfg.rewards["impact_progress"].params["robot_cfg"].site_names = (HAMMER_HEAD_SITE_NAME,)
+
   # --- Viewer ---
   cfg.viewer.body_name = "link00"
 

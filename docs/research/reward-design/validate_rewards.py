@@ -15,6 +15,7 @@ Phases (expected values scale with the live env config weights, not hardcoded):
     F. Reset + depth -> 0.005 m   -> nail_depth_delta ~= 0.005 * W_delta  (proves reset())
     G. Bounce-back 0.020 -> 0.015 -> nail_depth_delta == 0                (proves clamp_min)
     H. Completion bonus           -> completion == W_completion above threshold
+    I. Strike (drive down)        -> impact_progress > 0 on fresh productive contact, 0 else
 
 Run:
     /home/nikhil/miniconda3/envs/unitree_mjlab/bin/python \\
@@ -203,17 +204,53 @@ def main() -> None:
   summary.append(("H. Completion bonus", r))
   print(f"  H2 PASS  completion={r['completion']:.4f} (expected {W_COMPLETION:.4f})")
 
+  # --- Phase I: impact_progress end-to-end (real strike) ---
+  # Unlike C-G, this needs real physics: first_contact + finite-diff velocity +
+  # depth advance must all be genuine. Driving straight down yields free flight,
+  # then a fresh productive contact (the strike), then continuous contact.
+  print("\n--- Phase I: impact_progress end-to-end (real strike) ---")
+  env.reset()
+  contact_ever = False
+  max_impact = 0.0
+  strike_r: dict[str, float] | None = None
+  sensor = env.scene["hammer_nail_contact"]
+  for step in range(15):
+    env.step(down_action)
+    r = reward_dict(env)
+    found = bool((sensor.data.found > 0).any())
+    imp = r["impact_progress"]
+    if imp < -TOL_ZERO:
+      print(f"\n[FAIL] I.step{step}: impact_progress negative ({imp:.4f})")
+      sys.exit(1)
+    if imp > TOL_ZERO and not found:
+      print(f"\n[FAIL] I.step{step}: impact_progress={imp:.4f} fired with NO contact (gate broken)")
+      sys.exit(1)
+    if not contact_ever and not found:
+      assert_zero(imp, f"I.step{step}: impact_progress must be 0 in free flight")
+    if imp > TOL_ZERO:
+      strike_r = r
+    contact_ever = contact_ever or found
+    max_impact = max(max_impact, imp)
+    if contact_ever and not found:
+      break  # episode reset after the strike drove the nail home
+  if max_impact <= TOL_ZERO:
+    print("\n[FAIL] I: no productive strike produced impact_progress > 0")
+    sys.exit(1)
+  summary.append(("I. Strike (impact)", strike_r if strike_r is not None else r))
+  print(f"  PASS  impact_progress peaked at {max_impact:.4f} on the strike, 0 in free flight")
+
   # --- Summary table ---
   print("\n" + "=" * 110)
   print(" ALL PHASES PASSED")
   print("=" * 110)
-  header = f"{'Phase':<26} {'depth_delta':>12} {'completion':>12} {'approach':>10} {'nail_driven':>12} {'action_rate':>12} {'joint_lim':>10}"
+  header = f"{'Phase':<26} {'depth_delta':>12} {'impact':>9} {'completion':>12} {'approach':>10} {'nail_driven':>12} {'action_rate':>12} {'joint_lim':>10}"
   print(header)
   print("-" * 120)
   for phase, r in summary:
     print(
       f"{phase:<26} "
       f"{r.get('nail_depth_delta', 0):>12.4f} "
+      f"{r.get('impact_progress', 0):>9.4f} "
       f"{r.get('completion', 0):>12.4f} "
       f"{r.get('approach', 0):>10.4f} "
       f"{r.get('nail_driven', 0):>12.4f} "

@@ -155,9 +155,26 @@ def make_hammer_env_cfg() -> ManagerBasedRlEnvCfg:
     # is near-zero. Tracks per-episode state via ManagerTermBase.reset().
     "nail_depth_delta": RewardTermCfg(
       func=hammer_mdp.NailDepthDeltaTerm,
-      weight=2000.0,
+      weight=600.0,  # 2000 -> 600 (A1 rebalance); A0 baseline = 2000. Full-drive cumulative ~30-40.
       params={
         "nail_cfg": SceneEntityCfg("nail_block", joint_names=("nail_slide",)),
+      },
+    ),
+    # Double-gated momentum reward (NEW, #2): pays axial (downward) impact speed
+    # only on a fresh hammer->nail contact that advances the nail past its max
+    # depth. On the position-only DiffIK action space the controllable impact
+    # lever is end-effector momentum, not contact force. v_axial is normalised by
+    # ~1 m/s so the per-strike bonus is O(1) before weighting.
+    "impact_progress": RewardTermCfg(
+      func=hammer_mdp.ImpactProgressTerm,
+      weight=8.0,
+      params={
+        "sensor_name": "hammer_nail_contact",
+        "robot_cfg": SceneEntityCfg("robot", site_names=()),  # head site, per-robot
+        "nail_cfg": SceneEntityCfg("nail_block", joint_names=("nail_slide",)),
+        "axis": (0.0, 0.0, -1.0),
+        "eps": 5e-4,
+        "v_expected": 1.0,
       },
     ),
     # Sparse task-completion reward. Fires once when nail crosses success_depth.
