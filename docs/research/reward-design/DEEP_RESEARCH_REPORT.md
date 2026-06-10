@@ -5,6 +5,10 @@
 **Corpus:** 6 markdown files + 4 Python validation scripts in `docs/research/reward-design/`
 **Project:** mjlab Unitree-Z1-Hammer (branch `hammer-z1`), DifferentialIK action space, nail at z=0.102 m, success threshold ≈ 0.071 m of nail travel.
 
+> ⚠️ **Thesis-reframing note (2026-06-10).** This report and the deep dive linked below address reward design for the **standalone Z1 hammer task** (Phase 0 / preparation). The Z1 work is now framed as preparation for a TU Munich thesis on the **Unitree G1 humanoid with variable-impedance RL** — see `thesis_synthesis.md` (repo root) and `docs/HANDOVER.md` §0. The recommendations below are still valid for the Z1 task itself, but should not be transferred verbatim to the thesis — the thesis architecture (single-policy, variable-impedance, online RL with explicit per-joint impulse constraint) is meaningfully different from anything proposed here.
+
+> **▶ See also — v2 (2026-05-29):** [`../hammering_reward_design_deep_dive_v2.md`](../hammering_reward_design_deep_dive_v2.md) — a deeper, **external-literature** pass (29 net-new verified citations) that treats this report as the baseline to exceed. Adds: repetitive-hammering reward machine; the position-only action-space critique (impact lever is momentum `m_eff·v_axial`, not contact force); safety-constrained RL; privileged critic; domain-randomisation gap; and a reward-hacking checklist. It challenges this report's assumptions on the completion-bonus cliff (Q11), the `nail_depth_delta=2000` balance, and the orientation/torque/impedance recommendations.
+
 ---
 
 ## Executive Summary
