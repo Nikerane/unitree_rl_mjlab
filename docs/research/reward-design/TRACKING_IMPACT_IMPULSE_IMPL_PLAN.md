@@ -1,6 +1,8 @@
 # Tracking + Impact + Impulse — Staged Implementation Plan (Z1 Phase-0 → G1)
 
-**Date:** 2026-06-10 · **Branch:** `hammer-z1` · **Status:** plan approved-for-staging, **pre-implementation**. **Scope: Z1 only** — G1 deferred entirely (user decision, 2026-06-10; see stub at end).
+**Date:** 2026-06-10 · **Branch:** `hammer-z1` · **Status:** **T0 + T1 IMPLEMENTED & VERIFIED** (2026-06-10; T0 commit `ba0dc9f`, T1 this commit); T2–T5 pre-implementation. **Scope: Z1 only** — G1 deferred entirely (user decision, 2026-06-10; see stub at end).
+
+> **T1 verification record:** 147 unit tests green (16+1 new for the reference); `validate_rewards.py` 10/10 phases (new Phase J); Phase M playback gate PASS — scripted single strike succeeds at approach heights 0.06/0.10/0.15 (contact ~step 10, success 3 steps later; reference default `overshoot=0.015`, `approach_height=0.15`, calibrated by playback); CPU smoke train (5 it / 8 envs, 37-dim obs) clean; adversarial review agent (1 MAJOR fixed: descent phase now gated on-axis, `axis_tol=0.05`) + 3,100-trial property fuzz (all 8 properties pass; 1-ulp endpoint fixed). **Empirical correction:** the press exploit PERSISTS at 30 N from the reset pose (slow press reaches threshold in 65 steps vs 13 for the reference strike) — press exclusion is the reward design's job (T3 one-payout window + time penalty), watchdog metrics load-bearing; see OPEN_QUESTIONS Q1.
 **Design source of truth:** `docs/research/tracking_impact_impulse_design_research.md` (decisions D1–D6, open questions Q13–Q18).
 **Goal (user directive):** the RL policy follows a given strike trajectory while maximizing delivered impact and bounding per-joint impulse. "Max force" is operationalized as **delivered axial impulse/momentum** — never commanded or instantaneous simulated force.
 

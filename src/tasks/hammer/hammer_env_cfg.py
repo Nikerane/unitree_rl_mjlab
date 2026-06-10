@@ -80,6 +80,22 @@ def make_hammer_env_cfg() -> ManagerBasedRlEnvCfg:
       params={"asset_cfg": SceneEntityCfg("nail_block", joint_names=("nail_slide",))},
       noise=Unoise(n_min=-0.001, n_max=0.001),
     ),
+    # Strike-reference observations (plan T1): the policy must SEE the given
+    # trajectory for it to anchor exploration (no noise — clean internal signal).
+    "strike_phase": ObservationTermCfg(
+      func=hammer_mdp.strike_phase,
+      params={
+        "robot_cfg": SceneEntityCfg("robot", site_names=()),  # head site, per-robot
+        "nail_cfg": SceneEntityCfg("nail_block", site_names=("nail_top",)),
+      },
+    ),
+    "strike_ref_error": ObservationTermCfg(
+      func=hammer_mdp.strike_ref_error,
+      params={
+        "robot_cfg": SceneEntityCfg("robot", site_names=()),  # head site, per-robot
+        "nail_cfg": SceneEntityCfg("nail_block", site_names=("nail_top",)),
+      },
+    ),
     "actions": ObservationTermCfg(func=envs_mdp.last_action),
   }
   critic_terms = {**actor_terms}

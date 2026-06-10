@@ -9,11 +9,16 @@ import torch
 from mjlab.entity import Entity
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 
+from src.tasks.hammer.mdp.references import get_strike_reference
+
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
 
 _DEFAULT_ROBOT_CFG = SceneEntityCfg("robot")
 _DEFAULT_NAIL_CFG = SceneEntityCfg("nail_block", joint_names=("nail_slide",))
+# NOTE: strike_phase / strike_ref_error take robot_cfg/nail_cfg as REQUIRED
+# params (no defaults): a site-less SceneEntityCfg("robot") default would
+# resolve to ALL sites and silently return (B, nsites, 3) (review finding).
 
 
 def hammer_head_pos_b(
@@ -65,6 +70,43 @@ def nail_top_pos_w(
   """World position of nail_top site. Shape: (B, 3)."""
   nail_entity: Entity = env.scene[asset_cfg.name]
   return nail_entity.data.site_pos_w[:, asset_cfg.site_ids].squeeze(1)
+
+
+def strike_phase(
+  env: ManagerBasedRlEnv,
+  robot_cfg: SceneEntityCfg,
+  nail_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+  """Phase of the scripted single-strike reference (plan T1). Shape: (B, 1).
+
+  phi in [0, 0.5] = wind-up (step-indexed); [0.5, 1] = strike descent
+  (distance-indexed). Monotone within an episode; re-anchored on reset.
+  """
+  robot: Entity = env.scene[robot_cfg.name]
+  nail_entity: Entity = env.scene[nail_cfg.name]
+  head_w = robot.data.site_pos_w[:, robot_cfg.site_ids].squeeze(1)
+  nail_top_w = nail_entity.data.site_pos_w[:, nail_cfg.site_ids].squeeze(1)
+  ref = get_strike_reference(env)
+  phi = ref.update(head_w, nail_top_w, env.episode_length_buf)
+  return phi.unsqueeze(-1)
+
+
+def strike_ref_error(
+  env: ManagerBasedRlEnv,
+  robot_cfg: SceneEntityCfg,
+  nail_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+  """Vector from the hammer head to the current reference waypoint (plan T1).
+
+  Gives the policy the reference to anticipate (anchor, not cage). Shape: (B, 3).
+  """
+  robot: Entity = env.scene[robot_cfg.name]
+  nail_entity: Entity = env.scene[nail_cfg.name]
+  head_w = robot.data.site_pos_w[:, robot_cfg.site_ids].squeeze(1)
+  nail_top_w = nail_entity.data.site_pos_w[:, nail_cfg.site_ids].squeeze(1)
+  ref = get_strike_reference(env)
+  phi = ref.update(head_w, nail_top_w, env.episode_length_buf)
+  return ref.waypoint(phi) - head_w
 
 
 def nail_depth(

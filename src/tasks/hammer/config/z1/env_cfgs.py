@@ -62,6 +62,13 @@ def z1_hammer_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       if obs_key in group.terms:
         group.terms[obs_key].params["asset_cfg"].site_names = (HAMMER_HEAD_SITE_NAME,)
 
+  # Strike-reference observations (T1): wire the hammer head site.
+  for obs_key in ("strike_phase", "strike_ref_error"):
+    for group in cfg.observations.values():
+      assert isinstance(group, ObservationGroupCfg)
+      if obs_key in group.terms:
+        group.terms[obs_key].params["robot_cfg"].site_names = (HAMMER_HEAD_SITE_NAME,)
+
   # --- Wire approach reward site name ---
   cfg.rewards["approach"].params["robot_cfg"].site_names = (HAMMER_HEAD_SITE_NAME,)
 

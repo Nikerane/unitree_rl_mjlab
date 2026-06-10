@@ -67,15 +67,16 @@ class TestObservations:
     def test_obs_has_critic_key(self, obs_after_reset):
         assert "critic" in obs_after_reset
 
+    # 33 -> 37 (2026-06-10, T1): + strike_phase (1) + strike_ref_error (3).
     def test_actor_obs_shape(self, obs_after_reset):
         # 7 joint_pos + 7 joint_vel + 3 ee_pos + 3 ee_vel
         # + 3 head_pos + 3 head_vel + 3 nail_top_pos + 1 nail_depth + 3 actions = 33
-        assert obs_after_reset["actor"].shape == (1, 33), (
-            f"Expected actor shape (1, 33), got {obs_after_reset['actor'].shape}"
+        assert obs_after_reset["actor"].shape == (1, 37), (
+            f"Expected actor shape (1, 37), got {obs_after_reset['actor'].shape}"
         )
 
     def test_critic_obs_shape(self, obs_after_reset):
-        assert obs_after_reset["critic"].shape == (1, 33)
+        assert obs_after_reset["critic"].shape == (1, 37)
 
     def test_obs_finite(self, obs_after_reset):
         for key, tensor in obs_after_reset.items():
@@ -152,19 +153,27 @@ class TestPhysicsAtReset:
             f"Hammer head z={head_z:.4f} is not above nail top z={nail_top_z:.4f}"
         )
 
-    def test_neutral_joint_positions_at_reset(self, env_cpu):
-        """Joint positions after reset must match NEUTRAL_JOINT_POS within 1e-3 rad."""
-        from src.assets.robots.unitree_z1.z1_constants import NEUTRAL_JOINT_POS
+    def test_reset_joint_positions_near_init_pose(self, env_cpu):
+        """Joints after reset must sit at NEAR_NAIL_JOINT_POS (the configured
+        INIT_STATE) within the ±0.05 rad T0 reset-randomization band.
+
+        (Renamed/fixed 2026-06-10: the old test compared against
+        NEUTRAL_JOINT_POS — not the configured init pose — with a 1e-3
+        exactness that T0's reset randomization intentionally breaks.)
+        """
+        from src.assets.robots.unitree_z1.z1_constants import NEAR_NAIL_JOINT_POS
 
         env_cpu.reset()
         robot = env_cpu.scene["robot"]
         joint_pos = robot.data.joint_pos[0]  # shape: (njoint,)
 
+        rand_band = 0.05 + 1e-3
         for i, name in enumerate(robot.joint_names):
-            expected = NEUTRAL_JOINT_POS[name]
+            expected = NEAR_NAIL_JOINT_POS[name]
             actual = joint_pos[i].item()
-            assert abs(actual - expected) < 1e-3, (
-                f"Joint '{name}': expected {expected:.6f} rad, got {actual:.6f} rad"
+            assert abs(actual - expected) < rand_band, (
+                f"Joint '{name}': expected {expected:.6f} ± {rand_band} rad, "
+                f"got {actual:.6f} rad"
             )
 
     def test_nail_position_in_valid_range(self, env_cpu):

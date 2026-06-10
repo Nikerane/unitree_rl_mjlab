@@ -16,6 +16,8 @@ Phases (expected values scale with the live env config weights, not hardcoded):
     G. Bounce-back 0.020 -> 0.015 -> nail_depth_delta == 0                (proves clamp_min)
     H. Completion bonus           -> completion == W_completion above threshold
     I. Strike (drive down)        -> impact_progress > 0 on fresh productive contact, 0 else
+    J. Phase machinery (T1)       -> strike_phase ~0 after reset, monotone under
+                                     descent, reaches the descent half, re-anchors on reset
 
 Run:
     /home/nikhil/miniconda3/envs/unitree_mjlab/bin/python \\
@@ -239,6 +241,50 @@ def main() -> None:
     sys.exit(1)
   summary.append(("I. Strike (impact)", strike_r if strike_r is not None else r))
   print(f"  PASS  impact_progress peaked at {max_impact:.4f} on the strike, 0 in free flight")
+
+  # --- Phase J: strike-reference phase machinery (T1) ---
+  # The obs manager drives the shared SingleStrikeReference every step; we read
+  # its latched phase directly. Asserts: ~0 after reset, monotone under a
+  # sustained descent, reaches the descent half, re-anchors to ~0 on reset.
+  print("\n--- Phase J: strike-reference phase (anchored, monotone, resets) ---")
+  from src.tasks.hammer.mdp.references import get_strike_reference
+
+  env.reset()
+  ref = get_strike_reference(env)
+  phi_prev = float(ref._phi[0])
+  if phi_prev > 0.05:
+    print(f"\n[FAIL] J: phi should be ~0 right after reset, got {phi_prev:.4f}")
+    sys.exit(1)
+  phis = [phi_prev]
+  for step in range(12):
+    env.step(down_action)
+    if env.episode_length_buf[0].item() == 0:
+      # Episode auto-reset (success termination): phase re-anchors to ~0 by
+      # design, so the monotone check applies only within an episode.
+      break
+    phi = float(ref._phi[0])
+    if phi < phi_prev - 1e-6:
+      print(f"\n[FAIL] J.step{step}: phi decreased {phi_prev:.4f} -> {phi:.4f} (latch broken)")
+      sys.exit(1)
+    phi_prev = phi
+    phis.append(phi)
+  if max(phis) <= 0.5:
+    if env.episode_length_buf[0].item() == 0:
+      # Success arrived before phi crossed into the descent half — possible if
+      # nail physics are ever retuned to terminate in < n_windup steps. The
+      # anchor/latch/re-anchor properties were still exercised; warn, not fail.
+      print("  WARN  success terminated the episode before phi crossed 0.5; "
+            "descent-half coverage skipped")
+    else:
+      print(f"\n[FAIL] J: phi never reached the descent half (max={max(phis):.3f})")
+      sys.exit(1)
+  env.reset()
+  phi_reset = float(get_strike_reference(env)._phi[0])
+  if phi_reset > 0.05:
+    print(f"\n[FAIL] J: phi did not re-anchor on reset ({phi_reset:.3f})")
+    sys.exit(1)
+  summary.append(("J. Phase machinery", {}))
+  print(f"  PASS  phi rose monotonically to {max(phis):.3f}, re-anchored to {phi_reset:.3f} on reset")
 
   # --- Summary table ---
   print("\n" + "=" * 110)
