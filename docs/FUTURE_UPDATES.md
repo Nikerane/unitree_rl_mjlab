@@ -2,6 +2,8 @@
 
 Things worth changing once the current baseline is validated. Each item lists the observation that motivated it, the concrete fix, and the file to change.
 
+> **Status (2026-06-10, plan stage T0):** items **1** (`clip_actions=1.0`), **2a** (±0.05 rad reset noise, train-only), **5** (frictionloss 30 N, damping 0.5 — applied to BOTH scene XMLs, fixing the viz-scene desync), and **6a** (goal 0.032 / threshold 0.030, range "0 0.032") are **APPLIED**. Items 2b (nail xy randomisation), 3 (curriculum), 4 (impact_velocity_bonus — superseded by `impact_progress`), 6b, and 7 remain open. See `docs/research/reward-design/TRACKING_IMPACT_IMPULSE_IMPL_PLAN.md`.
+
 ---
 
 ## 1. Action range — clip policy outputs to `[-1, 1]`

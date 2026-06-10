@@ -168,11 +168,13 @@ class TestPhysicsAtReset:
             )
 
     def test_nail_position_in_valid_range(self, env_cpu):
-        """Nail qpos must be within its slide joint range [0, 0.075]."""
+        """Nail qpos must be within its slide joint range [0, NAIL_GOAL_DEPTH]."""
+        from src.tasks.hammer.nail_block import NAIL_GOAL_DEPTH
+
         env_cpu.reset()
         depth = _get_nail_depth(env_cpu)
-        assert 0.0 <= depth <= 0.075, (
-            f"Nail depth {depth:.6f} is outside valid range [0, 0.075]"
+        assert 0.0 <= depth <= NAIL_GOAL_DEPTH, (
+            f"Nail depth {depth:.6f} is outside valid range [0, {NAIL_GOAL_DEPTH}]"
         )
 
 

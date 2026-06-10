@@ -161,10 +161,11 @@ class TestNamedConstants:
 
 class TestNailBlockConstants:
     def test_goal_depth(self):
-        assert NAIL_GOAL_DEPTH == pytest.approx(0.075)
+        # 0.075 -> 0.032 (2026-06-10, geometry fix 6a: head flush with block top).
+        assert NAIL_GOAL_DEPTH == pytest.approx(0.032)
 
     def test_success_threshold(self):
-        assert NAIL_SUCCESS_THRESHOLD == pytest.approx(0.07)
+        assert NAIL_SUCCESS_THRESHOLD == pytest.approx(0.030)
 
     def test_threshold_less_than_goal(self):
         assert NAIL_SUCCESS_THRESHOLD < NAIL_GOAL_DEPTH

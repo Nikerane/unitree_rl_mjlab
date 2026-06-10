@@ -30,7 +30,8 @@ def get_nail_block_spec() -> mujoco.MjSpec:
 def get_nail_block_entity_cfg() -> EntityCfg:
   """Return a fresh EntityCfg for the nail+block.
 
-  The nail starts at qpos=0 (not driven). Goal is qpos=0.075 (fully driven).
+  The nail starts at qpos=0 (not driven). Goal is qpos=0.032 (fully driven:
+  nail head flush with the block top — geometry fix 6a, 2026-06-10).
   """
   return EntityCfg(
     spec_fn=get_nail_block_spec,
@@ -43,6 +44,9 @@ NAIL_SLIDE_JOINT_NAME = "nail_slide"
 NAIL_TOP_SITE_NAME = "nail_top"
 
 # Nail fully-driven depth (metres) — goal for the task.
-NAIL_GOAL_DEPTH: float = 0.075
+# 0.075 -> 0.032 (2026-06-10, FUTURE_UPDATES 6a): with block top at z=0.060 and
+# the head bottom at 0.092 - qpos, full drive now ends with the head flush with
+# the block surface instead of passing through it. Matches XML range "0 0.032".
+NAIL_GOAL_DEPTH: float = 0.032
 # Success threshold: nail driven more than this fraction of goal depth.
-NAIL_SUCCESS_THRESHOLD: float = 0.07
+NAIL_SUCCESS_THRESHOLD: float = 0.030

@@ -21,6 +21,7 @@ import torch
 
 from mjlab.envs import ManagerBasedRlEnv
 from src.tasks.hammer.config.z1.env_cfgs import z1_hammer_env_cfg
+from src.tasks.hammer.nail_block import NAIL_SUCCESS_THRESHOLD
 
 
 APPROACH_HEIGHTS = [0.05, 0.10, 0.15, 0.20]  # metres above nail_top
@@ -33,7 +34,7 @@ def main() -> None:
     cfg.scene.num_envs = N_ENVS
     cfg.scene.env_spacing = 2.0
     cfg.episode_length_s = 5.0
-    env = ManagerBasedRlEnv(cfg)
+    env = ManagerBasedRlEnv(cfg, device="cpu")  # API refresh 2026-06-10 (device arg required)
     env.reset()
 
     results: dict[float, list[float]] = {h: [] for h in APPROACH_HEIGHTS}
@@ -42,27 +43,35 @@ def main() -> None:
     # First, lift up to the approach height; then drive down.
     # Each env gets a different approach height assigned round-robin.
 
-    action_dim = env.action_manager.action_dim
-    lift_action = torch.zeros(N_ENVS, action_dim, device=env.device)
-    lift_action[:, 2] = +1.0   # up
+    action_dim = env.action_manager.total_action_dim  # was .action_dim (stale API)
+    # Per-env lift durations so each env actually stops at ITS assigned height
+    # (bug fix 2026-06-10: previously all envs lifted for max_lift steps and
+    # measured the same motion regardless of assigned height).
+    lift_steps = torch.tensor(
+        [int(APPROACH_HEIGHTS[i % len(APPROACH_HEIGHTS)] / 0.005) for i in range(N_ENVS)],
+        device=env.device,
+    )
     strike_action = torch.zeros(N_ENVS, action_dim, device=env.device)
     strike_action[:, 2] = -1.0  # down
 
-    # Phase 1: lift to approach height (proportional to height — rough heuristic)
-    lift_steps_per_height = {h: int(h / 0.005) for h in APPROACH_HEIGHTS}
-    max_lift = max(lift_steps_per_height.values())
+    # Phase 1: lift each env to its approach height, then hold (zero action).
+    max_lift = int(lift_steps.max().item())
     for step in range(max_lift):
+        lift_action = torch.zeros(N_ENVS, action_dim, device=env.device)
+        lift_action[:, 2] = (step < lift_steps).float()
         env.step(lift_action)
 
     # Phase 2: max-velocity strike
     nail = env.scene["nail_block"]
     initial_depth = nail.data.joint_pos[:, 0].clone()
 
+    max_depth_seen = initial_depth.clone()
     for step in range(40):  # 40 steps = 0.8 s at 50 Hz
         env.step(strike_action)
+        max_depth_seen = torch.maximum(max_depth_seen, nail.data.joint_pos[:, 0])
 
-    final_depth = nail.data.joint_pos[:, 0]
-    depth_advance = (final_depth - initial_depth).cpu().tolist()
+    # Use the running max (final depth can understate after bounce-back).
+    depth_advance = (max_depth_seen - initial_depth).cpu().tolist()
 
     # Group results by approach height (round-robin assignment)
     for i, depth in enumerate(depth_advance):
@@ -78,12 +87,12 @@ def main() -> None:
         print(f"{h:<25.3f} {mean_d:<25.4f} {max_d:.4f}")
 
     overall_max = max(max(v) for v in results.values())
-    threshold = 0.07
+    threshold = NAIL_SUCCESS_THRESHOLD  # read from nail_block.py (0.030 since 2026-06-10)
     print(f"\nNail success threshold: {threshold} m")
     print(f"Overall max single-strike depth: {overall_max:.4f} m")
     if overall_max >= threshold:
         print(">>> Single-strike solution IS achievable. Repeated-strike rewards are optional.")
-    elif overall_max < 0.03:
+    elif overall_max < threshold / 3.0:
         print(">>> Single-strike solution is NOT achievable. Repeated-strike rewards are MANDATORY.")
     else:
         print(">>> Marginal. Repeated-strike rewards likely help but may not be strictly required.")

@@ -71,7 +71,7 @@ def nail_depth(
   env: ManagerBasedRlEnv,
   asset_cfg: SceneEntityCfg = _DEFAULT_NAIL_CFG,
 ) -> torch.Tensor:
-  """Current nail slide qpos (0 = not driven, 0.075 = fully driven). Shape: (B, 1)."""
+  """Current nail slide qpos (0 = not driven, NAIL_GOAL_DEPTH=0.032 = fully driven). Shape: (B, 1)."""
   nail_entity: Entity = env.scene[asset_cfg.name]
   # joint_pos has shape (B, n_joints); nail_slide is the only joint.
   depth = nail_entity.data.joint_pos[:, asset_cfg.joint_ids]

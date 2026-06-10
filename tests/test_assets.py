@@ -139,8 +139,10 @@ def test_nail_block_xml_has_nail_top_site():
 
 
 def test_nail_slide_joint_range():
-    """Nail slide range must be [0, 0.075] — the full driving depth."""
+    """Nail slide range must be [0, NAIL_GOAL_DEPTH] — the full driving depth."""
+    from src.tasks.hammer.nail_block import NAIL_GOAL_DEPTH
+
     m = _compile_xml(_SCENE_XML)
     nail_joint = m.joint("nail_slide")
     assert pytest.approx(nail_joint.range[0], abs=1e-6) == 0.0
-    assert pytest.approx(nail_joint.range[1], abs=1e-4) == 0.075
+    assert pytest.approx(nail_joint.range[1], abs=1e-4) == NAIL_GOAL_DEPTH

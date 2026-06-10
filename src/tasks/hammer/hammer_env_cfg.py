@@ -106,11 +106,15 @@ def make_hammer_env_cfg() -> ManagerBasedRlEnvCfg:
 
   # --- Events ---
   events = {
+    # FUTURE_UPDATES #2a (applied 2026-06-10): ±0.05 rad (~3°) joint noise at
+    # reset so the policy must close the loop on joint_pos instead of replaying
+    # one memorised trajectory. Zeroed in play mode (config/z1/env_cfgs.py) so
+    # validation scripts stay deterministic.
     "reset_robot_joints": EventTermCfg(
       func=envs_mdp.reset_joints_by_offset,
       mode="reset",
       params={
-        "position_range": (0.0, 0.0),
+        "position_range": (-0.05, 0.05),
         "velocity_range": (0.0, 0.0),
         "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
       },
@@ -141,12 +145,16 @@ def make_hammer_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     # Gaussian on how far nail has been driven. Still near-zero at 0 mm but
     # provides pull once nail starts moving.
+    # std 0.03 -> 0.013 (2026-06-10): scaled with the 6a range change
+    # (goal 0.075 -> 0.032) to preserve the design intent. At std=0.03 with the
+    # new goal, the term paid ~0.32 at depth 0 (~0.68 reward/step), turning
+    # episode survival into a farm that beats the +100 completion bonus.
     "nail_driven": RewardTermCfg(
       func=hammer_mdp.nail_driven_reward,
       weight=2.0,
       params={
         "goal_depth": NAIL_GOAL_DEPTH,
-        "std": 0.03,
+        "std": 0.013,
         "nail_cfg": SceneEntityCfg("nail_block", joint_names=("nail_slide",)),
       },
     ),

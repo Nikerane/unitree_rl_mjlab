@@ -74,10 +74,11 @@ def force_nail_depth(env: ManagerBasedRlEnv, depth: float) -> None:
   """Directly set nail_slide qpos (position only, velocity untouched).
 
   NOTE: The nail shaft interpenetrates the block by design (resting state).
-  Running env.step() after this write will let the contact solver push the
-  nail back toward qpos=0 because the block normal force exceeds the joint's
-  frictionloss (0.3 N). Use recompute_rewards() — not env.step() — to evaluate
-  the reward at the written state.
+  Running env.step() after this write can let the contact solver push the
+  nail back toward qpos=0 (interpenetration-recovery forces can exceed the
+  joint's frictionloss — 30 N since the 2026-06-10 recalibration; the original
+  observation was made at 0.3 N). Use recompute_rewards() — not env.step() —
+  to evaluate the reward at the written state.
   """
   nail = env.scene["nail_block"]
   new_pos = torch.tensor([[depth]], dtype=torch.float32, device=env.device)

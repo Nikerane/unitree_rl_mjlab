@@ -7,17 +7,25 @@ Status legend: 🔴 OPEN | 🟡 SCRIPT PROVIDED (run to resolve) | 🟢 RESOLVED
 
 ### 🟡 Q1 — Does a single strike fully drive the nail?
 
-**Question:** With the current nail physics (frictionloss=0.3 N, damping=8 N·s/m, range 0–0.075 m), what is the maximum nail depth achievable in a single strike given the Z1's maximum achievable end-effector velocity via DifferentialIK?
+**Question:** With the current nail physics (**frictionloss=30 N, damping=0.5 N·s/m, range 0–0.032 m — recalibrated 2026-06-10, plan stage T0**; this question originally quoted stale visualisation-scene values 0.3 N/8 N·s/m/0.075 m), what is the maximum nail depth achievable in a single strike given the Z1's maximum achievable end-effector velocity via DifferentialIK?
 
-**Why it matters:** If a single hard strike can drive the nail 75mm, the repeated-strike reward design is unnecessary — the policy just needs to learn one good swing. If max single-strike depth is ~10–20mm, repeated striking is mandatory and the `air_time_bonus` + `impact_velocity_bonus` architecture becomes critical.
+**Why it matters:** If a single hard strike can drive the nail to the 30 mm success threshold, the repeated-strike reward design is unnecessary — the policy just needs to learn one good swing. If max single-strike depth is well short of it, repeated striking is mandatory and the single-strike reference (plan T1) must become cyclic.
 
-**Resolution:** Run `test_single_strike.py`. Script lifts the hammer to several approach heights, then commands a max-velocity downward strike, and reports the resulting nail depth per height. Interpretation:
-- If any approach yields ≥ 70 mm depth: single-strike is achievable; repeated-strike rewards are optional.
-- If all approaches yield < 30 mm: repeated striking is mandatory.
+**Resolution:** Run `test_single_strike.py`. Script lifts the hammer to several approach heights, then commands a max-velocity downward strike, and reports the resulting nail depth per height. Interpretation (thresholds read from `nail_block.py`):
+- If any approach yields ≥ 30 mm (success threshold): single-strike is achievable; repeated-strike rewards are optional.
+- If all approaches yield < 10 mm (threshold/3): repeated striking is mandatory.
 
 ```bash
 python docs/research/reward-design/test_single_strike.py
 ```
+
+**RESULT (2026-06-10, T0 physics: frictionloss 30 N, damping 0.5, range 0–0.032, threshold 0.030):**
+constant-down strike + 0.8 s follow-through press reached **max 20.5 mm** (mean per approach height: 0.05 m → 20.5 mm, 0.10 m → 20.5 mm, 0.15 m → 13.9 mm, 0.20 m → 7.7 mm; higher approaches lose alignment under the crude constant-down command). Verdict band: **marginal**. Two consequences:
+
+1. **The press is now physically excluded:** the sustained push stalls ≈ 20.5 mm < 30 mm threshold — a quasi-static press cannot reach success at 30 N. (Script API + per-env lift-duration bugs fixed same day; the script previously lifted all envs identically.)
+2. **Single-strike success needs a better swing than constant-down.** The T1 reference playback (`playback_reference.py`, plan stage T1) measures what a shaped lift→strike achieves. **Threshold invariant to maintain: press-stall depth < NAIL_SUCCESS_THRESHOLD ≤ best-clean-strike depth.** If the shaped strike also falls short of 30 mm, lower the threshold toward ~max(strike depth × 0.95, press stall + 2 mm) rather than reducing frictionloss (reducing friction raises the press-stall depth and re-admits the press exploit).
+
+Status: 🟢 measured (final threshold pinned after T1 playback).
 
 ---
 

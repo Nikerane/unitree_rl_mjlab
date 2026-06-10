@@ -74,6 +74,8 @@ def z1_hammer_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # --- Play mode overrides ---
   if play:
     cfg.episode_length_s = int(1e9)
+    # Deterministic resets for validation/play; training keeps ±0.05 rad noise.
+    cfg.events["reset_robot_joints"].params["position_range"] = (0.0, 0.0)
     for group in cfg.observations.values():
       assert isinstance(group, ObservationGroupCfg)
       group.enable_corruption = False
