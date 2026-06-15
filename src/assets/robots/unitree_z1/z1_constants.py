@@ -47,6 +47,10 @@ def get_spec() -> mujoco.MjSpec:
     assets: dict[str, bytes] = {}
     for mesh_file in _MESH_DIR.glob("*.stl"):
         assets[mesh_file.name] = mesh_file.read_bytes()
+    # Real claw-hammer meshes (SimToolReal, MIT) live in a subdir and are .obj;
+    # key them by the path the XML references (relative to meshdir="meshes/").
+    for mesh_file in _MESH_DIR.glob("claw_hammer/*.obj"):
+        assets[f"claw_hammer/{mesh_file.name}"] = mesh_file.read_bytes()
     spec.assets = assets
     return spec
 

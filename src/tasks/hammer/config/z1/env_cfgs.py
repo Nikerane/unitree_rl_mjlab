@@ -32,7 +32,10 @@ def z1_hammer_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # --- Contact sensor: hammer_head geom vs. nail body ---
   hammer_nail_contact = ContactSensorCfg(
     name="hammer_nail_contact",
-    primary=ContactMatch(mode="geom", pattern="hammer_head", entity="robot"),
+    # Real-hammer collision face pieces are hammer_head_0 / hammer_head_1
+    # (decomp pieces); matcher is fullmatch, so use a regex. Excludes the
+    # neck/claw/handle collision geoms so only the striking face triggers.
+    primary=ContactMatch(mode="geom", pattern="hammer_head_.*", entity="robot"),
     secondary=ContactMatch(mode="body", pattern="nail", entity="nail_block"),
     fields=("found", "force"),
     reduce="maxforce",
