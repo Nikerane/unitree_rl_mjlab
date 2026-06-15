@@ -34,3 +34,4 @@ Load-bearing facts that override the spec:
 - Conda env: `unitree_mjlab` — **mjlab 1.4.0**, mujoco 3.8.1, mujoco_warp 3.8.1.
 - Z1 + hammer assets live in a sibling repo: `~/repos/safe_impact_manipulation/hammer_z1_env/assets/`.
 - View scene: `python hammer_z1_env/view.py` (normal mode, weld active) or `mjpython hammer_z1_env/view.py --no-weld` (sliders mode, gravity disabled, requires `mjpython` on macOS).
+- **Visual inspection of the task (works headless on macOS — MuJoCo offscreen GL needs no display/MUJOCO_GL):** `python scripts/render_reference.py --distance 0.85 --elevation -25` renders the open-loop T1 strike to PNG frames + montage + mp4 under `/tmp/hammer_ref/` (agents can then read the PNGs). Interactive/browser view of the same: `python scripts/play_reference.py` (viser, prints a URL). Both drive the scripted reference, not a trained policy.
