@@ -14,13 +14,18 @@ import pytest
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.rl import RslRlVecEnvWrapper
 from src.tasks.hammer.config.z1.env_cfgs import z1_hammer_env_cfg
+from src.tasks.hammer.mdp.rewards import NailDepthDeltaTerm
+
+# Device-agnostic (was hardcoded cuda:0 → errored on CPU-only machines so these
+# never ran on the Mac). Uses GPU when available.
+_DEV = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 
 @pytest.fixture(scope="module")
 def env_wrapped():
     cfg = z1_hammer_env_cfg()
     cfg.scene.num_envs = 4
-    raw = ManagerBasedRlEnv(cfg=cfg, device="cuda:0")
+    raw = ManagerBasedRlEnv(cfg=cfg, device=_DEV)
     wrapped = RslRlVecEnvWrapper(raw)
     wrapped.reset()
     yield wrapped, raw
@@ -32,45 +37,30 @@ def env_wrapped():
 # ---------------------------------------------------------------------------
 
 def test_nail_depth_delta_no_spike_on_reset(env_wrapped):
-    """nail_depth_delta must not produce reward on step 1 from gravity settling.
+    """nail_depth_delta must not produce reward on step 1 from any reset transient.
 
-    The nail drifts ~3.5 mm downward due to a MuJoCo frictionloss boundary
-    artefact. _max_depth is initialised at 4 mm so this drift never triggers
-    a positive delta.
+    Since the 2026-06-15 gravcomp fix the nail no longer creeps under gravity
+    (it holds at ~0), so this is doubly safe: the _max_depth dead-zone
+    (_SETTLE_OFFSET) is now belt-and-suspenders rather than load-bearing.
     """
     wrapped, raw = env_wrapped
     wrapped.reset()
 
-    # Step once with zero actions — only gravity settling acts on the nail
-    _, rewards, _, _ = wrapped.step(torch.zeros(4, 3, device="cuda:0"))
+    # Step once with zero actions — nothing should move the nail.
+    _, rewards, _, _ = wrapped.step(torch.zeros(4, 3, device=_DEV))
 
-    # Get the nail_depth_delta contribution from the reward manager
-    delta_term = raw.reward_manager.get_term("nail_depth_delta")
-    # Re-evaluate the term directly to isolate it
-    from src.tasks.hammer.mdp.rewards import NailDepthDeltaTerm
-    from mjlab.managers.scene_entity_config import SceneEntityCfg
-    nail_cfg = SceneEntityCfg("nail_block", joint_names=("nail_slide",))
-    nail_cfg.resolve(raw.scene)
-
-    # After reset, _max_depth should be _SETTLE_OFFSET
-    term_obj = None
-    for name, term in raw.reward_manager._terms.items():
-        if isinstance(term, NailDepthDeltaTerm):
-            term_obj = term
-            break
-
-    assert term_obj is not None, "NailDepthDeltaTerm not found in reward manager"
-    assert (term_obj._max_depth == NailDepthDeltaTerm._SETTLE_OFFSET).all(), (
-        f"_max_depth should be {NailDepthDeltaTerm._SETTLE_OFFSET} after reset, "
-        f"got {term_obj._max_depth}"
+    # Observable behaviour (robust to manager internals): the nail_depth_delta
+    # term contributes ~0 on a no-op step, and the nail itself hasn't moved.
+    rm = raw.reward_manager
+    idx = list(rm.active_terms).index("nail_depth_delta")
+    delta_reward = rm._step_reward[:, idx]
+    assert (delta_reward.abs() < 1e-6).all(), (
+        f"nail_depth_delta fired on a zero-action step: {delta_reward}"
     )
-
-    # nail depth at step 1 should be below SETTLE_OFFSET (gravity settling < 4mm)
-    nail = raw.scene["nail_block"]
-    depth = nail.data.joint_pos[:, nail_cfg.joint_ids].squeeze(1)
-    assert (depth < NailDepthDeltaTerm._SETTLE_OFFSET).all(), (
-        f"Nail depth {depth.max().item():.5f} exceeded SETTLE_OFFSET "
-        f"{NailDepthDeltaTerm._SETTLE_OFFSET} — settling artefact larger than expected"
+    depth = raw.scene["nail_block"].data.joint_pos[:, 0]
+    assert (depth.abs() < 5e-4).all(), (
+        f"Nail moved {depth.abs().max().item()*1000:.3f} mm under zero action "
+        "— gravity-creep bug (gravcomp on the nail body missing?)."
     )
 
 
@@ -85,7 +75,7 @@ def test_nail_depth_delta_rewards_real_driving(env_wrapped):
     wrapped.reset()
 
     nail = raw.scene["nail_block"]
-    down = torch.tensor([[0., 0., -1.]] * 4, device="cuda:0")
+    down = torch.tensor([[0., 0., -1.]] * 4, device=_DEV)
     peak_depth = 0.0
 
     for _ in range(20):
@@ -130,7 +120,7 @@ def test_contact_sensor_detects_contact_on_strike(env_wrapped):
     wrapped, raw = env_wrapped
     wrapped.reset()
     sensor = raw.scene.sensors["hammer_nail_contact"]
-    down = torch.tensor([[0., 0., -1.]] * 4, device="cuda:0")
+    down = torch.tensor([[0., 0., -1.]] * 4, device=_DEV)
 
     contact_ever_detected = False
     for _ in range(15):

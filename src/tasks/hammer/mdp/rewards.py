@@ -97,22 +97,16 @@ class NailDepthDeltaTerm(ManagerTermBase):
       (env.num_envs,), self._SETTLE_OFFSET, dtype=torch.float32, device=env.device
     )
 
-  # WHY THIS EXISTS:
-  # At qpos=0 (episode reset), MuJoCo's constraint solver has gravity and the
-  # joint-limit spring active simultaneously. The solver is inherently compliant
-  # (all constraints are soft springs via solref) so it finds equilibrium at
-  # ~3.5 mm rather than exactly 0. This drift happens every episode in the first
-  # few physics steps with no arm contact.
-  #
-  # Without this offset, _max_depth starts at 0 and the settling looks like real
-  # progress: delta = 0.0035 → reward = 2000 × 0.0035 = 7.0 per episode for free.
-  # That free reward is consistent but it dilutes the striking signal.
-  #
-  # Setting _max_depth to 0.004 (just above 3.5 mm) creates a dead zone that
-  # absorbs the settling. Reward only fires when the arm drives the nail past 4 mm,
-  # which requires real hammer contact. Training impact is negligible: a single
-  # real strike drives ~66 mm, so the 4 mm threshold is cleared on first contact.
-  _SETTLE_OFFSET: float = 0.004  # 4 mm dead zone above gravity-settling artefact
+  # WHY THIS EXISTS (now belt-and-suspenders):
+  # Originally absorbed a gravity-creep artefact — the nail drifting down a few mm
+  # at reset because MuJoCo joint frictionloss does NOT statically hold it. As of
+  # 2026-06-15 that is fixed at the SOURCE with gravcomp="1" on the nail body
+  # (nail_block_scene.xml), so the nail now holds at ~0 and there is no settling to
+  # absorb. The dead zone is kept as a cheap guard; it can be lowered toward 0 in a
+  # future change (would also shift validate_rewards Phase C/E/F expected values).
+  # Cost of keeping it: the first 4 mm of genuine nail progress earns no
+  # nail_depth_delta — negligible, since a real strike clears 4 mm on first contact.
+  _SETTLE_OFFSET: float = 0.004  # 4 mm dead zone (legacy gravity-settling guard)
 
   def reset(self, env_ids: torch.Tensor | slice | None) -> None:
     if env_ids is None:
