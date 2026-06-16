@@ -27,7 +27,7 @@ clone_or_pull safe_impact_manipulation safe_impact_manipulation "$BRANCH"
 
 # 3. Venv + pinned deps (versions = known-good local env, 2026-06)
 cd "$REPO_ROOT/unitree_rl_mjlab"
-uv venv --python 3.12 .venv
+[ -d .venv ] || uv venv --python 3.12 .venv   # idempotent: uv venv errors if it exists
 # torch first (CUDA build); if the default index lacks a CUDA wheel, re-run with
 #   UV_TORCH_INDEX=https://download.pytorch.org/whl/cu124  (set before calling)
 TORCH_ARGS=()
