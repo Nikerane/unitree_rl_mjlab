@@ -21,7 +21,9 @@ clone_or_pull() {  # $1=name $2=url $3=branch
   else git clone --branch "$3" "https://github.com/Nikerane/$2.git" "$1"; fi
 }
 clone_or_pull unitree_rl_mjlab unitree_rl_mjlab "$BRANCH"
-clone_or_pull safe_impact_manipulation safe_impact_manipulation main
+# Sibling MUST track the same branch — the real-hammer grasp-#10 assets (and the
+# physics the reward/threshold are calibrated against) live on hammer-z1, not main.
+clone_or_pull safe_impact_manipulation safe_impact_manipulation "$BRANCH"
 
 # 3. Venv + pinned deps (versions = known-good local env, 2026-06)
 cd "$REPO_ROOT/unitree_rl_mjlab"
