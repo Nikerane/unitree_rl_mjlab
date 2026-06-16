@@ -51,7 +51,13 @@ class SingleStrikeReference:
     # calibrated 2026-06-10: 0.005 stalls at ~25.5 mm (target ends above the
     # driven nail head); 0.015 drives past the 30 mm threshold in 13 steps at
     # approach heights 0.06-0.10 with a single contact event.
-    overshoot: float = 0.015,
+    # 0.015 -> 0.035 (2026-06-15, real-hammer fix): the box-hammer site sat at
+    # the head-box CENTRE, 25 mm above the contact face, so 0.015 of follow-
+    # through reached ~30 mm. The claw-mesh site now sits ON the striking face
+    # (z1_hammer_robot.xml, hammer_head_site = face centroid), so overshoot must
+    # equal the desired drive depth: sweep gave 0.015->21 mm, 0.030->success,
+    # 0.040->success; 0.035 lands ~35 mm with margin and stays above block top.
+    overshoot: float = 0.035,
     windup_speed: float = 0.02,     # metres per control step during wind-up
     descent_speed: float = 0.05,    # metres per control step during descent (= IK max)
     # Descent phase engages only within this lateral distance of the strike

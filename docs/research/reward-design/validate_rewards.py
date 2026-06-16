@@ -108,6 +108,8 @@ def main() -> None:
   zero_action = torch.zeros(1, action_dim, device=device)
   down_action = torch.zeros(1, action_dim, device=device)
   down_action[:, 2] = -1.0
+  up_action = torch.zeros(1, action_dim, device=device)
+  up_action[:, 2] = 1.0
 
   weights = get_weights(env)
   W_DELTA = weights["nail_depth_delta"]
@@ -130,10 +132,19 @@ def main() -> None:
   print(f"  PASS  nail_depth_delta={r['nail_depth_delta']:.4f}  approach={r['approach']:.4f}")
 
   # --- Phase B: Move action (no nail contact expected) ---
-  print("\n--- Phase B: Move action (downward, no contact) ---")
+  # Drive UP/away from the nail: since 2026-06-15 the reset pose places the
+  # striking face directly above the nail (head_site is now ON the face), so a
+  # DOWNWARD move contacts almost immediately — it can no longer be the
+  # "free, non-contacting move" this phase needs. Up is a genuine no-contact
+  # move; we assert the sensor stays clear so the premise is verified, not assumed.
+  print("\n--- Phase B: Move action (upward, no contact) ---")
+  b_sensor = env.scene["hammer_nail_contact"]
   for step in range(5):
-    env.step(down_action)
+    env.step(up_action)
     r = reward_dict(env)
+    if bool((b_sensor.data.found > 0).any()):
+      print(f"\n[FAIL] B.step{step}: hammer contacted the nail while moving UP (premise broken)")
+      sys.exit(1)
     assert_zero(r["nail_depth_delta"], f"B.step{step}: nail_depth_delta should be 0 (no contact)")
   summary.append(("B. Move action", r))
   print(f"  PASS  nail_depth_delta={r['nail_depth_delta']:.4f}  approach={r['approach']:.4f}")

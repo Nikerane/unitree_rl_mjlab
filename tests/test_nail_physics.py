@@ -62,16 +62,30 @@ def test_nail_does_not_go_negative(env):
 
 
 def test_nail_driven_by_downward_action(env):
-    """Sustained max downward action must drive nail > 5 mm within 60 steps."""
+    """Sustained strike toward the nail must drive it > 5 mm within 60 steps.
+
+    Drives the IK head along the actual head->nail_top gap direction (recomputed
+    each step, closed-loop) instead of a blind world [0, 0, -1]. The old blind
+    action silently assumed the hammer face pointed straight down in the world
+    frame; after the grasp-#10 remount the face-to-nail line is not world-vertical,
+    so [0, 0, -1] under-drove the nail and made this test flaky. Aiming at the nail
+    exercises a real strike regardless of how the hammer is mounted.
+    """
     wrapped, raw_env = env
     wrapped.reset()
+    robot = raw_env.scene["robot"]
+    nail = raw_env.scene["nail_block"]
+    head_ids, _ = robot.find_sites("hammer_head_site")
+    nail_ids, _ = nail.find_sites("nail_top")
     max_depth = 0.0
-    # Max downward IK delta: action [0, 0, -1] × delta_pos_scale = 5 cm/step downward
-    down = torch.tensor([[0.0, 0.0, -1.0]], device=_DEV)
     for _ in range(60):
-        wrapped.step(down)
+        head = robot.data.site_pos_w[:, head_ids].squeeze(1)   # (B, 3)
+        ntop = nail.data.site_pos_w[:, nail_ids].squeeze(1)     # (B, 3)
+        gap = ntop - head
+        action = gap / gap.norm(dim=-1, keepdim=True).clamp_min(1e-6)  # unit dir
+        wrapped.step(action.to(_DEV))
         max_depth = max(max_depth, nail_depth(raw_env))
     assert max_depth > 5e-3, (
-        f"Nail only reached {max_depth*1000:.2f} mm after 60 downward steps "
+        f"Nail only reached {max_depth*1000:.2f} mm after 60 strike steps "
         f"(expected > 5 mm). frictionloss or contact may still be blocking."
     )

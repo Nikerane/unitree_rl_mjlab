@@ -73,10 +73,14 @@ class TestActuatorConfigs:
         assert _Z1_ARM_J2.target_names_expr == ("joint2",)
 
     def test_gripper_stiffness(self):
-        assert _Z1_GRIPPER.stiffness == 1000.0
+        # Softened 1000->100 (2026-06-16): the gripper is vestigial (hammer is rigidly
+        # attached to ee_center_body, policy never actuates the gripper), and the stiff
+        # actuator chattered numerically on the near-limit joint once the arm became
+        # gravity-compensated, leaving a phantom ~-4.59 rad/s in the gripper qvel obs.
+        assert _Z1_GRIPPER.stiffness == 100.0
 
     def test_gripper_damping(self):
-        assert _Z1_GRIPPER.damping == 100.0
+        assert _Z1_GRIPPER.damping == 20.0
 
     def test_gripper_effort_limit(self):
         assert _Z1_GRIPPER.effort_limit == 30.0

@@ -117,4 +117,13 @@ def nail_depth(
   nail_entity: Entity = env.scene[asset_cfg.name]
   # joint_pos has shape (B, n_joints); nail_slide is the only joint.
   depth = nail_entity.data.joint_pos[:, asset_cfg.joint_ids]
-  return depth
+  # Clamp the OBSERVED depth to >= 0. The nail's declared joint range is
+  # [0, 0.032], but the soft lower-limit constraint lets a hooking hammer claw
+  # extract the nail a few mm past 0 under adversarial action (audit #4,
+  # 2026-06-16: a sustained pure-up command pulls a seated nail to ~-9 mm). The
+  # policy is never rewarded for that — the depth-progress terms ratchet on
+  # max-depth-so-far so re-driving re-covered ground earns nothing, and the
+  # Gaussian nail_driven term (which keeps reading the raw qpos) actually drops
+  # when the nail is pulled up. Clamping only the obs keeps the network's input
+  # in the physical [0, .] range without touching physics/reward.
+  return depth.clamp_min(0.0)

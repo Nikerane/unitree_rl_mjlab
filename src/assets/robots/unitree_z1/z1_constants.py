@@ -52,6 +52,20 @@ def get_spec() -> mujoco.MjSpec:
     for mesh_file in _MESH_DIR.glob("claw_hammer/*.obj"):
         assets[f"claw_hammer/{mesh_file.name}"] = mesh_file.read_bytes()
     spec.assets = assets
+    # Gravity compensation on every robot body (arm links + gripper + hammer).
+    # The real Unitree Z1 runs gravity compensation in firmware, and every major
+    # MuJoCo-based manipulation RL stack does the same: robosuite adds MuJoCo's
+    # qfrc_bias to the controller output so the position-controlled arm HOLDS its
+    # commanded pose against gravity instead of sagging (verified deep dive,
+    # 2026-06-16; robosuite Controller.torque_compensation = qfrc_bias, added in
+    # both OSC and joint-PD controllers). Without it the DiffIK "hold current pose"
+    # action ratchets the arm downward under zero action and the hammer creeps
+    # onto the nail at rest. gravcomp cancels only the static gravity FORCE — masses,
+    # inertia and contacts are untouched, so the strike impulse (m_eff*v) is
+    # preserved. Consistent with the nail body, which already uses gravcomp.
+    for body in spec.bodies:
+        if body.name != "world":
+            body.gravcomp = 1.0
     return spec
 
 
@@ -81,11 +95,18 @@ _Z1_ARM_J2 = BuiltinPositionActuatorCfg(
     armature=0.02,
 )
 
-# Gripper: lighter mechanism, smaller armature.
+# Gripper: vestigial for this task — the hammer is rigidly attached to ee_center_body,
+# so the gripper only holds a non-functional jaw at jointGripper≈-0.001. The original
+# stiff+light config (k=1000, armature=0.005) chattered numerically once the arm became
+# gravity-compensated: ~25% of resets left a phantom ~-4.59 rad/s in the gripper qvel
+# (qpos frozen) that polluted the joint_vel observation (sim-audit 2026-06-16). Softer
+# gains + larger armature lower the actuator's natural frequency well below the
+# substep-stability limit, so the jaw holds quietly. No functional effect (the jaw
+# grasps nothing).
 _Z1_GRIPPER = BuiltinPositionActuatorCfg(
     target_names_expr=("jointGripper",),
-    stiffness=1000.0,
-    damping=100.0,
+    stiffness=100.0,
+    damping=20.0,
     effort_limit=30.0,
     armature=0.005,
 )
@@ -110,15 +131,20 @@ NEUTRAL_JOINT_POS: dict[str, float] = {
     "jointGripper": -0.000964725,
 }
 
-# Manually tuned via viewer (--no-weld, actuator sliders) on 2026-05-27.
-# Captured from a stable keyframe where qpos ≈ ctrl (PD equilibrium).
+# Manually tuned via viewer (2026-05-27), then RE-SOLVED 2026-06-16 via 6-DOF IK
+# for GRASP #10 (hammer geoms at quat 0.7071 0 0 0.7071,
+# pos 0 0.006 0 — the 80 mm grip slide toward the head). 6-DOF IK places the c4 FACE
+# centroid at world (0.5, 0, 0.15) with the head strike-axis pointing straight DOWN,
+# so the flat striking face leads (face lowest at 152 mm vs claw 211 mm) and a
+# straight-down drive contacts the nail with the FACE, not the claw. Re-solved after
+# the 80 mm grip slide moved the face 80 mm closer to the wrist.
 NEAR_NAIL_JOINT_POS: dict[str, float] = {
-    "joint1":  0.000358693,
-    "joint2":  1.72026,
-    "joint3": -1.3381,
-    "joint4":  0.834142,
-    "joint5": -0.00578292,
-    "joint6":  1.57008,
+    "joint1": -0.119749,
+    "joint2":  1.908621,
+    "joint3": -1.582969,
+    "joint4":  1.118154,
+    "joint5":  0.021694,
+    "joint6":  1.220820,
     "jointGripper": -0.001,
 }
 
