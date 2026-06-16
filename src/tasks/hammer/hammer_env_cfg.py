@@ -9,7 +9,7 @@ Task semantics (matches the Gym Z1HammerEnv):
   - Action:   3-D delta position of the hammer head site (DifferentialIK).
   - Obs:      ee_pos, ee_vel, head_pos, head_vel, nail_top_pos, nail_depth.
   - Reward:   Staged — approach reward + nail-driven reward + action-rate penalty.
-  - Success:  nail_slide qpos >= NAIL_SUCCESS_THRESHOLD (0.030 m).
+  - Success:  nail_slide qpos >= NAIL_SUCCESS_THRESHOLD (0.027 m).
   - Episode:  20 s; terminates early on success.
 """
 

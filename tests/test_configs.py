@@ -169,14 +169,18 @@ class TestNailBlockConstants:
         assert NAIL_GOAL_DEPTH == pytest.approx(0.032)
 
     def test_success_threshold(self):
-        assert NAIL_SUCCESS_THRESHOLD == pytest.approx(0.030)
+        # Re-pinned 0.030 -> 0.027 (2026-06-17, real claw-hammer): best clean single
+        # strike = 28.3 mm < old 0.030, so success must be single-strike-reachable.
+        assert NAIL_SUCCESS_THRESHOLD == pytest.approx(0.027)
 
     def test_threshold_less_than_goal(self):
         assert NAIL_SUCCESS_THRESHOLD < NAIL_GOAL_DEPTH
 
     def test_threshold_close_to_goal(self):
-        # Success should be at least 90% of full depth
-        assert NAIL_SUCCESS_THRESHOLD >= 0.9 * NAIL_GOAL_DEPTH
+        # Success should still mean "mostly driven" (>= 80% of full depth). Relaxed from
+        # 90% on 2026-06-17 because the real hammer's best single strike (88% of goal)
+        # leaves no room above the 90% line; 0.027 = 84% of goal.
+        assert NAIL_SUCCESS_THRESHOLD >= 0.8 * NAIL_GOAL_DEPTH
 
 
 # ---------------------------------------------------------------------------

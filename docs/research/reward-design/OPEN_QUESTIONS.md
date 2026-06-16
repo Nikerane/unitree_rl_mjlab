@@ -25,7 +25,24 @@ constant-down strike + 0.8 s follow-through press reached **max 20.5 mm** (mean 
 1. ~~The press is now physically excluded~~ **CORRECTED, then root-caused (2026-06-15).** The early "stall" readings were contaminated by a **gravity-creep bug**: the nail was held only by joint `frictionloss`, which MuJoCo does NOT enforce as a static hold (verified: frictionloss 30/300/3000 give identical creep; gravity off → 0; reference CPU MuJoCo creeps identically, so not a warp issue). The nail free-fell at ~9.6 mm/s and would self-reach the 30 mm success depth in ~3.3 s with **no hammer at all** — so every "press"/strike measurement included gravity assist, and the task was partly solvable by doing nothing. **Fixed at source** with `gravcomp="1"` on the nail body (both scene XMLs); regression test `test_nail_physics.py::test_nail_stable_at_rest` (0.5 mm tolerance). **Re-measured post-fix:** nail holds at 0 until contact; scripted strike still succeeds (≥30 mm, contact ~step 9–11, success step 13–14, clean `I_ref ≈ 0.39 N·s`); a deliberate sustained hammer **press still reaches threshold in ~65 steps purely by contact force** (no gravity assist now) vs ~13 for the strike. So the press exploit is real but now genuinely hammer-driven — Path-A outcome #2 stands (quasi-static solutions survive on stiff-PD position control), and press exclusion remains the reward design's job (T3 one-payout window + time penalty + T2 prior), with the press-watchdog metric load-bearing.
 2. **Single-strike success needs a better swing than constant-down.** The T1 reference playback (`playback_reference.py`, plan stage T1) measures what a shaped lift→strike achieves. **Threshold invariant to maintain: press-stall depth < NAIL_SUCCESS_THRESHOLD ≤ best-clean-strike depth.** If the shaped strike also falls short of 30 mm, lower the threshold toward ~max(strike depth × 0.95, press stall + 2 mm) rather than reducing frictionloss (reducing friction raises the press-stall depth and re-admits the press exploit).
 
-Status: 🟢 measured (final threshold pinned after T1 playback).
+**RESULT (2026-06-17, real claw-hammer — grasp #10, 0.5 kg head; supersedes the box-hammer figures above):**
+Re-measured on the final real-hammer physics. Single-strike depth rose with the heavier head but still falls short of the old 0.030 line:
+
+| Probe | Best single-strike depth | Contact step | I_ref |
+|---|---|---|---|
+| Crude constant-down (`test_single_strike.py`) | 24.3 mm (approach 0.05–0.10 m) | — | — |
+| **Shaped reference** (`playback_reference.py`, approach 0.06 m) | **28.3 mm** (uncapped) | 7 | **0.32–0.34 N·s** |
+| Shaped reference, approach 0.10 m | 25.4 mm | 11 | 0.32 N·s |
+| Shaped reference, approach 0.15 m | 15.7 mm | 18 | 0.17 N·s |
+| Slow press (no swing) | reaches threshold | ~89–93 | — |
+
+Best clean shaped strike = **28.3 mm < old 0.030 threshold** → the upper-bound invariant (`threshold ≤ best clean strike`) was **violated**. The press still slow-succeeds (~89 steps) rather than stalling below threshold — Path-A outcome #2 stands; the reward design (time penalty + one-payout impact window), not the threshold, must out-score it.
+
+**Decision (2026-06-17, user sign-off):** the RL reward is anchored to a *single-strike* reference, so success must be single-strike-reachable — otherwise the reference (one strike) and the completion bonus (>one strike) pull against each other. **Re-pinned `NAIL_SUCCESS_THRESHOLD` 0.030 → 0.027** (= 0.95 × best strike, ~1.3 mm margin). `nail_driven`'s Gaussian still centres on the goal (0.032), so the policy keeps driving deeper after success and the **per-episode max-depth distribution is the real Q1 metric**, not binary success. Post-fix `playback_reference.py` → PHASE M GATE **PASS** (shaped strike succeeds, terminates step 13); full gate green (155 pytest, `validate_rewards` all phases, `verify_contact_sensor`). `test_configs.py` relaxed (threshold 0.027; "mostly driven" floor 90% → 80% of goal).
+
+**Q1 verdict:** single-strike is **feasible but marginal** at the recalibrated 0.027 threshold (the open-loop reference only clears it at the 0.06 m approach). `air_time_bonus` remains NOT added (augment-not-replace) — V1 will show whether the trained single-strike policy clears 27 mm reliably or whether multi-strike/press emerges. If V1 depths cluster < 27 mm, lower the threshold further (cheap, iterative) rather than reducing frictionloss.
+
+Status: 🟢 measured on the real hammer; threshold pinned at 0.027 (2026-06-17). air_time_bonus deferred to V1 evidence.
 
 ---
 
