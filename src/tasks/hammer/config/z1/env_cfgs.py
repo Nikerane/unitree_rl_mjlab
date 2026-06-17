@@ -2,25 +2,42 @@
 
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import DifferentialIKActionCfg
+from mjlab.envs.mdp.curriculums import reward_curriculum
+from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.observation_manager import ObservationGroupCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
+from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 
 from src.assets.robots.unitree_z1.z1_constants import (
   ARM_ACTUATOR_NAMES,
+  ARM_JOINT_NAMES,
   EE_SITE_NAME,
   HAMMER_HEAD_SITE_NAME,
   Z1_HAMMER_DELTA_POS_SCALE,
   get_z1_hammer_robot_cfg,
 )
+from src.tasks.hammer import mdp as hammer_mdp
 from src.tasks.hammer.hammer_env_cfg import make_hammer_env_cfg
 from src.tasks.hammer.nail_block import get_nail_block_entity_cfg
 
 
-def z1_hammer_env_cfg(play: bool = False, imitation: bool = False) -> ManagerBasedRlEnvCfg:
-  """Create Z1 hammer-nail task configuration."""
+def z1_hammer_env_cfg(
+  play: bool = False,
+  imitation: bool = False,
+  vel_penalty: bool = False,
+  cat_vel: bool = False,
+) -> ManagerBasedRlEnvCfg:
+  """Create Z1 hammer-nail task configuration.
+
+  Velocity-bound ablation arms (keep delta_pos_scale=0.15; bound joint velocity to
+  the real 3.1415 rad/s Z1 limit as a constraint, not by lowering the action scale):
+    vel_penalty=True  -- A2: annealed squared-excess reward penalty (joint_vel_excess_penalty).
+    cat_vel=True      -- A3: Constraints-as-Terminations on joint velocity (CaTJointVelConstraint).
+  Both default False -> byte-identical A-BASE.
+  """
   cfg = make_hammer_env_cfg(imitation=imitation)
 
   # --- Scene entities ---
@@ -90,6 +107,44 @@ def z1_hammer_env_cfg(play: bool = False, imitation: bool = False) -> ManagerBas
   # --- Wire r_imit reward head site name (A-TRACK arm only; mirrors approach) ---
   if imitation:
     cfg.rewards["r_imit"].params["robot_cfg"].site_names = (HAMMER_HEAD_SITE_NAME,)
+
+  # --- Velocity-bound ablation arms (A2/A3) ---
+  # Keep delta_pos_scale=0.15; bound arm joint velocity to the real 3.1415 rad/s Z1
+  # limit as a constraint. Wave-1 signal = control-rate joint_vel (consistent with the
+  # diag_policy_trace eval); substep-peak is the v2 refinement.
+  vb_robot_cfg = SceneEntityCfg("robot", joint_names=ARM_JOINT_NAMES)
+  if vel_penalty:
+    # A2: squared excess over 0.9*limit, ANNEALED in after the strike is learned so the
+    # penalty never blocks learning to strike ("agent refuses to move" trap).
+    cfg.rewards["vel_excess"] = RewardTermCfg(
+      func=hammer_mdp.joint_vel_excess_penalty,
+      weight=0.0,  # ramped negative by the curriculum below
+      params={"limit": hammer_mdp.Z1_JOINT_VEL_LIMIT, "beta": 0.9, "robot_cfg": vb_robot_cfg},
+    )
+    cfg.curriculum["vel_excess_anneal"] = CurriculumTermCfg(
+      func=reward_curriculum,
+      params={
+        "reward_name": "vel_excess",
+        "stages": [
+          {"step": 0, "weight": 0.0},
+          {"step": 1500, "weight": -0.1},
+          {"step": 3000, "weight": -0.3},
+          {"step": 4500, "weight": -0.5},
+        ],
+      },
+    )
+  if cat_vel:
+    # A3: Constraints-as-Terminations. time_out defaults False -> counts as `terminated`,
+    # so PPO does not bootstrap it; the policy sees the lost completion bonus.
+    cfg.terminations["cat_vel"] = TerminationTermCfg(
+      func=hammer_mdp.CaTJointVelConstraint,
+      params={
+        "limit": hammer_mdp.Z1_JOINT_VEL_LIMIT,
+        "p_max": 0.5,
+        "tau": 0.95,
+        "robot_cfg": vb_robot_cfg,
+      },
+    )
 
   # --- Viewer ---
   cfg.viewer.body_name = "link00"
