@@ -1,0 +1,14 @@
+{
+  "source": "a_track_seed0 model_499 rollout (2026-06-17), control dt=0.02s. nail_mm & contact are empirical (scripts/render_policy.py); head_axial_speed is approximate (~0.45 m/s peak at contact, per diag_policy_trace).",
+  "dt": 0.02,
+  "steps": [
+    {"k": 1, "nail_mm": 0.0,  "contact": false, "head_axial_speed": 0.30, "first_contact": false},
+    {"k": 2, "nail_mm": 0.0,  "contact": false, "head_axial_speed": 0.40, "first_contact": false},
+    {"k": 3, "nail_mm": 0.0,  "contact": false, "head_axial_speed": 0.45, "first_contact": false},
+    {"k": 4, "nail_mm": 0.0,  "contact": false, "head_axial_speed": 0.45, "first_contact": false},
+    {"k": 5, "nail_mm": 0.0,  "contact": false, "head_axial_speed": 0.45, "first_contact": false},
+    {"k": 6, "nail_mm": 8.2,  "contact": true,  "head_axial_speed": 0.45, "first_contact": true},
+    {"k": 7, "nail_mm": 16.9, "contact": true,  "head_axial_speed": 0.25, "first_contact": false},
+    {"k": 8, "nail_mm": 25.4, "contact": true,  "head_axial_speed": 0.12, "first_contact": false}
+  ]
+}
