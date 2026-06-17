@@ -35,6 +35,19 @@ LATEX = {
     "completion": r"r_{\text{c}} = \mathbb{1}[\,d \ge d_{\text{succ}}\,],\ d_{\text{succ}}=0.027",
     "r_imit": r"r_{\text{imit}} = \exp\!\left(-\lVert p_{\text{head}}-p^{*}(\phi)\rVert^2/\sigma^2\right)\cdot \mathbb{1}[\text{pre-contact}],\ \sigma=0.05",
     "action_rate": r"r_{\text{ar}} = \lVert a_t - a_{t-1}\rVert^2\quad(\text{weight}<0)",
+    "joint_pos_limits": r"r_{\text{jl}} = \sum_j \big[\max(0,\,q_j-q_j^{\max}) + \max(0,\,q_j^{\min}-q_j)\big]\quad(\text{weight}<0)",
+}
+
+# Plain-language definition of each term (shown on the "All terms" reference page).
+DEFINITIONS = {
+    "approach": "Gaussian that pulls the hammer head toward the nail top. Low weight so hovering near the nail is never a stable optimum. Always on.",
+    "nail_driven": "Gaussian centred on the full-drive depth (32 mm): a dense pull once the nail starts moving; near-zero at 0 mm.",
+    "nail_depth_delta": "Progress reward — pays only NEW maximum depth (ratchets on max-so-far), so re-driving already-covered ground earns nothing. 4 mm dead zone at the start.",
+    "impact_progress": "Downward impact speed at contact, paid once per fresh contact that actually advances the nail (double-gated). The controllable 'hit hard' lever on a position-only action space.",
+    "completion": "Sparse +1 the step the nail crosses the 27 mm success threshold; the episode then terminates.",
+    "r_imit": "Weak ante-impact tracking prior (A-TRACK arm only): rewards following the scripted strike reference BEFORE contact, then gates off. Annealed to 0 by iter ~250 so the policy ends up free to deviate.",
+    "action_rate": "Smoothness penalty on the change in action between consecutive steps (negative weight).",
+    "joint_pos_limits": "Penalty for driving joints past their soft position limits (negative weight); ~0 in normal operation, a guard against limit-slamming.",
 }
 
 # Per-term tunable scalar slider: (param_label, min, max, default). None = no param.
@@ -47,7 +60,22 @@ PARAM = {
     "nail_depth_delta": ("settle", 0.0, 0.01, 0.004),
     "action_rate": (None, 0.0, 0.0, 0.0),
 }
-TERMS = list(LATEX.keys())
+# Terms with a standalone curve in the explorer (joint_pos_limits is reference-only).
+TERMS = ["nail_driven", "approach", "r_imit", "completion", "impact_progress", "nail_depth_delta", "action_rate"]
+
+
+def overview_markdown() -> str:
+    """A single reference page: every reward term, its equation, definition, and live weight."""
+    lines = [
+        "## All reward terms",
+        "The Z1 hammer reward — **A-TRACK** arm (the A-BASE 7-term reward + the annealed `r_imit` "
+        "prior). Weights are the live training values; equations are pinned to the code by the parity test.",
+    ]
+    for name in LATEX:
+        lines.append(f"### `{name}` · weight **{WEIGHTS.get(name, 0):+g}**")
+        lines.append(f"$$ {LATEX[name]} $$")
+        lines.append(DEFINITIONS[name])
+    return "\n\n".join(lines)
 
 
 def term_curve_figure(term: str, param_value: float):

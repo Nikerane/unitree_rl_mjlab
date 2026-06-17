@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import gradio as gr
 
-from plots import LATEX, PARAM, TERMS, strike_overlay_figure, term_curve_figure
+from plots import LATEX, PARAM, TERMS, overview_markdown, strike_overlay_figure, term_curve_figure
 from reward_formulas import WEIGHTS
 
 _LATEX_DELIMS = [{"left": "$$", "right": "$$", "display": True}]
@@ -39,6 +39,9 @@ def build_demo() -> gr.Blocks:
             "See each reward term's math, plot it, and tune it. Formulas are pinned to the "
             "training code by a parity test (`tests/test_reward_viz_parity.py`)."
         )
+
+        with gr.Tab("All terms"):
+            gr.Markdown(overview_markdown(), latex_delimiters=_LATEX_DELIMS)
 
         with gr.Tab("Term explorer"):
             term = gr.Dropdown(TERMS, value="nail_driven", label="reward term")
