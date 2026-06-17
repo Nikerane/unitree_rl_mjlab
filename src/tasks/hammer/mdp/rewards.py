@@ -9,6 +9,7 @@ import torch
 from mjlab.entity import Entity
 from mjlab.managers.manager_base import ManagerTermBase, ManagerTermBaseCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
+from src.tasks.hammer.mdp.references import get_strike_reference
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -194,3 +195,65 @@ class ImpactProgressTerm(ManagerTermBase):
     # Contact gate: fire only on the step a fresh contact begins.
     fc = sensor.compute_first_contact(dt=dt).any(-1).to(head.dtype)
     return (v_axial / v_expected) * fc * advanced
+
+
+class ImitationPriorTerm(ManagerTermBase):
+  """Weak ante-impact tracking prior (plan T2): exp(-||p_head - p*(phi)||^2 / sigma^2) * 1[pre-contact].
+
+  Rewards the hammer head for following the scripted SingleStrikeReference waypoint
+  p*(phi), but ONLY before the first hammer->nail contact of the episode (ante-impact
+  latch), so it shapes the approach/wind-up and never the impact. Position-only,
+  task-space; no velocity imitation (Biemond/TAC: ill-posed through contact). Intended
+  to run at a small weight that ANNEALS to 0 via mjlab's reward_curriculum, so the policy
+  stays free to deviate and beat the reference (online RL, not DeepMimic).
+
+  Stateful: a per-env "has contacted this episode" latch, reset per episode.
+
+  KNOWN RISK (watch-item, not yet guarded): the latch bounds accumulation only once
+  contact occurs. A policy that hovers near the wind-up apex without contacting keeps
+  earning ~weight/step. Mitigated by (a) the anneal to 0 by step 6000, and (b) the +100
+  completion bonus that terminates the episode (striking dominates hovering). The
+  deviation-norm / press-watchdog training metrics surface it; add a per-episode cap or
+  a phi-descent gate only if observed (augment-not-replace).
+  """
+
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv):
+    super().__init__(env)
+    self._contacted: torch.Tensor = torch.zeros(
+      self.num_envs, dtype=torch.bool, device=self.device
+    )
+
+  def reset(self, env_ids: torch.Tensor | slice | None) -> None:
+    if env_ids is None:
+      self._contacted.fill_(False)
+    else:
+      self._contacted[env_ids] = False
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    sensor_name: str,
+    robot_cfg: SceneEntityCfg = _DEFAULT_ROBOT_CFG,
+    nail_cfg: SceneEntityCfg = _DEFAULT_NAIL_CFG,
+    sigma: float = 0.05,
+  ) -> torch.Tensor:
+    """Returns shape (B,)."""
+    robot: Entity = env.scene[robot_cfg.name]
+    nail: Entity = env.scene[nail_cfg.name]
+    sensor = env.scene[sensor_name]
+
+    head_w = robot.data.site_pos_w[:, robot_cfg.site_ids].squeeze(1)
+    nail_top_w = nail.data.site_pos_w[:, nail_cfg.site_ids].squeeze(1)
+
+    ref = get_strike_reference(env)
+    phi = ref.update(head_w, nail_top_w, env.episode_length_buf)
+    p_star = ref.waypoint(phi)
+
+    dist_sq = torch.sum((head_w - p_star) ** 2, dim=-1)
+    gauss = torch.exp(-dist_sq / sigma**2)
+
+    # Ante-impact latch: zero from the first contact of the episode onward.
+    found = (sensor.data.found > 0).any(-1)
+    self._contacted = self._contacted | found
+    gate = (~self._contacted).to(head_w.dtype)
+    return gauss * gate
