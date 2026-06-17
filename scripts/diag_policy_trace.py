@@ -97,6 +97,7 @@ def main():
     rec_len, rec_depth, rec_nc, rec_vimp, rec_vany, rec_dev, rec_succ, rec_to, rec_qv = ([] for _ in range(9))
     running_max_depth = 0.0  # global max depth seen (useful in --no-term mode)
     running_max_qv = 0.0     # global max |arm joint vel| seen (rad/s) — safety check vs 3.1415
+    running_max_substep_qv = 0.0  # global max SUBSTEP-peak |q̇| (only if the substep metric is wired)
 
     trace_rows = []  # env-0 first-episode trace
     env0_done = False
@@ -133,6 +134,12 @@ def main():
         qv = robot.data.joint_vel.abs().amax(dim=1)
         peak_qv = torch.maximum(peak_qv, qv)
         running_max_qv = max(running_max_qv, float(qv.max()))
+
+        # TRUE within-decimation substep peak (only present on the CaT-Substep task, which
+        # wires the SubstepPeakJointVel per_substep metric that stashes itself on the env).
+        sub = getattr(u, "_hammer_substep_peak_qv", None)
+        if sub is not None:
+            running_max_substep_qv = max(running_max_substep_qv, float(sub.peak_qv.max()))
 
         # deviation from reference (ante-impact only), via the shared reference
         ref = get_strike_reference(u)
@@ -213,6 +220,9 @@ def main():
     print(f"\n  global max nail depth observed: {running_max_depth:.2f} mm"
           + ("   (no-term: this is the true depth ceiling)" if args.no_term else ""))
     print(f"  global max |arm joint vel| observed: {running_max_qv:.3f} rad/s{over}")
+    if running_max_substep_qv > 0.0:
+        sover = "  ⚠ EXCEEDS 3.1415" if running_max_substep_qv > 3.1415 else "  (<= 3.1415, honest)"
+        print(f"  global max SUBSTEP |arm joint vel|  : {running_max_substep_qv:.3f} rad/s{sover}  (TRUE peak; control-rate above under-reports)")
     env.close()
 
 

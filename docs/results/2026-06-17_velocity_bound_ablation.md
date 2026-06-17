@@ -17,6 +17,23 @@
 | **A2** | vel-excess penalty (w=0.5) | 100% | 4.0 | 1.20 | 2.7–3.6 | **4.14–4.49** | ✗ (≈ baseline) |
 | **A3** | CaT termination (p_max=0.5) | 100% | 4.4 | 1.12 | 2.6–2.8 | **3.61–4.00** | ✗ |
 | **A4** | DcMotor torque-speed envelope | 100% | 4.4 | 0.93 | 3.0 | **4.27–4.36** | ✗ (≈ baseline) |
+| **A3-substep** | CaT, **substep-peak** detection (p=0.5) | 100% | 3.8 | **1.25** | 2.6 | 3.56–3.61 *(ctrl)* / **4.12–4.28 *(true)*** | ✗ |
+
+(All worst-case columns above except A3-substep are **control-rate** — which under-reports the TRUE peak by ~0.5 rad/s, see below.)
+
+### Substep-CaT follow-up — does catching the 500 Hz peak bound it? (run `36532706`)
+
+A3 (the original CaT arm) detected velocity at **control rate**, aliasing the within-decimation peak. A3-substep is identical (p_max=0.5) but reads the **substep peak** (a per-substep `SubstepPeakJointVel` metric peak-holds |q̇| inside the decimation loop; the CaT term reads it). Measuring the **TRUE substep peak** (`diag_policy_trace --task …-CaT-Substep --no-term`, the metric on, terminations off) for both:
+
+| | control-rate peak | **TRUE substep peak** |
+|---|---|---|
+| A3 (control-rate trained) | 3.92–4.01 | **4.51–4.95** (mean ~4.74) |
+| A3-substep (substep trained) | 3.56–3.61 | **4.12–4.28** (mean ~4.17) |
+
+- **Control-rate under-reports the true peak by ~0.5 rad/s.** So every A1–A4 worst-case above (control-rate) sits ~0.5 below the real peak — e.g. b_strike's true peak ≈ 5.1, A1's ≈ 4.0. The chain-coupled residual is *worse* than the headline numbers suggested.
+- **Substep detection genuinely helped** — the better-informed termination cut the true peak **4.74 → 4.17** (~0.57 rad/s) *and* kept *more* impact (1.25 vs A3's 1.12 m/s). So substep is the better knob; aliasing *was* a real (partial) factor.
+- **But the residual is still ~4.1–4.3, ~30% over π.** Even feeding the termination the true peak does not bound it. **Verdict: the residual is genuinely chain-coupled, not (mostly) a detection artifact.** CaT *reweights returns*; it does not physically brake the spike (as the deep-dive pre-registered: "will reduce, will not provably bound"). A hard worst-case bound needs an action-level Jacobian projection or the thesis's variable impedance — not a better detector.
+- **Caveat unchanged:** A3-substep still uses the naive sampled-hard CaT, not soft `γ(1−δ)`; same-mechanism comparison, so the detection-axis conclusion holds.
 
 ## Reading
 
