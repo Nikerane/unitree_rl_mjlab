@@ -1,5 +1,9 @@
 # Velocity-bound ablation — A1–A4 (2026-06-17)
 
+> **DECISION (accepted 2026-06-17):** Accept this as the Phase-0 finding and **adopt CaT (A3)** as the velocity-honesty mechanism. The worst-case overshoot is **chain-coupled** and no single soft/plant/kinematic bound removes it on a position-only fixed-PD action space — which is itself the result that motivates the thesis's variable-impedance + explicit-constraint direction. Carry CaT forward to the G1, where the per-joint *impulse* constraint actually matters.
+>
+> **FOLLOW-UP (2026-06-17):** Not chasing the Z1 number for its own sake, but a **targeted CaT-knob ablation** is worthwhile to *learn the tool* (it transfers to the G1) and to test the **cause-agnostic** hypothesis — since CaT terminates on the violation regardless of cause, **hard CaT (p_max→1.0) + substep-rate detection** may bound the worst-case where the per-joint plant (A4) could not. Axes: p_max (soft 0.5 → hard 1.0), detection (control-rate → substep), curriculum (on/off). Design to be finalized from the CaT deep-dive (`../research/reward-design/`), then run as a focused ablation. The action-level Jacobian projection remains the known hard-bound fix, better rehearsed on the G1.
+
 **Question:** b_strike gave a real ~1.2 m/s single strike but drove arm joints to 4.3–4.65 rad/s worst-case, over the real Z1 limit of 3.1415. Which way of bounding velocity keeps the strike *and* gets honest? (Decision context: `2026-06-17_b_strike.md`; research: `../research/reward-design/JOINT_VELOCITY_BOUND_RESEARCH.md`.)
 
 **Harness (all arms):** A-BASE 7-term reward, 3 seeds × 500 iters, Vega. Eval: `diag_policy_trace` (64 envs × 80 steps) on the trained `model_499`. A1 evaluated at its trained delta=0.10; A2/A3 on the base task at delta=0.15 (measures the learned policy with no constraint masking its raw velocity); A4 on the DcMotor task (the envelope IS the plant).
