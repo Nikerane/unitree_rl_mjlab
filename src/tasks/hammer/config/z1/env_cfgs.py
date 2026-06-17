@@ -29,6 +29,7 @@ def z1_hammer_env_cfg(
   imitation: bool = False,
   vel_penalty: bool = False,
   cat_vel: bool = False,
+  dcmotor: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Create Z1 hammer-nail task configuration.
 
@@ -36,13 +37,14 @@ def z1_hammer_env_cfg(
   the real 3.1415 rad/s Z1 limit as a constraint, not by lowering the action scale):
     vel_penalty=True  -- A2: annealed squared-excess reward penalty (joint_vel_excess_penalty).
     cat_vel=True      -- A3: Constraints-as-Terminations on joint velocity (CaTJointVelConstraint).
-  Both default False -> byte-identical A-BASE.
+    dcmotor=True      -- A4: DC-motor torque-speed-envelope arm actuators (plant-level bound).
+  All default False -> byte-identical A-BASE.
   """
   cfg = make_hammer_env_cfg(imitation=imitation)
 
   # --- Scene entities ---
   cfg.scene.entities = {
-    "robot": get_z1_hammer_robot_cfg(),
+    "robot": get_z1_hammer_robot_cfg(dcmotor=dcmotor),
     "nail_block": get_nail_block_entity_cfg(),
   }
 

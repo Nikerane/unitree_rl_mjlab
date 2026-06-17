@@ -43,3 +43,13 @@ register_mjlab_task(
     rl_cfg=z1_hammer_ppo_runner_cfg(),
     runner_cls=HammerOnPolicyRunner,
 )
+
+# A4: DC-motor torque-speed-envelope arm (plant-level velocity bound; trains inside the
+# real motor envelope so >3.1415 rad/s is unreachable to the actuator).
+register_mjlab_task(
+    task_id="Unitree-Z1-Hammer-DcMotor",
+    env_cfg=z1_hammer_env_cfg(dcmotor=True),
+    play_env_cfg=z1_hammer_env_cfg(play=True, dcmotor=True),
+    rl_cfg=z1_hammer_ppo_runner_cfg(),
+    runner_cls=HammerOnPolicyRunner,
+)

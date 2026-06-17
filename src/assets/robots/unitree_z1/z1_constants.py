@@ -15,7 +15,7 @@ from pathlib import Path
 
 import mujoco
 
-from mjlab.actuator import BuiltinPositionActuatorCfg
+from mjlab.actuator import BuiltinPositionActuatorCfg, DcMotorActuatorCfg
 from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
 
 ##
@@ -117,6 +117,49 @@ Z1_ARTICULATION = EntityArticulationInfoCfg(
 
 
 ##
+# A4 (ablation): DC-motor torque-speed envelope variant.
+##
+# Same PD gains/armature as the position actuators, but a velocity-dependent torque
+# ceiling makes >velocity_limit physically unreachable to the MOTOR (back-EMF model,
+# the MuJoCo-maintainer-endorsed alternative to a non-physical clip). The velocity bound
+# comes from the torque-speed CURVE (torque_speed_top = saturation*(1 - |q̇|/velocity_limit)
+# -> 0 at q̇=velocity_limit), NOT the continuous-torque clamp: with effort_limit==
+# saturation_effort the horizontal clamp is inert for forward motion, so it's left equal
+# to the URDF rating (no separate continuous datasheet value exists). NOTE this routes the
+# arm through mjlab's Python torque-level IdealPdActuator (a <motor> + explicit PD) instead
+# of the native <position> affine PD; gravcomp (get_spec) is unaffected. CAVEAT (research
+# JOINT_VELOCITY_BOUND_RESEARCH.md): the curve limits each joint's OWN motor, so it removes
+# the actuator-driven windup but cannot brake chain-coupled momentum delivered through the
+# linkage -- so it may reduce, not fully eliminate, the 4.3-4.65 rad/s overshoot.
+_Z1_VELOCITY_LIMIT: float = 3.1415  # rad/s, URDF no-load speed (all joints)
+
+_Z1_ARM_STANDARD_DC = DcMotorActuatorCfg(
+    target_names_expr=("joint1", "joint3", "joint4", "joint5", "joint6"),
+    stiffness=1000.0,
+    damping=100.0,
+    effort_limit=30.0,          # == saturation_effort (no separate continuous rating)
+    saturation_effort=30.0,     # stall (peak) torque
+    velocity_limit=_Z1_VELOCITY_LIMIT,
+    armature=0.01,
+)
+
+_Z1_ARM_J2_DC = DcMotorActuatorCfg(
+    target_names_expr=("joint2",),
+    stiffness=1500.0,
+    damping=150.0,
+    effort_limit=60.0,
+    saturation_effort=60.0,
+    velocity_limit=_Z1_VELOCITY_LIMIT,
+    armature=0.02,
+)
+
+# Gripper stays a position actuator (vestigial; must not change behavior).
+Z1_ARTICULATION_DC = EntityArticulationInfoCfg(
+    actuators=(_Z1_ARM_STANDARD_DC, _Z1_ARM_J2_DC, _Z1_GRIPPER),
+)
+
+
+##
 # Initial joint configurations (radians).
 ##
 
@@ -185,14 +228,19 @@ Z1_HAMMER_DELTA_POS_SCALE: float = 0.15
 ##
 
 
-def get_z1_hammer_robot_cfg() -> EntityCfg:
-    """Return a fresh Z1+hammer EntityCfg with BuiltinPositionActuatorCfg.
+def get_z1_hammer_robot_cfg(dcmotor: bool = False) -> EntityCfg:
+    """Return a fresh Z1+hammer EntityCfg.
 
     Returns a new instance each call to avoid shared-state mutation bugs
     when the config is used in multiple places.
+
+    Args:
+      dcmotor: if True, use the DC-motor torque-speed-envelope arm actuators (A4
+        ablation; velocity_limit=3.1415 rad/s) instead of the default
+        BuiltinPositionActuatorCfg. The gripper stays a position actuator either way.
     """
     return EntityCfg(
         init_state=INIT_STATE,
         spec_fn=get_spec,
-        articulation=Z1_ARTICULATION,
+        articulation=Z1_ARTICULATION_DC if dcmotor else Z1_ARTICULATION,
     )
