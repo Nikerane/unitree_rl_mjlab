@@ -41,12 +41,14 @@ from src.assets.robots.unitree_z1.z1_constants import HAMMER_HEAD_SITE_NAME
 from src.tasks.hammer.nail_block import NAIL_SUCCESS_THRESHOLD, NAIL_GOAL_DEPTH
 
 
-def build(task, num_envs, device, play=True, no_term=False, delta_scale=None):
+def build(task, num_envs, device, play=True, no_term=False, delta_scale=None, max_dq=None):
     env_cfg = load_env_cfg(task, play=play)
     if no_term:
         env_cfg.terminations = {}
     if delta_scale is not None:
         env_cfg.actions["ik_hammer_head"].delta_pos_scale = float(delta_scale)
+    if max_dq is not None:
+        env_cfg.actions["ik_hammer_head"].max_dq = float(max_dq)
     env_cfg.scene.num_envs = num_envs
     agent_cfg = load_rl_cfg(task)
     env = ManagerBasedRlEnv(cfg=env_cfg, device=device, render_mode=None)
@@ -80,7 +82,8 @@ def main():
     ap.add_argument("--nsteps", type=int, default=80)
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--lift-steps", type=int, default=0, help="[max_vel] steps of max-up before max-down")
-    ap.add_argument("--delta-scale", type=float, default=None, help="override action delta_pos_scale (default 0.05)")
+    ap.add_argument("--delta-scale", type=float, default=None, help="override action delta_pos_scale")
+    ap.add_argument("--max-dq", type=float, default=None, help="override IK max_dq (per-substep joint clamp, rad)")
     ap.add_argument("--no-term", action="store_true", help="[press_basin] disable terminations to watch post-contact behavior")
     args = ap.parse_args()
 
@@ -92,9 +95,13 @@ def main():
 
 def run_max_vel(args):
     # No policy. Lift (optional) then command full downward action; measure achievable axial speed.
-    env, _ = build(args.task, args.num_envs, args.device, play=True, delta_scale=args.delta_scale)
+    env, _ = build(args.task, args.num_envs, args.device, play=True, delta_scale=args.delta_scale, max_dq=args.max_dq)
     u, head, depth, found = accessors(env)
     dt = float(u.step_dt)
+    from src.assets.robots.unitree_z1.z1_constants import ARM_JOINT_NAMES
+    jcfg = SceneEntityCfg("robot", joint_names=ARM_JOINT_NAMES); jcfg.resolve(u.scene)
+    robot = u.scene["robot"]
+    maxqv = lambda: float(robot.data.joint_vel[:, jcfg.joint_ids].abs().max())
     env.reset()
     A = env.unwrapped.action_space.shape[-1]
     up = torch.zeros(args.num_envs, A, device=u.device); up[:, 2] = +1.0
@@ -103,7 +110,7 @@ def run_max_vel(args):
     print(f"[max_vel] task={args.task} lift_steps={args.lift_steps} dt={dt:.4f} "
           f"delta_pos_scale*clip/dt ceiling ~ {0.05/dt:.2f} m/s (nominal)")
     prev = head().clone(); have_prev = False
-    peak_v = 0.0; v_at_contact = None; contact_step = None; apex_z = None
+    peak_v = 0.0; v_at_contact = None; contact_step = None; apex_z = None; peak_qvel = 0.0
     print(f"{'k':>3} {'phase':>5} {'head_z':>7} {'v_ax':>6} {'depth_mm':>8} {'contact':>7}")
     k = 0
     # lift
@@ -124,13 +131,14 @@ def run_max_vel(args):
         h = head(); d = depth(); c = bool(found()[0])
         v = float((-(h[0,2]-prev[0,2]))/dt) if have_prev else 0.0
         prev = h.clone(); have_prev = True
-        peak_v = max(peak_v, v)
+        peak_v = max(peak_v, v); peak_qvel = max(peak_qvel, maxqv())
         if c and contact_step is None:
             contact_step = k; v_at_contact = v
         print(f"{k:>3} {'down':>5} {float(h[0,2]):>7.4f} {v:>6.3f} {float(d[0])*1000:>8.2f} {str(c):>7}")
         if float(d[0]) >= NAIL_SUCCESS_THRESHOLD or (contact_step is not None and k > contact_step + 4):
             break
     print(f"\n[max_vel] apex_z={apex_z:.4f}  peak axial speed (control-rate, lower bound) = {peak_v:.3f} m/s")
+    print(f"[max_vel] peak |arm joint speed| = {peak_qvel:.3f} rad/s  (real Z1 limit 3.1415)")
     print(f"[max_vel] axial speed AT first contact = {v_at_contact}  (contact step {contact_step})")
     print(f"[max_vel] NOTE control-rate finite-diff underestimates the substep contact-instant speed.")
     env.close()

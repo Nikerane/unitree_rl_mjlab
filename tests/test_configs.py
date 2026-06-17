@@ -143,7 +143,10 @@ class TestNamedConstants:
         assert HAMMER_HEAD_SITE_NAME == "hammer_head_site"
 
     def test_delta_pos_scale(self):
-        assert Z1_HAMMER_DELTA_POS_SCALE == 0.05
+        # 0.05 -> 0.15 (2026-06-17): raised for a genuine ~1.35 m/s strike (terminal
+        # head speed ~linear in this scale); self-limiting under the 3.1415 rad/s joint
+        # limit (peak ~2.41 rad/s). See the strike-not-press design record.
+        assert Z1_HAMMER_DELTA_POS_SCALE == 0.15
 
     def test_neutral_joint_pos_has_all_joints(self):
         expected = set(ARM_JOINT_NAMES) | {GRIPPER_JOINT_NAME}

@@ -170,8 +170,14 @@ ARM_ACTUATOR_NAMES = ("joint1", "joint2", "joint3", "joint4", "joint5", "joint6"
 EE_SITE_NAME = "ee_center_site"
 HAMMER_HEAD_SITE_NAME = "hammer_head_site"
 
-# DifferentialIK scale: max 5 cm per policy step (matches Gym env action_scale).
-Z1_HAMMER_DELTA_POS_SCALE: float = 0.05
+# DifferentialIK scale: max position delta the policy commands per control step.
+# 0.05 -> 0.15 (2026-06-17): terminal hammer-head speed is ~linear in this scale
+# (~0.18 * delta_pos_scale / dt), so 0.05 capped the strike at ~0.45 m/s -- a gentle
+# servo push, not a momentum blow. 0.15 -> ~1.35 m/s (max joint ~2.2 rad/s, under the
+# 3.1415 rad/s velocity rail; head KE ~0.45 J) enabling a genuine single strike. The
+# rail (env_cfgs.py max_dq) keeps the achievable speed hardware-faithful.
+# See docs/superpowers/specs/2026-06-17-z1-strike-not-press-redesign-design.md.
+Z1_HAMMER_DELTA_POS_SCALE: float = 0.15
 
 
 ##

@@ -51,6 +51,13 @@ def z1_hammer_env_cfg(play: bool = False, imitation: bool = False) -> ManagerBas
   ik_action.actuator_names = ARM_ACTUATOR_NAMES
   ik_action.frame_name = HAMMER_HEAD_SITE_NAME
   ik_action.delta_pos_scale = Z1_HAMMER_DELTA_POS_SCALE
+  # Joint-velocity headroom: at delta_pos_scale=0.15 the max straight-down command
+  # drives the dominant joint to ~2.41 rad/s -- under the real Z1 limit of 3.1415 rad/s
+  # (z1_description URDF) -- so the action scale is self-limiting and no max_dq rail is
+  # needed here. (max_dq is NOT a clean velocity limit: it bounds the per-substep IK
+  # step, and the PD then settles at ~(kp/kd)*max_dq, so a dt-based value craters motion.)
+  # If delta_pos_scale is ever raised toward ~2.5 m/s, add a calibrated rail
+  # (max_dq ~= 0.29 caps joint speed near 3.14 rad/s) and re-verify with diag_strike_probe.
 
   # --- Wire observation site names ---
   # EE site observations.

@@ -13,6 +13,12 @@ V1 (the A-BASE/A-TRACK campaign, arrays `36472565`/`36472566`) showed the task i
 
 **Direction:** fix the task so the *existing* reward elicits a genuine strike — add the `max_dq` velocity rail, raise `delta_pos_scale` to target ~1.5 m/s, fix a raw-nail-position clamp bug. **Start single-strike** (user, 2026-06-17); keep friction modest and *verify* the press stays excluded. Multi-strike (raise friction to physically kill the press) is deferred but its trigger conditions and design are recorded (§6). No new reward terms.
 
+> **CORRECTION (during implementation, 2026-06-17) — supersedes the `max_dq = 3.1415·dt` recipe in TL;DR pt 4 and §3/§5 below.** Probe calibration (`scripts/diag_strike_probe.py --mode max_vel`, peak-joint-speed readout) found two things:
+> 1. **`delta_pos_scale=0.15` is self-limiting.** The hardest straight-down command peaks at **2.41 rad/s** joint speed — under the real 3.1415 rad/s limit — so a velocity rail is **redundant at this scale** (a rail only matters if the scale is pushed toward ~2.5 m/s). Caveat: 2.41 is the open-loop straight-down max; confirm the trained policy's peak qvel in the rollout (wind-up / reversals could differ).
+> 2. **`max_dq` is NOT a clean velocity limit and is NOT `3.1415·dt`.** It clamps the per-substep IK *increment*; the position-PD then settles at `qvel ≈ (kp/kd)·max_dq`, and for the Z1 `kp/kd = 10` (stiffness 1000 / damping 100). So the `0.0063` value caps joint speed at ~0.06 rad/s and **craters the arm** (measured 0.055 rad/s crawl). Empirical fit across `max_dq ∈ {0.0063, 0.314, 0.5}` → qvel ≈ {0.055, 3.32, 5.20} ≈ `10·max_dq`. A real rail, if ever needed, is `max_dq ≈ 0.29–0.31` (0.314 → 3.32 rad/s peak).
+>
+> The `max_dq` line was **reverted** in `env_cfgs.py` (replaced with a comment); `delta_pos_scale=0.15` stays. Whether to add an insurance rail vs rely on self-limiting + rollout monitoring is an **open decision** (not yet trained). Durable summary in the `diffik-maxdq-velocity` and `z1-hardware-limits` auto-memories.
+
 ---
 
 ## 1. Background — why we're here
