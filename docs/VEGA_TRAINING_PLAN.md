@@ -53,6 +53,9 @@ and (eyeball from a rollout video pulled back) press-vs-strike behavior. Either 
 written result (press dissolves → fixed-PD striking viable; persists → variable-impedance
 justification). Baseline numbers for every later arm.
 
+**V1 RESULT (2026-06-17 — runs `36472565` a_base / `36472566` a_track, 500 iters, 3 seeds each, all COMPLETED ~15 min/A100):**
+A-BASE ≈ A-TRACK within noise across 3 seeds — mean reward ~2.68, mean episode length **~8.6 control steps**, completion 0.10, ~473 `nail_driven` successes/window. A-TRACK `r_imit`=0 at iter 499 (anneal worked — decayed to 0 by iter ~250). **Path-A: the slow-press exploit DISSOLVED.** Rollouts (`scripts/render_policy.py`, `model_499`) show a **fast ~3-contact-step drive**: nail 0→9→18→26 mm over control steps 6–8, success at ~step 9 — vs ~89 steps for the scripted quasi-static press. So **fixed-PD striking/driving is viable**; the weak annealed tracking prior left the same solution (no help, no harm — as expected for an annealed prior). It is a fast hard *drive* (continuous contact ~3 steps, ~9 mm/step), not a single ballistic impact — exactly the impact character the thesis per-joint impulse constraint is meant to bound. Resolves OPEN_QUESTIONS Q1 (single strike feasible at the 0.027 threshold) and the Path-A press-vs-strike question (strike/drive wins). Checkpoints on Vega: `logs/rsl_rl/z1_hammer/2026-06-17_10-50-13_*`.
+
 ### V2 — Full ablation campaign (after T2–T5 are implemented)
 Array over arms × seeds: A-BASE, A-PRIOR (primary), A-RES (opt), C-PEN, C-LAG, I-MOM
 (see `reward-design/TRACKING_IMPACT_IMPULSE_IMPL_PLAN.md`). One GPU per (arm, seed).
