@@ -32,7 +32,12 @@ N_STEPS = 200
 N_ENVS = 16
 
 # Event rewards that are expected to stay silent under a random policy.
-LIVENESS_EXEMPT = {"impact_progress"}
+# completion: sparse SUCCESS bonus. A random policy reaches the 0.027 m success
+# threshold only occasionally (16 envs x 200 steps), so its liveness here is
+# non-deterministic (flaky FAIL/OK across runs). Its firing is verified
+# deterministically by validate_rewards Phase H, so exempt it from this
+# random-policy liveness sweep rather than rely on a lucky random success.
+LIVENESS_EXEMPT = {"impact_progress", "completion"}
 
 
 def main() -> None:
