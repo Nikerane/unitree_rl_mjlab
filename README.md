@@ -24,8 +24,8 @@ and sim-to-real deployment.
 
 This branch adds **`Unitree-Z1-Hammer`**: Z1 arm + differential IK hammer control.
 Assets live in the sibling repo [`safe_impact_manipulation`](https://github.com/Nikerane/safe_impact_manipulation)
-(`hammer_z1_env/assets/`). Docs: [BASELINE_AUDIT](docs/BASELINE_AUDIT.md),
-[reward design](docs/research/reward-design/).
+(`hammer_z1_env/assets/`). Docs: [reward design](docs/research/reward-design/)
+(historical snapshots in [docs/archive/](docs/archive/)).
 
 ```bash
 export MUJOCO_GL=egl
