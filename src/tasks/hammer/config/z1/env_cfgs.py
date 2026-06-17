@@ -19,9 +19,9 @@ from src.tasks.hammer.hammer_env_cfg import make_hammer_env_cfg
 from src.tasks.hammer.nail_block import get_nail_block_entity_cfg
 
 
-def z1_hammer_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+def z1_hammer_env_cfg(play: bool = False, imitation: bool = False) -> ManagerBasedRlEnvCfg:
   """Create Z1 hammer-nail task configuration."""
-  cfg = make_hammer_env_cfg()
+  cfg = make_hammer_env_cfg(imitation=imitation)
 
   # --- Scene entities ---
   cfg.scene.entities = {
@@ -79,6 +79,10 @@ def z1_hammer_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   # --- Wire impact_progress reward head site name (mirrors approach) ---
   cfg.rewards["impact_progress"].params["robot_cfg"].site_names = (HAMMER_HEAD_SITE_NAME,)
+
+  # --- Wire r_imit reward head site name (A-TRACK arm only; mirrors approach) ---
+  if imitation:
+    cfg.rewards["r_imit"].params["robot_cfg"].site_names = (HAMMER_HEAD_SITE_NAME,)
 
   # --- Viewer ---
   cfg.viewer.body_name = "link00"

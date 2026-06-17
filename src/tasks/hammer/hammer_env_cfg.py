@@ -21,6 +21,8 @@ from mjlab.managers.observation_manager import ObservationGroupCfg, ObservationT
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.managers.termination_manager import TerminationTermCfg
+from mjlab.managers.curriculum_manager import CurriculumTermCfg
+from mjlab.envs.mdp.curriculums import reward_curriculum
 from mjlab.scene import SceneCfg
 from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.terrains import TerrainEntityCfg
@@ -32,7 +34,7 @@ from src.tasks.hammer import mdp as hammer_mdp
 from src.tasks.hammer.nail_block import NAIL_GOAL_DEPTH, NAIL_SUCCESS_THRESHOLD
 
 
-def make_hammer_env_cfg() -> ManagerBasedRlEnvCfg:
+def make_hammer_env_cfg(imitation: bool = False) -> ManagerBasedRlEnvCfg:
   """Create base hammer-nail task configuration.
 
   Robot entity and site names must be filled in by the robot-specific
@@ -235,6 +237,38 @@ def make_hammer_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
   }
 
+  # --- T2 weak-annealed tracking prior (A-TRACK arm) ---
+  # imitation=False -> byte-identical A-BASE. imitation=True -> add r_imit + its anneal.
+  curriculum: dict = {}
+  if imitation:
+    rewards["r_imit"] = RewardTermCfg(
+      func=hammer_mdp.ImitationPriorTerm,
+      weight=0.1,  # w_I0; budget rule: cumulative w0*Sum r_imit < 0.35 * completion
+      params={
+        "sensor_name": "hammer_nail_contact",
+        "robot_cfg": SceneEntityCfg("robot", site_names=()),  # head site, per-robot
+        "nail_cfg": SceneEntityCfg("nail_block", site_names=("nail_top",)),
+        "sigma": 0.05,
+      },
+    )
+    # Linear-ish decay to 0 by step 6000 (= 250 iters * 24 steps/iter). Shape immaterial
+    # (Freitag); reward_curriculum mutates the live term weight so validate_rewards' read
+    # stays truthful. common_step_counter increments once per control step.
+    curriculum["r_imit_anneal"] = CurriculumTermCfg(
+      func=reward_curriculum,
+      params={
+        "reward_name": "r_imit",
+        "stages": [
+          {"step": 0, "weight": 0.1},
+          {"step": 1200, "weight": 0.08},
+          {"step": 2400, "weight": 0.06},
+          {"step": 3600, "weight": 0.04},
+          {"step": 4800, "weight": 0.02},
+          {"step": 6000, "weight": 0.0},
+        ],
+      },
+    )
+
   return ManagerBasedRlEnvCfg(
     scene=SceneCfg(
       terrain=TerrainEntityCfg(terrain_type="plane"),
@@ -247,7 +281,7 @@ def make_hammer_env_cfg() -> ManagerBasedRlEnvCfg:
     events=events,
     rewards=rewards,
     terminations=terminations,
-    curriculum={},
+    curriculum=curriculum,
     viewer=ViewerConfig(
       origin_type=ViewerConfig.OriginType.ASSET_BODY,
       entity_name="robot",

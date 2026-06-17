@@ -371,3 +371,40 @@ class TestZ1EnvCfgPlayMode:
         cfg = z1_hammer_env_cfg(play=False)
         actor_group = cfg.observations["actor"]
         assert actor_group.enable_corruption is True
+
+
+# ---------------------------------------------------------------------------
+# Imitation flag (A-TRACK arm)
+# ---------------------------------------------------------------------------
+
+
+class TestImitationFlag:
+    def test_base_has_no_r_imit_or_curriculum(self):
+        base = z1_hammer_env_cfg(imitation=False)
+        assert "r_imit" not in base.rewards
+        assert not base.curriculum  # A-BASE unchanged: empty curriculum
+
+    def test_track_adds_only_r_imit(self):
+        base = z1_hammer_env_cfg(imitation=False)
+        track = z1_hammer_env_cfg(imitation=True)
+        # Exactly one new reward term, nothing else changed.
+        assert set(track.rewards) - set(base.rewards) == {"r_imit"}
+        assert track.rewards["r_imit"].weight == pytest.approx(0.1)
+
+    def test_track_anneal_curriculum_present(self):
+        track = z1_hammer_env_cfg(imitation=True)
+        assert "r_imit_anneal" in track.curriculum
+        stages = track.curriculum["r_imit_anneal"].params["stages"]
+        assert stages[0]["weight"] == pytest.approx(0.1)
+        assert stages[-1]["weight"] == pytest.approx(0.0)
+        assert stages[-1]["step"] == 6000  # 250 iters * 24 steps/iter
+
+    def test_track_head_site_wired(self):
+        track = z1_hammer_env_cfg(imitation=True)
+        assert track.rewards["r_imit"].params["robot_cfg"].site_names == (HAMMER_HEAD_SITE_NAME,)
+
+    def test_track_play_mode_clears_curriculum(self):
+        # Play/validation mode keeps r_imit but drops the anneal (weight fixed at 0.1).
+        track_play = z1_hammer_env_cfg(play=True, imitation=True)
+        assert "r_imit" in track_play.rewards
+        assert not track_play.curriculum
