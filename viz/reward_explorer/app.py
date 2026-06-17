@@ -16,6 +16,25 @@ from reward_formulas import WEIGHTS
 _LATEX_DELIMS = [{"left": "$$", "right": "$$", "display": True}]
 _OVERLAY_TERMS = ["nail_driven", "nail_depth_delta", "impact_progress", "completion"]
 
+# Machined-steel + safety-orange identity (matches the standalone reward_sheet.html).
+THEME = gr.themes.Base(
+    primary_hue="orange",
+    neutral_hue="slate",
+    font=[gr.themes.GoogleFont("IBM Plex Sans"), "system-ui", "sans-serif"],
+    font_mono=[gr.themes.GoogleFont("IBM Plex Mono"), "monospace"],
+).set(
+    body_background_fill="#0F141B",
+    body_text_color="#E8EDF4",
+    block_background_fill="#19212C",
+    block_border_color="#2C3845",
+    border_color_primary="#2C3845",
+)
+CSS = """
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&display=swap');
+.gradio-container{background:radial-gradient(1100px 560px at 82% -12%,#172230 0%,transparent 60%),#0F141B !important;}
+h1,h2,h3{font-family:'Space Grotesk','IBM Plex Sans',sans-serif !important;letter-spacing:-.01em;}
+"""
+
 
 def _on_term(term: str):
     """Term changed -> update equation, reconfigure the param slider, redraw."""
@@ -33,7 +52,7 @@ def _on_term(term: str):
 
 
 def build_demo() -> gr.Blocks:
-    with gr.Blocks(title="Z1 Hammer Reward Explorer") as demo:
+    with gr.Blocks(title="Z1 Hammer Reward Explorer", theme=THEME, css=CSS) as demo:
         gr.Markdown(
             "# 🔨 Z1 Hammer Reward Explorer\n"
             "See each reward term's math, plot it, and tune it. Formulas are pinned to the "

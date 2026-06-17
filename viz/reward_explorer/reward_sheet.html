@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Z1 Hammer · Reward Datasheet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/katex.min.css" integrity="sha384-vlBdW0r3AcZO/HboRPznQNowvexd3fY8qHOWkBi5q7KGgqJ+F48+DceybYmrVbmB" crossorigin="anonymous">
+<style>
+:root{
+  --bg:#0F141B;--panel:#19212C;--well:#1F2A38;--line:#2C3845;
+  --text:#E8EDF4;--muted:#93A1B3;--accent:#FF6A1A;--cyan:#62D0E8;--pos:#56D98A;--neg:#FF6B6B;
+}
+*{box-sizing:border-box}
+body{margin:0;color:var(--text);line-height:1.55;-webkit-font-smoothing:antialiased;
+  font-family:"IBM Plex Sans",system-ui,sans-serif;
+  background:radial-gradient(1100px 560px at 82% -12%,#172230 0%,transparent 60%),var(--bg);}
+.wrap{max-width:880px;margin:0 auto;padding:72px 24px 110px;}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:12px;letter-spacing:.24em;
+  text-transform:uppercase;color:var(--accent);}
+h1{font-family:"Space Grotesk",sans-serif;font-weight:700;letter-spacing:-.02em;
+  font-size:clamp(34px,6vw,58px);margin:12px 0 10px;}
+.lede{color:var(--muted);font-size:17px;max-width:62ch;margin:0 0 30px;}
+.legend{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 34px;
+  font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted);
+  border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:12px 0;}
+.legend b{color:var(--text);font-weight:500;}
+.cells{display:inline-flex;gap:3px;vertical-align:middle;}
+.cell{width:13px;height:8px;border-radius:2px;background:#28333f;display:inline-block;}
+.cell.on{background:var(--accent);box-shadow:0 0 7px rgba(255,106,26,.5);}
+.card{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  padding:22px 24px 18px;margin:14px 0;overflow:hidden;}
+.card::before{content:"";position:absolute;inset:0 auto 0 0;width:4px;background:var(--rail);}
+.chead{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px;}
+.tname{font-family:"IBM Plex Mono",monospace;font-size:15px;font-weight:600;}
+.tag{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.04em;color:var(--muted);
+  border:1px solid var(--line);border-radius:999px;padding:3px 10px;}
+.badge{margin-left:auto;font-family:"IBM Plex Mono",monospace;font-size:13px;font-weight:600;
+  border:1px solid;border-radius:8px;padding:3px 10px;}
+.badge.pos{color:var(--pos);border-color:#2f6b4b;background:#12241b;}
+.badge.neg{color:var(--neg);border-color:#6b3030;background:#241313;}
+.eq{background:var(--well);border:1px solid var(--line);border-radius:10px;
+  padding:14px 14px;margin:14px 0 12px;overflow-x:auto;}
+.def{color:#C6D0DC;font-size:15px;margin:0 0 16px;}
+.strip{display:flex;align-items:center;gap:10px;}
+.strip .lab{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--muted);letter-spacing:.05em;}
+.foot{margin-top:36px;color:var(--muted);font-family:"IBM Plex Mono",monospace;font-size:11.5px;line-height:1.7;}
+.foot a{color:var(--accent);text-decoration:none;}
+@media (prefers-reduced-motion:no-preference){
+  .card{transition:transform .16s ease,border-color .16s ease;}
+  .card:hover{transform:translateY(-2px);border-color:#3a4757;}
+}
+</style>
+</head><body>
+<main class="wrap">
+  <div class="eyebrow">Z1 hammer · reward datasheet · A-TRACK</div>
+  <h1>Eight terms, one strike.</h1>
+  <p class="lede">How the policy is rewarded for driving a nail flush — every reward term,
+  its equation, and where it fires across the ~9-step strike. Weights are the live training
+  values; equations are pinned to the code by a parity test.</p>
+  <div class="legend"><b>strike timeline</b> · 8 control steps: approach <span class="cells"><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i><i class="cell"></i><i class="cell"></i><i class="cell"></i></span> → first contact (6) → drive <span class="cells"><i class="cell"></i><i class="cell"></i><i class="cell"></i><i class="cell"></i><i class="cell"></i><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i></span> → success ~step 9</div>
+  <article class="card" style="--rail:var(--accent)"><div class="chead"><span class="tname">approach</span><span class="tag">always-on</span><span class="badge pos">+0.1</span></div><div class="eq">$$ r_{\text{app}} = \exp\!\left(-\lVert p_{\text{head}}-p_{\text{nail}}\rVert^2/\sigma^2\right),\ \sigma=0.08 $$</div><p class="def">Gaussian that pulls the hammer head toward the nail top. Low weight so hovering near the nail is never a stable optimum. Always on.</p><div class="strip"><span class="cells"><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i><i class="cell"></i><i class="cell"></i><i class="cell"></i></span><span class="lab">fires across the strike →</span></div></article><article class="card" style="--rail:var(--accent)"><div class="chead"><span class="tname">nail_driven</span><span class="tag">always-on</span><span class="badge pos">+2</span></div><div class="eq">$$ r_{\text{nd}} = \exp\!\left(-(d_{\text{goal}}-d)^2/\sigma^2\right),\ d_{\text{goal}}=0.032,\ \sigma=0.013 $$</div><p class="def">Gaussian centred on the full-drive depth (32 mm): a dense pull once the nail starts moving; near-zero at 0 mm.</p><div class="strip"><span class="cells"><i class="cell"></i><i class="cell"></i><i class="cell"></i><i class="cell"></i><i class="cell"></i><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i></span><span class="lab">fires across the strike →</span></div></article><article class="card" style="--rail:var(--accent)"><div class="chead"><span class="tname">nail_depth_delta</span><span class="tag">progress</span><span class="badge pos">+600</span></div><div class="eq">$$ r_{\Delta} = \max\!\left(0,\ d - \max_{t'\le t} d_{t'}\right) $$</div><p class="def">Progress reward — pays only NEW maximum depth (ratchets on max-so-far), so re-driving already-covered ground earns nothing. 4 mm dead zone at the start.</p><div class="strip"><span class="cells"><i class="cell"></i><i class="cell"></i><i class="cell"></i><i class="cell"></i><i class="cell"></i><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i></span><span class="lab">fires across the strike →</span></div></article><article class="card" style="--rail:var(--accent)"><div class="chead"><span class="tname">impact_progress</span><span class="tag">at contact</span><span class="badge pos">+8</span></div><div class="eq">$$ r_{\text{ip}} = \frac{\max(0,\,v_{\text{axial}})}{v_{\text{exp}}}\cdot \mathbb{1}[\text{first contact}]\cdot \mathbb{1}[\Delta d>\epsilon] $$</div><p class="def">Downward impact speed at contact, paid once per fresh contact that actually advances the nail (double-gated). The controllable 'hit hard' lever on a position-only action space.</p><div class="strip"><span class="cells"><i class="cell"></i><i class="cell"></i><i class="cell"></i><i class="cell"></i><i class="cell"></i><i class="cell on"></i><i class="cell"></i><i class="cell"></i></span><span class="lab">fires across the strike →</span></div></article><article class="card" style="--rail:var(--accent)"><div class="chead"><span class="tname">completion</span><span class="tag">at success</span><span class="badge pos">+100</span></div><div class="eq">$$ r_{\text{c}} = \mathbb{1}[\,d \ge d_{\text{succ}}\,],\ d_{\text{succ}}=0.027 $$</div><p class="def">Sparse +1 the step the nail crosses the 27 mm success threshold; the episode then terminates.</p><div class="strip"><span class="cells"><i class="cell"></i><i class="cell"></i><i class="cell"></i><i class="cell"></i><i class="cell"></i><i class="cell"></i><i class="cell"></i><i class="cell on"></i></span><span class="lab">fires across the strike →</span></div></article><article class="card" style="--rail:var(--cyan)"><div class="chead"><span class="tname">r_imit</span><span class="tag">ante-impact · annealed</span><span class="badge pos">+0.1</span></div><div class="eq">$$ r_{\text{imit}} = \exp\!\left(-\lVert p_{\text{head}}-p^{*}(\phi)\rVert^2/\sigma^2\right)\cdot \mathbb{1}[\text{pre-contact}],\ \sigma=0.05 $$</div><p class="def">Weak ante-impact tracking prior (A-TRACK arm only): rewards following the scripted strike reference BEFORE contact, then gates off. Annealed to 0 by iter ~250 so the policy ends up free to deviate.</p><div class="strip"><span class="cells"><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i><i class="cell"></i><i class="cell"></i><i class="cell"></i></span><span class="lab">fires across the strike →</span></div></article><article class="card" style="--rail:var(--neg)"><div class="chead"><span class="tname">action_rate</span><span class="tag">penalty</span><span class="badge neg">-0.01</span></div><div class="eq">$$ r_{\text{ar}} = \lVert a_t - a_{t-1}\rVert^2\quad(\text{weight}<0) $$</div><p class="def">Smoothness penalty on the change in action between consecutive steps (negative weight).</p><div class="strip"><span class="cells"><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i></span><span class="lab">fires across the strike →</span></div></article><article class="card" style="--rail:var(--neg)"><div class="chead"><span class="tname">joint_pos_limits</span><span class="tag">penalty</span><span class="badge neg">-10</span></div><div class="eq">$$ r_{\text{jl}} = \sum_j \big[\max(0,\,q_j-q_j^{\max}) + \max(0,\,q_j^{\min}-q_j)\big]\quad(\text{weight}<0) $$</div><p class="def">Penalty for driving joints past their soft position limits (negative weight); ~0 in normal operation, a guard against limit-slamming.</p><div class="strip"><span class="cells"><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i><i class="cell on"></i></span><span class="lab">fires across the strike →</span></div></article>
+  <div class="foot">Generated from <code>viz/reward_explorer/</code> (pure-numpy formulas,
+  pinned by <code>tests/test_reward_viz_parity.py</code>). Interactive version:
+  the Reward Explorer Gradio Space.</div>
+</main>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/katex.min.js" integrity="sha384-AtrdNsnxl/75rvBneBVH7DtOvCxSVahR2zWqle1coBKd8DEmLoviqNeJSx64gNAs" crossorigin="anonymous"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.17.0/dist/contrib/auto-render.min.js" integrity="sha384-bjyGPfbij8/NDKJhSGZNP/khQVgtHUE5exjm4Ydllo42FwIgYsdLO2lXGmRBf5Mz" crossorigin="anonymous"
+  onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true}]})"></script>
+</body></html>
