@@ -18,12 +18,13 @@ mkdir -p logs
 ITERS="${ITERS:-5000}"
 NENVS="${NENVS:-4096}"
 RUN="${RUN:-a_base}"
+TASK="${TASK:-Unitree-Z1-Hammer}"   # arm select: Unitree-Z1-Hammer (A-BASE) | -Track (A-TRACK)
 SEED="${SLURM_ARRAY_TASK_ID:-0}"
 
 echo "[train] run=$RUN seed=$SEED iters=$ITERS envs=$NENVS node=$(hostname) gpu=$CUDA_VISIBLE_DEVICES"
 nvidia-smi -L
 
-.venv/bin/python scripts/train.py Unitree-Z1-Hammer \
+.venv/bin/python scripts/train.py "$TASK" \
   --gpu-ids '[0]' \
   --agent.logger tensorboard \
   --agent.run-name "${RUN}_seed${SEED}" \
