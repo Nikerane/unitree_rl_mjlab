@@ -1,7 +1,7 @@
 ---
 title: Z1 Hammer Reward Explorer
 emoji: 🔨
-colorFrom: orange
+colorFrom: yellow
 colorTo: blue
 sdk: gradio
 app_file: app.py
