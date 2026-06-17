@@ -41,6 +41,51 @@ Z1_JOINT_VEL_LIMIT: float = 3.1415
 # Arm joints (exclude the vestigial gripper, which carries reset-noise velocity).
 _ARM_CFG = SceneEntityCfg("robot", joint_names=("joint1", "joint2", "joint3", "joint4", "joint5", "joint6"))
 
+# Where SubstepPeakJointVel stashes itself on the env so the (control-rate) CaT termination
+# can read the substep-peak |q̇| instead of the aliased post-decimation sample.
+_ENV_SUBSTEP_ATTR = "_hammer_substep_peak_qv"
+
+
+class SubstepPeakJointVel(ManagerTermBase):
+  """per_substep MetricsTerm: running MAX of |arm joint vel| over each control window.
+
+  CaT's termination manager runs once per CONTROL step (after the decimation loop), so a
+  control-rate read sees only the last substep and ALIASES the 500 Hz peak (the spike
+  implicated in A3's residual). This term, evaluated every physics substep inside the
+  decimation loop, peak-holds |q̇| over the window and stashes itself on the env so the CaT
+  termination can read `peak_qv` (the true within-window peak). Returns the per-substep
+  |q̇|.amax for logging (the manager means it over substeps).
+
+  Pattern mirrors the ContactSensor history+max. Window resets at the first substep of each
+  control step (i % decimation == 0); episode reset clears it too.
+  """
+
+  def __init__(self, cfg: ManagerTermBaseCfg, env: "ManagerBasedRlEnv"):
+    super().__init__(env)
+    arm = SceneEntityCfg("robot", joint_names=_ARM_CFG.joint_names)
+    arm.resolve(env.scene)
+    self._robot: Entity = env.scene["robot"]
+    self._joint_ids = arm.joint_ids
+    self._dec = int(env.cfg.decimation)
+    self.peak_qv: torch.Tensor = torch.zeros(env.num_envs, device=env.device)
+    self._i = 0
+    setattr(env, _ENV_SUBSTEP_ATTR, self)
+
+  def reset(self, env_ids: torch.Tensor | slice | None) -> None:
+    if env_ids is None:
+      self.peak_qv.zero_()
+    else:
+      self.peak_qv[env_ids] = 0.0
+    return None
+
+  def __call__(self, env: "ManagerBasedRlEnv") -> torch.Tensor:
+    if self._i % self._dec == 0:        # first substep of a new control window -> reset peak
+      self.peak_qv.zero_()
+    qv = self._robot.data.joint_vel[:, self._joint_ids].abs().amax(dim=1)  # (B,)
+    torch.maximum(self.peak_qv, qv, out=self.peak_qv)                       # in-place: keep identity
+    self._i += 1
+    return qv
+
 
 def joint_vel_excess_penalty(
   env: "ManagerBasedRlEnv",
@@ -87,11 +132,26 @@ class CaTJointVelConstraint(ManagerTermBase):
     p_max: float = 0.5,
     tau: float = 0.95,
     robot_cfg: SceneEntityCfg = _ARM_CFG,
+    detection: str = "control_rate",
   ) -> torch.Tensor:
-    """Returns a bool termination mask, shape (B,)."""
-    robot: Entity = env.scene[robot_cfg.name]
-    qv = robot.data.joint_vel[:, robot_cfg.joint_ids].abs()  # (B, J)
-    c = (qv.amax(dim=1) - limit).clamp_min(0.0)              # (B,) worst-joint excess
+    """Returns a bool termination mask, shape (B,).
+
+    detection: "control_rate" reads the post-decimation joint_vel (aliases the 500 Hz peak);
+    "substep" reads the within-window peak from the SubstepPeakJointVel metric (must be wired
+    into cfg.metrics) -- the honest signal that catches the spike A3 missed.
+    """
+    if detection == "substep":
+      tracker = getattr(env, _ENV_SUBSTEP_ATTR, None)
+      if tracker is None:
+        raise RuntimeError(
+          "CaTJointVelConstraint detection='substep' requires the SubstepPeakJointVel "
+          "per_substep metric wired into cfg.metrics (see env_cfgs.py cat_substep)."
+        )
+      qv_peak = tracker.peak_qv                                # (B,) within-control-window peak
+    else:
+      robot: Entity = env.scene[robot_cfg.name]
+      qv_peak = robot.data.joint_vel[:, robot_cfg.joint_ids].abs().amax(dim=1)  # (B,) control-rate
+    c = (qv_peak - limit).clamp_min(0.0)                       # (B,) worst-joint excess
     # Update the EMA of the batch-max excess (detached; a normalizer, not a gradient path).
     batch_max = c.max().detach()
     self._excess_max = tau * self._excess_max + (1.0 - tau) * batch_max

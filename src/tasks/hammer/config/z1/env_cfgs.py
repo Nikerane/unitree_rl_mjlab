@@ -5,6 +5,7 @@ from mjlab.envs.mdp.actions import DifferentialIKActionCfg
 from mjlab.envs.mdp.curriculums import reward_curriculum
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
+from mjlab.managers.metrics_manager import MetricsTermCfg
 from mjlab.managers.observation_manager import ObservationGroupCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
@@ -29,6 +30,7 @@ def z1_hammer_env_cfg(
   imitation: bool = False,
   vel_penalty: bool = False,
   cat_vel: bool = False,
+  cat_substep: bool = False,
   dcmotor: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Create Z1 hammer-nail task configuration.
@@ -135,9 +137,11 @@ def z1_hammer_env_cfg(
         ],
       },
     )
-  if cat_vel:
-    # A3: Constraints-as-Terminations. time_out defaults False -> counts as `terminated`,
-    # so PPO does not bootstrap it; the policy sees the lost completion bonus.
+  if cat_vel or cat_substep:
+    # A3 / A3-substep: Constraints-as-Terminations. time_out defaults False -> counts as
+    # `terminated`, so PPO does not bootstrap it; the policy sees the lost completion bonus.
+    # cat_substep reads the within-window substep PEAK (de-confounds A3's control-rate aliasing);
+    # p_max kept at 0.5 (same as A3) so ONLY the detection axis changes.
     cfg.terminations["cat_vel"] = TerminationTermCfg(
       func=hammer_mdp.CaTJointVelConstraint,
       params={
@@ -145,7 +149,15 @@ def z1_hammer_env_cfg(
         "p_max": 0.5,
         "tau": 0.95,
         "robot_cfg": vb_robot_cfg,
+        "detection": "substep" if cat_substep else "control_rate",
       },
+    )
+  if cat_substep:
+    # per_substep metric: peak-hold |q̇| inside the decimation loop so the CaT term reads the
+    # true 500 Hz peak instead of the aliased post-decimation sample. Stashes itself on env.
+    cfg.metrics["substep_peak_qv"] = MetricsTermCfg(
+      func=hammer_mdp.SubstepPeakJointVel,
+      per_substep=True,
     )
 
   # --- Viewer ---

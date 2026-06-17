@@ -53,3 +53,13 @@ register_mjlab_task(
     rl_cfg=z1_hammer_ppo_runner_cfg(),
     runner_cls=HammerOnPolicyRunner,
 )
+
+# A3-substep: CaT on the SUBSTEP-PEAK |q̇| (de-confounds A3's control-rate aliasing; same
+# p_max=0.5). Tests whether catching the 500 Hz peak tightens the worst-case bound.
+register_mjlab_task(
+    task_id="Unitree-Z1-Hammer-CaT-Substep",
+    env_cfg=z1_hammer_env_cfg(cat_substep=True),
+    play_env_cfg=z1_hammer_env_cfg(play=True, cat_substep=True),
+    rl_cfg=z1_hammer_ppo_runner_cfg(),
+    runner_cls=HammerOnPolicyRunner,
+)
