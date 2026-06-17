@@ -74,3 +74,16 @@ register_mjlab_task(
     rl_cfg=z1_hammer_ppo_runner_cfg(),
     runner_cls=HammerOnPolicyRunner,
 )
+
+# Faithful soft γ(1−δ) CaT (FAITHFUL_SOFT_CAT_IMPL_PLAN.md): the soft termination probability δ
+# discounts the value-target bootstrap (CatPPO dual-mask GAE) and the positive reward
+# (scale-positives, Decision 1) -- it NEVER ends the episode (Decision 5). The primary fixed-impedance
+# thesis arm. NOTE: cat_soft=True must be set on BOTH env_cfg (installs the δ/r_pos hook) AND rl_cfg
+# (selects CatPPO); one without the other is a silent no-op.
+register_mjlab_task(
+    task_id="Unitree-Z1-Hammer-CaT-Soft",
+    env_cfg=z1_hammer_env_cfg(cat_soft=True),
+    play_env_cfg=z1_hammer_env_cfg(play=True, cat_soft=True),
+    rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+    runner_cls=HammerOnPolicyRunner,
+)

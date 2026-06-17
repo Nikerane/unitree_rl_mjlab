@@ -7,5 +7,6 @@ docs/research/reward-design/FAITHFUL_SOFT_CAT_IMPL_PLAN.md.
 
 from .constraint_manager import CaT
 from .constraints import joint_velocity_excess
+from .hook import CatSoftHook
 
-__all__ = ["CaT", "joint_velocity_excess"]
+__all__ = ["CaT", "joint_velocity_excess", "CatSoftHook"]

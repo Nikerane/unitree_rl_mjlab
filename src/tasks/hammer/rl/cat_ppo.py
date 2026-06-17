@@ -20,15 +20,16 @@ from tensordict import TensorDict
 from rsl_rl.algorithms.ppo import PPO
 from rsl_rl.env import VecEnv
 
+from src.tasks.hammer.cat.keys import CAT_DELTA_KEY, CAT_R_POS_KEY
 from src.tasks.hammer.rl.cat_storage import CatRolloutStorage
 
 
 class CatPPO(PPO):
   """PPO with the faithful soft-CaT reward discount + dual-mask bootstrap."""
 
-  # Keys the CaT env hook stashes into ``extras`` each step.
-  DELTA_KEY = "cat_delta"   # δ ∈ [0, max_p], shape (B,)
-  R_POS_KEY = "cat_r_pos"   # sum of the positive reward terms, shape (B,)
+  # Keys the CaT env hook (CatSoftHook) stashes into ``extras`` each step (shared via cat.keys).
+  DELTA_KEY = CAT_DELTA_KEY   # δ ∈ [0, max_p], shape (B,)
+  R_POS_KEY = CAT_R_POS_KEY   # dt-scaled sum of the positive reward terms, shape (B,)
 
   @staticmethod
   def _cat_scale_reward(rewards: torch.Tensor, delta: torch.Tensor, r_pos: torch.Tensor) -> torch.Tensor:

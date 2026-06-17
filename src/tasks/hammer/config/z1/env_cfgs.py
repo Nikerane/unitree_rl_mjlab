@@ -21,6 +21,7 @@ from src.assets.robots.unitree_z1.z1_constants import (
   get_z1_hammer_robot_cfg,
 )
 from src.tasks.hammer import mdp as hammer_mdp
+from src.tasks.hammer.cat import CatSoftHook
 from src.tasks.hammer.hammer_env_cfg import make_hammer_env_cfg
 from src.tasks.hammer.nail_block import get_nail_block_entity_cfg
 
@@ -32,6 +33,7 @@ def z1_hammer_env_cfg(
   cat_vel: bool = False,
   cat_substep: bool = False,
   vel_hard_term: bool = False,
+  cat_soft: bool = False,
   dcmotor: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Create Z1 hammer-nail task configuration.
@@ -172,6 +174,23 @@ def z1_hammer_env_cfg(
     cfg.metrics["substep_peak_qv"] = MetricsTermCfg(
       func=hammer_mdp.SubstepPeakJointVel,
       per_substep=True,
+    )
+
+  if cat_soft:
+    # C3: faithful soft γ(1−δ) CaT. Full-step MetricsTerm computes δ + r_pos and writes env.extras
+    # for CatPPO. It is a METRICS term, so it can NEVER feed reset_buf (Decision 5 — a soft violation
+    # discounts the value target, it does not end the episode). MUST be paired with the CatPPO rl_cfg
+    # (z1_hammer_ppo_runner_cfg(cat_soft=True)) or δ is computed but never consumed (silent no-op).
+    cfg.metrics["cat_soft"] = MetricsTermCfg(
+      func=CatSoftHook,
+      per_substep=False,
+      params={
+        "limit": hammer_mdp.Z1_JOINT_VEL_LIMIT,
+        "max_p": 0.5,
+        "min_p": 0.0,
+        "tau": 0.95,
+        "robot_cfg": vb_robot_cfg,
+      },
     )
 
   # --- Viewer ---

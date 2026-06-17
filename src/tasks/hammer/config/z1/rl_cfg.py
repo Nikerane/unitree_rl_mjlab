@@ -7,7 +7,7 @@ from mjlab.rl import (
 )
 
 
-def z1_hammer_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
+def z1_hammer_ppo_runner_cfg(cat_soft: bool = False) -> RslRlOnPolicyRunnerCfg:
   """Create RL runner configuration for Z1 hammer-nail task.
 
   Network sizes are smaller than locomotion tasks (manipulation has
@@ -42,6 +42,9 @@ def z1_hammer_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       lam=0.95,
       desired_kl=0.01,
       max_grad_norm=1.0,
+      # C3: select the faithful soft-CaT learner (scale-positives discount + dual-mask GAE) for the
+      # cat_soft arm. resolve_callable needs the "module:Class" colon form. Stock PPO otherwise.
+      class_name=("src.tasks.hammer.rl.cat_ppo:CatPPO" if cat_soft else "PPO"),
     ),
     experiment_name="z1_hammer",
     save_interval=500,
