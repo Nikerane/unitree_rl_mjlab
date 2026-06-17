@@ -8,4 +8,5 @@ from .velocity_bound import (  # noqa: F401
   SubstepPeakJointVel,
   Z1_JOINT_VEL_LIMIT,
   joint_vel_excess_penalty,
+  joint_vel_hard_termination,
 )

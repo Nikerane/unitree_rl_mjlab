@@ -158,3 +158,41 @@ class CaTJointVelConstraint(ManagerTermBase):
     denom = self._excess_max.clamp_min(1e-6)
     delta = p_max * (c / denom).clamp(0.0, 1.0)              # (B,) termination probability
     return torch.rand_like(delta) < delta
+
+
+def joint_vel_hard_termination(
+  env: "ManagerBasedRlEnv",
+  limit: float = Z1_JOINT_VEL_LIMIT,
+  warmup_steps: int = 3600,
+  robot_cfg: SceneEntityCfg = _ARM_CFG,
+  detection: str = "substep",
+) -> torch.Tensor:
+  """DETERMINISTIC hard termination: any arm joint over ``limit`` ends the episode.
+
+  The strongest *learned* enforcement (top of the soft->hard sweep; the "just end the episode
+  when it speeds" idea). NOTE it does NOT physically prevent the spike -- it ends the episode the
+  control step AFTER the joint already crossed ``limit``, so it is a maximal learning signal
+  ("never go there or lose the whole episode + the completion bonus"), not a brake. Whether it
+  bounds velocity depends on feasibility: if a limit-respecting hard strike exists on fixed PD the
+  policy learns it; if not, it can only comply by striking softly (the strike-vs-honesty tension
+  VIC is meant to resolve).
+
+  CURRICULUM (mandatory): disabled for the first ``warmup_steps`` control steps so the strike skill
+  forms first -- a hard cut from scratch makes every early (flailing) episode die before the policy
+  ever learns to strike (the documented all-hard collapse). ``detection='substep'`` reads the true
+  within-window peak (needs the SubstepPeakJointVel metric wired).
+  """
+  if env.common_step_counter < warmup_steps:
+    return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+  if detection == "substep":
+    tracker = getattr(env, _ENV_SUBSTEP_ATTR, None)
+    if tracker is None:
+      raise RuntimeError(
+        "joint_vel_hard_termination detection='substep' requires the SubstepPeakJointVel "
+        "per_substep metric wired into cfg.metrics (see env_cfgs.py vel_hard_term)."
+      )
+    qv_peak = tracker.peak_qv
+  else:
+    robot: Entity = env.scene[robot_cfg.name]
+    qv_peak = robot.data.joint_vel[:, robot_cfg.joint_ids].abs().amax(dim=1)
+  return qv_peak > limit

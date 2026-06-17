@@ -63,3 +63,14 @@ register_mjlab_task(
     rl_cfg=z1_hammer_ppo_runner_cfg(),
     runner_cls=HammerOnPolicyRunner,
 )
+
+# Hard cap: deterministic episode termination on substep-peak |q̇| > limit (strongest learned
+# enforcement; warmup-gated). Tests whether fixed PD can learn a limit-respecting hard strike,
+# or can only comply by striking softly (the strike-vs-honesty tension that motivates VIC).
+register_mjlab_task(
+    task_id="Unitree-Z1-Hammer-VelHardTerm",
+    env_cfg=z1_hammer_env_cfg(vel_hard_term=True),
+    play_env_cfg=z1_hammer_env_cfg(play=True, vel_hard_term=True),
+    rl_cfg=z1_hammer_ppo_runner_cfg(),
+    runner_cls=HammerOnPolicyRunner,
+)

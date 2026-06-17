@@ -13,6 +13,7 @@ from src.tasks.hammer.mdp.velocity_bound import (
   CaTJointVelConstraint,
   Z1_JOINT_VEL_LIMIT,
   joint_vel_excess_penalty,
+  joint_vel_hard_termination,
 )
 
 LIM = Z1_JOINT_VEL_LIMIT  # 3.1415
@@ -86,3 +87,23 @@ def test_cat_more_excess_more_termination():
   small = term(_env(torch.full((n, 6), LIM + 0.2)), limit=LIM, p_max=1.0).float().mean().item()
   big = term(_env(torch.full((n, 6), LIM + 1.4)), limit=LIM, p_max=1.0).float().mean().item()
   assert big > small >= 0.0, (small, big)
+
+
+def _env_step(qv: torch.Tensor, step: int):
+  e = _env(qv)
+  e.common_step_counter = step
+  return e
+
+
+def test_hard_term_silent_during_warmup():
+  # Even grossly over the limit, no termination before warmup_steps.
+  qv = torch.full((4, 6), 5.0)
+  out = joint_vel_hard_termination(_env_step(qv, 100), warmup_steps=3600, robot_cfg=_rcfg(), detection="control_rate")
+  assert out.dtype == torch.bool and not out.any(), out
+
+
+def test_hard_term_fires_past_warmup_only_over_limit():
+  # env0 over (5 rad/s), env1 under (2 rad/s); past warmup.
+  qv = torch.tensor([[5.0, 1, 1, 1, 1, 1], [2.0, 2, 2, 2, 2, 2]])
+  out = joint_vel_hard_termination(_env_step(qv, 4000), warmup_steps=3600, robot_cfg=_rcfg(), detection="control_rate")
+  assert bool(out[0]) and not bool(out[1]), out

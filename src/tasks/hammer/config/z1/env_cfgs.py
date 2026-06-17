@@ -31,6 +31,7 @@ def z1_hammer_env_cfg(
   vel_penalty: bool = False,
   cat_vel: bool = False,
   cat_substep: bool = False,
+  vel_hard_term: bool = False,
   dcmotor: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Create Z1 hammer-nail task configuration.
@@ -152,8 +153,21 @@ def z1_hammer_env_cfg(
         "detection": "substep" if cat_substep else "control_rate",
       },
     )
-  if cat_substep:
-    # per_substep metric: peak-hold |q̇| inside the decimation loop so the CaT term reads the
+  if vel_hard_term:
+    # Deterministic hard cap: any arm joint over the limit ends the episode (strongest learned
+    # enforcement; the top of the soft->hard sweep). Warmup-gated so the strike forms first.
+    cfg.terminations["vel_hard"] = TerminationTermCfg(
+      func=hammer_mdp.joint_vel_hard_termination,
+      params={
+        "limit": hammer_mdp.Z1_JOINT_VEL_LIMIT,
+        "warmup_steps": 3600,  # ~30% of a 500-iter run (24 steps/iter); avoids all-hard collapse
+        "robot_cfg": vb_robot_cfg,
+        "detection": "substep",
+      },
+    )
+
+  if cat_substep or vel_hard_term:
+    # per_substep metric: peak-hold |q̇| inside the decimation loop so the constraint reads the
     # true 500 Hz peak instead of the aliased post-decimation sample. Stashes itself on env.
     cfg.metrics["substep_peak_qv"] = MetricsTermCfg(
       func=hammer_mdp.SubstepPeakJointVel,
