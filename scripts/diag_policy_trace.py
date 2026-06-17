@@ -38,6 +38,9 @@ def main():
     ap.add_argument("--num-envs", type=int, default=64)
     ap.add_argument("--nsteps", type=int, default=80)
     ap.add_argument("--device", default="cpu")
+    ap.add_argument("--delta-scale", type=float, default=None,
+                    help="override ik_hammer_head.delta_pos_scale (MUST match the value the "
+                         "policy was trained with, e.g. 0.10 for the A1 arm)")
     ap.add_argument("--play", action="store_true",
                     help="play mode (zeroed reset/obs noise -> deterministic)")
     ap.add_argument("--no-term", action="store_true",
@@ -45,6 +48,8 @@ def main():
     args = ap.parse_args()
 
     env_cfg = load_env_cfg(args.task, play=args.play)
+    if args.delta_scale is not None:
+        env_cfg.actions["ik_hammer_head"].delta_pos_scale = float(args.delta_scale)
     if args.no_term:
         env_cfg.terminations = {}
     env_cfg.scene.num_envs = args.num_envs

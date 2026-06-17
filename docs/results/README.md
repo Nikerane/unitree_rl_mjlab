@@ -17,4 +17,5 @@ Empirical analyses of training runs and diagnostic experiments — **one Markdow
 | Date | Run | Headline | File |
 |---|---|---|---|
 | 2026-06-17 | `b_strike` (`36517248`) | Honest-scale single strike (delta=0.15): real ~1.2 m/s single ballistic strike, 100% success, press excluded — **but** the trained policy exceeds the 3.1415 rad/s joint-velocity limit (worst 4.3–4.65). | [2026-06-17_b_strike.md](2026-06-17_b_strike.md) |
+| 2026-06-17 | velocity-bound ablation A1–A4 (`36526179`/`270`/`271`/`318`) | 4 ways to bound joint velocity (delta→0.10 / penalty / CaT / DcMotor envelope). All keep 100% + the strike; **none gets worst-case under π** — the residual overshoot is chain-coupled. CaT best impact-preserving; DcMotor ≈ baseline (confirms chain-coupling). | [2026-06-17_velocity_bound_ablation.md](2026-06-17_velocity_bound_ablation.md) |
 | 2026-06-17 | `a_base` / `a_track` V1 (`36472565`/`36472566`) | Press exploit dissolves under training; both arms reach 100% and converge to the same fast strike-drive; tracking prior has no measurable effect. | analysis in [`../VEGA_TRAINING_PLAN.md`](../VEGA_TRAINING_PLAN.md) → "V1 — Results" |
