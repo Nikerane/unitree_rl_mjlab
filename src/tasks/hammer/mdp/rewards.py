@@ -252,7 +252,9 @@ class ImitationPriorTerm(ManagerTermBase):
     dist_sq = torch.sum((head_w - p_star) ** 2, dim=-1)
     gauss = torch.exp(-dist_sq / sigma**2)
 
-    # Ante-impact latch: zero from the first contact of the episode onward.
+    # Ante-impact latch: zero from the first contact of the episode onward. Level-
+    # triggered on current contact state (data.found), not the first-contact rising
+    # edge -- we want "has contacted at all this episode", OR-accumulated below.
     found = (sensor.data.found > 0).any(-1)
     self._contacted = self._contacted | found
     gate = (~self._contacted).to(head_w.dtype)

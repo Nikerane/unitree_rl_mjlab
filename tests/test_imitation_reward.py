@@ -117,3 +117,19 @@ def test_returns_per_env_shape():
     env.episode_length_buf[:] = 0
     r = term(env, **_PARAMS)
     assert tuple(r.shape) == (3,)
+
+
+def test_per_env_latch_independence():
+    """One env's contact latch must not zero another env's reward."""
+    env, robot, nail, sensor = _make_env(num_envs=2)
+    term = ImitationPriorTerm(cfg=None, env=env)
+    _set(robot, nail, head=(0.0, 0.0, 0.20))
+    env.episode_length_buf[:] = 0
+    term(env, **_PARAMS)  # anchor both envs
+    # env 0 contacts, env 1 does not; both stay near the reference.
+    env.episode_length_buf[:] = 1
+    sensor.data.found[0, 0] = 1.0
+    sensor.data.found[1, 0] = 0.0
+    r = term(env, **_PARAMS)
+    assert float(r[0]) == 0.0   # env 0 latched off
+    assert float(r[1]) > 0.0    # env 1 still tracking
