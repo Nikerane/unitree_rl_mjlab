@@ -2,7 +2,9 @@
 
 ## ⚠️ Thesis context (read this first)
 
-This repo is **preparation / Phase 0** for a Master's thesis at TU Munich (ATARI Lab, Prof. Khadiv): *impact-safe contact-rich manipulation on the Unitree G1 humanoid*. The Z1 hammer work here is a fixed-base diagnostic baseline; the thesis itself moves to the G1 with a **variable-impedance action space** and an **explicit per-joint impulse constraint**.
+This repo is the development platform for a Master's thesis at TU Munich (ATARI Lab, Prof. Khadiv): *impact-safe contact-rich manipulation*, ultimately targeting the Unitree G1 humanoid with a **variable-impedance action space** and an **explicit per-joint impulse constraint**.
+
+> **DIRECTION UPDATE (2026-06-17, user):** The **Z1 is now the primary platform** — build and validate the *full* thesis machinery here first: soft `γ(1−δ)` CaT, the substep-accumulated impulse constraint, and **variable impedance** (the policy commanding per-joint stiffness via `set_gains`). **The G1 is optional future replication, not the current focus** — do not hyperfixate on it. Sequencing: get the **fixed-impedance** results complete first (with real soft CaT), **then** add variable impedance at the end. This supersedes the earlier "Z1 is a fixed diagnostic; do variable impedance fresh on the G1; don't retrofit VIC into the Z1" framing.
 
 **Authoritative direction docs (read in this order):**
 1. `thesis_synthesis.md` — deep-research synthesis over the two source docs below; current architectural truth.
@@ -11,7 +13,7 @@ This repo is **preparation / Phase 0** for a Master's thesis at TU Munich (ATARI
 
 **Decisions that affect what code is worth writing:**
 - The thesis is **single-policy, variable-impedance, online RL**. The "two-level SURE+RL" and "generate-then-track / DeepMimic" architectures were considered and **walked back by the supervisor**. Do not implement either without re-confirming with Khadiv.
-- The current Z1 reward design (below) is for Phase 0 — finishing the diagnostic value of the current task. The thesis itself starts fresh on the G1; do not retrofit variable impedance into the Z1 task.
+- The Z1 is the primary development platform (see Direction Update above): the full program — soft CaT, impulse constraint, then variable impedance — is built and validated on the Z1 first. Variable impedance comes **after** the fixed-impedance results are complete. The G1 is optional future replication.
 
 ## Reward design (Z1 hammer task — Phase 0 only)
 
