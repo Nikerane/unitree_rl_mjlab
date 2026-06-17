@@ -8,8 +8,9 @@ import torch
 
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 
+from src.tasks.hammer.mdp.rewards import clamped_nail_depth
+
 if TYPE_CHECKING:
-  from mjlab.entity import Entity
   from mjlab.envs import ManagerBasedRlEnv
 
 _DEFAULT_NAIL_CFG = SceneEntityCfg("nail_block", joint_names=("nail_slide",))
@@ -24,6 +25,5 @@ def nail_fully_driven(
 
   Shape: (B,) bool tensor.
   """
-  nail_entity: Entity = env.scene[nail_cfg.name]
-  current_depth = nail_entity.data.joint_pos[:, nail_cfg.joint_ids].squeeze(1)
+  current_depth = clamped_nail_depth(env, nail_cfg)
   return current_depth >= success_depth

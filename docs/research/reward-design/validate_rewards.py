@@ -32,7 +32,7 @@ import torch
 
 from mjlab.envs import ManagerBasedRlEnv
 from src.tasks.hammer.config.z1.env_cfgs import z1_hammer_env_cfg
-from src.tasks.hammer.nail_block import NAIL_SUCCESS_THRESHOLD
+from src.tasks.hammer.nail_block import NAIL_SUCCESS_THRESHOLD, NAIL_GOAL_DEPTH
 
 
 TOL_FRAC = 0.01    # fractional tolerance for nonzero assertions (1% of expected)
@@ -337,6 +337,26 @@ def main() -> None:
     sys.exit(1)
   print(f"  K3 PASS  imitation budget {budget:.4f} < 0.35*completion ({budget_cap:.1f})")
   summary.append(("K. Imitation prior", {}))
+
+  # --- Phase L: Soft-limit overshoot is clamped at the reward source ---
+  # A hard strike transiently drives nail_slide past its 0.032 m stop (~63 mm).
+  # Every depth-reading reward term must see the CLAMPED physical depth, not the
+  # elastic excursion (else a harder strike inflates nail_depth_delta and any
+  # future impulse integral). Previously only the OBSERVATION was clamped, low side only.
+  print("\n--- Phase L: soft-limit overshoot clamp ---")
+  expected_delta = (NAIL_GOAL_DEPTH - SETTLE) * W_DELTA
+  r = {}
+  for overshoot in (0.063, 0.10):
+    env.reset()
+    force_nail_depth(env, overshoot)
+    r = recompute_rewards(env)
+    assert_close(
+      r["nail_depth_delta"], expected_delta,
+      f"L@{overshoot}m: nail_depth_delta must clamp to GOAL ({NAIL_GOAL_DEPTH} m), "
+      f"not pay the {overshoot} m overshoot",
+    )
+  print(f"  L PASS  nail_depth_delta clamps to {expected_delta:.4f} at overshoot (GOAL={NAIL_GOAL_DEPTH} m)")
+  summary.append(("L. Overshoot clamp", r))
 
   # --- Summary table ---
   print("\n" + "=" * 110)

@@ -10,12 +10,27 @@ from mjlab.entity import Entity
 from mjlab.managers.manager_base import ManagerTermBase, ManagerTermBaseCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from src.tasks.hammer.mdp.references import get_strike_reference
+from src.tasks.hammer.nail_block import NAIL_GOAL_DEPTH
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
 
 _DEFAULT_ROBOT_CFG = SceneEntityCfg("robot")
 _DEFAULT_NAIL_CFG = SceneEntityCfg("nail_block", joint_names=("nail_slide",))
+
+
+def clamped_nail_depth(env: "ManagerBasedRlEnv", nail_cfg: SceneEntityCfg) -> torch.Tensor:
+  """Nail slide depth clamped to the physical joint range [0, NAIL_GOAL_DEPTH]. Shape (B,).
+
+  The slide's soft limits let a hard strike transiently overshoot the 0.032 m stop to
+  ~63 mm (and a hooking claw pull it below 0). Reward/termination terms must read the
+  PHYSICAL depth, not the elastic excursion -- otherwise a harder strike inflates the
+  progress reward and any windowed impulse. (Only the observation was clamped before,
+  and only on the low side; observations.py:129.)
+  """
+  nail: Entity = env.scene[nail_cfg.name]
+  depth = nail.data.joint_pos[:, nail_cfg.joint_ids].squeeze(1)
+  return depth.clamp(0.0, NAIL_GOAL_DEPTH)
 
 
 def nail_driven_reward(
@@ -29,8 +44,7 @@ def nail_driven_reward(
   Returns exp(-error^2 / std^2) where error = goal_depth - current_depth.
   Shape: (B,).
   """
-  nail_entity: Entity = env.scene[nail_cfg.name]
-  current_depth = nail_entity.data.joint_pos[:, nail_cfg.joint_ids].squeeze(1)
+  current_depth = clamped_nail_depth(env, nail_cfg)
   error = goal_depth - current_depth
   return torch.exp(-(error**2) / std**2)
 
@@ -76,8 +90,7 @@ def completion_bonus(
   nail_driven TerminationTermCfg, so this fires at most once per episode.
   Shape: (B,).
   """
-  nail: Entity = env.scene[nail_cfg.name]
-  depth = nail.data.joint_pos[:, nail_cfg.joint_ids].squeeze(1)
+  depth = clamped_nail_depth(env, nail_cfg)
   return (depth >= success_depth).float()
 
 
@@ -121,8 +134,7 @@ class NailDepthDeltaTerm(ManagerTermBase):
     nail_cfg: SceneEntityCfg = _DEFAULT_NAIL_CFG,
   ) -> torch.Tensor:
     """Returns shape (B,)."""
-    nail: Entity = env.scene[nail_cfg.name]
-    depth = nail.data.joint_pos[:, nail_cfg.joint_ids].squeeze(1)
+    depth = clamped_nail_depth(env, nail_cfg)
     delta = (depth - self._max_depth).clamp_min(0.0)
     self._max_depth = torch.maximum(self._max_depth, depth)
     return delta
@@ -171,7 +183,6 @@ class ImpactProgressTerm(ManagerTermBase):
   ) -> torch.Tensor:
     """Returns shape (B,)."""
     robot: Entity = env.scene[robot_cfg.name]
-    nail: Entity = env.scene[nail_cfg.name]
     sensor = env.scene[sensor_name]
     dt = env.step_dt
 
@@ -188,7 +199,7 @@ class ImpactProgressTerm(ManagerTermBase):
     v_axial = (vel * n).sum(-1).clamp_min(0.0)
 
     # Progress gate: nail must advance past its max-so-far by more than eps.
-    depth = nail.data.joint_pos[:, nail_cfg.joint_ids].squeeze(1)
+    depth = clamped_nail_depth(env, nail_cfg)
     advanced = (depth - self._prev_depth > eps).to(head.dtype)
     self._prev_depth = torch.maximum(self._prev_depth, depth)
 
