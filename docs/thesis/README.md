@@ -135,8 +135,11 @@ applied above and in `CONSTRAINED_RL_LANDSCAPE.md` §5.*
 
 ## 6. Still-open / not-yet-thesis-ready
 
-- soft-CaT training results (implementation underway on branch `soft-cat`: **C0 done** — pure δ-math
-  `CaT` core + tests green; C1–C5 in `FAITHFUL_SOFT_CAT_IMPL_PLAN.md` §5).
+- soft-CaT training **results** (the implementation itself is **DONE** on branch `soft-cat`: C0–C3
+  built, adversarially reviewed + fixed, 37 CPU unit tests + `verify_cat_soft.py` (real env) +
+  `smoke_cat_soft.py` (3-iter CPU train loop runs, no NaN) all green. Only the GPU *results* run —
+  does the policy learn a limit-respecting strike — remains, on Vega. `train.py`'s launcher is
+  GPU-gated so the full run cannot execute on the mac).
 - worst-case tail closure via VIC (capability layer — after fixed-impedance results).
 - ~~citation verification pass~~ **DONE** (2026-06-17): no fabricated ids; 4 minor title/year fixes
   applied. Still confirm exact published venues per the thesis house citation style.
