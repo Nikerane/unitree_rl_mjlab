@@ -1,12 +1,21 @@
 # Tracking + Impact + Impulse — Staged Implementation Plan (Z1 Phase-0 → G1)
 
-**Date:** 2026-06-10 · **Branch:** `hammer-z1` · **Status:** **T0 + T1 IMPLEMENTED & VERIFIED** (2026-06-10; T0 commit `ba0dc9f`, T1 this commit); T2–T5 pre-implementation. **Scope: Z1 only** — G1 deferred entirely (user decision, 2026-06-10; see stub at end).
+**Date:** 2026-06-10 · **Branch:** `hammer-z1` · **Status:** **T0 + T1 IMPLEMENTED & VERIFIED** (2026-06-10; T0 commit `ba0dc9f`, T1 this commit); **T2 DESIGN LOCKED 2026-06-17** (see changelog — A-TRACK arm, ready for writing-plans/impl); T3–T5 pre-implementation. **Scope: Z1 only** — G1 deferred entirely (user decision, 2026-06-10; see stub at end).
 
 > **T1 verification record:** 147 unit tests green (16+1 new for the reference); `validate_rewards.py` 10/10 phases (new Phase J); Phase M playback gate PASS — scripted single strike succeeds at approach heights 0.06/0.10/0.15 (contact ~step 10, success 3 steps later; reference default `overshoot=0.015`, `approach_height=0.15`, calibrated by playback); CPU smoke train (5 it / 8 envs, 37-dim obs) clean; adversarial review agent (1 MAJOR fixed: descent phase now gated on-axis, `axis_tol=0.05`) + 3,100-trial property fuzz (all 8 properties pass; 1-ulp endpoint fixed). **Empirical correction:** the press exploit PERSISTS at 30 N from the reset pose (slow press reaches threshold in 65 steps vs 13 for the reference strike) — press exclusion is the reward design's job (T3 one-payout window + time penalty), watchdog metrics load-bearing; see OPEN_QUESTIONS Q1.
 **Design source of truth:** `docs/research/tracking_impact_impulse_design_research.md` (decisions D1–D6, open questions Q13–Q18).
 **Goal (user directive):** the RL policy follows a given strike trajectory while maximizing delivered impact and bounding per-joint impulse. "Max force" is operationalized as **delivered axial impulse/momentum** — never commanded or instantaneous simulated force.
 
 > **Decision changelog (2026-06-10, supersedes report D1 for the Z1):** primary tracking mechanism = **weak annealed reward-level prior (A-PRIOR)**, per the user's expectation that the policy should be free to deviate qualitatively from the reference, and because the reward-prior machinery is what the eventual thesis policy uses. The **residual action space (A-RES) is demoted to an optional ablation arm**. All anti-degenerate-tracking safeguards from the research report apply to A-PRIOR and are specified in Stage T2.
+>
+> **Decision changelog (2026-06-17 — T2 DESIGN LOCKED for implementation, user sign-off):**
+> 1. **Strength: weak + annealed confirmed** (user) — keeps it online RL, away from the walked-back DeepMimic regime; keeps seed variance meaningful (back-half of training is free online optimization). `w_I0 = 0.1`, `σ = 0.05 m`, position-only, ante-impact-only latch.
+> 2. **Scope = T2 ONLY.** Add `r_imit` to the current 7-term reward behind an `imitation` flag (`imitation=False` ⇒ byte-identical A-BASE). **Keep `impact_progress`** (T3 windowed-impulse / T4 impulse-cost deferred). This makes the new arm a clean one-variable ablation: "does the tracking prior help vs A-BASE?". Arm name: **A-TRACK** (= A-BASE + `r_imit`).
+> 3. **Anneal mechanism resolved:** mjlab's native `reward_curriculum` (`mjlab/envs/mdp/curriculums.py`) decays the *live* `term_cfg.weight` so `validate_rewards.py`'s dynamic read stays truthful. `T_anneal = 250` of **500** total iters (shape immaterial per Freitag → stage-approximated linear decay-to-0). No internal-factor fallback.
+> 4. **Training methodology:** 500 iters (no *dynamics* domain randomization → fast convergence; reduced from the plan's 5000), 3 seeds, **A-BASE + A-TRACK run in parallel** (6 one-GPU tasks) for the mean±CI comparison. Run only after the full local gate + new `r_imit` tests are green.
+> 5. **Physics:** `NAIL_SUCCESS_THRESHOLD` re-pinned **0.027** on the real claw-hammer (2026-06-17, see OPEN_QUESTIONS Q1); reference strikes succeed (PHASE M PASS), `I_ref ≈ 0.32 N·s`.
+>
+> Next: writing-plans → TDD impl (`tests/test_imitation_reward.py`, `validate_rewards.py` Phase J extension incl. the imitation-budget assertion) → full gate → Vega.
 
 ---
 
