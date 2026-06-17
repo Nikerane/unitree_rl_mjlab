@@ -241,6 +241,29 @@ terminations/timeouts still reset through the normal `TerminationManager`.
 A barely-violating step contributes ≈0 probability (`constraint_manager.py:25`). Revisit only if
 training shows a dead-zone near the limit.
 
+### Decision 7 — Terminal/timeout value-target convention. **[added after adversarial review, 2026-06-18]**
+
+An adversarial panel flagged that the **done-step** value targets were untested (every prior test had
+δ=0 at done-steps). Resolution, verified against the reference:
+
+- **Convention 2 (faithful) — keep it.** CaT scales reward by `(1−δ)` at *every* step **including the
+  step the episode ends on** (`cat_env.py:102-106`, unconditional). So a **violating success**
+  (`nail_driven` with δ>0) is worth `(1−δ)·reward` — its `+100` is discounted (e.g. δ=0.5 → ~50). We
+  **keep** this (user-confirmed): it is faithful AND the intended safety incentive (an over-limit
+  success is worth less → pushes toward limit-respecting strikes). We explicitly **rejected** the
+  panel's "undiscount the terminal" proposal — that assumes "convention 1" (δ touches only the
+  future), which the reference does not use.
+- **Timeout bootstrap.** The reference's locomotion task has *no* time limits (`cleanrl/ppo.py:227`
+  `exit(0)`s on one), so it gives no guidance. rsl_rl bootstraps timeouts by injecting `γ·V_t` into
+  the reward; injecting at **full weight** is inconsistent with soft-CaT (the future is reached only
+  w.p. `(1−δ)`). `CatPPO.process_env_step` therefore injects `(1−δ)·γ·V_t` and suppresses rsl_rl's
+  full-weight injection — a timeout is handled exactly like a continuing step:
+  `reward·(1−δ) + (1−δ)·γ·V_t`.
+- **Guards added.** The hook raises if a negative-weight reward term is missing from `_NEG_TERMS`
+  (penalty-evasion exploit), if the reward manager's `scale_by_dt` is off, or if `_step_reward` shape
+  drifts; `CatPPO` raises on the first step if `cat_delta` is absent (env/alg mismatch). Done-step
+  regression tests cover timeout, success-terminal, first-step-mismatch, and the sign guard.
+
 ---
 
 ## 4. Architecture — new files in our repo (zero installed-package edits)
