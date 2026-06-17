@@ -98,7 +98,7 @@ def recompute_rewards(env: ManagerBasedRlEnv) -> dict[str, float]:
 
 
 def main() -> None:
-  cfg = z1_hammer_env_cfg(play=True)
+  cfg = z1_hammer_env_cfg(play=True, imitation=True)
   cfg.scene.num_envs = 1
   device = "cpu"
   env = ManagerBasedRlEnv(cfg, device=device)
@@ -296,6 +296,47 @@ def main() -> None:
     sys.exit(1)
   summary.append(("J. Phase machinery", {}))
   print(f"  PASS  phi rose monotonically to {max(phis):.3f}, re-anchored to {phi_reset:.3f} on reset")
+
+  # --- Phase K: imitation prior r_imit (T2) ---
+  # K1: right after reset the head == the reference anchor (phi=0 -> waypoint=head0),
+  #     so the Gaussian is 1 and (pre-contact) r_imit == its weight.
+  # K2: driving down, from the first contact onward the ante-impact latch zeroes it.
+  # K3: budget rule -- cumulative weighted r_imit over the strike < 0.35 * completion.
+  print("\n--- Phase K: imitation prior (anchored, ante-impact latch, budget) ---")
+  env.reset()
+  W_IMIT = get_weights(env)["r_imit"]
+  r = recompute_rewards(env)
+  assert_close(r["r_imit"], W_IMIT,
+               f"K1: r_imit should be ~{W_IMIT} (Gaussian=1 at the reference anchor)",
+               tol=max(0.01, W_IMIT * TOL_FRAC))
+  print(f"  K1 PASS  r_imit={r['r_imit']:.4f} at the reference anchor (weight {W_IMIT})")
+
+  env.reset()
+  k_sensor = env.scene["hammer_nail_contact"]
+  contacted = False
+  budget = 0.0
+  for step in range(40):
+    env.step(down_action)
+    r = reward_dict(env)
+    budget += r["r_imit"]
+    found = bool((k_sensor.data.found > 0).any())
+    if found or contacted:
+      contacted = True
+      assert_zero(r["r_imit"],
+                  f"K2.step{step}: r_imit must be 0 from first contact onward (ante-impact latch)")
+    if env.episode_length_buf[0].item() == 0:
+      break  # episode reset after the strike drove the nail home
+  if not contacted:
+    print("\n[FAIL] K2: no contact within 40 steps; cannot verify the ante-impact latch")
+    sys.exit(1)
+  print(f"  K2 PASS  r_imit latched to 0 from first contact; pre-contact budget={budget:.4f}")
+
+  budget_cap = 0.35 * W_COMPLETION
+  if budget >= budget_cap:
+    print(f"\n[FAIL] K3: imitation budget {budget:.4f} >= 0.35*completion ({budget_cap:.1f})")
+    sys.exit(1)
+  print(f"  K3 PASS  imitation budget {budget:.4f} < 0.35*completion ({budget_cap:.1f})")
+  summary.append(("K. Imitation prior", {}))
 
   # --- Summary table ---
   print("\n" + "=" * 110)

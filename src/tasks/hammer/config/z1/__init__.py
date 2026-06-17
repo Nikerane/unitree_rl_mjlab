@@ -13,3 +13,12 @@ register_mjlab_task(
     rl_cfg=z1_hammer_ppo_runner_cfg(),
     runner_cls=HammerOnPolicyRunner,
 )
+
+# A-TRACK arm: A-BASE + the weak-annealed tracking prior r_imit (plan T2).
+register_mjlab_task(
+    task_id="Unitree-Z1-Hammer-Track",
+    env_cfg=z1_hammer_env_cfg(imitation=True),
+    play_env_cfg=z1_hammer_env_cfg(play=True, imitation=True),
+    rl_cfg=z1_hammer_ppo_runner_cfg(),
+    runner_cls=HammerOnPolicyRunner,
+)
