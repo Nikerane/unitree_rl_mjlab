@@ -72,3 +72,25 @@ and resolve the corresponding OPEN_QUESTIONS.
 - Pre-warm any HF caches on the **login** node; GPU nodes have egress but offline is cleaner.
 - Pin deps; if the warp wheel fails to build, fall back to the exact local versions and, if
   needed, a known-good CUDA index for torch (discovered live in V0).
+
+---
+
+## V1 status — LAUNCHED 2026-06-17 (in flight, awaiting analysis)
+
+V0 sanity PASSED earlier (A100, ~32.5k steps/s, GPU stack healthy). V1 now runs **two arms in
+parallel** on the recalibrated env (commit `f74a11d`, `NAIL_SUCCESS_THRESHOLD=0.027`), 500 iters,
+3 seeds each, 1 A100 per task:
+
+| Arm | Gym task | Slurm array | Reward |
+|---|---|---|---|
+| A-BASE | `Unitree-Z1-Hammer` | `36472565_[0-2]` | current 7-term |
+| A-TRACK | `Unitree-Z1-Hammer-Track` | `36472566_[0-2]` | 7-term + weak-annealed `r_imit` (T2; anneals to 0 by iter ~250) |
+
+**Submit cmd (for re-runs):** `ITERS=500 RUN=<a_base|a_track> TASK=<task-id> sbatch --array=0-2 scripts/slurm/train_array.sbatch`
+
+**TODO (next agent):** confirm both arms start without crashing (esp. A-TRACK — only arm with new GPU code);
+on completion pull success rate / mean ep length / per-term rewards (check `r_imit` anneals to ~0);
+compare A-BASE vs A-TRACK (anchor-or-cage, beat-the-reference); read strike-vs-slam-vs-press from a
+rollout (Path-A deliverable); watch the hover-at-apex `r_imit` farming risk; then resolve OPEN_QUESTIONS
+Path-A and record numbers here. Logs: `logs/z1-train-<arrayid>_<seed>.out`; checkpoints under
+`logs/rsl_rl/z1_hammer/`.
