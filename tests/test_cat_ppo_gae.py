@@ -228,17 +228,64 @@ def test_process_env_step_scales_reward_and_carries_delta(monkeypatch):
   assert torch.allclose(recorded["soft_dones"], delta)
 
 
-def test_process_env_step_is_noop_without_cat_extras(monkeypatch):
+def test_first_step_without_delta_raises():
+  # env/alg mismatch guard: CatPPO selected but the hook never fed δ -> loud crash, not a silent
+  # PPO-vs-PPO baseline.
+  import pytest
+  obj = object.__new__(CatPPO)
+  obj.transition = RolloutStorage.Transition()
+  with pytest.raises(RuntimeError, match="cat_delta"):
+    CatPPO.process_env_step(obj, None, torch.tensor([1.0, 2.0]), torch.zeros(2), extras={})
+
+
+def test_noop_without_delta_after_first_cat_step(monkeypatch):
   recorded = {}
 
   def spy(self, obs, rewards, dones, extras):
     recorded["rewards"] = rewards
-    recorded["soft_dones"] = getattr(self.transition, "soft_dones", None)
 
   monkeypatch.setattr(PPO, "process_env_step", spy)
   obj = object.__new__(CatPPO)
   obj.transition = RolloutStorage.Transition()
+  obj.gamma = 0.99
+  # first step carries δ (latch passes), then a later δ-absent step degrades gracefully (no raise)
+  CatPPO.process_env_step(obj, None, torch.tensor([1.0, 2.0]), torch.zeros(2),
+                          {"cat_delta": torch.zeros(2), "cat_r_pos": torch.zeros(2)})
+  r = torch.tensor([3.0, -4.0])
+  CatPPO.process_env_step(obj, None, r, torch.zeros(2), extras={})
+  assert torch.allclose(recorded["rewards"], r)  # unscaled fallback
+
+
+def test_success_terminal_keeps_discount_no_bootstrap():
+  # Terminal step (hard_done=1, no timeout): target = stored (already (1-δ)-discounted) reward, NO
+  # bootstrap. Documents the user-confirmed convention: a violating success is worth (1-δ)*reward
+  # (e.g. 50, not 100) -- NOT the panel's undiscounted r_total. last_value is ignored (bootstrap cut).
+  scaled = torch.tensor([[[50.0]]])  # = r_total(100) - δ(0.5)*r_pos(100)
+  out = _run(CatPPO.compute_returns, scaled, torch.zeros(1, 1, 1),
+             dones=torch.ones(1, 1, 1), soft=torch.full((1, 1, 1), 0.5),
+             last_value=torch.tensor([[999.0]]))
+  assert torch.allclose(out[0], torch.tensor([[50.0]]), atol=1e-6)
+
+
+def test_timeout_bootstrap_is_delta_discounted(monkeypatch):
+  # At a timeout, the injected time-limit bootstrap is (1-δ)·γ·V_t (NOT rsl_rl's full γ·V_t), and the
+  # time_outs key is removed so super() does not double-inject.
+  recorded = {}
+
+  def spy(self, obs, rewards, dones, extras):
+    recorded["rewards"] = rewards
+    recorded["extras"] = extras
+
+  monkeypatch.setattr(PPO, "process_env_step", spy)
+  obj = object.__new__(CatPPO)
+  obj.transition = RolloutStorage.Transition()
+  obj.transition.values = torch.tensor([[10.0], [20.0]])  # V(s_t)
+  obj.gamma = 0.99
   rewards = torch.tensor([2.0, -8.0])
-  CatPPO.process_env_step(obj, None, rewards, torch.zeros(2), extras={})  # no CaT keys
-  assert torch.allclose(recorded["rewards"], rewards)   # unscaled
-  assert recorded["soft_dones"] is None                  # no delta carried -> storage falls back to hard
+  delta = torch.tensor([0.5, 0.0])
+  r_pos = torch.tensor([4.0, 2.0])
+  CatPPO.process_env_step(obj, None, rewards, torch.ones(2),
+                          {"cat_delta": delta, "cat_r_pos": r_pos, "time_outs": torch.tensor([1.0, 1.0])})
+  # scaled = [2-0.5*4, -8-0]=[0,-8]; +(1-δ)γV_t = [0.5*0.99*10, 1.0*0.99*20]=[4.95,19.8] -> [4.95,11.8]
+  assert torch.allclose(recorded["rewards"], torch.tensor([4.95, 11.8]), atol=1e-4)
+  assert "time_outs" not in recorded["extras"]

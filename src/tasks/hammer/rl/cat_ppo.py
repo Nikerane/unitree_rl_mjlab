@@ -46,13 +46,41 @@ class CatPPO(PPO):
   def process_env_step(
     self, obs: TensorDict, rewards: torch.Tensor, dones: torch.Tensor, extras: dict[str, torch.Tensor]
   ) -> None:
-    """Apply the scale-positives discount + carry δ, then defer to stock PPO bookkeeping."""
+    """Scale-positives discount + a soft-CaT-consistent timeout bootstrap; carry δ; then defer to
+    stock PPO bookkeeping."""
     delta = extras.get(self.DELTA_KEY)
-    if delta is not None:
-      rewards = self._cat_scale_reward(rewards, delta, extras[self.R_POS_KEY])
-      # Carried into CatRolloutStorage.add_transition (set before super() records the transition).
-      self.transition.soft_dones = delta.reshape(-1)
-    # super() clones rewards, adds RND + the standard timeout bootstrap, and records the transition.
+    if not getattr(self, "_cat_checked", False):
+      # Fail loudly on the env/alg mismatch: CatPPO selected but the CatSoftHook never fed δ (would
+      # otherwise be a silent, uninstrumented PPO-vs-PPO baseline).
+      self._cat_checked = True
+      if delta is None:
+        raise RuntimeError(
+          "CatPPO is selected (algorithm.class_name) but extras['cat_delta'] is absent on the first "
+          "step -- the CatSoftHook env hook is not wired. Set cat_soft=True on BOTH env_cfg and "
+          "rl_cfg (FAITHFUL_SOFT_CAT_IMPL_PLAN.md), or use stock PPO."
+        )
+    if delta is None:
+      super().process_env_step(obs, rewards, dones, extras)
+      return
+
+    d = delta.reshape(-1)
+    # Scale-positives discount (Decision 1), applied on EVERY step incl. terminals (convention 2,
+    # faithful to cat_env.py reward*(1-δ)). At a true terminal the dual mask cuts the bootstrap, so a
+    # violating success is worth (1-δ)*reward -- the intended safety incentive (user-confirmed).
+    rewards = self._cat_scale_reward(rewards, delta, extras[self.R_POS_KEY])
+    self.transition.soft_dones = d
+
+    # Soft-CaT-consistent time-limit bootstrap. rsl_rl injects the FULL gamma*V_t at a timeout
+    # (ppo.py:151-155); under soft-CaT the future is reached only w.p. (1-δ), so inject
+    # (1-δ)*gamma*V_t and suppress rsl_rl's full-weight injection. A timeout is a non-terminal cutoff,
+    # so the step is handled like a continuing step: reward*(1-δ) + (1-δ)*gamma*V_t.
+    time_outs = extras.get("time_outs")
+    if time_outs is not None:
+      v_t = self.transition.values.reshape(-1)  # V(s_t), set in act() before the env step
+      to = time_outs.to(rewards.device).reshape(-1).to(rewards.dtype)
+      rewards = rewards + (1.0 - d) * self.gamma * v_t * to
+      extras = {k: v for k, v in extras.items() if k != "time_outs"}  # prevent super double-inject
+
     super().process_env_step(obs, rewards, dones, extras)
 
   def compute_returns(self, obs: TensorDict) -> None:

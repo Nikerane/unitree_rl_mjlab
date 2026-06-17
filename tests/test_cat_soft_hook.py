@@ -29,9 +29,15 @@ def _hook(max_p=0.5, tau=0.95, min_p=0.0):
   return h
 
 
+def _term_cfg(n):
+  w = -0.01 if n == "action_rate" else (-10.0 if n == "joint_pos_limits" else 1.0)
+  return SimpleNamespace(weight=w)
+
+
 def _env(qv, step_reward, step_dt=0.02):
   robot = SimpleNamespace(data=SimpleNamespace(joint_vel=qv))
-  rm = SimpleNamespace(_step_reward=step_reward, active_terms=list(ACTIVE))
+  rm = SimpleNamespace(_step_reward=step_reward, active_terms=list(ACTIVE),
+                       get_term_cfg=_term_cfg, _scale_by_dt=True)
   return SimpleNamespace(scene={"robot": robot}, reward_manager=rm, step_dt=step_dt, extras={})
 
 
@@ -97,3 +103,23 @@ def test_neg_term_indices_resolved_lazily():
   h(_env(torch.full((1, 6), 1.0), torch.zeros(1, len(ACTIVE))))
   assert h._neg_idx == [I_ACTION_RATE, I_JOINT_LIM]
   assert _NEG_TERMS == ("action_rate", "joint_pos_limits")
+
+
+def test_neg_sign_guard_raises_on_unregistered_negative_term():
+  # MF-3: a future negative-weight reward term not in _NEG_TERMS would be silently discounted by
+  # (1-δ) (penalty-evasion exploit). The hook must fail loudly on first __call__.
+  import pytest
+
+  active = list(ACTIVE) + ["rogue_penalty"]
+
+  def term_cfg(n):
+    w = -3.0 if n in ("action_rate", "joint_pos_limits", "rogue_penalty") else 1.0
+    return SimpleNamespace(weight=w)
+
+  rm = SimpleNamespace(_step_reward=torch.zeros(2, len(active)), active_terms=active,
+                       get_term_cfg=term_cfg, _scale_by_dt=True)
+  env = SimpleNamespace(
+    scene={"robot": SimpleNamespace(data=SimpleNamespace(joint_vel=torch.full((2, 6), 1.0)))},
+    reward_manager=rm, step_dt=0.02, extras={})
+  with pytest.raises(RuntimeError, match="rogue_penalty"):
+    _hook()(env)

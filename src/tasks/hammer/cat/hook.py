@@ -63,6 +63,23 @@ class CatSoftHook(ManagerTermBase):
           "CatSoftHook needs reward_manager._step_reward (mjlab 1.4.0 internal). Pin mjlab or adapt "
           "the r_pos recipe in CatSoftHook._compute_r_pos."
         )
+      if not getattr(rm, "_scale_by_dt", True):
+        raise RuntimeError(
+          "CatSoftHook assumes the reward manager scales by dt (reward_buf = rate*dt); r_pos is "
+          "dt-scaled to match. reward_manager._scale_by_dt is False -- adapt _compute_r_pos."
+        )
+      if rm._step_reward.shape[1] != len(rm.active_terms):
+        raise RuntimeError("CatSoftHook: reward_manager._step_reward column count != #active_terms.")
+      # MF-3 guard: any negative-weight reward term NOT in _NEG_TERMS would be silently discounted by
+      # (1-δ) under scale-positives -- the penalty-evasion exploit Decision 1 exists to prevent. The
+      # augment-not-replace workflow means new penalty terms are expected; fail loudly if one appears.
+      for n in rm.active_terms:
+        if rm.get_term_cfg(n).weight < 0 and n not in _NEG_TERMS:
+          raise RuntimeError(
+            f"CatSoftHook: reward term '{n}' has negative weight {rm.get_term_cfg(n).weight} but is "
+            f"not in _NEG_TERMS {_NEG_TERMS}; scale-positives would discount it by (1-δ) "
+            f"(penalty-evasion exploit, Decision 1). Add it to _NEG_TERMS."
+          )
       self._neg_idx = [rm.active_terms.index(n) for n in _NEG_TERMS if n in rm.active_terms]
     return self._neg_idx
 
