@@ -42,7 +42,11 @@ Best clean shaped strike = **28.3 mm < old 0.030 threshold** → the upper-bound
 
 **Q1 verdict:** single-strike is **feasible but marginal** at the recalibrated 0.027 threshold (the open-loop reference only clears it at the 0.06 m approach). `air_time_bonus` remains NOT added (augment-not-replace) — V1 will show whether the trained single-strike policy clears 27 mm reliably or whether multi-strike/press emerges. If V1 depths cluster < 27 mm, lower the threshold further (cheap, iterative) rather than reducing frictionloss.
 
-Status: 🟢 measured on the real hammer; threshold pinned at 0.027 (2026-06-17). air_time_bonus deferred to V1 evidence.
+**V1 RESULT (2026-06-17 GPU training, Vega arrays `36472565`/`36472566`; full writeup in `docs/VEGA_TRAINING_PLAN.md` §"V1 — Results"):** the open question is **answered — the *trained* policy clears 27 mm reliably with a clean single strike; the press does NOT emerge.** Across 6 runs (A-BASE + A-TRACK, 3 seeds each, 500 iters): **100% success, 0% timeout**, converged by ~iter 25. A 64-env rollout of every final checkpoint (`scripts/diag_policy_trace.py`) shows **one contact event/episode** (~1.05), **~0.45 m/s downward axial speed at contact**, nail driven 0→27 mm in ~3 contact steps, episode ~8.6 steps — vs the scripted press's ~89 steps at v≈0. With terminations off the policy **strikes → retracts → re-strikes**, i.e. a learned swing.
+
+So the **press exploit is real in physics but training does not converge to it** — the reward (`impact_progress` + `completion` + the implicit time cost of long episodes) successfully selects the strike. This is **Path-A outcome #1 for the learned policy** (fixed-PD position-control striking is viable on the Z1), even though Path-A outcome #2's *physics* claim (a scripted press slow-succeeds) still stands. **Caveat:** the head resets ~13 cm above the nail, so the strike is trivially reachable and the press is never seriously explored — this proves "striking viable here," not "the reward beats a press on a harder reset / the G1." The trained behaviour is a **controlled ~0.45 m/s drive-through**, not a max-velocity slam — consistent with the position-only DiffIK action-space lesson (impact lever is approach momentum; policy lands on the minimum sufficient speed). air_time_bonus / multi-strike reference **not needed** (single strike clears 27 mm reliably).
+
+Status: 🟢 **RESOLVED.** Real-hammer threshold 0.027 (2026-06-17); V1 training confirms a reliable trained single strike, press does not emerge. air_time_bonus NOT added.
 
 ---
 
@@ -55,6 +59,10 @@ Status: 🟢 measured on the real hammer; threshold pinned at 0.027 (2026-06-17)
 **Experiment:** Train ablation step 3 (approach + depth_delta + impact_velocity, no air_time). Record video of 100 rollouts. Count: (a) episodes with ≥2 distinct contact events, (b) episodes where the nail advances > 5mm.
 
 **Cannot be resolved without running training.** Plan: keep `air_time_bonus` in the initial config (Step 4 of the ablation), and run a single ablation that disables it to confirm whether it's load-bearing.
+
+**V1 RESULT (2026-06-17):** **answered — retract-and-restrike emerges naturally, no `air_time_bonus` needed.** A `--no-term` rollout of the trained V1 policy (`scripts/diag_strike_probe.py --mode press_basin --no-term`, and `scripts/diag_policy_trace.py --no-term`) shows the policy spontaneously **strikes → retracts ~7 cm (head climbs back up) → re-strikes** — a clean swing cycle — with no rhythm/air-time term in the reward. This holds even when the policy is started already in contact (the "press basin"). Matches the striking-RL literature (Liu 2025; Karbasi 2024; Robot Drummer 2025): repetitive striking emerges from the task, not an explicit rhythm reward. So for an eventual multi-strike task, the cyclic behaviour is expected to come for free from a higher success bar; `air_time_bonus` stays NOT added (augment-not-replace). See `docs/superpowers/specs/2026-06-17-z1-strike-not-press-redesign-design.md` §6.
+
+Status: 🟢 **RESOLVED** — retract-and-restrike emerges without an air-time term.
 
 ---
 
@@ -157,8 +165,8 @@ No spurious reward on the first step. **No debug assertion needed.**
 
 | Q | Status | How resolved |
 |---|---|---|
-| Q1 | 🟡 Script provided | Run `test_single_strike.py` |
-| Q2 | 🔴 Needs training | Ablation Step 3 vs Step 4 comparison |
+| Q1 | 🟢 Resolved | Real-hammer measure + V1 GPU training (arrays 36472565/36472566): trained single strike clears 27 mm at 100%, press does not emerge |
+| Q2 | 🟢 Resolved | V1 `--no-term` rollout: trained policy strikes→retracts→re-strikes with no rhythm reward |
 | Q3 | 🔴 Needs training | Weight grid search |
 | Q4 | 🟢 Resolved | Geom name = `hammer_head` (exact, verified in XML) |
 | Q5 | 🟡 Script provided | `verify_reward_setup.py` outputs percentiles |

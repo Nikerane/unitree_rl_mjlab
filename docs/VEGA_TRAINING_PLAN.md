@@ -75,22 +75,74 @@ and resolve the corresponding OPEN_QUESTIONS.
 
 ---
 
-## V1 status — LAUNCHED 2026-06-17 (in flight, awaiting analysis)
+## V1 — Results (completed 2026-06-17)
 
-V0 sanity PASSED earlier (A100, ~32.5k steps/s, GPU stack healthy). V1 now runs **two arms in
-parallel** on the recalibrated env (commit `f74a11d`, `NAIL_SUCCESS_THRESHOLD=0.027`), 500 iters,
-3 seeds each, 1 A100 per task:
+V0 sanity PASSED (A100, GPU stack healthy). V1 ran **two arms in parallel** on the recalibrated
+env (commit `f74a11d`, `NAIL_SUCCESS_THRESHOLD=0.027`), 500 iters, 3 seeds each, 4096 envs,
+**1 A100 per task** (6 one-GPU array tasks). Logs under `logs/rsl_rl/z1_hammer/2026-06-17_10-50-13_*`.
 
 | Arm | Gym task | Slurm array | Reward |
 |---|---|---|---|
-| A-BASE | `Unitree-Z1-Hammer` | `36472565_[0-2]` | current 7-term |
-| A-TRACK | `Unitree-Z1-Hammer-Track` | `36472566_[0-2]` | 7-term + weak-annealed `r_imit` (T2; anneals to 0 by iter ~250) |
+| A-BASE | `Unitree-Z1-Hammer` | **`36472565_[0-2]`** | current 7-term |
+| A-TRACK | `Unitree-Z1-Hammer-Track` | **`36472566_[0-2]`** | 7-term + weak-annealed `r_imit` (T2) |
 
-**Submit cmd (for re-runs):** `ITERS=500 RUN=<a_base|a_track> TASK=<task-id> sbatch --array=0-2 scripts/slurm/train_array.sbatch`
+**Submit cmd (re-runs):** `ITERS=500 RUN=<a_base|a_track> TASK=<task-id> sbatch --array=0-2 scripts/slurm/train_array.sbatch`
+Each run ≈ 12 min wall on one A100 (~62k FPS); all 6 finished cleanly (no crash, no NaN — incl. A-TRACK, the only arm with new GPU code).
 
-**TODO (next agent):** confirm both arms start without crashing (esp. A-TRACK — only arm with new GPU code);
-on completion pull success rate / mean ep length / per-term rewards (check `r_imit` anneals to ~0);
-compare A-BASE vs A-TRACK (anchor-or-cage, beat-the-reference); read strike-vs-slam-vs-press from a
-rollout (Path-A deliverable); watch the hover-at-apex `r_imit` farming risk; then resolve OPEN_QUESTIONS
-Path-A and record numbers here. Logs: `logs/z1-train-<arrayid>_<seed>.out`; checkpoints under
-`logs/rsl_rl/z1_hammer/`.
+### Headline: both arms reach 100% success and converge to the *same* clean single strike
+
+All 6 seeds converge by **~iter 25** to **100% success** (terminate on `nail_driven`, **0% timeout**),
+mean episode length **~8.6 control steps (~0.17 s)**. A-BASE and A-TRACK are **statistically
+indistinguishable** on every metric (final TB + a 64-env × 80-step rollout per checkpoint via
+`scripts/diag_policy_trace.py`):
+
+| metric (mean±std, 3 seeds) | A-BASE | A-TRACK |
+|---|---|---|
+| success rate | 100% | 100% |
+| episode length (steps) | 8.63 ± 0.04 | 8.65 ± 0.10 |
+| # distinct contacts / episode | **1.04** | **1.06** |
+| peak axial speed @ contact | **0.447 ± 0.003 m/s** | **0.448 ± 0.004 m/s** |
+| ante-impact deviation from ref | 49.5 ± 1.2 mm | 51.0 ± 1.4 mm |
+| TB per-term `impact_progress` | 0.0133 | 0.0133 |
+
+### Path-A deliverable — *does the press exploit survive training?* → **No. The policy strikes.**
+
+The trained policy is a genuine **single-strike hammer**, not a press: **one contact event** (~1.05),
+**~0.45 m/s downward axial speed at contact**, nail driven 0→27 mm in ~3 contact steps, episode ends
+in ~8.6 steps. A press (scripted) needs **~89 steps at v≈0** with sustained contact — none of that
+appears. With terminations disabled the policy **strikes → retracts (head climbs back ~0.11 m) →
+re-strikes** (env-0 no-term trace), confirming a learned swing rather than a quasi-static push. →
+**Path-A outcome #1: the press dissolves under training; fixed-PD position-control striking is viable
+on the Z1.**
+
+*Honest caveat (matters for the thesis framing):* the reset places the head ~13 cm above the nail, so
+a direct descent-strike is the obvious, trivially-reachable solution (converged by iter 25, both arms
+identical). The reward (impact_progress + completion + implicit time cost) does disfavour the press,
+but the easy reset means the press is never seriously explored. The behaviour is a **controlled
+~0.45 m/s drive-through**, not a max-velocity slam (IK max ≈ 2.5 m/s) nor a press — on the position-only
+DiffIK action space the policy modulates approach speed and lands on the minimum sufficient value. This
+supports "striking viable" but does **not** prove the reward would beat a press on a harder reset / the G1.
+
+### A-TRACK vs A-BASE — does the tracking prior help? → **No measurable effect on this task.**
+
+- `r_imit` anneal verified end-to-end: live weight stepped **0.10→0.08→0.06→0.04→0.02→0.00** exactly on
+  schedule (iters 0/50/100/150/200/250, keyed to the 24-steps/iter counter), and `Episode_Reward/r_imit`
+  was non-zero through iter ~250 then 0 — so the prior *was* active early; the ablation is real, not a no-op.
+- It neither **helped** (no faster/cleaner convergence — A-TRACK was if anything marginally slower at iter 25)
+  nor **caged** (anchor-or-cage answer: **neither** — ante-impact deviation ~51 mm ≈ the prior's σ=50 mm and
+  is *not lower* than A-BASE's ~49.5 mm, so the policy never hugged the reference). On a task this easy the
+  prior leaves no fingerprint; its discriminating value would need a harder reset / the G1.
+
+### Watch-item (r_imit hover-near-apex farming) — **did NOT occur; no guard added.**
+
+Hover-farming would show as inflated episode length while the prior is active and deviation ≪ σ. Instead:
+episodes are ~8.6 steps (converged by iter 25, *during* the active-prior phase), 0% timeout, all terminate
+on success, and deviation ≈ σ. The early-training episode-length bump (iters 5–10) is identical in A-BASE
+(no prior) → it is exploration, not r_imit farming. Per augment-not-replace, **no per-episode cap or
+φ-descent gate added.**
+
+### Reproduce / artefacts
+
+- Behavioural rollout + metrics: `python scripts/diag_policy_trace.py --task <id> --ckpt <model_499.pt> --num-envs 64 --nsteps 80 --device cpu` (add `--no-term` for the full strike-retract trajectory + depth ceiling).
+- TB scalars: `logs/rsl_rl/z1_hammer/2026-06-17_10-50-13_{a_base,a_track}_seed{0,1,2}/`. Checkpoints: `model_499.pt` in each.
+- Resolves **Path-A** and feeds **Q1** in `docs/research/reward-design/OPEN_QUESTIONS.md`.
