@@ -149,3 +149,11 @@ on success, and deviation ≈ σ. The early-training episode-length bump (iters 
 - Behavioural rollout + metrics: `python scripts/diag_policy_trace.py --task <id> --ckpt <model_499.pt> --num-envs 64 --nsteps 80 --device cpu` (add `--no-term` for the full strike-retract trajectory + depth ceiling).
 - TB scalars: `logs/rsl_rl/z1_hammer/2026-06-17_10-50-13_{a_base,a_track}_seed{0,1,2}/`. Checkpoints: `model_499.pt` in each.
 - Resolves **Path-A** and feeds **Q1** in `docs/research/reward-design/OPEN_QUESTIONS.md`.
+
+---
+
+## b_strike — honest-scale single strike (2026-06-17, run `36517248`)
+
+`delta_pos_scale` 0.05→0.15 + depth clamp → **real single ballistic strike** (~1.2 m/s, 2.7× V1), 100% success, ~4 control steps, press still excluded. **But** the trained policy exceeds the 3.1415 rad/s joint-velocity limit (worst-case 4.3–4.65 across all seeds) — Option A ("self-limiting, no rail") is falsified for the closed-loop policy; how to bound it is the open decision (research `wf_aa165e9a-cb9`).
+
+→ **Full analysis & decision options: [`results/2026-06-17_b_strike.md`](results/2026-06-17_b_strike.md).**

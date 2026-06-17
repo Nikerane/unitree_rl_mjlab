@@ -84,12 +84,14 @@ def main():
     first_contact_done = torch.zeros(N, dtype=torch.bool, device=dev)
     peak_v_impact = torch.zeros(N, device=dev)   # axial speed on the FIRST contact step
     peak_v_any = torch.zeros(N, device=dev)       # max downward axial speed any step
+    peak_qv = torch.zeros(N, device=dev)          # peak |arm joint vel| any step (rad/s)
     dev_sum = torch.zeros(N, device=dev)          # ante-impact deviation accumulator
     dev_cnt = torch.zeros(N, device=dev)
 
     # collected per-episode records
-    rec_len, rec_depth, rec_nc, rec_vimp, rec_vany, rec_dev, rec_succ, rec_to = ([] for _ in range(8))
+    rec_len, rec_depth, rec_nc, rec_vimp, rec_vany, rec_dev, rec_succ, rec_to, rec_qv = ([] for _ in range(9))
     running_max_depth = 0.0  # global max depth seen (useful in --no-term mode)
+    running_max_qv = 0.0     # global max |arm joint vel| seen (rad/s) — safety check vs 3.1415
 
     trace_rows = []  # env-0 first-episode trace
     env0_done = False
@@ -122,6 +124,11 @@ def main():
         first_contact_done = first_contact_done | rising
         peak_v_any = torch.maximum(peak_v_any, v_axial)
 
+        # peak arm joint speed (rad/s) — robot entity is the 6-DOF arm (nail is a separate entity)
+        qv = robot.data.joint_vel.abs().amax(dim=1)
+        peak_qv = torch.maximum(peak_qv, qv)
+        running_max_qv = max(running_max_qv, float(qv.max()))
+
         # deviation from reference (ante-impact only), via the shared reference
         ref = get_strike_reference(u)
         phi = ref._phi.clone()
@@ -150,6 +157,7 @@ def main():
                 rec_dev.append(float((dev_sum[i] / dev_cnt[i].clamp(min=1)) * 1000))
                 rec_succ.append(bool(succ_mask[i]))  # exact: nail_driven termination
                 rec_to.append(bool(to_mask[i]))
+                rec_qv.append(float(peak_qv[i]))
             # reset accumulators for completed envs
             ep_len[done_idx] = 0
             max_depth[done_idx] = 0
@@ -158,6 +166,7 @@ def main():
             first_contact_done[done_idx] = False
             peak_v_impact[done_idx] = 0
             peak_v_any[done_idx] = 0
+            peak_qv[done_idx] = 0
             dev_sum[done_idx] = 0
             dev_cnt[done_idx] = 0
             have_prev[done_idx] = False
@@ -179,7 +188,7 @@ def main():
     if n:
         ml, sl = stat(rec_len); md, sd = stat(rec_depth)
         mc, sc = stat([float(x) for x in rec_nc]); mvi, svi = stat(rec_vimp)
-        mva, sva = stat(rec_vany); mdev, sdev = stat(rec_dev)
+        mva, sva = stat(rec_vany); mdev, sdev = stat(rec_dev); mqv, sqv = stat(rec_qv)
         succ = 100.0 * sum(rec_succ) / n
         to = 100.0 * sum(rec_to) / n
         # contact-count histogram
@@ -193,9 +202,12 @@ def main():
         print(f"  contact-count histogram : {hist_str}")
         print(f"  peak v_axial @ contact  : {mvi:.3f} +/- {svi:.3f} m/s")
         print(f"  peak v_axial (any step) : {mva:.3f} +/- {sva:.3f} m/s")
+        print(f"  peak |arm joint vel|    : {mqv:.3f} +/- {sqv:.3f} rad/s  (real Z1 limit 3.1415)")
         print(f"  ante-impact deviation   : {mdev:.1f} +/- {sdev:.1f} mm  (r_imit sigma=50mm)")
+    over = "  ⚠ EXCEEDS 3.1415" if running_max_qv > 3.1415 else "  (<= 3.1415, honest)"
     print(f"\n  global max nail depth observed: {running_max_depth:.2f} mm"
           + ("   (no-term: this is the true depth ceiling)" if args.no_term else ""))
+    print(f"  global max |arm joint vel| observed: {running_max_qv:.3f} rad/s{over}")
     env.close()
 
 

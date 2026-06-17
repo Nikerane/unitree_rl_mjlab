@@ -19,6 +19,8 @@ V1 (the A-BASE/A-TRACK campaign, arrays `36472565`/`36472566`) showed the task i
 >
 > The `max_dq` line was **reverted** in `env_cfgs.py` (replaced with a comment); `delta_pos_scale=0.15` stays. Whether to add an insurance rail vs rely on self-limiting + rollout monitoring is an **open decision** (not yet trained). Durable summary in the `diffik-maxdq-velocity` and `z1-hardware-limits` auto-memories.
 
+> **TRAINING RESULT (2026-06-17 — `b_strike`, run `36517248`, 3 seeds × 500 iters, all COMPLETED). The strike redesign worked; Option A (self-limiting, no rail) is FALSIFIED.** All seeds: 100% success, **single ballistic contact** (~1 contact/ep vs V1's ~3-step drive), **~1.2 m/s impact** (2.7× V1's 0.45), ~4 control steps/ep (vs ~8.6), press still excluded (press-basin → LIFT-AND-STRIKE). **But** the trained policy's peak arm joint speed amplifies to **4.3–4.65 rad/s worst-case (≈1.9× the 2.41 open-loop ceiling)** on every seed — seed 1's *mean* (3.75) already exceeds the real 3.1415 rad/s limit. The rollout-caveat in pt 1 above was correct: closed-loop wind-up / off-axis Jacobian breaks the "self-limiting" assumption. **Open decision before the next retrain:** (1) lower `delta_pos_scale`→~0.10; (2) keep 0.15 + add a joint-velocity-excess penalty (thesis-aligned, augment-on-observed-failure); (3) verified `max_dq≈0.29` rail; (4) accept as the Phase-0 diagnostic finding ("the binding limit for a hard position-only strike is joint velocity"). Full results in `docs/VEGA_TRAINING_PLAN.md` → "b_strike" section.
+
 ---
 
 ## 1. Background — why we're here
