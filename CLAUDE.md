@@ -11,6 +11,8 @@ This repo is the development platform for a Master's thesis at TU Munich (ATARI 
 2. `thesis_direction_update.md` — the supervisor-conversation update; the *current* architecture (single policy, variable impedance, online RL).
 3. `thesis_handoff_brief_original.md` — the original brief; conceptual pillars (impulse-not-energy, preparation-not-reaction, hitting flux) survive intact. Architecture sections are superseded.
 
+**Curated thesis material:** `docs/thesis/README.md` — the running, curated digest of confirmed thesis-bound contributions, decisions, defense points, and citations (distilled from `docs/research/`; exhaustive detail stays there). Add to it as material becomes thesis-ready. The constraint-mechanism justification + cited literature map lives in `docs/research/reward-design/CONSTRAINED_RL_LANDSCAPE.md`; the faithful soft-CaT design + decisions in `docs/research/reward-design/FAITHFUL_SOFT_CAT_IMPL_PLAN.md`.
+
 **Decisions that affect what code is worth writing:**
 - The thesis is **single-policy, variable-impedance, online RL**. The "two-level SURE+RL" and "generate-then-track / DeepMimic" architectures were considered and **walked back by the supervisor**. Do not implement either without re-confirming with Khadiv.
 - The Z1 is the primary development platform (see Direction Update above): the full program — soft CaT, impulse constraint, then variable impedance — is built and validated on the Z1 first. Variable impedance comes **after** the fixed-impedance results are complete. The G1 is optional future replication.
