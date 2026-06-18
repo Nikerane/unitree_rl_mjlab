@@ -174,20 +174,23 @@ NEUTRAL_JOINT_POS: dict[str, float] = {
     "jointGripper": -0.000964725,
 }
 
-# Manually tuned via viewer (2026-05-27), then RE-SOLVED 2026-06-16 via 6-DOF IK
-# for GRASP #10 (hammer geoms at quat 0.7071 0 0 0.7071,
-# pos 0 0.006 0 — the 80 mm grip slide toward the head). 6-DOF IK places the c4 FACE
-# centroid at world (0.5, 0, 0.15) with the head strike-axis pointing straight DOWN,
-# so the flat striking face leads (face lowest at 152 mm vs claw 211 mm) and a
-# straight-down drive contacts the nail with the FACE, not the claw. Re-solved after
-# the 80 mm grip slide moved the face 80 mm closer to the wrist.
+# Manually tuned via viewer (2026-05-27), then RE-SOLVED 2026-06-16 via position-only 6-DOF IK
+# for GRASP #10 (hammer geoms at quat 0.7071 0 0 0.7071, pos 0 0.006 0 — the 80 mm grip slide
+# toward the head), placing the c4 FACE centroid at world (0.5, 0, 0.15) so the flat striking face
+# leads (not the claw).
+# RE-SOLVED AGAIN 2026-06-18 via ORIENTATION-AWARE IK with joint1 LOCKED=0
+# (hammer_z1_env/solve_ik_oriented.py --lock-joint1): the strike axis now points DEAD-vertical
+# (tilt 0.002 deg vs the old position-only solution's 7.4 deg oblique) AND the arm is IN-PLANE
+# (joint1=0). The wrist (joint6) absorbs the lateral face-centroid offset, so no base yaw and no
+# re-grasp are needed — a clean, perpendicular, in-plane strike for well-defined impact impulse.
+# Earlier belief that the ~6 deg base yaw was "grasp-forced" was a position-only-IK artifact.
 NEAR_NAIL_JOINT_POS: dict[str, float] = {
-    "joint1": -0.119749,
-    "joint2":  1.908621,
-    "joint3": -1.582969,
-    "joint4":  1.118154,
-    "joint5":  0.021694,
-    "joint6":  1.220820,
+    "joint1":  0.00000000,
+    "joint2":  1.99068114,
+    "joint3": -1.79578707,
+    "joint4":  1.37590226,
+    "joint5": -0.00003641,
+    "joint6":  1.64860944,
     "jointGripper": -0.001,
 }
 

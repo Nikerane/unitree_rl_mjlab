@@ -154,17 +154,18 @@ self._cat.add("joint_impulse_excess", c_imp, max_p=self._imp_max_p)   # get_prob
 
 The Z1 reset pose (`NEAR_NAIL_JOINT_POS`, `z1_constants.py:184`) looks out-of-plane. Investigated with `solve_ik.py` (the DLS solver that produced it). It decomposes into three parts:
 
-| solve | joint1 (base yaw) | strike-axis tilt from vertical | face at nail |
-|---|---|---|---|
-| current `NEAR_NAIL` (position-only IK) | −6.9° | **7.4° (oblique)** | ✓ |
-| lock joint1=0 (naive) | 0° | 13.0° (worse) | ✓ |
-| 6-DoF orientation-aware IK | −6.2° | **0.05° (vertical)** | ✓ |
+| solve | joint1 (base yaw) | strike-axis tilt from vertical | face at nail | within limits |
+|---|---|---|---|---|
+| current `NEAR_NAIL` (position-only IK) | −6.9° | **7.4° (oblique)** | ✓ | — |
+| lock joint1=0, **position-only** IK | 0° | 13.0° (worse) | ✓ | — |
+| joint1 **free**, orientation-aware IK | −6.2° | 0.05° (vertical) | ✓ | ✓ |
+| **lock joint1=0, orientation-aware IK** | **0.0°** | **0.00° (vertical)** | ✓ (0.010 cm) | ✓ |
 
-- **Oblique 7.4° strike — FIXABLE NOW, no re-grasp.** `NEAR_NAIL` was solved *position-only*, so the strike axis orientation was incidental. A 6-DoF IK (position + strike-axis → world −Z) yields a **dead-vertical strike** at the same arm config — a drop-in re-solve of `NEAR_NAIL_JOINT_POS`. Cleaner impact + better-defined for the per-joint impulse measurement. **Adopt this for the impulse-CaT runs.**
-- **~6° base yaw — grasp-forced.** Persists in the vertical solution (−6.2°) because the c4 face centroid is *laterally offset* from the gripper axis (grasp #10, quat 0.7071·z). Zeroing it needs a **re-grasp** (remove the lateral offset), then re-IK + re-site + contact-namespace re-check. Minor; optional.
-- **Wrist twist** (`joint4≈80°, joint6≈70°`) is the sideways-claw-grasp cost; persists.
+- **Oblique 7.4° strike — FIXABLE, no re-grasp.** `NEAR_NAIL` was solved *position-only*, so the strike-axis orientation was incidental. An **orientation-aware IK** (position + strike-axis → world −Z) yields a dead-vertical strike.
+- **In-plane (`joint1=0`) IS achievable — *correction* to the earlier "grasp-forced" claim.** Locking `joint1=0` and re-solving with the *orientation-aware* IK converges to a fully **in-plane + perpendicular (0.00° tilt) + on-nail** pose, within limits: `{j1=0, j2=114.1, j3=−102.9, j4=78.8, j5=0, j6=94.5}°`. The **wrist** absorbs the lateral face offset (`joint6` → 94.5° vs 70.5°), so the base need not yaw. The earlier −6° was a *position-only-IK artifact* (it never used the wrist to compensate), NOT a grasp constraint. **No re-grasp needed.**
+- **Wrist twist** (`joint4≈79°, joint6≈94°`) remains — the sideways-claw-grasp cost; benign.
 
-**Action:** re-solve `NEAR_NAIL_JOINT_POS` via 6-DoF (pos + axis-down) IK as part of standing up the impulse-CaT arm (kills the 7.4° obliquity); treat the full in-plane re-grasp as optional. The diagnostic comparison runs (a_base / c_a3_cat / c_hardterm / soft-CaT) used the old pose but were only for *choosing the enforcement path* (→ soft-CaT), so no re-train is owed.
+**Action:** re-solve `NEAR_NAIL_JOINT_POS` via the orientation-aware IK with `joint1` locked to 0 → an **in-plane, perpendicular, on-nail** reset pose (drop-in replacement; no re-grasp, no action-space change, no hand-tuning). Re-verify with `playback_reference.py` (Phase M — strike still drives the nail) + `validate_rewards.py` before training on it. The diagnostic comparison runs (a_base / c_a3_cat / c_hardterm / soft-CaT) used the old pose but were only for *choosing the enforcement path* (→ soft-CaT), so no re-train is owed.
 
 > **Future robustness arm (orientation control + Vicon sim-to-real):** once the nail is no longer fixed-vertical, the strike must align to the actual board/nail normal — a **6-DoF DiffIK action** + board-tilt domain randomization, with a Vicon-only state scheme (board-cluster normal + a nail-shaft tracking ball for depth, no perception). Full spec: `ORIENTATION_ROBUST_SIM2REAL_ARM.md`. Build **after** the fixed-impedance impulse result.
 
