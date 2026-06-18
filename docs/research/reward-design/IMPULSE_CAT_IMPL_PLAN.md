@@ -166,6 +166,8 @@ The Z1 reset pose (`NEAR_NAIL_JOINT_POS`, `z1_constants.py:184`) looks out-of-pl
 
 **Action:** re-solve `NEAR_NAIL_JOINT_POS` via 6-DoF (pos + axis-down) IK as part of standing up the impulse-CaT arm (kills the 7.4° obliquity); treat the full in-plane re-grasp as optional. The diagnostic comparison runs (a_base / c_a3_cat / c_hardterm / soft-CaT) used the old pose but were only for *choosing the enforcement path* (→ soft-CaT), so no re-train is owed.
 
+> **Future robustness arm (orientation control + Vicon sim-to-real):** once the nail is no longer fixed-vertical, the strike must align to the actual board/nail normal — a **6-DoF DiffIK action** + board-tilt domain randomization, with a Vicon-only state scheme (board-cluster normal + a nail-shaft tracking ball for depth, no perception). Full spec: `ORIENTATION_ROBUST_SIM2REAL_ARM.md`. Build **after** the fixed-impedance impulse result.
+
 ## 7. Open questions
 
 - Is soft-CaT (not CMDP/Lagrangian) the agreed impulse enforcement? (§ top — confirm with Khadiv.)
