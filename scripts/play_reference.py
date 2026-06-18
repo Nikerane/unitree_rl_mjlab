@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 import torch
 import tyro
 
@@ -43,7 +44,29 @@ class Cfg:
   num_envs: int = 1
   approach_height: float = 0.15
   viewer: str = "viser"  # "viser" (browser, mac-friendly) or "native"
+  show_line: bool = True  # draw the reference head path as a red 3D polyline (viser; GUI-toggleable)
   device: str | None = None
+
+
+def collect_head_path(env, policy: "ReferencePolicy") -> np.ndarray:
+  """Roll the scripted reference once to capture the hammer-head path (world coords), then reset.
+
+  Used only to draw the static reference polyline; the viewer re-runs the same open-loop strike,
+  so the drawn line is exactly the path the head retraces. Breaks at the success auto-reset so the
+  line is one clean strike (not a repeat).
+  """
+  obs, _ = env.reset()
+  pts = [policy._head().squeeze(0).cpu().numpy().copy()]
+  n = policy._ref.playback_length()
+  for _ in range(n + 14):
+    with torch.no_grad():
+      action = policy(obs)
+    obs = env.step(action)[0]
+    if int(env.unwrapped.episode_length_buf[0]) == 0:  # success-reset -> strike complete
+      break
+    pts.append(policy._head().squeeze(0).cpu().numpy().copy())
+  env.reset()
+  return np.stack(pts).astype(np.float64)
 
 
 class ReferencePolicy:
@@ -89,6 +112,30 @@ class ReferencePolicy:
     return delta.clamp(-1.0, 1.0)
 
 
+class _RefLineViewer(ViserPlayViewer):
+  """ViserPlayViewer that draws the reference head path as a red polyline with a GUI on/off toggle."""
+
+  head_path: np.ndarray | None = None
+
+  def setup(self) -> None:
+    super().setup()
+    if self.head_path is None or len(self.head_path) < 2:
+      return
+    # scene offset is (0,0,0) for a single env; add it for safety so the line sits on the robot.
+    off = np.asarray(getattr(self._scene, "_scene_offset", np.zeros(3)), dtype=np.float64).reshape(3)
+    pts = self.head_path.astype(np.float64) + off[None, :]
+    segs = np.stack([pts[:-1], pts[1:]], axis=1).astype(np.float32)  # (N-1, 2, 3): join the real points
+    self._refline = self._server.scene.add_line_segments(
+      "/reference_path", points=segs, colors=(230, 30, 15), line_width=3.0
+    )
+    with self._server.gui.add_folder("Reference"):
+      toggle = self._server.gui.add_checkbox("Show reference path", True)
+
+    @toggle.on_update
+    def _(_event) -> None:
+      self._refline.visible = toggle.value
+
+
 def main(cfg: Cfg = Cfg()) -> None:
   configure_torch_backends()
   device = cfg.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -106,6 +153,13 @@ def main(cfg: Cfg = Cfg()) -> None:
 
   if cfg.viewer == "native":
     NativeMujocoViewer(env, policy).run()
+  elif cfg.show_line:
+    path = collect_head_path(env, policy)
+    viewer = _RefLineViewer(env, policy)
+    viewer.head_path = path
+    print(f"[play_reference] reference path drawn ({len(path)} pts) — toggle it under the "
+          f"'Reference' folder in the viser GUI")
+    viewer.run()
   else:
     ViserPlayViewer(env, policy).run()
 
