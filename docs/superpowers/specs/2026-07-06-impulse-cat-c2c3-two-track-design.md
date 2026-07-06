@@ -132,6 +132,41 @@ Every new code path gets pytest coverage (accumulator modes, invariant, hook int
 5. All docs/memory that tracked the blockers updated (IMPULSE_CAT_IMPL_PLAN §6b + Status,
    OPEN_QUESTIONS L168/179, `l6-hammer-fixture-ee` memory, freshness guard green).
 
+## Amendments — round 2 (2026-07-06, three-auditor review: max-impact methodology, observability, executability)
+
+1. **Fourth arm `c3_imp0`.** `c3_track` optimizes a different objective (no `delivered_impulse`,
+   plus `r_imit`, stock PPO), so nothing "δ-attributable" is identifiable against it. The proper
+   unconstrained baseline is `-CaT-Impulse` with the repo-default `imp_max_p=0` (CatPPO at δ≡0
+   reduces exactly to stock PPO — verified in `cat_ppo.py`). The vacuous-check compares
+   `c3_imp` vs `c3_imp0`; `c3_track`/`c3_catsoft` are secondary comparators only.
+2. **Observability track (pre-submission).** Per-joint episode-peak Λ training metrics
+   (`Episode_Metrics/imp_peak_joint1..6` — full-step readers of the accumulator, which also fixes
+   the substep-mean dilution of the existing worst-joint scalar), a `cat_delta_peak` metric
+   (episode-mean δ dilutes strike-time δ by ~episode length), `scripts/diag_impulse_trace.py`
+   (per-strike substep-resolution force-propagation figure, checkpoint AND reference modes), and
+   `scripts/compare_runs.py` (cross-run curves, per-arm mean±std across seeds, missing-key-safe).
+   These MUST land before the Vega submission or the runs won't carry the per-joint keys.
+3. **Checkpoint-eval task (post-queue, the impl plan's C4 analogue the two-track plan had
+   dropped).** All checkpoints (4 arms × 3 seeds) rolled in the SAME instrumented env
+   (`-CaT-Impulse` play cfg, `imp_max_p=0` log-only). Pinned protocol: final checkpoint
+   `model_{ITERS-1}.pt`, 256 envs, ≥512 episodes per policy, `play=True`, mean-action rollout
+   primary (sampled as robustness check), fixed eval seed, eval job id recorded.
+4. **Maximize-side evidence mandated in the record**: (a) delivered-impulse training curve,
+   `c3_imp0` overlaid on `c3_imp` — the converged gap IS the delivered-impulse cost of the cap;
+   (b) eval frontier: per-episode delivered impulse vs worst-joint Λ/Λ̄ across arms.
+5. **C2 weight-share step** (fulfils the config's "C2 tunes the weight" promise): per-term
+   weighted episode-return table on the driven reference strikes incl. `delivered_impulse`'s share
+   of positive return; hard-gate sanity only (fires, positive, finite); the weight decision is the
+   user's, recorded with rationale.
+6. **Probe-pass corrections**: heights run DESCENDING (the hook seeds its normalizer from the
+   first over-limit sample — ascending order saturates δ on the very first strike and the graded-δ
+   gate fails spuriously); graded-δ gate = "≥1 over-limit strike with 0 < δ < max_p"; the
+   physics-identical check is a regression tripwire only (δ has no physics pathway in playback) and
+   is complemented by the real check: probe δ>0 on contact steps, log-only baseline δ≡0.
+7. **Provenance gap (STOP/ask)**: the windup-sweep solver was not preserved in either repo — the
+   user either supplies it for commit or the `z1_constants.py` provenance comment is amended to
+   note the solver was not preserved.
+
 ## Out of scope
 
 Variable impedance (comes after fixed-impedance results, per CLAUDE.md); the N-P3O baseline arm
