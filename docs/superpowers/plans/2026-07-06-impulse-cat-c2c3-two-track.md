@@ -233,7 +233,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ### Task 5: C2 — local enforcement gate + max_p mini-sweep + reward-share table
 
-**Spec amendments apply (read both).** Reference strikes measure ~5% of J_limit, so the machinery hard-gates run against a **probe limit** (`0.05 × IMP_J_LIMIT`); real caps get a **statistics report** only. **Heights run DESCENDING (0.15, 0.10, 0.06)** — the hook seeds its normalizer from the FIRST over-limit sample, so ascending order saturates δ on the first strike and fails the graded-δ gate spuriously. The δ-attributable vacuous-check happens at Task 12 (`c3_imp` vs `c3_imp0`).
+**Spec amendments apply (read both).** Reference strikes measure ~5% of J_limit, so the machinery hard-gates run against a **probe limit** (`0.05 × IMP_J_LIMIT`); real caps get a **statistics report** only. **Heights run most-violent-FIRST — ASCENDING (0.06, 0.10, 0.15) under the windup geometry (amended 2026-07-10)** — the hook seeds its normalizer from the FIRST over-limit sample, so ascending order saturates δ on the first strike and fails the graded-δ gate spuriously. The δ-attributable vacuous-check happens at Task 12 (`c3_imp` vs `c3_imp0`).
 
 **Files:**
 - Create: `docs/research/reward-design/c2_enforcement_gate.py`
@@ -294,8 +294,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # reward-design is not
 from reward_design_util import run_reference_strikes  # noqa: E402
 
 MAX_PS = (0.25, 0.5)
-HEIGHTS = (0.15, 0.10, 0.06)  # DESCENDING — see module docstring
-PROBE_SCALE = 0.05
+# AMENDED 2026-07-10 (execution finding): fixture-era reference strikes measure ~2.9-3.8% of
+# J_limit, so PROBE_SCALE=0.05 caught nothing; and under the windup pose the LOWEST approach
+# strikes hardest, so descending order seeded the normalizer with the weakest over-limit strike
+# and δ saturated. Most-violent-FIRST now means ASCENDING heights.
+HEIGHTS = (0.06, 0.10, 0.15)  # most violent first under the windup geometry — seeds c_max high
+PROBE_SCALE = 0.02  # below the measured ~2.9% floor ⇒ every reference strike crosses in the probe
 
 
 def build_cfg(imp_max_p: float):
@@ -322,7 +326,7 @@ def main() -> int:
 
     for mp in MAX_PS:
         probe = run_reference_strikes(build_cfg(mp), heights=HEIGHTS, limit_override=PROBE_SCALE)
-        print(f"\n=== PROBE imp_max_p={mp} (limit × {PROBE_SCALE}, heights descending) ===")
+        print(f"\n=== PROBE imp_max_p={mp} (limit × {PROBE_SCALE}, heights most-violent-first) ===")
         print(f"excess: {probe['max_excess']}\nδ:      {probe['max_delta']}\nc_max:  {probe['cmax']}")
         cmax = torch.as_tensor(probe["cmax"])
         worst_excess = max(probe["max_excess"])
