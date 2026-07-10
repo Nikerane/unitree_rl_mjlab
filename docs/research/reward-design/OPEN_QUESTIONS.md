@@ -165,7 +165,7 @@ No spurious reward on the first step. **No debug assertion needed.**
 
 | Q | Status | How resolved |
 |---|---|---|
-| Q1 | 🟢 Resolved (gripper-era) | Real-hammer measure + V1 GPU training (arrays 36472565/36472566): trained single strike clears 27 mm at 100%, press does not emerge. NOTE: measured pre-L6-fixture; NEAR_NAIL re-solve pending, so depths may shift |
+| Q1 | 🟢 Resolved (fixture-era re-confirmed 2026-07-10) | Real-hammer measure + V1 GPU training (arrays 36472565/36472566): trained single strike clears 27 mm at 100%, press does not emerge. Re-measured post-L6-fixture 2026-07-06 (windup re-solve, reset z=0.25): `playback_reference.py` (shaped reference, ≥0.027 m criterion) PASSES at all three approach heights (best 27.0 mm) — strike feasibility re-confirmed. `test_single_strike.py`'s crude constant-vertical probe FAILED (max 13.3 mm; pure-vertical descent is kinematically impossible with the new grasp near the floor) — **retired** for this grasp (2026-07-10); `playback_reference.py` is now the feasibility re-check after any EE/pose change |
 | Q2 | 🟢 Resolved | V1 `--no-term` rollout: trained policy strikes→retracts→re-strikes with no rhythm reward |
 | Q3 | 🔴 Needs training | Weight grid search |
 | Q4 | 🟢 Resolved | Geom name = `hammer_head` (exact, verified in XML) |
@@ -176,7 +176,7 @@ No spurious reward on the first step. **No debug assertion needed.**
 | Q9 | 🔴 Needs training + hardware | Defer; depends on Q1 |
 | Q10 | 🟢 Resolved | Finite-differenced velocity eliminates the risk |
 
-**Remaining blockers before first training run:** the L6 fixture EE change requires a NEAR_NAIL re-solve + gate re-green before training on the current tree (see [[l6-hammer-fixture-ee]]). All resolvable-from-code reward questions are answered. Remaining open questions require training cycles (Q3, Q6, Q7, Q9 — defer to training campaign); Q5's percentile script (`verify_reward_setup.py`) is ready to run.
+**Remaining blockers before first training run:** NONE — the L6 fixture EE NEAR_NAIL re-solve was adopted 2026-07-06 and the full pre-train gate re-greened 2026-07-10 (`validate_rewards.py` all phases A–M, `verify_contact_sensor.py`, `verify_reward_setup.py`, full pytest all PASS; see [[l6-hammer-fixture-ee]]). All resolvable-from-code reward questions are answered; no blockers remain before the C2/C3 impulse campaign. Remaining open questions require training cycles (Q3, Q6, Q7, Q9 — defer to training campaign); Q5's percentile script (`verify_reward_setup.py`) is ready to run.
 
 ---
 

@@ -186,6 +186,7 @@ NEUTRAL_JOINT_POS: dict[str, float] = {
 # NOTE (open thread): posture at contact is an ~8.5x impact lever (effective-mass analysis), but the
 # position-only DiffIK action space collapses the redundancy, so bracing must EMERGE via the
 # delivered-impulse reward + (future) null-space access, not be baked into this reset.
+# (sweep solver not preserved; pose verified by playback_reference.py gate, 2026-07-10)
 NEAR_NAIL_JOINT_POS: dict[str, float] = {
     "joint1":  0.00000000,
     "joint2":  1.60600000,
