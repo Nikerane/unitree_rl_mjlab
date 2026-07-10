@@ -22,11 +22,15 @@ data objects and a ``feed(...)`` closure.
 
 from types import SimpleNamespace
 
+import pytest
 import torch
 
 from src.tasks.hammer.mdp.impulse_bound import (
+  _ENV_SUBSTEP_IMPULSE_ATTR,
+  CatDeltaPeak,
   SubstepDeliveredImpulse,
   SubstepImpulseAccumulator,
+  joint_impulse_peak,
 )
 
 DT = 0.002  # physics_dt @ 500 Hz
@@ -45,6 +49,7 @@ def _acc(B: int, subtract_baseline: bool = False, n_joints: int = 6):
   a._last_off_qfrc = torch.zeros(B, n_joints)
   a._in_contact_prev = torch.zeros(B, dtype=torch.bool)
   a._episode_peak = torch.zeros(B)
+  a._episode_peak_perjoint = torch.zeros(B, n_joints)
   robot_data = SimpleNamespace(_joint_dof_field=None)
   sensor_data = SimpleNamespace(found=None)
   a._robot = SimpleNamespace(data=robot_data)
@@ -296,3 +301,88 @@ def test_delivered_reset_and_shape():
   assert acc.delivered.shape == (2,) and acc.delivered.sum() > 0
   acc.reset(None)
   assert torch.allclose(acc.delivered, torch.zeros(2))
+
+
+# --- Per-joint episode-peak Λ + module-level readers (Task 6 observability) ----------------------
+
+
+def test_episode_peak_perjoint_matches_window_and_survives_reset():
+  # New buffer: per-JOINT episode-peak Λ (not just the worst-joint scalar _episode_peak) — the
+  # authoritative full-step reader (joint_impulse_peak) logs this directly via reduce="last".
+  acc, feed = _acc(B=1, n_joints=6)
+  q = torch.tensor([[1.0, -2.0, 3.0, 0.0, 0.0, 0.0]])
+  for _ in range(3):
+    feed(q, torch.ones(1, 1))
+  feed(torch.zeros(1, 6), torch.zeros(1, 1))  # falling edge: window closes -> pulse latched
+  expected = (q.abs() * DT * 3)[0]
+  assert torch.allclose(acc._episode_peak_perjoint[0], expected, atol=1e-9), acc._episode_peak_perjoint
+  # survives well past the control-step boundary where .impulse (the pulse) clears
+  for _ in range(DEC + 2):
+    feed(torch.zeros(1, 6), torch.zeros(1, 1))
+  assert acc.impulse[0, 0].item() == 0.0  # pulse has cleared...
+  assert torch.allclose(acc._episode_peak_perjoint[0], expected, atol=1e-9)  # ...but the peak persists
+  acc.reset(None)
+  assert torch.allclose(acc._episode_peak_perjoint, torch.zeros(1, 6))
+
+
+def test_episode_peak_perjoint_reset_subset_of_envs():
+  acc, feed = _acc(B=2, n_joints=6)
+  feed(torch.ones(2, 6), torch.ones(2, 1))
+  assert acc._episode_peak_perjoint.abs().sum() > 0
+  acc.reset(torch.tensor([0]))
+  assert torch.allclose(acc._episode_peak_perjoint[0], torch.zeros(6))
+  assert acc._episode_peak_perjoint[1].abs().sum() > 0
+
+
+def test_joint_impulse_peak_reads_requested_column():
+  acc, feed = _acc(B=2, n_joints=6)
+  q = torch.tensor([[1.0, 2.0, 0.0, 0.0, 0.0, 0.0], [3.0, 4.0, 0.0, 0.0, 0.0, 0.0]])
+  feed(q, torch.ones(2, 1))
+  env = SimpleNamespace()
+  setattr(env, _ENV_SUBSTEP_IMPULSE_ATTR, acc)
+  out1 = joint_impulse_peak(env, joint=1)
+  assert out1.shape == (2,)
+  assert torch.allclose(out1, acc._episode_peak_perjoint[:, 1])
+  out0 = joint_impulse_peak(env, joint=0)
+  assert torch.allclose(out0, acc._episode_peak_perjoint[:, 0])
+  assert not torch.allclose(out0, out1)
+
+
+def test_joint_impulse_peak_requires_accumulator():
+  env = SimpleNamespace()  # no _hammer_substep_impulse stashed
+  with pytest.raises(RuntimeError):
+    joint_impulse_peak(env, joint=0)
+
+
+def test_cat_delta_peak_tracks_running_max_and_resets():
+  peak_term = object.__new__(CatDeltaPeak)
+  peak_term._peak = torch.zeros(2)
+
+  env = SimpleNamespace(extras={"cat_delta": torch.tensor([0.1, 0.0])})
+  out = peak_term(env)
+  assert torch.allclose(out, torch.tensor([0.1, 0.0]))
+
+  env.extras["cat_delta"] = torch.tensor([0.05, 0.3])  # smaller in col0, bigger in col1
+  out = peak_term(env)
+  assert torch.allclose(out, torch.tensor([0.1, 0.3])), out  # running MAX, not the last value
+
+  env.extras["cat_delta"] = torch.tensor([0.4, 0.0])
+  out = peak_term(env)
+  assert torch.allclose(out, torch.tensor([0.4, 0.3])), out
+
+  peak_term.reset(None)
+  assert torch.allclose(peak_term._peak, torch.zeros(2))
+
+
+def test_cat_delta_peak_missing_key_is_a_noop():
+  peak_term = object.__new__(CatDeltaPeak)
+  peak_term._peak = torch.tensor([0.2, 0.0])
+  out = peak_term(SimpleNamespace(extras={}))  # no "cat_delta" key yet this step
+  assert torch.allclose(out, torch.tensor([0.2, 0.0]))
+
+
+def test_cat_delta_peak_reset_subset_of_envs():
+  peak_term = object.__new__(CatDeltaPeak)
+  peak_term._peak = torch.tensor([0.5, 0.7])
+  peak_term.reset(torch.tensor([0]))
+  assert torch.allclose(peak_term._peak, torch.tensor([0.0, 0.7]))

@@ -100,6 +100,10 @@ class SubstepImpulseAccumulator(ManagerTermBase):
     # be able to observe learned Λ against J_limit; a substep-mean of the transient pulse dilutes
     # it ~100× and is phase-dependent.
     self._episode_peak = torch.zeros(env.num_envs, device=env.device)
+    # Per-JOINT episode-peak Λ (Task 6 observability): J_limit differs 2× across joints (joint2
+    # τ_rated=60 vs 30 elsewhere), so the worst-joint scalar above can't be compared per-column to
+    # the cap vector. Read by the module-level joint_impulse_peak reader below (one TB key/joint).
+    self._episode_peak_perjoint = torch.zeros(env.num_envs, J, device=env.device)
     setattr(env, _ENV_SUBSTEP_IMPULSE_ATTR, self)
 
   @property
@@ -115,6 +119,7 @@ class SubstepImpulseAccumulator(ManagerTermBase):
     self._last_off_qfrc[idx] = 0.0
     self._in_contact_prev[idx] = False
     self._episode_peak[idx] = 0.0
+    self._episode_peak_perjoint[idx] = 0.0
     return None
 
   def __call__(self, env: "ManagerBasedRlEnv", **params) -> torch.Tensor:
@@ -143,6 +148,10 @@ class SubstepImpulseAccumulator(ManagerTermBase):
     # Logged metric: EPISODE-PEAK worst-joint Λ (pair with MetricsTermCfg reduce="last").
     imp = torch.maximum(self._pulse, self._running).amax(dim=1)  # (B,)
     torch.maximum(self._episode_peak, imp, out=self._episode_peak)
+    # Per-joint episode-peak Λ (Task 6): same monotone-max update, one column per arm joint.
+    torch.maximum(
+      self._episode_peak_perjoint, torch.maximum(self._pulse, self._running), out=self._episode_peak_perjoint
+    )
     return self._episode_peak
 
 
@@ -200,3 +209,34 @@ class SubstepDeliveredImpulse(ManagerTermBase):
     self._event_age = self._event_age + in_contact.long()
     self._in_contact_prev = in_contact
     return self._total  # (B,) cumulative — pair with MetricsTermCfg reduce="last"
+
+
+def joint_impulse_peak(env: "ManagerBasedRlEnv", joint: int) -> torch.Tensor:
+  """Full-step metric: episode-peak Λ for ONE arm joint, from the stashed accumulator.
+  reduce="last" on a FULL-STEP term logs the exact compute-time value of the monotone buffer —
+  the authoritative per-joint episode peak (the per-substep worst-joint scalar is substep-mean
+  diluted in the terminal control step)."""
+  acc = getattr(env, _ENV_SUBSTEP_IMPULSE_ATTR, None)
+  if acc is None:
+    raise RuntimeError("joint_impulse_peak requires the SubstepImpulseAccumulator metric (cat_impulse).")
+  return acc._episode_peak_perjoint[:, joint]
+
+
+class CatDeltaPeak(ManagerTermBase):
+  """Full-step metric: episode-peak δ from env.extras['cat_delta'] (episode-MEAN δ dilutes
+  strike-time δ by ~episode length). Register AFTER cfg.metrics['cat_soft'] — the manager
+  evaluates in insertion order, so the hook has written this step's δ."""
+
+  def __init__(self, cfg: ManagerTermBaseCfg, env: "ManagerBasedRlEnv"):
+    super().__init__(env)
+    self._peak = torch.zeros(env.num_envs, device=env.device)
+
+  def reset(self, env_ids) -> None:
+    idx = slice(None) if env_ids is None else env_ids
+    self._peak[idx] = 0.0
+
+  def __call__(self, env, **params) -> torch.Tensor:
+    delta = env.extras.get("cat_delta")
+    if delta is not None:
+      torch.maximum(self._peak, delta.reshape(self._peak.shape), out=self._peak)
+    return self._peak

@@ -261,6 +261,16 @@ def z1_hammer_env_cfg(
         "tau": 0.95,
       },
     )
+    # Per-joint episode-peak Λ (TB: Episode_Metrics/imp_peak_joint1..6) — the authoritative peaks;
+    # J_limit differs 2× across joints (joint2 τ_rated=60), so worst-joint alone can't be compared
+    # to the cap vector. cat_delta_peak: peak binding pressure (episode-mean δ dilutes strikes).
+    for _j, _jn in enumerate(("joint1", "joint2", "joint3", "joint4", "joint5", "joint6")):
+      cfg.metrics[f"imp_peak_{_jn}"] = MetricsTermCfg(
+        func=hammer_mdp.joint_impulse_peak, per_substep=False, reduce="last", params={"joint": _j},
+      )
+    cfg.metrics["cat_delta_peak"] = MetricsTermCfg(
+      func=hammer_mdp.CatDeltaPeak, per_substep=False, reduce="last", params={},
+    )
     # MAXIMIZE objective: object-side delivered impact impulse (positive term; rides the (1−δ) discount
     # so an over-limit strike's delivered-impulse reward is worth less -- the two-sides interplay).
     # i_ref MEASURED 2026-07-06 (gate section [3] mean); delivered_impulse SHARE measured at C2 (see
