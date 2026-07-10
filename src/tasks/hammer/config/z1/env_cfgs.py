@@ -223,7 +223,8 @@ def z1_hammer_env_cfg(
       params={
         "sensor_name": "hammer_nail_contact",
         "robot_cfg": vb_robot_cfg,
-        "subtract_baseline": False,  # C0 gate decides raw vs baseline-subtracted (friction removal)
+        "subtract_baseline": True,  # C2 (2026-07-06): enforce the baseline-subtracted Λ_j — removes
+        # the dominant dof-friction share; residual quantified by the Track-2 contact-row metric.
       },
     )
     # Object-side delivered axial impulse (episode-cumulative, per-event capped — see the class).
@@ -239,15 +240,20 @@ def z1_hammer_env_cfg(
     # use_vel follows the cat_soft flag: cat_impulse alone = impulse-only (clean attribution);
     # cat_soft + cat_impulse = ONE hook with BOTH constraints (velocity ∪ impulse soft-OR, C5) —
     # previously this block silently overwrote the velocity hook (2026-07 review finding #8).
+    # Fixture-era per-joint impulse caps, MEASURED by derive_impulse_thresholds.py on 2026-07-06
+    # (windup NEAR_NAIL reset, oblique contact; gate log: /tmp/derive_thresholds_fixture.txt →
+    # dated record at C3). J_limit_j = τ_rated_j × 2 (HD Repeated-Peak) × Δt_impact.
+    IMP_J_LIMIT = [1.640, 3.280, 1.640, 1.640, 1.640, 1.640]  # ← paste section [4], N·m·s
     cfg.metrics["cat_soft"] = MetricsTermCfg(
       func=CatSoftHook,
       per_substep=False,
       params={
         "use_vel": bool(cat_soft),
         "use_impulse": True,
-        "imp_limit": hammer_mdp.Z1_JOINT_IMPULSE_LIMIT,  # placeholder; real per-joint J_limit at C0/C2
-        "imp_max_p": 0.0,  # C0 LOG-ONLY
-        "imp_seed": 1e-3,  # C0 gate replaces with the reference-strike p95 over-limit excess
+        "imp_limit": IMP_J_LIMIT,  # measured fixture-era per-joint caps (see above)
+        "imp_max_p": 0.0,  # log-only default; C2/C3 raise it per-run via
+        #   --env.metrics.cat-soft.params.imp-max-p (verified tyro flag)
+        "imp_seed": 1e-3,  # normalizer DECAY FLOOR only — never a p95/excess statistic (hook.py)
         "robot_cfg": vb_robot_cfg,
         "limit": hammer_mdp.Z1_JOINT_VEL_LIMIT,
         "max_p": 0.5,
@@ -257,12 +263,13 @@ def z1_hammer_env_cfg(
     )
     # MAXIMIZE objective: object-side delivered impact impulse (positive term; rides the (1−δ) discount
     # so an over-limit strike's delivered-impulse reward is worth less -- the two-sides interplay).
-    # weight + i_ref are C0 PLACEHOLDERS; derive_impulse_thresholds.py sets i_ref and C2 tunes the weight.
+    # i_ref MEASURED 2026-07-06 (gate section [3] mean); delivered_impulse SHARE measured at C2 (see
+    # /tmp/c2_gate.txt) — weight decision recorded there.
     cfg.rewards["delivered_impulse"] = RewardTermCfg(
       func=hammer_mdp.DeliveredImpulseTerm,
       weight=2.0,
       params={
-        "i_ref": 1.0,
+        "i_ref": 0.0811,
         "eps": 5e-4,
         "nail_cfg": SceneEntityCfg("nail_block", joint_names=("nail_slide",)),
       },

@@ -20,8 +20,8 @@ Reports / asserts (fail-not-warn → exit 1):
      real. Pinocchio impulseDynamics(r_coeff=0) leg is scaffolded behind an availability check.
   4. THRESHOLDS: per-joint J_limit = τ_rated,j × 2 (Harmonic-Drive Repeated-Peak) × Δt_impact, with the
      1e4-event fatigue-budget note. Binding-ness: Λ_j(p95) / J_limit_j.
-  5. NORMALIZER SEED: emits imp_seed = p95(Λ_j) — the C2 robust-normalizer seed (env_cfgs cat_soft
-     imp_seed) so δ is graded, not collapsed.
+  5. NORMALIZER FLOOR: section [5] prints p95(Λ_j) for reference only — imp_seed stays a small decay
+     floor (1e-3); the hook self-seeds from the first over-limit sample.
 
 Run: ~/miniconda3/envs/unitree_mjlab/bin/python docs/research/reward-design/derive_impulse_thresholds.py
 """
