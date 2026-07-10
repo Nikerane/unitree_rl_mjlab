@@ -1,3 +1,6 @@
+> ⚠️ **ARCHIVED 2026-07-05** — superseded by nothing — historical peer-review record (2026-06-02).
+> Facts below may contradict the current code. Do not act on them; check `docs/README.md`.
+
 # Peer Review — Reward Design for RL Hammering & Repetitive Impact
 
 **Review type:** `academic-paper-reviewer`, `full` mode (5-reviewer panel + editorial synthesis)

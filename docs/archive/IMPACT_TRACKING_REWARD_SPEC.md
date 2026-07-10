@@ -1,3 +1,6 @@
+> ⚠️ **ARCHIVED 2026-07-05** — superseded by the single-policy direction — the generate-then-track architecture was walked back; see `docs/thesis/README.md`.
+> Facts below may contradict the current code. Do not act on them; check `docs/README.md`.
+
 # Reward-Function Design Spec — Stage-2 Tracking + Bi-Objective Impact
 
 > ⚠️ **HISTORICAL (2026-06-10).** This spec describes the generate-then-track / DeepMimic-style architecture that was considered for the Z1 hammer task in early June. **It is *not* the current thesis direction.** Per `thesis_direction_update.md`, the supervisor walked back from two-level (TO + RL) and tracking-style architectures to a **single-policy variable-impedance online RL** design. The reasoning: TO and RL minimise the same objective, so having one solve "max impact s.t. impulse limits" and the other re-solve via tracking is solving it twice.

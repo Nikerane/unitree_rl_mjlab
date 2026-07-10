@@ -1,3 +1,6 @@
+> ⚠️ **ARCHIVED 2026-07-05** — superseded by `docs/research/reward-design/FAITHFUL_SOFT_CAT_IMPL_PLAN.md` (CaT deep-dive appendix).
+> Facts below may contradict the current code. Do not act on them; check `docs/README.md`.
+
 # CaT deep dive — knobs, the impulse constraint, and what it changes (2026-06-17)
 
 Multi-lens deep dive (workflow `wf_01a029a0-59f`: mechanism / extensions / CaT-for-impulse / humanoid-G1 / internal-fit → synthesis → adversarial critique) into Constraints-as-Terminations ([[cat-constraints-as-terminations]]), to find what helps us more and how to carry it to the G1 impulse constraint. The critique substantially sharpened (and partly downgraded) the synthesis — both are captured.

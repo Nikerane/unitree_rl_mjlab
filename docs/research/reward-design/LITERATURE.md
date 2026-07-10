@@ -1,6 +1,178 @@
-# Hammering × Robot Learning — Field Notes & Annotated Bibliography
+# Literature — Z1 hammer / impact-manipulation (merged bibliography)
 
-**Purpose:** a niche-specific running bibliography for the (very small) intersection of **robot learning** and **hammering / percussive nail-driving**. Companion to `hammering_reward_design_deep_dive_v2.md`. Grows as sources from `~/Desktop/_Munich_hammering/` and the web are read.
+> Verbatim assembly (2026-07-05) of three source bibliographies, each under a `[from <source>]` tag with annotations unchanged. Originals are archived under `docs/archive/` with banners. Only stale live-config numbers, a dead code pointer, and the walked-back generate-then-track architecture framing were dropped on merge — everything else is the source text verbatim.
+
+---
+
+## [from REWARD_LITERATURE] — Reward Design Literature (Annotated Bibliography, APA 7)
+
+Engineering focus. Each entry: citation → key finding → **what to steal**.
+
+---
+
+### Foundational Theory
+
+**Ng, A. Y., Harada, D., & Russell, S. J. (1999).** Policy invariance under reward transformations: Theory and application to reward shaping. *Proceedings of the 16th International Conference on Machine Learning (ICML)*, 278–287. https://www.cs.utexas.edu/~shivaram/readings/b2hd-NgHR1999.html
+
+The foundational theorem: only shaping rewards of the form `F(s,s') = γΦ(s') − Φ(s)` leave the optimal policy invariant. Any other shaping term can silently shift what the agent optimises for. The current mjlab `nail_driven_reward` (Gaussian on absolute depth) and `hammer_approach_reward` (Gaussian on distance) are NOT potential-based — they bias the policy toward hovering near high-reward states.
+
+**What to steal:** When in doubt, express a shaping term as `γΦ(s') − Φ(s)`. For the approach phase: `Φ(s) = −dist(head, nail_top)` gives zero reward when stationary, positive when approaching, negative when retreating — no hovering incentive.
+
+---
+
+### Contact-Rich Manipulation
+
+**Wu, Z., Lian, W., Unhelkar, V., Tomizuka, M., & Schaal, S. (2021).** Learning dense rewards for contact-rich manipulation tasks. *2021 IEEE International Conference on Robotics and Automation (ICRA)*, 2339–2345. https://doi.org/10.1109/ICRA48506.2021.9561891 (arXiv:2011.08458)
+
+Proposes DREM: self-supervised extraction of dense rewards from high-dimensional observations (images + tactile). The core insight is that task progress (e.g., peg depth) is a monotonically increasing quantity that can be extracted from observations and used as a reward — the "progress" framing. Tested on peg-in-hole and USB insertion.
+
+**What to steal:** The progress framing — `r = f(depth_t) − f(depth_{t-1})` — is the right signal for nail driving. Reward improvements, not absolute position. Their depth-delta formulation directly maps to `nail_depth_delta` in our task.
+
+---
+
+**Tang, B., Lin, M. A., Akinola, I., Handa, A., Sukhatme, G. S., Ramos, F., Fox, D., & Narang, Y. (2023).** IndustReal: Transferring contact-rich assembly tasks from simulation to reality. *Robotics: Science and Systems (RSS) 2023*. https://doi.org/10.15607/RSS.2023.XIX.051 (arXiv:2305.17110)
+
+Introduces SDF (signed distance field) reward for assembly tasks. The SDF evaluated at the part position is smooth across the contact boundary — no discontinuous jump when contact initiates. Also introduces sampling-based curriculum (start near goal, expand difficulty) and simulation-aware policy updates. Zero-shot sim-to-real on peg/gear assembly.
+
+**What to steal:** SDF reward for the alignment sub-phase — guiding the hammer head onto the nail axis before striking. Contact-force rewards from MuJoCo are least faithful to hardware; geometry-based (SDF) rewards transfer better.
+
+---
+
+**Mu, T., Liu, M., & Su, H. (2024).** DrS: Learning reusable dense rewards for multi-stage tasks. *International Conference on Learning Representations (ICLR) 2024*. https://arxiv.org/abs/2404.16779
+
+Learns stage-decomposed dense rewards from sparse rewards + optional demonstrations, where each stage's reward is independently learnable and reusable across task variants. Tested on 1000+ manipulation variants. The stage decomposition is learned from data rather than hand-designed.
+
+**What to steal:** Validates the staged approach → contact → drive design. Our hand-designed stages are architecturally aligned with what DrS discovers automatically. Confirms this is the right structure; we just specify it explicitly.
+
+---
+
+**Luo, Y., Dong, K., Zhao, L., Sun, Z., Zhou, C., & Song, B. (2022).** Dense2Sparse reward shaping for robot manipulation with environment uncertainty. *2022 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS)*. https://arxiv.org/abs/2003.02740
+
+Use dense reward for fast early learning, then switch to sparse reward to prevent overfitting to the shaping signal (reward hacking). The dense-to-sparse transition prevents the policy from learning to game the dense reward at the expense of actual task completion.
+
+**What to steal:** For Z1 training: use `nail_depth_delta` at a high weight early, then consider reducing it once the policy reliably drives the nail. Prevents the agent from making tiny repeated taps to farm delta rewards instead of driving the nail fully.
+
+---
+
+**Kumar, V., Todorov, E., & Levine, S. (2016).** Optimal control with learned local models: Application to dexterous manipulation. *2016 IEEE International Conference on Robotics and Automation (ICRA)*, 378–383.
+
+Not directly about reward shaping, but establishes that local models of contact dynamics are learnable and that contact discontinuities do not prevent policy gradient methods from finding good solutions if the reward signal is smooth.
+
+**What to steal:** Confirms that MuJoCo contact physics is learnable by PPO even with discontinuities. The engineering question is reward smoothness near the contact boundary, not contact modelling accuracy.
+
+---
+
+### Impact-Specific Tasks
+
+**D'Ambrosio, D. B., Abeyruwan, S., Abelian, J., Bingham, J., Cofer, B., Dwibedi, D., Foong, C., Foster, E., Garg, A., Golemo, F., Horgan, D., Humplik, J., Ibarz, J., Laskin, M., Leal, F., Nair, A., Oslund, J., Sermanet, P., Sherrer, J., . . . Vanhoucke, V. (2023).** Robotic table tennis: A case study into a high speed learning system. *Robotics: Science and Systems (RSS) 2023*. https://arxiv.org/abs/2309.03315
+
+The most detailed published reward engineering case study for a high-velocity impact task. Over 35 reward components tried; ~20 in active use. Key findings: (1) contact is a binary sparse term (+1 at ball hit), not a dense approach signal; (2) velocity, acceleration, AND jerk are all penalised separately; (3) the full reward table is in Appendix G, Table V. Zero-shot sim-to-real via PyBullet with latency modelled as per-component Gaussians.
+
+**What to steal:** Event-gated reward pattern — +1 fires exactly once at the moment of contact, not continuously during approach. For hammering: `+impact_bonus` fires at each `compute_first_contact()` transition, not on every step near the nail. Velocity penalty weight ≈ 10% of maximum total reward is the sweet spot for sim-to-real.
+
+---
+
+<!-- opus-audit M1: RSS 2025 venue claim not independently re-verified in this audit. Treat as preprint until confirmed against the RSS 2025 proceedings. -->
+**Kim, J., Kim, J., Lee, D., Jang, Y., & Kim, B. (2025).** A low-cost and lightweight 6 DoF bimanual arm for dynamic and contact-rich manipulation. *Robotics: Science and Systems (RSS) 2025 — venue not re-verified*. https://arxiv.org/abs/2502.16908
+
+ARMADA: low-inertia, back-drivable arms trained in IsaacGym for striking, snatching, and hammering. 24,576 parallel environments. Key finding: for striking tasks, the reward should include velocity-at-impact, not just positional approach. The policy learns qualitatively different swing behaviours when velocity-at-contact is rewarded vs. only final position.
+
+**What to steal:** The `impact_velocity_bonus` term. Scale impact reward by `||head_vel||` at the moment `compute_first_contact()` fires. This is the signal that pushes the policy from slow-press to genuine swing.
+
+---
+
+**van Steen, J., Stokbroekx, D., van de Wouw, N., & Saccon, A. (2024).** Impact-aware robotic manipulation: Quantifying the sim-to-real gap for velocity jumps. *arXiv:2411.06319*.
+
+Directly quantifies how MuJoCo's impact model (ante-impact → post-impact velocity jump) differs from real robot behaviour. Key finding: 3.1% average error in post-impact velocity with calibrated rigid-body impact model. Contact force magnitudes are less faithful than velocity jumps.
+
+**What to steal:** Prefer reward terms based on geometric outcomes (nail depth, displacement) over contact force magnitudes — the former transfers, the latter does not. The `nail_depth_delta` term is safe; a `contact_force_reward` is not.
+
+---
+
+### Locomotion (Air-Time / Rhythmic Motion Analogs)
+
+**Rudin, N., Hoeller, D., Reist, P., & Hutter, M. (2022).** Learning to walk in minutes using massively parallel deep reinforcement learning. *Conference on Robot Learning (CoRL) 2022*. https://arxiv.org/abs/2109.11978
+
+Canonical RSL-RL reward design for legged locomotion. The `feet_air_time` reward fires only at the transition from air to ground contact: `reward = (air_time − threshold) × first_contact_flag`. This rewards longer strides (more air time before each step) and is the direct analog of rewarding bigger hammer swings (more retraction before each strike). Standard smoothness terms: action rate + torque penalty + joint velocity penalty.
+
+**What to steal:** The `air_time` reward structure maps directly to a hammer retraction reward. Replace "feet" with "hammer head," "ground contact" with "nail contact," and "air" with "above-nail clearance." Use mjlab `ContactSensor` with `track_air_time=True` to access `last_air_time` at the moment `compute_first_contact()` fires.
+
+---
+
+### Simulation-to-Real Transfer
+
+**Ma, Y. J., Liang, W., Wang, G., Huang, D. A., Bastani, O., Jayaraman, D., Zhu, Y., Fan, L., & Anandkumar, A. (2023).** Eureka: Human-level reward design via coding large language models. *International Conference on Learning Representations (ICLR) 2024*. https://arxiv.org/abs/2310.12931
+
+GPT-4 iteratively writes and evaluates reward code in IsaacGym. Outperforms human-expert rewards on 83% of 29 tasks. Key finding: LLM-discovered rewards for dynamic tasks (dexterous pen spinning) consistently include velocity-at-contact terms and separate approach/contact/outcome stages — validating the staged design.
+
+**What to steal:** The Eureka discovery pattern confirms our staged reward architecture is what an automated reward search would also discover. Also: Eureka found that exponential/Gaussian shaping near-target (not linear) works better in most cases — consistent with using Gaussian `nail_driven_reward` for fine near-goal gradient.
+
+---
+
+<!-- opus-audit M1: DrEureka venue not re-verified in this audit; cited here as preprint. -->
+**Ma, Y. J., Liang, W., Zhu, G., Wang, G., Bastani, O., Jayaraman, D., Zhu, Y., Fan, L., & Anandkumar, A. (2024).** DrEureka: Language model guided sim-to-real transfer. *arXiv preprint arXiv:2406.01967*.
+
+Extends Eureka to auto-generate domain randomisation distributions. Key finding: reward terms based on task outcome (object position, joint position) transfer better than terms based on intermediate physics (exact contact force, contact location). Rewards that exploit simulation-specific artefacts (precise contact normals) hurt sim-to-real.
+
+**What to steal:** `nail_depth_delta` (geometric outcome) → safe to transfer. Any reward reading `contact_force` directly from MuJoCo sensordata → risky. The `impact_velocity_bonus` (head velocity at contact, not contact force) sits in between — velocity is more faithful than force.
+
+---
+
+### Reward Architecture Patterns
+
+<!-- opus-audit H3: corrected author list against arXiv:1910.10897 (verified 2026-05-22).
+     Sonnet 4.6 had fabricated "Shao, H.", "Nair, A.", "Chen, S.", "Bahl, S.", "Planche, B."
+     and missed "Shively, H.", "Bellathur, A.". -->
+**Yu, T., Quillen, D., He, Z., Julian, R., Narayan, A., Shively, H., Bellathur, A., Hausman, K., Finn, C., & Levine, S. (2020).** Meta-World: A benchmark and evaluation for multi-task and meta reinforcement learning. *Conference on Robot Learning (CoRL) 2020*. https://arxiv.org/abs/1910.10897
+
+Meta-World's hammer v3 task uses a dense hybrid reward: `reward = (2 × grasp + 6 × in_place) × quat_alignment`, with a flat +10 bonus when `nail_slide_joint.qpos > 0.09 m`. The multiplicative `quat_alignment` term kills the reward entirely when hammer orientation is wrong — a hard gate rather than a soft penalty. The task is single-strike.
+
+**What to steal:** The orientation alignment gate — multiply the approach reward by a Gaussian over the hammer head orientation relative to the nail axis. This prevents the policy from approaching from impossible angles. Also: the flat completion bonus pattern (not proportional to remaining distance, just a large step at threshold).
+
+---
+
+**Narang, Y., Storey, K., Akinola, I., Macklin, M., Reist, P., Langlois, O., Handa, A., & Fox, D. (2022).** Factory: Fast contact for robotic assembly. *Robotics: Science and Systems (RSS) 2022*. https://arxiv.org/abs/2205.03532
+
+Factory provides three assembly environments (nut tightening, peg insertion, gear meshing) with fast MuJoCo-based contact physics. The paper focuses on simulation fidelity; reward design is intentionally minimal (sparse success + small dense position reward). The follow-on IndustReal paper (Tang et al., 2023) adds the SDF reward layer on top.
+
+**What to steal:** Factory's sim fidelity work validates MuJoCo as a viable impact simulator. Their contact parameter calibration methodology is directly applicable to calibrating the Z1 hammer's nail contact stiffness and restitution.
+
+---
+
+**Berducci, L., Aguilar, E. A., Ničković, D., & Grosu, R. (2024).** HPRS: Hierarchical potential-based reward shaping from task specifications. *Frontiers in Robotics and AI*, 11. https://arxiv.org/abs/2110.02792
+
+Formalises task requirements as a partially-ordered hierarchy (safety > target > comfort) and builds a potential function that enforces priority order while preserving policy optimality (Ng et al. guarantee). Maps cleanly to: safety = joint limits/collision avoidance, target = nail depth, comfort = smoothness.
+
+**What to steal:** The hierarchy framing. Joint limit penalties should have higher priority (larger weight) than smoothness penalties, which should have higher priority than approach rewards. Getting this ordering right prevents the policy from trading safety for task progress.
+
+---
+
+<!-- opus-audit M1: Reward Training Wheels venue not re-verified in this audit; cited here as preprint. -->
+**Wang, L., Xu, T., Lu, Y., & Xiao, X. (2025).** Reward training wheels: Adaptive auxiliary rewards for robotics RL. *arXiv preprint arXiv:2503.15724*.
+
+Teacher-student meta-RL that dynamically adjusts auxiliary reward weights based on student capability. Early in training, approach rewards are weighted high; as the agent reliably achieves contact, the teacher reduces approach weight and shifts emphasis to depth reward. Outperforms fixed expert-designed weights.
+
+**What to steal:** Motivation for the soft-fade approach (exp decay with depth) rather than a fixed weight — it approximates what RTW does automatically. If training shows instability at the approach-to-contact transition, consider implementing adaptive weighting.
+
+---
+
+### Sim-to-Real Smoothness
+
+**Kim, Y., Lee, J., Choe, J., Cho, H., & Kang, Y. (2023).** Not only rewards but also constraints: Applications on legged robot locomotion. *arXiv:2308.12517*.
+
+Advocates Lagrangian RL for hard constraints (joint limits, torque limits) rather than soft reward penalties. The insight: a large task reward can overwhelm soft penalty terms, causing constraint violations during high-impact events (exactly the scenario during a hammer strike).
+
+**What to steal:** Consider treating Z1 joint torque limits as hard constraints (Lagrangian multiplier) rather than soft penalties during the strike phase, where the task reward gradient is largest. Alternatively: use a large weight on `joint_pos_limits` and also add a torque limit term.
+
+---
+
+*Compiled 2026-05-22. All arXiv IDs verified unless marked otherwise.*
+
+---
+
+## [from hammering_literature_notes] — Hammering × Robot Learning field notes & annotated bibliography
+
+**Purpose:** a niche-specific running bibliography for the (very small) intersection of **robot learning** and **hammering / percussive nail-driving**. Companion to `../hammering_reward_design_deep_dive_v2.md`. Grows as sources from `~/Desktop/_Munich_hammering/` and the web are read.
 
 **Tier legend** (same as v2): `[E1]` peer-reviewed, verified · `[E2]` preprint verified · `[E2*]` reported, not re-fetched · `[E3]/gray` gray literature / non-peer-reviewed · dates marked *(uncertain)* where the source gives none.
 
@@ -219,3 +391,45 @@ Priority order for the Z1 reward work:
 - [ ] `A_Multiple_Working_Mode_Approach_to_Hammering_with_a_Modular_Reconfigurable_Robot.pdf` + `a-multiple-working-mode-approach-to-robotic-hammering-analysis-and-experiments.pdf`
 - [ ] `Kinematics-Aware Multi-Policy Reinforcement Learning for Force-Capable Humanoid Loco-Manipulation.pdf` (humanoid transfer / force-capable RL)
 - [ ] `Learning Variable Impedance.pdf` (ties to v2 §8 admittance/impedance)
+
+---
+
+## [from impact_tracking_rl_litreview] — Impact / tracking RL literature review
+
+> Only §2 (annotated bibliography) and §4 (citation-integrity corrections) are carried here; the source’s §1/§3/§5 framed the walked-back "generate-then-track" architecture and are dropped as superseded (single-policy direction — see `../../../thesis_direction_update.md`).
+
+## 2. Annotated bibliography (verified)
+
+### A. Motion-imitation / reference-tracking RL
+- **Peng, X. B., Abbeel, P., Levine, S., & van de Panne, M. (2018). DeepMimic: Example-guided deep RL of physics-based character skills.** *ACM TOG, 37*(4). arXiv:1804.02717. — Weighted **imitation + task** reward (`r = 0.7·r^I + 0.3·r^G`); imitation = joint pose + joint velocity + end-effector position (+ CoM). Reference State Initialization + Early Termination are critical for dynamic skills. *Striking/throwing tasks need the task reward — pure imitation is insufficient.*
+- **Peng, X. B., Ma, Z., Abbeel, P., Levine, S., & Kanazawa, A. (2021). AMP: Adversarial Motion Priors for Stylized Physics-Based Character Control.** *ACM TOG, 40*(4). arXiv:2104.02180. — Replaces per-frame tracking with a learned **adversarial style reward** (discriminator on a motion dataset) **+ a task reward**; scales to unstructured motion data.
+- **Ma, Z., Tian, C., & Gao, Y. (2025). Manipulate as Human: Learning Task-Oriented Manipulation Skills by Adversarial Motion Priors (HMAMP).** *Robotica, 43*(6), 2320–2332. arXiv:2510.24257. — AMP applied to **real-arm hammering**. Reward `r = 0.6·r^g + 0.4·r^s` (task = contact force + nail alignment `1−tanh‖x_f−x_c‖`; style = LSGAN). Learns the **energy-storing back-swing**, yielding ~+70–80% delivered impulse over baseline RL.
+
+### B. Offline RL
+- **Kostrikov, I., Nair, A., & Levine, S. (2022). Offline RL with Implicit Q-Learning (IQL).** *ICLR 2022.* arXiv:2110.06169. — Never queries out-of-dataset actions (expectile value + advantage-weighted BC); strong at **stitching** sub-optimal trajectories; cheap to implement.
+- **Fu, J., Kumar, A., Nachum, O., Tucker, G., & Levine, S. (2020). D4RL: Datasets for Deep Data-Driven RL.** arXiv:2004.07219 (**preprint only**). — Establishes the Adroit **`hammer`** task as a standard offline-RL benchmark built on human mocap demos, deliberately including sub-optimal data.
+
+### C. Impact mechanics & effective mass / recoil
+- **Stronge, W. J. (2000/2018). Impact Mechanics (1st/2nd ed.).** Cambridge University Press. — Foundational rigid-body impulse-momentum and effective-mass theory underlying `m_eff = 1/(n̂ᵀJM⁻¹Jᵀn̂)`.
+- **Wang, Y., Dehio, N., & Kheddar, A. (2022). Predicting Impact-Induced Joint Velocity Jumps on Kinematic-Controlled Manipulator.** *IEEE RA-L, 7*(3), 6226–6233. arXiv:2202.12646. — Joint-velocity jump `Δq̇ = M⁻¹Jᵀι`; introduces a **composite-rigid-body (CRB) impact inertia** because the naive operational-space inertia is **inaccurate for stiff/high-gain joints** (≈82% error reduction; validated on a Franka with an ATI mini45 F/T sensor). *Directly relevant: position-controlled arms are the stiff-joint regime — use the CRB form.*
+- **Wang, Y., & Kheddar, A. (2019). Impact-Friendly Robust Control Design with Task-Space Quadratic Optimization.** *RSS XV*, p. 32. DOI:10.15607/RSS.2019.XV.032. — Embeds the impact-induced state-jump as a **QP constraint** so pre-impact motion stays feasible through the recoil.
+- **Wang, Y., Dehio, N., Tanguy, A., & Kheddar, A. (2023). Impact-Aware Task-Space Quadratic-Programming Control.** *IJRR, 42*(14), 1265–1282. arXiv:2006.01987. — Journal extension: feasible-set polyhedra constraining post-impact critical states; recoil enforced at the controller level.
+
+### D. Optimal-control / trajectory generation for impact
+- **Vu, et al. (2026). QP-based Impact Momentum Maximization for a Hammering Task by a Humanoid Robot.** *IEEE AMC 2026* (Daegu), Xplore doc 11435814. — QP that **co-optimizes effective mass and velocity** (`m_eff·v`) on HRP-5P. *The most direct source for "maximize both mass and velocity."* (Authors beyond "Vu" paywalled — cite as "Vu et al." pending full list.) *[Editorial 2026-07-05: superseded — the full author list and venue were verified by direct read; see §2.3 above.]*
+- **Ti, B., Gao, Y., Zhao, J., & Calinon, S. (2024). An Optimal Control Formulation of Tool Affordance Applied to Impact Tasks.** *IEEE T-RO, 40*, 1966–1982. arXiv:2402.05502. — iLQR+ADMM maximizing **directional velocity manipulability** `α=√(uᵀJJᵀu)` at impact, with tool-affordance grasp constraints; real nail-hammering on a 7-DoF arm. Treats pre-impact velocity as dominant in a pilot-hole regime.
+
+### E. Reward shaping / constrained RL / smoothness
+- **Stooke, A., Achiam, J., & Abbeel, P. (2020). Responsive Safety in RL by PID Lagrangian Methods.** *ICML 2020.* arXiv:2007.03964. — CMDP constraint enforcement; the **PID multiplier** damps the cost-overshoot/oscillation of naive Lagrangian — recipe for bounding joint-impulse on top of PPO.
+- **Mysore, S., Mabsout, B., Mancuso, R., & Saenko, K. (2021). Regularizing Action Policies for Smooth Control with RL (CAPS).** *ICRA 2021*, 1810–1816. arXiv:2012.06644. — Temporal + spatial smoothness regularizers for sim-to-real-friendly control.
+- **Wu, Z., Lian, W., Unhelkar, V., Tomizuka, M., & Schaal, S. (2021). Learning Dense Rewards for Contact-Rich Manipulation Tasks (DREM).** *ICRA 2021*, 6214–6221. arXiv:2011.08458. — Progress-not-position dense reward for contact-rich tasks (basis for the geometric `nail_depth_delta`).
+
+## 4. Citation-integrity notes (corrections caught in verification)
+- **AMP:** add co-author **Kanazawa**; exact title is "…for Stylized Physics-Based Character Control."
+- **IQL:** publication year is **2022** (ICLR 2022); arXiv posted Oct 2021.
+- **D4RL:** **preprint only** — never appeared at a peer-reviewed venue; cite as arXiv.
+- **CAPS:** actual title is "Regularizing Action Policies for Smooth Control with Reinforcement Learning" (not the acronym expansion).
+- **Wang/Dehio/Kheddar 2022:** exact title "…on Kinematic-Controlled Manipulator" (no "position-controlled" in title).
+- **Vu et al. 2026:** existence + venue confirmed; **full author list is paywalled** — cite "Vu et al." until retrieved.
+- **HMAMP impulse figure:** the paper's `I = 4238 kg·m/s` (Table I) is **physically implausible for a single strike** (≈400–800× too large) — likely cumulative/episode or a unit issue in the paper; use only the **relative +70–80%** comparison, not the absolute value.
+- **Stronge:** specify edition (1st 2000 / 2nd 2018) when citing.

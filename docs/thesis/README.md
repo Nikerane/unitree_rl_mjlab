@@ -11,6 +11,10 @@ pointer to the authoritative detail and a **status**:
 The full detail lives in `docs/research/reward-design/`; this folder is the distilled layer. Add to
 it as material becomes thesis-ready — don't duplicate the exhaustive versions here.
 
+Sibling files in this folder: `NOTATION.md` — manuscript notation rules (why Λ_j, the
+Λ-as-impulse vs Λ-as-inertia clash across our own citation set, per-paper audit + two extra
+defense citations).
+
 ---
 
 ## 1. Contributions (the novel claims)
@@ -23,7 +27,7 @@ chosen for convenience.
 - Status: **CONFIRMED** (conceptual); the empirical demonstration is **RESULTS-PENDING**.
 - Open-gap framing (the originality): across surveyed CaT adopters (SoloParkour, Humanoid-CaT, lunar
   mobile-manip), **none analyzes the worst-case tail or pairs CaT with an action-level hard filter.**
-- Detail: `CONSTRAINED_RL_LANDSCAPE.md` §3–4, `CAT_DEEP_DIVE.md`.
+- Detail: `CONSTRAINED_RL_LANDSCAPE.md` §3–4, `FAITHFUL_SOFT_CAT_IMPL_PLAN.md` (CaT deep-dive appendix).
 
 **C2 — A per-step (substep-accumulated) per-joint *impulse* constraint as the enforcement step on top
 of soft-gain-regularized variable impedance.** Prior VIC work (incl. the advisor's own line) used
@@ -35,9 +39,10 @@ of soft-gain-regularized variable impedance.** Prior VIC work (incl. the advisor
 
 **C3 — The chain-coupled-momentum finding: no per-joint *incentive* (reward penalty, soft or hard
 CaT, even a cumulative-Lagrangian) bounds the worst-case velocity tail.** Our A1–A4 ablation: CaT was
-the best impact-preserving reducer yet kept worst-case `|q̇|` at 4.3–4.65 rad/s (over the 3.1415
-limit) because the overshoot is momentum delivered through the linkage by other joints + contact
-rebound. This *motivates* the capability layer (C1).
+the best impact-preserving reducer, yet no arm brought worst-case `|q̇|` under the 3.1415 limit
+(A3 CaT: 3.61–4.00 control-rate, 4.12–4.95 true substep across the two CaT variants; unconstrained
+baseline 4.29–4.65 control-rate) because the overshoot is momentum delivered through the linkage by other joints
++ contact rebound. This *motivates* the capability layer (C1).
 - Status: **CONFIRMED** (we have the ablation data).
 - Detail: `docs/results/2026-06-17_velocity_bound_ablation.md`, memory [[z1-velocity-bound-finding]].
 
@@ -49,7 +54,10 @@ rebound. This *motivates* the capability layer (C1).
 We replace the naive sampled-hard termination with the paper's true mechanism: env-side
 `reward·(1−δ)` discount + a float soft-done carried into a `γ(1−δ)` GAE bootstrap. Mirrors the CaT
 authors' own per-library adapter pattern (they never forked CleanRL/rl_games/skrl).
-- Status: **CONFIRMED** (design); implementation **RESULTS-PENDING**.
+- Status: **CONFIRMED** (design; shipped on branch `soft-cat`). ~~implementation **RESULTS-PENDING**~~
+  **velocity-arm GPU result DONE (2026-06-18)**: learns, complies in the mean (2.48–2.65 rad/s vs
+  unconstrained 3.54), preserves the strike; the worst-case tail remains (see C3) —
+  `../results/2026-06-18_softcat_velocity.md`.
 - Detail: `FAITHFUL_SOFT_CAT_IMPL_PLAN.md` §1–2.
 
 **D2 — Reward discount is *scale-positives-only*: `reward = r_total − δ·r_pos`** (apply `(1−δ)` to the
@@ -135,11 +143,12 @@ applied above and in `CONSTRAINED_RL_LANDSCAPE.md` §5.*
 
 ## 6. Still-open / not-yet-thesis-ready
 
-- soft-CaT training **results** (the implementation itself is **DONE** on branch `soft-cat`: C0–C3
-  built, adversarially reviewed + fixed, 37 CPU unit tests + `verify_cat_soft.py` (real env) +
-  `smoke_cat_soft.py` (3-iter CPU train loop runs, no NaN) all green. Only the GPU *results* run —
-  does the policy learn a limit-respecting strike — remains, on Vega. `train.py`'s launcher is
-  GPU-gated so the full run cannot execute on the mac).
+- ~~soft-CaT training **results**~~ **velocity-arm GPU results DONE (2026-06-18)** — see
+  `../results/2026-06-18_softcat_velocity.md`: soft-CaT learns, complies in the mean, keeps 100%
+  success + the fastest strike; **but the worst-case tail (3.9–4.2 rad/s, over π) remains**. Still
+  open: tail closure (next bullet) and the **impulse-CaT enforcement run** (C0 shipped LOG-ONLY;
+  the machinery has since grown well past this bullet's earlier snapshot — current status in
+  `../research/reward-design/IMPULSE_CAT_IMPL_PLAN.md`).
 - worst-case tail closure via VIC (capability layer — after fixed-impedance results).
 - ~~citation verification pass~~ **DONE** (2026-06-17): no fabricated ids; 4 minor title/year fixes
   applied. Still confirm exact published venues per the thesis house citation style.

@@ -1,3 +1,6 @@
+> ⚠️ **ARCHIVED 2026-07-05** — superseded by `src/tasks/hammer/hammer_env_cfg.py` (live reward terms + weights).
+> Facts below may contradict the current code. Do not act on them; check `docs/README.md`.
+
 # Reward Design Matrix — Z1 Hammer Task
 
 Columns: **Term** | **Formula (batch tensor, shape [B])** | **When active** | **Typical weight range** | **Source** | **mjlab feasibility**

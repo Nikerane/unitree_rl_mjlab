@@ -1,3 +1,6 @@
+> ⚠️ **ARCHIVED 2026-07-05** — superseded by `docs/research/hammering_reward_design_deep_dive_v2.md` (the v2 deep dive).
+> Facts below may contradict the current code. Do not act on them; check `docs/README.md`.
+
 # Deep-Research Report — Reward Design for the Z1 Hammer-Nail Task
 
 **Pipeline:** ARS deep-research (`full` mode, local-corpus variant)

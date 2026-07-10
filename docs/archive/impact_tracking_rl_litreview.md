@@ -1,3 +1,6 @@
+> ⚠️ **ARCHIVED 2026-07-05** — superseded by `docs/research/reward-design/LITERATURE.md`.
+> Facts below may contradict the current code. Do not act on them; check `docs/README.md`.
+
 # Literature Review — Generate-then-Track RL for Impact-Explicit Robotic Hammering
 
 **Mode:** ARS `deep-research` lit-review (bibliography → source-verification → synthesis)

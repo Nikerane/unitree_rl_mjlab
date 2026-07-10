@@ -1,3 +1,6 @@
+> ⚠️ **ARCHIVED 2026-07-05** — superseded by `docs/research/reward-design/CONSTRAINED_RL_LANDSCAPE.md` (joint-velocity-bound appendix).
+> Facts below may contradict the current code. Do not act on them; check `docs/README.md`.
+
 # Bounding joint velocity for the Z1 strike policy — research synthesis (2026-06-17)
 
 **Trigger:** `b_strike` produced a real single strike (~1.2 m/s, 100% success, press excluded) but the trained policy drives joints to **4.3–4.65 rad/s worst-case**, exceeding the real Z1 limit of **3.1415 rad/s**. See `docs/results/2026-06-17_b_strike.md`. Question: how do we make the strike *honest at the hardware velocity limit* without killing it?

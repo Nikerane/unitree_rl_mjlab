@@ -5,7 +5,7 @@ Status legend: 🔴 OPEN | 🟡 SCRIPT PROVIDED (run to resolve) | 🟢 RESOLVED
 
 ---
 
-### 🟡 Q1 — Does a single strike fully drive the nail?
+### 🟢 Q1 — Does a single strike fully drive the nail?
 
 **Question:** With the current nail physics (**frictionloss=30 N, damping=0.5 N·s/m, range 0–0.032 m — recalibrated 2026-06-10, plan stage T0**; this question originally quoted stale visualisation-scene values 0.3 N/8 N·s/m/0.075 m), what is the maximum nail depth achievable in a single strike given the Z1's maximum achievable end-effector velocity via DifferentialIK?
 
@@ -50,7 +50,7 @@ Status: 🟢 **RESOLVED.** Real-hammer threshold 0.027 (2026-06-17); V1 training
 
 ---
 
-### 🔴 Q2 — Does the policy discover retract-and-restrike naturally?
+### 🟢 Q2 — Does the policy discover retract-and-restrike naturally?
 
 **Question:** With only `nail_depth_delta` + `impact_velocity_bonus` (no `air_time_bonus`), does the policy learn to retract and re-strike, or does it get stuck pressing continuously?
 
@@ -58,9 +58,9 @@ Status: 🟢 **RESOLVED.** Real-hammer threshold 0.027 (2026-06-17); V1 training
 
 **Experiment:** Train ablation step 3 (approach + depth_delta + impact_velocity, no air_time). Record video of 100 rollouts. Count: (a) episodes with ≥2 distinct contact events, (b) episodes where the nail advances > 5mm.
 
-**Cannot be resolved without running training.** Plan: keep `air_time_bonus` in the initial config (Step 4 of the ablation), and run a single ablation that disables it to confirm whether it's load-bearing.
+Status: 🟢 **RESOLVED** (V1 training, 2026-06-17). The `--no-term` rollout shows the trained policy **strikes → retracts → re-strikes** with no rhythm reward (see Q1's V1 result above); retraction emerges naturally, so `air_time_bonus` is **not load-bearing** and was NOT added.
 
-**V1 RESULT (2026-06-17):** **answered — retract-and-restrike emerges naturally, no `air_time_bonus` needed.** A `--no-term` rollout of the trained V1 policy (`scripts/diag_strike_probe.py --mode press_basin --no-term`, and `scripts/diag_policy_trace.py --no-term`) shows the policy spontaneously **strikes → retracts ~7 cm (head climbs back up) → re-strikes** — a clean swing cycle — with no rhythm/air-time term in the reward. This holds even when the policy is started already in contact (the "press basin"). Matches the striking-RL literature (Liu 2025; Karbasi 2024; Robot Drummer 2025): repetitive striking emerges from the task, not an explicit rhythm reward. So for an eventual multi-strike task, the cyclic behaviour is expected to come for free from a higher success bar; `air_time_bonus` stays NOT added (augment-not-replace). See `docs/superpowers/specs/2026-06-17-z1-strike-not-press-redesign-design.md` §6.
+**V1 RESULT (2026-06-17):** **answered — retract-and-restrike emerges naturally, no `air_time_bonus` needed.** A `--no-term` rollout of the trained V1 policy (`scripts/diag_strike_probe.py --mode press_basin --no-term`, and `scripts/diag_policy_trace.py --no-term`) shows the policy spontaneously **strikes → retracts ~7 cm (head climbs back up) → re-strikes** — a clean swing cycle — with no rhythm/air-time term in the reward. This holds even when the policy is started already in contact (the "press basin"). Matches the striking-RL literature (Liu 2025; Karbasi 2024; Robot Drummer 2025): repetitive striking emerges from the task, not an explicit rhythm reward. So for an eventual multi-strike task, the cyclic behaviour is expected to come for free from a higher success bar; `air_time_bonus` stays NOT added (augment-not-replace). See `../../archive/2026-06-17-z1-strike-not-press-redesign-design.md` §6.
 
 Status: 🟢 **RESOLVED** — retract-and-restrike emerges without an air-time term.
 
@@ -165,7 +165,7 @@ No spurious reward on the first step. **No debug assertion needed.**
 
 | Q | Status | How resolved |
 |---|---|---|
-| Q1 | 🟢 Resolved | Real-hammer measure + V1 GPU training (arrays 36472565/36472566): trained single strike clears 27 mm at 100%, press does not emerge |
+| Q1 | 🟢 Resolved (gripper-era) | Real-hammer measure + V1 GPU training (arrays 36472565/36472566): trained single strike clears 27 mm at 100%, press does not emerge. NOTE: measured pre-L6-fixture; NEAR_NAIL re-solve pending, so depths may shift |
 | Q2 | 🟢 Resolved | V1 `--no-term` rollout: trained policy strikes→retracts→re-strikes with no rhythm reward |
 | Q3 | 🔴 Needs training | Weight grid search |
 | Q4 | 🟢 Resolved | Geom name = `hammer_head` (exact, verified in XML) |
@@ -176,36 +176,23 @@ No spurious reward on the first step. **No debug assertion needed.**
 | Q9 | 🔴 Needs training + hardware | Defer; depends on Q1 |
 | Q10 | 🟢 Resolved | Finite-differenced velocity eliminates the risk |
 
-**Remaining blockers before first training run:** none. All resolvable-from-code questions are answered. Remaining open questions all require either running the env (Q1, Q5 — scripts ready) or training cycles (Q2, Q3, Q6, Q7, Q9 — defer to training campaign).
+**Remaining blockers before first training run:** the L6 fixture EE change requires a NEAR_NAIL re-solve + gate re-green before training on the current tree (see [[l6-hammer-fixture-ee]]). All resolvable-from-code reward questions are answered. Remaining open questions require training cycles (Q3, Q6, Q7, Q9 — defer to training campaign); Q5's percentile script (`verify_reward_setup.py`) is ready to run.
 
 ---
 
 ## Reward Stack Validation (2026-05-22)
 
-Independent of all open questions above, the current 6-term reward stack (`approach`, `nail_driven`, `nail_depth_delta`, `completion`, `action_rate`, `joint_pos_limits`) has been validated end-to-end via `validate_rewards.py`. All 8 validation phases pass:
-
-| Phase | What it tests | Result |
-|---|---|---|
-| A. Reset & hold | baseline / no spurious signals | `nail_depth_delta = 0` |
-| B. Move action | no delta without contact | `nail_depth_delta = 0` |
-| C. Force depth 0.010 m | progress fires correctly | `nail_depth_delta = 5.0` (= 0.010 × 500) |
-| D. Hold at 0.010 m | no re-fire on same depth | `nail_depth_delta = 0` |
-| E. Force depth 0.020 m | NEW delta fires, not cumulative | `nail_depth_delta = 5.0` (= 0.010 × 500) |
-| F. Reset + depth 0.005 m | `NailDepthDeltaTerm.reset()` works | `nail_depth_delta = 2.5` (= 0.005 × 500) |
-| G. Bounce-back 0.020 → 0.015 m | `clamp_min(0)` prevents negative | `nail_depth_delta = 0` |
-| H. Completion bonus | sparse task reward at success threshold | `completion = 0` below 0.070, `= 100.0` at 0.071 |
-
-Methodology: `REWARD_VALIDATION_METHODOLOGY.md`.
+Independent of all open questions above, the current 7-term reward stack (`approach`, `nail_driven`, `nail_depth_delta`, `impact_progress`, `completion`, `action_rate`, `joint_pos_limits`) is validated end-to-end by `validate_rewards.py`, which now runs phases A–M (impact_progress = Phase I, impulse-CaT = Phase M). See that script for the authoritative per-phase expected values — they track the live weights in `hammer_env_cfg.py` (e.g. `nail_depth_delta = 600`), so this doc no longer restates a per-phase table (the earlier walkthrough was a 2026-05-22 snapshot and has since drifted). Run it before any GPU training.
 
 **Implication:** when GPU training becomes available, the reward stack is known correct. Any failure during training is attributable to policy learnability or env dynamics, not to a buggy reward term.
 
-**Note on baseline composition:** `completion` (sparse task reward) was added to the baseline alongside the dense shaping terms, because completion is the actual task signal, not a shaping choice. Other terms from `RECOMMENDED_REWARD_SPEC.md` (`impact_velocity_bonus`, `air_time_bonus`, `approach_contact_gated`, `joint_vel_penalty`) remain in the deferred bucket — they are shaping terms to be added only when a specific failure mode is observed during training.
+**Note on baseline composition:** `completion` (sparse task reward) was added to the baseline alongside the dense shaping terms, because completion is the actual task signal, not a shaping choice. Other terms from `../../archive/RECOMMENDED_REWARD_SPEC.md` (`impact_velocity_bonus`, `air_time_bonus`, `approach_contact_gated`, `joint_vel_penalty`) remain in the deferred bucket — they are shaping terms to be added only when a specific failure mode is observed during training.
 
 ---
 
 ## Opus 4.7 Audit (2026-05-22) — New experiment questions
 
-<!-- opus-audit: added during second-pass audit. See OPUS_AUDIT.md for the full
+<!-- opus-audit: added during second-pass audit. See ../../archive/OPUS_AUDIT.md for the full
      finding table and severity assignments. -->
 
 ### 🔴 Q11 — Value-function discontinuity from large completion bonus

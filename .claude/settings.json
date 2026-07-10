@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c 'import json,sys; d=json.load(sys.stdin); p=((d.get(\"tool_input\") or {}).get(\"file_path\") or \"\"); \"/docs/archive/\" in p and print(json.dumps({\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"⚠️ This file is ARCHIVED and superseded. Do not act on its contents; check docs/README.md for current truth.\"}}))'",
+            "timeout": 10,
+            "statusMessage": "Checking for archived-doc read"
+          }
+        ]
+      }
+    ]
+  }
+}

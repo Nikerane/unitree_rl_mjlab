@@ -1,3 +1,6 @@
+> ⚠️ **ARCHIVED 2026-07-05** — superseded by `docs/results/2026-06-17_b_strike.md` (applied items) + `docs/archive/TRACKING_IMPACT_IMPULSE_IMPL_PLAN.md` (deferred reward work).
+> Facts below may contradict the current code. Do not act on them; check `docs/README.md`.
+
 # Future updates for the Z1 hammer task
 
 Things worth changing once the current baseline is validated. Each item lists the observation that motivated it, the concrete fix, and the file to change.

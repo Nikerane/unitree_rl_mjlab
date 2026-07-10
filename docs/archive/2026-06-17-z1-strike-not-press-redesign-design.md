@@ -1,3 +1,6 @@
+> ⚠️ **ARCHIVED 2026-07-05** — superseded by nothing — executed 2026-06-17 design record.
+> Facts below may contradict the current code. Do not act on them; check `docs/README.md`.
+
 # Z1 Hammer — "Make it actually strike, kill pressing" redesign (design + decision record)
 
 **Date:** 2026-06-17 · **Branch:** `hammer-z1` · **Status:** DESIGN DECIDED — **start single-strike** (Option S); multi-strike (Option M) deferred but documented (§6). Diagnostics done. **Scope: Z1 Phase-0 only** (G1 explicitly out of scope per user, 2026-06-17).

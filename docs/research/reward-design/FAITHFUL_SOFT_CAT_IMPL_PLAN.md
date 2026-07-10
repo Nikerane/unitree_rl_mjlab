@@ -1,6 +1,6 @@
 # Faithful soft `γ(1−δ)` CaT — design, decisions & implementation plan
 
-**Status:** pre-implementation (design approved, decisions recorded). 2026-06-17.
+**Status:** IMPLEMENTED — the soft-CaT velocity arm (C0–C4) is shipped and validated on branch `soft-cat` (unit tests green); the curriculum (§4 table, C5) remains optional / not-yet-shipped. Design + decisions below are the authoritative record. 2026-06-17 (implemented through 2026-07-05).
 **Scope:** Z1 hammer task, fixed impedance. Replace the *naive sampled-hard* `CaTJointVelConstraint`
 (`src/tasks/hammer/mdp/velocity_bound.py:109-160` — a `TerminationTermCfg` that does
 `torch.rand_like(δ) < δ` and returns a hard boolean done) with the **faithful soft** mechanism
@@ -14,7 +14,7 @@ discounts the value target; the policy learns to avoid violating trajectories be
 systematically lower returns, without the sim ever being reset on a soft violation.
 
 > This document is the authoritative design + decision record for the port. The companion
-> conceptual dive is `CAT_DEEP_DIVE.md` (why CaT is an incentive, not a brake; CaT-vs-VIC).
+> conceptual dive is the **Appendix: CaT conceptual deep-dive** below (why CaT is an incentive, not a brake; CaT-vs-VIC).
 
 ---
 
@@ -190,7 +190,7 @@ becomes `−δ · [ r_pos + γ·V(s_{t+1}) ]` with `r_pos ≥ 0`; the bracket ca
 `V(s_{t+1}) < 0` (rare, and *uncoupled* from the −10 penalty), so the evasion knob is gone and the
 penalty magnitude is no longer policy-controllable. CaT's `(1−δ)` is a "forfeit future *positive*
 return" weight — only coherent on `r ≥ 0`; applying it to penalties (as full-reward does) is the
-semantic error. This also implements our own companion analysis `CAT_DEEP_DIVE.md:19` ("keep
+semantic error. This also implements our own companion analysis (the CaT deep-dive appendix below, knob #1: "keep
 penalties as separate constraints or shift reward non-negative"), which the overturned option
 silently contradicted.
 
@@ -200,7 +200,7 @@ augment-not-replace / trust-the-code discipline. Scale-positives-only achieves t
 restoration without touching the reward design.
 
 **Implementation note (it is not literally "one line").** Scale-positives-only needs `r_pos` (or
-`r_neg`) surfaced to the learner. The `cat_hook` computes `r_neg` from the two known negative terms
+`r_neg`) surfaced to the learner. `CatSoftHook` (`cat/hook.py`) computes `r_neg` from the two known negative terms
 (`action_rate`, `joint_pos_limits`) and stashes `r_pos = r_total − r_neg` into `extras` alongside δ;
 `CatPPO.process_env_step` then applies `reward ← r_total − δ·r_pos`. Verified by test (iv) in C2.
 
@@ -272,8 +272,8 @@ An adversarial panel flagged that the **done-step** value targets were untested 
 |---|---|
 | `src/tasks/hammer/cat/constraint_manager.py` | Port of the reference `CaT` helper: per-term EMA `running_maxes` (τ=0.95, persists across resets), δ = `min_p + clamp(c/c_max,0,1)·(max_p−min_p)`, max-combine over terms. Pure torch, CPU-testable. `compute(env) → δ (B,)`. |
 | `src/tasks/hammer/cat/constraints.py` | Pure constraint funcs returning the **raw signed margin** `c = value − limit`. `joint_velocity_excess` reuses `_ARM_CFG` + `SubstepPeakJointVel` (substep-peak signal) from `velocity_bound.py:49-87`. Future substep-impulse constraint plugs in here. |
-| `src/tasks/hammer/cat/cat_hook.py` | Non-terminating manager hook (Decision 5): calls the manager, stashes δ on `env` + into `extras["cat_delta"]`, never feeds `reset_buf`. Also computes `r_pos = r_total − r_neg` (Decision 1, from the two negative terms) and stashes `extras["cat_r_pos"]`. Exposes `max_p` for the curriculum. |
-| `src/tasks/hammer/cat/curriculum.py` | Port of `modify_constraint_p` (`curriculums.py:21-42`): lifetime ramp `T:20→1/init_max_p`, `max_p=1/T`, clocked by `common_step_counter`. Optional for v1. |
+| `src/tasks/hammer/cat/hook.py` (`CatSoftHook`) | Non-terminating manager hook (Decision 5): calls the manager, stashes δ on `env` + into `extras["cat_delta"]`, never feeds `reset_buf`. Also computes `r_pos = r_total − r_neg` (Decision 1, from the two negative terms) and stashes `extras["cat_r_pos"]`. Exposes `max_p` for the curriculum. |
+| `src/tasks/hammer/cat/curriculum.py` (NOT YET SHIPPED — C5 optional) | Port of `modify_constraint_p` (`curriculums.py:21-42`): lifetime ramp `T:20→1/init_max_p`, `max_p=1/T`, clocked by `common_step_counter`. Optional for v1. |
 | `src/tasks/hammer/rl/cat_storage.py` | `CatRolloutStorage(RolloutStorage)`: float32 `dones` buffer + a separate `soft_dones` (δ) float buffer and its `add_transition` write. Fixes the byte-truncation (`rollout_storage.py:149,180`). |
 | `src/tasks/hammer/rl/cat_ppo.py` | `CatPPO(PPO)`: overrides `construct_algorithm` (inject `CatRolloutStorage`), `process_env_step` (read δ + `r_pos` from `extras`; apply **scale-positives-only** `reward ← r_total − δ·r_pos` per Decision 1; store δ), and `compute_returns` (dual-mask GAE per §1.3). |
 
@@ -301,12 +301,12 @@ An adversarial panel flagged that the **done-step** value targets were untested 
   `r_neg ∈ {0,−8,−10}`, `V_next ∈ {0,+2,+60,−1}`, `δ ∈ {0,0.5,1.0}` (incl. a cold-start `V_next≈0`
   row). Test (iv) is the regression guard: it **fails** for full-reward no-clip and **passes** for
   scale-positives-only. `pytest tests/test_cat_ppo_gae.py` (CPU, no sim).
-- **C3 — env hook + extras plumbing (sim, CPU).** Implement `cat_hook.py`; wire `cat_soft`. Test:
+- **C3 — env hook + extras plumbing (sim, CPU).** Implement `cat/hook.py` (`CatSoftHook`); wire `cat_soft`. Test:
   forced over-limit qv → `extras["cat_delta"]` present, float, ∈[0,max_p]; episode length
   **unchanged** by a soft violation (Decision 5, no spurious reset). `scripts/verify_cat_soft.py`.
 - **C4 — end-to-end short train (smoke).** Register `-CaT-Soft`; run ~20 iters; assert loop runs,
   δ logged, mean reward reflects the scale-positives discount, no NaN, checkpoints save. Re-run the
-  CLAUDE.md pre-train gate (`validate_rewards.py` 9 phases + `verify_contact_sensor.py`) for the new
+  CLAUDE.md pre-train gate (`validate_rewards.py` phases A–M + `verify_contact_sensor.py`) for the new
   arm. **Penalty-evasion trip-wire (Decision 1):** log per-env δ alongside `joint_pos_limits` /
   `action_rate` firing and assert their co-occurrence correlation does **not** rise over training,
   and that inter-strike peak `|q̇|` does not creep up — treat a rising correlation as a hard gate,
@@ -331,3 +331,46 @@ The `-CaT*` registration pattern is the template for the `-CaT-Soft` arm.
 3. **Logger episode counting** uses `(dones > 0)` (`logger.py:118-125`) — a threshold, not a bool.
    Keep the soft δ **out** of the wrapper's hard `dones` channel (carry it via `extras`) so episode
    stats stay correct. Verify in C3/C4.
+
+---
+
+## Appendix: CaT conceptual deep-dive [from CAT_DEEP_DIVE, verbatim]
+
+> Historical (2026-06-17), written BEFORE the faithful soft-CaT (`CatPPO` / `CatSoftHook`) and the substep impulse accumulator shipped. Its "our shipped mechanism is naive / a crude approximation" framing and its "mjlab may not expose `qfrc_constraint`" caveat are SUPERSEDED (both now implemented — see the plan above and `impulse_bound.py`); a few now-falsified sentences were dropped on merge. Enduring value: the CaT-knob taxonomy, the H1/Leziart humanoid precedent, and the variable-impedance × impulse non-stationarity risk.
+
+Multi-lens deep dive (workflow `wf_01a029a0-59f`: mechanism / extensions / CaT-for-impulse / humanoid-G1 / internal-fit → synthesis → adversarial critique) into Constraints-as-Terminations ([[cat-constraints-as-terminations]]), to find what helps us more and how to carry it to the G1 impulse constraint. The critique substantially sharpened (and partly downgraded) the synthesis — both are captured.
+
+## CaT's right role (critique's reframing)
+
+CaT fits **instantaneous** limits (velocity, contact force — the paper's demos). An **accumulated-window budget** (`Σ|qfrc|·h ≤ Λ_max`) is a **stretch**: encoding it as a per-step ceiling on a monotone accumulator converts "spend-when-you-like budget" into "hard instantaneous ceiling," which for a single impulsive strike = terminate at the impact peak — it inherits mid-strike-termination pathology and buys nothing over an instantaneous-rate constraint. **Budget-native tools are better-matched:** Saute-RL (remaining budget in the observation → policy shapes the whole strike, almost-sure by construction) and PID/dual-ascent Lagrangian on the episodic sum (multiplier auto-scales). 
+
+So: **adopt CaT as the scale-free SHAPER of the ante-impact instantaneous quantity** (velocity; on the G1, ante-impact `m_eff·v_axial` read at contact onset) — which on the position-only Z1 *is* essentially what A3 already does — and do **not** delete the PID-Lagrangian arm (T5.2) on the strength of A2(fixed-λ)-vs-A3: that's a category error (fixed-λ ≠ adaptive dual).
+
+## Knobs A3 left unused (use these)
+
+1. **Real `γ(1−δ)` value-bootstrap** (we sampled Bernoulli) — the low-variance core; "copy exactly." Hazard for us: the `clip(reward·(1−δ), min=0)` assumes mostly-positive reward; our task has penalty terms → keep penalties as separate constraints or shift reward non-negative.
+2. **Time-to-death curriculum** (we used fixed p) — ramp expected time-to-death `T` (set `p_max=1/T`), and for a hard term **disable it for the first ~20–30% of training** then ramp **both** `p_max` and the threshold loose→tight. Prevents the documented "all-hard fails completely" collapse.
+3. **Substep detection** (we read post-decimation `joint_vel`, aliasing the 500 Hz peak — implicated in the residual overshoot) — peak-hold / accumulate inside the decimation loop (the ContactSensor history+max pattern is the in-repo template).
+4. **Per-constraint, contact-active EMA normalizers** (we used one shared scalar, no floor) — on ~29 G1 joints a shared EMA lets the largest-unit joint dominate the `max`-aggregation; compute the EMA over contact-active samples only (a bursty contact-sparse signal diluted by free-flight zeros corrupts `c_max`).
+5. **Multi-constraint max-aggregation** (`δ=max_i`, not sum) — compose {velocity-CaT, impulse-CaT, commanded-stiffness-CaT}; tune so the impulse term can *win the max* during contact or it is silently masked.
+
+## CaT-for-impulse (the thesis target) — recipe + caveats
+
+Stateful per-joint `ConstraintTerm`: open a window on `first_contact` (latch from `ImpactProgressTerm`), accumulate `Λ[env,j] += Σ_substeps |qfrc_constraint_j|·h` (h=2 ms) inside the decimation loop, return `c_j = Λ_j − Λ_max,j` every control step on the running total; close/reset at window end. The `air_time` term is the API precedent. **Net-new: CaT-on-substep-accumulated-impulse is unpublished** (prior force-terminations are crude instantaneous aborts). Caveats:
+- **Only benign under the real soft bootstrap** (see Knob #1 above) — under a naive hard cut it would be the refuses-to-act trap.
+- **Variable-impedance × CaT-on-impulse is a foundational risk** (unpublished): the policy can game the *measurement* (go compliant at the read instant → lower `qfrc` while delivering the same momentum), and `m_eff` itself depends on commanded K → the constraint surface `c=Λ−Λ_max` is **non-stationary** under the policy's own action, which CaT's stationary-tuned EMA will lag. Validate on a toy variable-K Z1 before the thesis depends on it.
+- **No clean almost-sure cap** even at p_max=1.0 (per-step chance-constraint; sim-to-real torque leaked 3.17 vs 3.0 N·m for 0.05 s). The CBF fallback is likely **ill-posed for impulse** (integral through a contact discontinuity, relative-degree issue) — so the practical hard lever loops back to ante-impact velocity/`m_eff` shaping (what A3 does). SDH (arXiv:2602.04599) is the citeable off-policy successor of `γ(1−δ)` and proves the survival-weighted objective under-penalizes the rare-deep tail (= our worst-case).
+
+## De-risked by precedent
+
+A CaT co-author (Leziart, Chane-Sane et al., 2026) ported CaT to the **Unitree H1 humanoid** + a box loco-manipulation task with a **soft, contact-phase-gated hand contact-force** constraint (`c = 1_contact·F`) — the direct, less-physical analogue of our impulse term. G1 recipe: joint-limits + **falling** = hard/separate terminations; velocity/torque/action-rate/impulse + commanded-stiffness = soft tier with curriculum; couple `K_d=2√(M·K_p)`.
+
+## Revised plan / next actions (critique-ordered)
+
+1. **(done at the time)** Audit found the *then-shipped* mechanism was naive sampled-hard, not `γ(1−δ)` — since replaced by the faithful `CatPPO` / `CatSoftHook` (see the plan above).
+2. **Cheap Z1 confirmation, reframed honestly** as a *velocity-CaT detector/pressure test* (NOT an impulse rehearsal): de-confound A3's two axes — **substep vs control-rate detection**, with **curriculum-ramped p_max** — but do **NOT** set `p_max=1.0` AND substep simultaneously (a 500 Hz Bernoulli at p=1 fires on one-substep transients → "strike≈die"). Pre-register: it will *reduce* the worst case but not *provably bound* it < π. Log `Λ_j`/`Δq̇` in parallel.
+3. **De-risk the `Λ_j` measurement** independently (resolved in C0 — `qfrc_constraint` is exposed per-DoF and the substep accumulator shipped; see `impulse_bound.py`).
+4. **For the thesis budget:** primary instrument = **Saute-RL** (budget-in-obs) and/or **PID-Lagrangian** (keep T5.2); evaluate CaT-on-accumulator as a *third* arm, not the sole method. Use CaT for the ante-impact instantaneous shaping it actually fits, with the **real `γ(1−δ)`** mechanism.
+5. **Honest defense scope:** CaT delivers strong-adherence-*in-expectation*, not an almost-sure cap; set `Λ_max` with margin; the hard ceiling (if redeemable) comes from a separate layer.
+
+**Confidence: medium** (critique). The single highest-priority correction is the mechanism audit/fix; the single most useful cheap experiment is the reframed substep-vs-control-rate velocity-CaT run.

@@ -1,3 +1,6 @@
+> ⚠️ **ARCHIVED 2026-07-05** — superseded by `docs/VEGA_TRAINING_PLAN.md` + `docs/results/` run records.
+> Facts below may contradict the current code. Do not act on them; check `docs/README.md`.
+
 # Z1 Hammer — Baseline Audit
 
 **Date:** 2026-05-22  

@@ -1,3 +1,6 @@
+> ⚠️ **ARCHIVED 2026-07-05** — executed sweep playbook, kept for provenance; its OUTPUT lives in `docs/research/reward-design/LITERATURE.md`.
+> Facts below may contradict the current code. Do not act on them; check `docs/README.md`.
+
 # Hammering Literature — Full-Sweep RUNBOOK
 
 **Purpose.** A re-runnable, **account-switch-aware** playbook for a comprehensive *learning-for-hammering* literature sweep using Claude + the **Workflow** tool. Structured into phases with explicit **🛑 STOP** points so you can top up tokens (switch accounts) between heavy steps.

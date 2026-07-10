@@ -1,3 +1,6 @@
+> ⚠️ **DATED RESEARCH RECORD** (2026-05 original handoff brief; architecture sections superseded by `thesis_direction_update.md`) — kept for provenance.
+> Facts below reflect their date and may contradict the current code; check `docs/README.md`.
+
 # Master's Thesis — Handoff Brief
 
 This document summarizes a long planning conversation so a new agent can continue seamlessly. It covers the student, the thesis topic, the technical understanding reached, the open decisions, and where things stand.

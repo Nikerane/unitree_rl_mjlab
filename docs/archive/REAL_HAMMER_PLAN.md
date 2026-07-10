@@ -1,3 +1,6 @@
+> ⚠️ **DATED RESEARCH RECORD** (archived 2026-07-05) — kept for provenance.
+> Facts below reflect their date and may contradict the current code; check `docs/README.md`.
+
 # T0.5 — Replace the primitive hammer with a real claw-hammer mesh
 
 **Date:** 2026-06-15 (corrected 2026-06-17) · **Branch:** `hammer-z1` · **Status:** **INTEGRATED, striking & RECALIBRATED** (both XMLs, grasp #10); arm gravcomp + sim-audit fixes done; Q1/I_ref re-measured and `NAIL_SUCCESS_THRESHOLD` re-pinned **0.030 → 0.027** (2026-06-17). Ready for Vega V1.

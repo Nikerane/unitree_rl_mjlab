@@ -1,11 +1,14 @@
 # Impulse-CaT implementation plan — extending faithful soft γ(1−δ) CaT from joint-velocity to per-joint impact impulse
 
-**Status:** design (2026-06-18), pre-implementation. Produced by a multi-agent deep-dive (4 readers → synthesis → 2 adversarial critics) over the thesis impulse-design docs, the implemented soft-CaT code, the mjlab substep machinery, and external literature.
+**Status:** **C0, C1 (Phase M gate) and the C5 soft-OR composition SHIPPED on branch `soft-cat` — impulse enforcement LOG-ONLY (`imp_max_p=0`; a composed velocity arm keeps its own `max_p`).** C0 built + CPU-validated 2026-06-18; hardened by two deep code-review rounds (2026-07-05: per-event pulse Λ, episode-cumulative capped delivered, first-violation seeding, log-only invariant). C2 (enable `max_p`) and C3 (GPU run) pend the Khadiv mechanism confirm + fixture-era threshold re-derivation. Design produced by a multi-agent deep-dive (4 readers → synthesis → 2 adversarial critics) over the thesis impulse-design docs, the implemented soft-CaT code, the mjlab substep machinery, and external literature.
+
+> **C0 build (done):** `src/tasks/hammer/mdp/impulse_bound.py` (`SubstepImpulseAccumulator` robot-side Λ_j, contact-anchored + sensor-gated, optional pre-contact baseline subtraction; `SubstepDeliveredImpulse` object-side ∫F_axial dt via a `reduce="netforce"` sensor) · `cat/constraints.py::joint_impulse_excess` (log-only) · `cat/hook.py` (use_vel/use_impulse split + sparse-signal robust normalizer; `imp_max_p=0` ⇒ δ≡0) · `rewards.py::DeliveredImpulseTerm` (maximize objective) · arm `Unitree-Z1-Hammer-CaT-Impulse` (cat_impulse flag) · `derive_impulse_thresholds.py` (quantity gate) · `validate_rewards.py` Phase M · 38 new unit tests. Full local pre-train gate GREEN.
+> **C0 findings (EE-dependent measurements — gripper-era C0, friction range revised 2026-07-04 fixture-era; superseded by any EE change, re-derive via `derive_impulse_thresholds.py`):** the dominant contaminant is dof-FRICTION (efc `mjCNSTR_FRICTION_DOF`, ~41–48% of the raw contact-window Λ_j, EE-dependent, spread across the load-bearing arm joints), not the weld (whose contribution is minor under gravity compensation); the object-side delivered ∫F·dt is the clean weld/friction-immune ground truth; per-joint J_limit and the reference-strike ratio are fixture-dependent — do not quote the old gripper-era numbers, re-run `derive_impulse_thresholds.py`. efc-row isolation of the *specific* contact is not clean in mujoco_warp (deferred). Pinocchio cross-check SKIPPED (not installed — decision pending). max_p>0 NOT enabled (awaits Khadiv mechanism confirm + Pinocchio decision).
 
 **Relationship to other docs:**
 - `FAITHFUL_SOFT_CAT_IMPL_PLAN.md` — the soft-CaT machinery this reuses (CaT δ-math, `CatPPO` scale-positives + dual-mask GAE, `CatSoftHook`). All of it is **unchanged** by this plan.
-- `TRACKING_IMPACT_IMPULSE_IMPL_PLAN.md` (stages T0–T5) — the *prior* impulse plan, written before soft-CaT was chosen. It mandates a **contact-anchored window** (T4:95) and prescribes an **excess-penalty → PID-Lagrangian CMDP** enforcement ladder. This plan supersedes the *enforcement-mechanism* portion (soft-CaT instead of penalty/Lagrangian) and inherits its quantity/windowing/threshold decisions.
-- `tracking_impact_impulse_design_research.md` — the cited research (D1–D6); the quantity `Λ_j = Σ|qfrc_constraint_j|·h` over a contact-anchored window comes from SQ3 (line 99).
+- `../../archive/TRACKING_IMPACT_IMPULSE_IMPL_PLAN.md` (stages T0–T5) — the *prior* impulse plan, written before soft-CaT was chosen. It mandates a **contact-anchored window** (Stage T4) and prescribes an **excess-penalty → PID-Lagrangian CMDP** enforcement ladder. This plan supersedes the *enforcement-mechanism* portion (soft-CaT instead of penalty/Lagrangian) and inherits its quantity/windowing/threshold decisions.
+- `../tracking_impact_impulse_design_research.md` — the cited research (D1–D6); the quantity `Λ_j = Σ|qfrc_constraint_j|·h` over a contact-anchored window comes from SQ3 (line 99).
 
 ---
 
@@ -35,7 +38,7 @@ The synthesis first proposed accumulating `qfrc_constraint` over the **full cont
 
 **Resolution (design + critics + upstream docs now agree):**
 1. **Contact-only masking** — isolate the hammer↔nail contact rows of `efc_force` (exclude `mjCNSTR_EQUALITY` weld and `mjCNSTR_LIMIT_JOINT`) before projecting to joint space; *or*, cheaper and weld-immune, **gate accumulation on the contact sensor** (already verified in `verify_contact_sensor.py`) so non-contact substeps contribute zero. Build the mask into the accumulator from day one — **not** a post-hoc "C0 audit".
-2. **Contact-anchored window** — accumulate from the first-contact substep to the last-contact substep of a strike (per `TRACKING_IMPACT_IMPULSE_IMPL_PLAN.md:95`), **not** over the fixed 20 ms control grid. This also closes the *spread-across-time* evasion (see §4).
+2. **Contact-anchored window** — accumulate from the first-contact substep to the last-contact substep of a strike (per `../../archive/TRACKING_IMPACT_IMPULSE_IMPL_PLAN.md` Stage T4), **not** over the fixed 20 ms control grid. This also closes the *spread-across-time* evasion (see §4).
 
 The C0 gate is then a true test, not an audit: **on a contact-free control step `Λ_j` must be ≈ 0**, and the weld contribution to arm DoFs must be below tolerance (assert, fail-not-warn).
 
@@ -54,11 +57,17 @@ The C0 gate is then a true test, not an audit: **on a contact-free control step 
 
 ### 3.1 `src/tasks/hammer/mdp/impulse_bound.py` (NEW — mirror `velocity_bound.py` `SubstepPeakJointVel`)
 
+> **This sketch is the original design** — the shipped `impulse_bound.py` supersedes it (per-event
+> PULSE Λ semantics, episode-cumulative capped delivered; hardened 2026-07-05). The code is the
+> authoritative semantics.
+
 ```python
 # Per-joint contact-reaction impulse limit (N·m·s). C0 PLACEHOLDER — the term ships LOG-ONLY
 # (max_p=0) until derive_impulse_thresholds.py emits real Harmonic-Drive Repeated-Peak × duration
 # values (≈2× rated torque, 1e4-event fatigue budget). NOT a magic constant to ship.
-Z1_JOINT_IMPULSE_LIMIT: float = 0.1            # placeholder
+Z1_JOINT_IMPULSE_LIMIT: float = 0.1            # placeholder — NEVER a silent default: joint_impulse_excess
+                                               # requires an explicit limit, and CatSoftHook rejects this
+                                               # VALUE under enforcement (imp_max_p>0)
 _ARM_CFG = SceneEntityCfg("robot", joint_names=("joint1",...,"joint6"))
 _ENV_SUBSTEP_IMPULSE_ATTR = "_hammer_substep_impulse"
 
@@ -81,12 +90,12 @@ class SubstepImpulseAccumulator(ManagerTermBase):   # per_substep=True
         return self.impulse.amax(dim=1)                              # (B,) for logging
 ```
 
-> `qfrc_constraint` **does** exist on the mujoco_warp 3.8.1 `Data` and is sliceable via the existing `entity._joint_dof_field('qfrc_constraint')` helper (`data.py:237-240`) — the `velocity_bound.py:22` comment ("not exposed on the Entity") is **outdated**; correct it in C0. Prefer adding a clean `qfrc_constraint` `@property` to `data.py` (mirror `qfrc_actuator` at `data.py:414-423`). `torque_source ∈ {'constraint','actuator'}` param kept for the documented ablation.
+> `qfrc_constraint` **does** exist on the mujoco_warp 3.8.1 `Data` and is sliceable via the existing `entity._joint_dof_field('qfrc_constraint')` helper (`data.py:237-240`) — the `velocity_bound.py:22` comment claiming it was inaccessible is **outdated** and already corrected in C0. Prefer adding a clean `qfrc_constraint` `@property` to `data.py` (mirror `qfrc_actuator` at `data.py:414-423`). `torque_source ∈ {'constraint','actuator'}` param kept for the documented ablation.
 
 ### 3.2 `src/tasks/hammer/cat/constraints.py` (add alongside `joint_velocity_excess`)
 
 ```python
-def joint_impulse_excess(env, limit=Z1_JOINT_IMPULSE_LIMIT, robot_cfg=_ARM_CFG) -> torch.Tensor:
+def joint_impulse_excess(env, limit) -> torch.Tensor:   # limit REQUIRED; no default, no robot_cfg (the accumulator's own robot_cfg fixes the joint set)
     """Raw per-joint impulse margin Λ_j − limit, shape (B, J). Positive ⇒ over the limit.
     Reads the contact-anchored substep accumulator stashed on env. Returns the RAW signed margin
     only — CaT does all clamp/EMA. NEVER a probability, NEVER a reward term (hard constraint #1)."""
@@ -95,11 +104,12 @@ def joint_impulse_excess(env, limit=Z1_JOINT_IMPULSE_LIMIT, robot_cfg=_ARM_CFG) 
     return acc.impulse - limit          # (B,J) − (J,) broadcasts to per-joint thresholds
 ```
 
-### 3.3 `CatSoftHook` diff — **two lines**, everything else unchanged
+### 3.3 `CatSoftHook` diff — a dedicated `_add_impulse_constraint` (sparse-signal per-column self-seeding normalizer + `imp_max_p==0` log-only short-circuit), everything else unchanged
 
 ```python
-c_imp = joint_impulse_excess(env, limit=self._imp_limit, robot_cfg=self._robot_cfg)
-self._cat.add("joint_impulse_excess", c_imp, max_p=self._imp_max_p)   # get_probs() already MAXes
+# impulse takes a DEDICATED path (not cat.add's shared batch-max EMA — that saturates on the sparse Λ signal):
+self._add_impulse_constraint(env)   # writes cat.probs['joint_impulse_excess'] via a per-column
+                                    # self-seeding normalizer; get_probs() then MAXes it in (soft-OR)
 ```
 
 `get_probs()` MAXes over all terms and all columns (6 vel + 6 impulse = 12 columns → one per-env δ), so the soft-OR is automatic. `constraint_manager.py`, `cat_ppo.py`, `cat_storage.py`, `keys.py` are **untouched**.
@@ -113,26 +123,26 @@ self._cat.add("joint_impulse_excess", c_imp, max_p=self._imp_max_p)   # get_prob
 | **Weld pollution** (blocker) | `qfrc_constraint` dominated by the weld baseline | contact-only mask / sensor gate; C0 assert `Λ≈0` off-contact, weld < tol (fail-not-warn) |
 | **Spread-across-time** (blocker) | per-control-step reset → split one impact across two 20 ms windows, each under threshold | **contact-anchored** window from the sensor (not the control grid); test: inject a boundary-straddling strike, assert δ fires |
 | **Spread-across-joints** (major) | soft-OR MAX + per-column normalize → only worst joint drives δ; shuffle load off it | C4 reports a **chain-aggregate** (Σ\|Λ_j\| or Cartesian EE reaction impulse) alongside per-joint; if aggregate creeps while columns stay flat, add one aggregate column (`.add()`); echoes the known chain-coupled residual ([[z1-velocity-bound-finding]]) |
-| **Sparse-signal EMA collapse** (major) | Λ≈0 between strikes → batch-max EMA c_max decays to the 1e-6 floor → δ saturates at max_p on *every* contact (hard lottery, kills graded δ) | **do not inherit the velocity EMA**: mask the EMA update to contact steps / use a robust statistic (p95 of recent contact events) / **seed c_max from the C0 reference histogram**; C2 plots δ-vs-excess and asserts it is *graded*, not saturated |
+| **Sparse-signal EMA collapse** (major) | Λ≈0 between strikes → a batch-max EMA c_max would decay to the floor → δ saturates at max_p on every contact | **do not inherit the velocity EMA**: the shipped fix is CaT-style FIRST-VIOLATION per-column seeding (`cmax = max(first over-limit batch-max, imp_seed floor)`) with a per-column violation-masked EMA afterwards; `imp_seed` is a decay FLOOR only (any small value safe), NOT a p95/excess statistic; C2 plots δ-vs-excess and asserts it is *graded*, not saturated |
 | **Vacuous limit** (major) | δ≈0 is ambiguous: "safe" vs "J_limit too loose"; placeholder 0.1 would silently ship | **binding-ness gate** (C1/C2): report fraction of strikes in `[0.8·J_limit, J_limit]` and δ-attributable peak-impulse reduction vs the same-seed unconstrained baseline; ≈0 reduction + δ≈0 ⇒ vacuous, fail |
-| **Wrong quantity** (major) | `qfrc_constraint` (impact reaction) vs `qfrc_actuator` (transmitted motor effort) under-justified on a position-servo + weld arm; the Repeated-Peak rating bounds *transmitted joint torque* | promote the **Pinocchio `impulseDynamics` (r_coeff=0) cross-check** from a C4 validation to a **C0 quantity-selection GATE** — it is the only ground truth for "is this the real impact impulse" |
+| **Wrong quantity** (major) | `qfrc_constraint` (impact reaction) vs `qfrc_actuator` (transmitted motor effort) under-justified on a position-servo + weld arm; the Repeated-Peak rating bounds *transmitted joint torque* | promote the **Pinocchio `impulseDynamics` (r_coeff=0) cross-check** from a C4 validation to a **C0 quantity-selection GATE** *(as designed — at C0 the object-side ∫F·dt was accepted as ground truth instead and Pinocchio DEFERRED, see the status note; revisit before `max_p>0`)* |
 
 ---
 
-## 5. Staged plan (mirrors the C0–C5 that worked for velocity)
+## 5. Staged plan (mirrors the velocity plan's C0–C5 — the two plans' stage numberings are separate namespaces)
 
-- **C0 — accumulator + log-only + physics probe + quantity gate.** Implement `SubstepImpulseAccumulator` (contact-gated) + `joint_impulse_excess`; wire LOG-ONLY (`max_p=0`) behind a `cat_impulse` flag; correct `velocity_bound.py:22`. Write `derive_impulse_thresholds.py` / `log_strike_window.py`: probe the open-loop reference strike → per-joint contact-impulse histogram (real magnitudes; **weld contribution asserted < tol**; Λ≈0 off-contact). **Pinocchio cross-check decides the quantity here**, not later. *Tests:* accumulator sums over the contact window, zeros at boundaries, shape (B,6); off-contact ≈ 0; margin never a probability.
-- **C1 — pre-train gate (Phase L).** Add a `validate_rewards.py` Phase L: Λ_j logged nonzero on a normal strike, excess ≈ 0 on a gentle/reference strike, positive on an injected violent strike; δ identically 0 under `max_p=0` (proves log-only is a true no-op); **binding-ness metric** present. All existing phases still pass; `verify_contact_sensor.py` + `verify_reward_setup.py` green.
+- **C0 — accumulator + log-only + physics probe + quantity gate.** Implement `SubstepImpulseAccumulator` (contact-gated) + `joint_impulse_excess`; wire LOG-ONLY (`max_p=0`) behind a `cat_impulse` flag; correct `velocity_bound.py:22`. Write `derive_impulse_thresholds.py` / `log_strike_window.py`: probe the open-loop reference strike → per-joint contact-impulse histogram (real magnitudes; **weld contribution asserted < tol**; Λ≈0 off-contact). **The MuJoCo-native object-side ∫F·dt is the accepted ground truth; Pinocchio `impulseDynamics` cross-check is DEFERRED (not installed — decision pending).** *Tests:* accumulator sums over the contact window, zeros at boundaries, shape (B,6); off-contact ≈ 0; margin never a probability.
+- **C1 — pre-train gate (SHIPPED — as Phase M; the letter L went to the overshoot clamp).** The shipped `validate_rewards.py` Phase M certifies the M1–M4 invariants: Λ_j logged nonzero on a strike; `cat_delta` published and identically 0 under `max_p=0` (proves log-only is a true no-op); the delivered-impulse reward fires; the raw-margin identity (Λ−limit) holds at nonzero Λ. The **binding-ness metric** shipped in `derive_impulse_thresholds.py` (the quantity gate), not in Phase M. All existing phases still pass; `verify_contact_sensor.py` + `verify_reward_setup.py` green.
 - **C2 — smoke + normalizer/max_p gate (CPU/tiny GPU).** Turn on `max_p` with the real `J_limit`. **Hard gate** (not "watch"): c_max(impulse) bounded, not pinned at 1e-6, not single-event-spiked; δ-vs-excess **graded**, not saturated. Mini-sweep `max_p ∈ {0.25, 0.5}`; pick robust statistic / τ. Strike skill still forms.
 - **C3 — full GPU results run (one GPU).** `Unitree-Z1-Hammer-CaT-Impulse`, chosen `max_p`/τ, real per-joint `J_limit`. Compare vs `r_imit`-only and the existing CaT-velocity arm on the same seed budget.
 - **C4 — peak-impulse eval** (impulse analogue of `diag_policy_trace` peak-qv). Per-joint **and chain-aggregate** peak impulse (max/p95/worst-joint); delivered nail impulse retained; Pinocchio `impulseDynamics` cross-check within tolerance.
-- **C5 — combined soft-OR arm (optional, last).** velocity ∪ impulse in one CaT instance (one `.add()`; 12 columns). Report the **column-contribution (argmax) histogram** to show the impulse column actually drives terminations and is not masked by the correlated velocity column under soft-OR saturation — otherwise the composition claim is unsupported. Scaffold (not train) the escalation ladder beyond soft-CaT (excess-penalty / episodic-sum PID-Lagrangian CMDP) as future work.
+- **C5 — combined soft-OR composition (SHIPPED at flag level: `cat_soft=True` + `cat_impulse=True` composes into ONE hook — velocity ∪ impulse soft-OR, 12 columns — unit-tested; no combined task id is registered yet).** Still to do at results time: report the **column-contribution (argmax) histogram** to show the impulse column actually drives terminations and is not masked by the correlated velocity column under soft-OR saturation; scaffold (not train) the escalation ladder beyond soft-CaT (excess-penalty / episodic-sum PID-Lagrangian CMDP) as future work.
 
 **Run isolation:** impulse runs as a **separate arm** (`Unitree-Z1-Hammer-CaT-Impulse`), not soft-OR'd with velocity, for clean attribution — velocity and impulse are physically correlated (both ∝ `m_eff·v`), so a combined arm can't attribute the safety gain. Combined is the trivial last experiment.
 
 ---
 
-## 6. Net-new literature (verified this session; not in `hammering_reward_design_deep_dive_v2.md`)
+## 6. Net-new literature (verified this session; not in `../hammering_reward_design_deep_dive_v2.md`)
 
 > **Gap found:** the v2 deep-dive cites generic constrained-RL but **never cites CaT itself** — the mechanism the thesis is built on.
 
@@ -165,7 +175,7 @@ The Z1 reset pose (`NEAR_NAIL_JOINT_POS`, `z1_constants.py:184`) looks out-of-pl
 - **In-plane (`joint1=0`) IS achievable — *correction* to the earlier "grasp-forced" claim.** Locking `joint1=0` and re-solving with the *orientation-aware* IK converges to a fully **in-plane + perpendicular (0.00° tilt) + on-nail** pose, within limits: `{j1=0, j2=114.1, j3=−102.9, j4=78.8, j5=0, j6=94.5}°`. The **wrist** absorbs the lateral face offset (`joint6` → 94.5° vs 70.5°), so the base need not yaw. The earlier −6° was a *position-only-IK artifact* (it never used the wrist to compensate), NOT a grasp constraint. **No re-grasp needed.**
 - **Wrist twist** (`joint4≈79°, joint6≈94°`) remains — the sideways-claw-grasp cost; benign.
 
-**Action:** re-solve `NEAR_NAIL_JOINT_POS` via the orientation-aware IK with `joint1` locked to 0 → an **in-plane, perpendicular, on-nail** reset pose (drop-in replacement; no re-grasp, no action-space change, no hand-tuning). Re-verify with `playback_reference.py` (Phase M — strike still drives the nail) + `validate_rewards.py` before training on it. The diagnostic comparison runs (a_base / c_a3_cat / c_hardterm / soft-CaT) used the old pose but were only for *choosing the enforcement path* (→ soft-CaT), so no re-train is owed.
+**Action — DONE for the gripper-era EE (2026-06-18, commit `1f4a6f8`, sibling `hammer_z1_env/solve_ik_oriented.py`):** `NEAR_NAIL_JOINT_POS` re-solved via the orientation-aware IK with `joint1` locked to 0 → an **in-plane, perpendicular, on-nail** reset pose (drop-in replacement; no re-grasp, no action-space change, no hand-tuning), re-verified with `playback_reference.py` (note: that script's "PHASE M GATE" print is its own legacy reference-strike label — unrelated to `validate_rewards.py` Phase M) + `validate_rewards.py`. The solve table above is gripper-era. **A NEW re-solve is pending for the L6 fixture EE** — tracked in `OPEN_QUESTIONS.md` ("Remaining blockers"). The diagnostic comparison runs (a_base / c_a3_cat / c_hardterm / soft-CaT) used the old pose but were only for *choosing the enforcement path* (→ soft-CaT), so no re-train is owed.
 
 > **Future robustness arm (orientation control + Vicon sim-to-real):** once the nail is no longer fixed-vertical, the strike must align to the actual board/nail normal — a **6-DoF DiffIK action** + board-tilt domain randomization, with a Vicon-only state scheme (board-cluster normal + a nail-shaft tracking ball for depth, no perception). Full spec: `ORIENTATION_ROBUST_SIM2REAL_ARM.md`. Build **after** the fixed-impedance impulse result.
 
@@ -175,4 +185,4 @@ The Z1 reset pose (`NEAR_NAIL_JOINT_POS`, `z1_constants.py:184`) looks out-of-pl
 - `J_limit` per joint (Harmonic-Drive Repeated-Peak × duration) — derive in C0, not invent.
 - Contact window length / single-strike vs cyclic (depends on Q1 single-strike feasibility).
 - Per-joint vs summed cost for any future Lagrangian rung.
-- Pinocchio `impulseDynamics` is named in the docs but **unbuilt** in the Z1 task — C0 prerequisite.
+- Pinocchio `impulseDynamics` is named in the docs but **unbuilt** in the Z1 task — was a C0 prerequisite as designed; at C0 the object-side ∫F·dt was accepted as ground truth instead and Pinocchio DEFERRED (revisit before `max_p>0`).

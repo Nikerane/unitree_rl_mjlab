@@ -4,7 +4,7 @@
 >
 > **FOLLOW-UP (2026-06-17):** Not chasing the Z1 number for its own sake, but a **targeted CaT-knob ablation** is worthwhile to *learn the tool* (it transfers to the G1) and to test the **cause-agnostic** hypothesis — since CaT terminates on the violation regardless of cause, **hard CaT (p_max→1.0) + substep-rate detection** may bound the worst-case where the per-joint plant (A4) could not. Axes: p_max (soft 0.5 → hard 1.0), detection (control-rate → substep), curriculum (on/off). Design to be finalized from the CaT deep-dive (`../research/reward-design/`), then run as a focused ablation. The action-level Jacobian projection remains the known hard-bound fix, better rehearsed on the G1.
 
-**Question:** b_strike gave a real ~1.2 m/s single strike but drove arm joints to 4.3–4.65 rad/s worst-case, over the real Z1 limit of 3.1415. Which way of bounding velocity keeps the strike *and* gets honest? (Decision context: `2026-06-17_b_strike.md`; research: `../research/reward-design/JOINT_VELOCITY_BOUND_RESEARCH.md`.)
+**Question:** b_strike gave a real ~1.2 m/s single strike but drove arm joints to 4.3–4.65 rad/s worst-case, over the real Z1 limit of 3.1415. Which way of bounding velocity keeps the strike *and* gets honest? (Decision context: `2026-06-17_b_strike.md`; research: `../research/reward-design/CONSTRAINED_RL_LANDSCAPE.md`.)
 
 **Harness (all arms):** A-BASE 7-term reward, 3 seeds × 500 iters, Vega. Eval: `diag_policy_trace` (64 envs × 80 steps) on the trained `model_499`. A1 evaluated at its trained delta=0.10; A2/A3 on the base task at delta=0.15 (measures the learned policy with no constraint masking its raw velocity); A4 on the DcMotor task (the envelope IS the plant).
 
@@ -42,7 +42,7 @@ A3 (the original CaT arm) detected velocity at **control rate**, aliasing the wi
 - **A4 (honest plant) is the punchline.** It barely moved the worst-case (4.27–4.36 vs baseline 4.29–4.65) *and* lowered the impact (0.93 m/s). The torque-speed curve removes the bounded joint's *own motor* contribution, but the overshoot is **chain-coupled** — momentum delivered to a joint through the linkage by other joints' motion, plus contact rebound — which no per-joint motor curve can brake. So the residual is *not* motor-driven; it is kinematic coupling.
 - **A2 (fixed penalty, w=0.5) effectively failed** — worst-case ≈ baseline. A strike's squared-excess penalty (~1.4/step) is negligible against `completion=+100`, so the policy eats it. A fixed-λ penalty is hackable; it needs a far larger weight (risking the strike) or a Lagrangian that auto-scales.
 - **A3 (CaT) is the best impact-preserving reducer** — keeps 1.12 m/s while pulling the worst-case to 3.6–4.0 and the *mean* solidly under π. The termination threat (losing +100) is a much stronger, scale-free deterrent than the weak penalty. Still soft: control-rate detection + the chain-coupled tail leak through.
-  - **CAVEAT (added 2026-06-17, post CaT deep-dive):** A3 used the **naive sampled-Bernoulli HARD-termination** variant (`velocity_bound.py:100`), not the paper's low-variance soft `γ(1−δ)` value-discount. The *core ablation conclusion is robust* to this — no termination (naive or real) physically brakes the spike; both are soft-in-expectation, so real CaT would also leave a worst-case tail (the chain-coupled residual is a physics fact). What may refine with real CaT: A3's exact numbers + training stability, and the bigger confound — **control-rate vs substep detection** (A3 aliased the 500 Hz peak). The planned substep-CaT run de-confounds the detection axis; the soft `γ(1−δ)` rebuild is the foundational fix carried to the G1. See `../research/reward-design/CAT_DEEP_DIVE.md`.
+  - **CAVEAT (added 2026-06-17, post CaT deep-dive):** A3 used the **naive sampled-Bernoulli HARD-termination** variant (`velocity_bound.py:100`), not the paper's low-variance soft `γ(1−δ)` value-discount. The *core ablation conclusion is robust* to this — no termination (naive or real) physically brakes the spike; both are soft-in-expectation, so real CaT would also leave a worst-case tail (the chain-coupled residual is a physics fact). What may refine with real CaT: A3's exact numbers + training stability, and the bigger confound — **control-rate vs substep detection** (A3 aliased the 500 Hz peak). The planned substep-CaT run de-confounds the detection axis; the soft `γ(1−δ)` rebuild is the foundational fix carried to the G1. See `../research/reward-design/FAITHFUL_SOFT_CAT_IMPL_PLAN.md` (CaT deep-dive appendix).
 - **A1 (scale-down) has the best worst-case (3.3–3.6)** but the slowest strike (0.82) — and still ~6–15% over π. Pure kinematic scaling is necessary-but-not-sufficient.
 
 ## Final ranking
@@ -64,11 +64,5 @@ The chain-coupled residual is the binding fact. To get a **hard** worst-case bou
 ## Artefacts
 - Checkpoints (Vega): `logs/rsl_rl/z1_hammer/2026-06-17_*_{c_a1_delta010,c_a2_vpenalty,c_a3_cat,c_a4_dcmotor}_seed{0,1,2}/model_499.pt`.
 - Local pulls: `/tmp/ckpt/{c_a1,c_a2,c_a3,c_a4}/seed{0,1,2}_model_499.pt`.
-- Runs: A1 `36526179`, A2 `36526270`, A3 `36526271`, A4 `36526318`.
-- `diag_policy_trace.py` gained a `--delta-scale` override (eval a policy at its trained scale, e.g. A1 at 0.10).
-
-## Artefacts
-- Checkpoints (Vega): `logs/rsl_rl/z1_hammer/2026-06-17_*_{c_a1_delta010,c_a2_vpenalty,c_a3_cat,c_a4_dcmotor}_seed{0,1,2}/model_499.pt`.
-- Local pulls: `/tmp/ckpt/{c_a1,c_a2,c_a3}/seed{0,1,2}_model_499.pt` (A4 pending).
 - Runs: A1 `36526179`, A2 `36526270`, A3 `36526271`, A4 `36526318`.
 - `diag_policy_trace.py` gained a `--delta-scale` override (eval a policy at its trained scale, e.g. A1 at 0.10).

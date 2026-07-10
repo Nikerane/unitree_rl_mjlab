@@ -1,3 +1,6 @@
+> ⚠️ **ARCHIVED 2026-07-05** — superseded by `docs/research/reward-design/validate_rewards.py` (module docstring + phase A–M comments).
+> Facts below may contradict the current code. Do not act on them; check `docs/README.md`.
+
 # Reward Validation Methodology
 ## Testing reward correctness without training
 

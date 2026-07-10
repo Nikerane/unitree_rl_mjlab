@@ -1,3 +1,8 @@
+> ⚠️ **DATED RESEARCH RECORD** (supervisor-conversation update; pre-2026-06-10) — kept for provenance.
+> The single-policy / variable-impedance / online-RL architecture it records is still current. The
+> build-on-the-G1 platform framing is SUPERSEDED by the 2026-06-17 Z1-primary direction
+> (`CLAUDE.md` DIRECTION UPDATE block). Check `docs/README.md` for current truth.
+
 # Thesis Direction — Update / Addendum
 
 **Read this alongside the original "Master's Thesis — Handoff Brief."** That brief is still 90% correct: the task, the robot, the physics, the tooling, and the reading list are unchanged. What changed is the *architecture* — how SURE, the reference trajectory, the RL policy, and CBO relate to each other. This document records that shift so anyone (or any agent) picking up the work knows what is now different and why.

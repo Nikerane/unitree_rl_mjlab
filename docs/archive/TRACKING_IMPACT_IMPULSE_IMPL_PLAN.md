@@ -1,3 +1,6 @@
+> ⚠️ **ARCHIVED 2026-07-05** — superseded by `docs/research/reward-design/IMPULSE_CAT_IMPL_PLAN.md` + `FAITHFUL_SOFT_CAT_IMPL_PLAN.md`.
+> Facts below may contradict the current code. Do not act on them; check `docs/README.md`.
+
 # Tracking + Impact + Impulse — Staged Implementation Plan (Z1 Phase-0 → G1)
 
 **Date:** 2026-06-10 · **Branch:** `hammer-z1` · **Status:** **T0 + T1 IMPLEMENTED & VERIFIED** (2026-06-10; T0 commit `ba0dc9f`, T1 this commit); **T2 DESIGN LOCKED 2026-06-17** (see changelog — A-TRACK arm, ready for writing-plans/impl); T3–T5 pre-implementation. **Scope: Z1 only** — G1 deferred entirely (user decision, 2026-06-10; see stub at end).

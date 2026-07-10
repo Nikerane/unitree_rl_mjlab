@@ -1,3 +1,6 @@
+> ⚠️ **ARCHIVED 2026-07-05** — superseded by nothing — historical audit record (2026-05-22).
+> Facts below may contradict the current code. Do not act on them; check `docs/README.md`.
+
 # Opus 4.7 Audit of Sonnet 4.6 Reward-Engineering Deliverables
 
 **Date:** 2026-05-22

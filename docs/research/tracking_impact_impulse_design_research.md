@@ -1,12 +1,15 @@
+> ⚠️ **DATED RESEARCH RECORD** (2026-06-10 design research) — kept for provenance.
+> Facts below reflect their date and may contradict the current code; check `docs/README.md`.
+
 # Design Research — Track a Reference, Maximize Impact, Bound Joint Impulse
 
 **Pipeline:** ARS `deep-research` (`full` mode, design-research variant) — 6 parallel literature-search agents + lead verification + inline DA/editorial checkpoints.
 **Date:** 2026-06-10 · **Branch:** `hammer-z1` · **Requested by:** user directive "make our environment such that with the RL policy we can follow the given trajectory and at the same time have max force and minimize the impulse on the joints."
-**Companion implementation plan:** `docs/research/reward-design/TRACKING_IMPACT_IMPULSE_IMPL_PLAN.md`.
+**Companion implementation plan:** `../archive/TRACKING_IMPACT_IMPULSE_IMPL_PLAN.md`.
 
-> ⚠️ **EVIDENCE STATUS & SCOPE BANNER** (lesson from `PEER_REVIEW_v2.md` Tier-1 #3). This is a *design* document grounded in verified external literature and the local corpus. **No RL training was run for it.** Every design recommendation below is *hypothesized-untested* until the ablations in the companion plan are executed. Claims about what the literature reports are verified; claims about what will work in *our* env are predictions.
+> ⚠️ **EVIDENCE STATUS & SCOPE BANNER** (lesson from `../archive/PEER_REVIEW_v2.md` Tier-1 #3). This is a *design* document grounded in verified external literature and the local corpus. **No RL training was run for it.** Every design recommendation below is *hypothesized-untested* until the ablations in the companion plan are executed. Claims about what the literature reports are verified; claims about what will work in *our* env are predictions.
 
-> **Pipeline deviations (disclosed):** (1) The user pre-authorized end-to-end execution ("go all in"), so the Phase-1→2 user-confirmation gate was skipped; the RQ brief is in §1 for retroactive review. (2) Two session-limit interruptions occurred mid-investigation; all six agents ultimately completed. (3) Source verification: every agent was required to open every source it reported (WebFetch); the lead re-verified the two most load-bearing net-new citations (Varin 2019, Freitag 2026). Tags: `[E1]`/`[E2]` = venue-confirmed / arXiv-only, opened by the reporting agent this session; `[E1†]` = additionally re-fetched by the lead; `[E3]` = inherited from the verified local corpus (`impact_tracking_rl_litreview.md`, audited 2026-06-10 — see session audit); `[DOCS]` = official documentation.
+> **Pipeline deviations (disclosed):** (1) The user pre-authorized end-to-end execution ("go all in"), so the Phase-1→2 user-confirmation gate was skipped; the RQ brief is in §1 for retroactive review. (2) Two session-limit interruptions occurred mid-investigation; all six agents ultimately completed. (3) Source verification: every agent was required to open every source it reported (WebFetch); the lead re-verified the two most load-bearing net-new citations (Varin 2019, Freitag 2026). Tags: `[E1]`/`[E2]` = venue-confirmed / arXiv-only, opened by the reporting agent this session; `[E1†]` = additionally re-fetched by the lead; `[E3]` = inherited from the verified local corpus (`reward-design/LITERATURE.md`, audited 2026-06-10 — see session audit); `[DOCS]` = official documentation.
 
 ---
 

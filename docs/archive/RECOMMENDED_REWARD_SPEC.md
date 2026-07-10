@@ -1,3 +1,6 @@
+> ⚠️ **ARCHIVED 2026-07-05** — superseded by `src/tasks/hammer/hammer_env_cfg.py` — the implemented 7-term reward is the source of truth (this 9-term spec is aspirational).
+> Facts below may contradict the current code. Do not act on them; check `docs/README.md`.
+
 # Recommended Reward Specification — Z1 Hammer Task
 ## Engineering spec for mjlab ManagerBasedRlEnv
 

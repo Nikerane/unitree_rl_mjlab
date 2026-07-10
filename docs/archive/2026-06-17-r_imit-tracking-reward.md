@@ -1,3 +1,6 @@
+> ⚠️ **ARCHIVED 2026-07-05** — superseded by nothing — executed 2026-06-17 plan (r_imit arm shipped in `src/tasks/hammer/`).
+> Facts below may contradict the current code. Do not act on them; check `docs/README.md`.
+
 # r_imit Weak-Annealed Tracking Reward (A-TRACK arm) — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

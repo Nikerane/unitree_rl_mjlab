@@ -1,3 +1,6 @@
+> ⚠️ **DATED RESEARCH RECORD** (2026-06-10 synthesis) — kept for provenance.
+> The "Z1 lacks the impulse constraint / start fresh on the G1" framing is SUPERSEDED by the 2026-06-17 Z1-primary direction (`CLAUDE.md`); the substep impulse accumulator + soft-CaT now ship on the Z1. Conceptual analysis remains useful; check `docs/README.md` for current truth.
+
 # Thesis Direction — Deep-Research Synthesis
 
 **Method:** ARS deep-research, local-corpus mode. Sources: `thesis_handoff_brief_original.md` (original), `thesis_direction_update.md` (post-supervisor update). Cross-referenced against the current Z1 hammer work in `docs/HANDOVER.md` and `docs/research/`. No new external literature pulled — the existing bibliographies inside both docs are taken as inherited.

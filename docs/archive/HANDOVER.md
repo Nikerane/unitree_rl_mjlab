@@ -1,3 +1,6 @@
+> ⚠️ **ARCHIVED 2026-07-05** — superseded by `docs/thesis/README.md` + `CLAUDE.md` (current direction).
+> Facts below may contradict the current code. Do not act on them; check `docs/README.md`.
+
 # Z1 Hammer Project — Handover
 
 **Audience:** an agent or engineer picking up this branch cold.

@@ -4,7 +4,7 @@ Runs scripted state sequences (including direct sim-state writes) and asserts
 each reward term produces the expected value. Catches reward-correctness bugs
 without requiring training.
 
-Methodology: docs/research/reward-design/REWARD_VALIDATION_METHODOLOGY.md
+Methodology: docs/archive/REWARD_VALIDATION_METHODOLOGY.md
 
 Phases (expected values scale with the live env config weights, not hardcoded):
     A. Reset & hold               -> nail_depth_delta == 0
@@ -18,6 +18,10 @@ Phases (expected values scale with the live env config weights, not hardcoded):
     I. Strike (drive down)        -> impact_progress > 0 on fresh productive contact, 0 else
     J. Phase machinery (T1)       -> strike_phase ~0 after reset, monotone under
                                      descent, reaches the descent half, re-anchors on reset
+    K. Imitation prior (T2)       -> r_imit anchored at reset, ante-impact latch, budget cap
+    L. Overshoot clamp            -> nail_depth_delta clamps to GOAL past the soft-limit stop
+    M. Impulse-CaT arm (C0)       -> Λ_j>0 on a strike, cat_delta ≡ 0 under log-only (imp_max_p=0),
+                                     delivered-impulse reward fires, joint_impulse_excess = Λ_j − limit
 
 Run:
     /home/nikhil/miniconda3/envs/unitree_mjlab/bin/python \\
@@ -357,6 +361,77 @@ def main() -> None:
     )
   print(f"  L PASS  nail_depth_delta clamps to {expected_delta:.4f} at overshoot (GOAL={NAIL_GOAL_DEPTH} m)")
   summary.append(("L. Overshoot clamp", r))
+
+  # --- Phase M: impulse-CaT arm (Λ_j accumulation, LOG-ONLY δ≡0, delivered-impulse reward) ---
+  # Builds the SEPARATE -CaT-Impulse arm (cat_impulse=True) and certifies the C0 invariants:
+  #   M1  Λ_j (substep accumulator) goes positive on a productive strike;
+  #   M2  cat_delta is PUBLISHED every step (a dead hook must FAIL, not vacuously pass) and is
+  #       identically 0 under imp_max_p=0 (log-only is a TRUE no-op — the enforcement gate);
+  #   M3  the object-side delivered-impulse maximize reward fires on the strike;
+  #   M4  joint_impulse_excess = Λ_j − limit checked at a step with NONZERO Λ (not a tautology).
+  # auto_reset is DISABLED for this phase (mjlab-native): nail_driven still TERMINATES (the MDP is
+  # unchanged, and the metrics-before-reset ordering on the terminal strike is exercised), but the
+  # in-step auto-reset — which zeroed the accumulators before step() returned and silently discarded
+  # the home-driving strike's Λ (2026-07 review finding #5) — does not run, so terminal-step values
+  # stay readable. Full histogram + shipped-accumulator cross-check: derive_impulse_thresholds.py.
+  print("\n--- Phase M: impulse-CaT arm (Λ_j, log-only δ≡0, delivered impulse) ---")
+  from src.tasks.hammer.cat.constraints import joint_impulse_excess
+  from src.tasks.hammer.mdp.impulse_bound import (
+    _ENV_SUBSTEP_IMPULSE_ATTR,
+    Z1_JOINT_IMPULSE_LIMIT,
+  )
+
+  imp_cfg = z1_hammer_env_cfg(play=True, cat_impulse=True)
+  imp_cfg.scene.num_envs = 1
+  imp_cfg.auto_reset = False  # terminal-step state stays readable; termination itself still fires
+  imp_env = ManagerBasedRlEnv(imp_cfg, device=device)
+  imp_env.reset()
+  imp_down = torch.zeros(1, imp_env.action_manager.total_action_dim, device=device)
+  imp_down[:, 2] = -1.0
+  acc = getattr(imp_env, _ENV_SUBSTEP_IMPULSE_ATTR)
+  imp_rm = imp_env.reward_manager
+  didx = imp_rm.active_terms.index("delivered_impulse")
+  peak_lambda = torch.zeros(6, device=device)
+  max_delta, max_dimp_reward = 0.0, 0.0
+  m4_margin = m4_impulse = None
+  terminated = False
+  for step in range(20):
+    imp_env.step(imp_down)
+    imp_now = acc.impulse[0].clone()
+    peak_lambda = torch.maximum(peak_lambda, imp_now)
+    delta = imp_env.extras.get("cat_delta")
+    if delta is None:
+      print(f"\n[FAIL] M2: extras['cat_delta'] missing at step {step} — the CaT hook is not wired")
+      sys.exit(1)
+    max_delta = max(max_delta, float(delta.abs().max()))
+    max_dimp_reward = max(max_dimp_reward, float(imp_rm._step_reward[0, didx]))
+    if m4_margin is None and float(imp_now.max()) > TOL_ZERO:
+      # Capture the raw-margin identity at a step where Λ is genuinely nonzero (anti-tautology).
+      m4_margin = joint_impulse_excess(imp_env, limit=Z1_JOINT_IMPULSE_LIMIT).clone()
+      m4_impulse = acc.impulse.clone()
+    if bool(imp_env.reset_terminated.any()):
+      terminated = True  # success fired; with auto_reset=False the terminal state is still live
+      break
+  if terminated:
+    print("  (success termination fired on the strike step; terminal-step Λ read pre-reset)")
+  if not (peak_lambda.max() > TOL_ZERO):
+    print(f"\n[FAIL] M1: per-joint impulse Λ_j never went positive on the strike ({peak_lambda.tolist()})")
+    sys.exit(1)
+  print(f"  M1 PASS  peak Λ_j = {[f'{v:.3f}' for v in peak_lambda.tolist()]} N·m·s")
+  assert_zero(max_delta, "M2: cat_delta must be identically 0 under log-only imp_max_p=0", tol=1e-6)
+  print(f"  M2 PASS  cat_delta published every step and ≡ 0 (log-only no-op): max|δ| = {max_delta:.1e}")
+  if not (max_dimp_reward > TOL_ZERO):
+    print(f"\n[FAIL] M3: delivered_impulse reward never fired (peak {max_dimp_reward:.4f})")
+    sys.exit(1)
+  print(f"  M3 PASS  delivered_impulse reward peaked at {max_dimp_reward:.4f} (object-side maximize)")
+  if m4_margin is None:
+    print("\n[FAIL] M4: never observed a nonzero Λ step to check the raw-margin identity on")
+    sys.exit(1)
+  if m4_margin.shape != (1, 6) or not torch.allclose(m4_margin, m4_impulse - Z1_JOINT_IMPULSE_LIMIT):
+    print(f"\n[FAIL] M4: joint_impulse_excess must equal Λ_j − limit, shape (1,6); got {m4_margin.shape}")
+    sys.exit(1)
+  print(f"  M4 PASS  joint_impulse_excess = Λ_j − {Z1_JOINT_IMPULSE_LIMIT} at nonzero Λ (raw signed margin)")
+  summary.append(("M. Impulse arm", {}))
 
   # --- Summary table ---
   print("\n" + "=" * 110)

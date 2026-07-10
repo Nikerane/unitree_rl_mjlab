@@ -1,3 +1,6 @@
+> ⚠️ **ARCHIVED 2026-07-05** — superseded by `src/tasks/hammer/hammer_env_cfg.py` (the `impact_progress` term shipped) + `docs/research/hammering_reward_design_deep_dive_v2.md`.
+> Facts below may contradict the current code. Do not act on them; check `docs/README.md`.
+
 # Impact-Progress Reward — Implementation Spec (changes #1 + #2)
 
 **Date:** 2026-06-02 · **Branch:** `hammer-z1` · **Status:** design approved, pre-implementation
