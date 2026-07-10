@@ -165,3 +165,15 @@ on success, and deviation ≈ σ. The early-training episode-length bump (iters 
 `delta_pos_scale` 0.05→0.15 + depth clamp → **real single ballistic strike** (~1.2 m/s, 2.7× V1), 100% success, ~4 control steps, press still excluded. **But** the trained policy exceeds the 3.1415 rad/s joint-velocity limit (worst-case 4.3–4.65 across all seeds) — Option A ("self-limiting, no rail") is falsified for the closed-loop policy; how to bound it is the open decision (research `wf_aa165e9a-cb9`).
 
 → **Full analysis & decision options: [`results/2026-06-17_b_strike.md`](results/2026-06-17_b_strike.md).**
+
+---
+
+## C3 campaign (2026-07-06) — impulse-CaT enforcement results
+One GPU per run (`--gres=gpu:1`), 3 seeds via array, ITERS=5000, NENVS=4096.
+    ITERS=5000 NENVS=4096 RUN=c3_imp     TASK=Unitree-Z1-Hammer-CaT-Impulse EXTRA="--env.metrics.cat-soft.params.imp-max-p 0.5" sbatch --array=0-2 scripts/slurm/train_array.sbatch
+    ITERS=5000 NENVS=4096 RUN=c3_imp0    TASK=Unitree-Z1-Hammer-CaT-Impulse                                                          sbatch --array=0-2 scripts/slurm/train_array.sbatch
+    ITERS=5000 NENVS=4096 RUN=c3_track   TASK=Unitree-Z1-Hammer-Track                                                                sbatch --array=0-2 scripts/slurm/train_array.sbatch
+    ITERS=5000 NENVS=4096 RUN=c3_catsoft TASK=Unitree-Z1-Hammer-CaT-Soft                                                             sbatch --array=0-2 scripts/slurm/train_array.sbatch
+c3_imp0 = SAME task, repo-default imp_max_p=0 (CatPPO at δ≡0 ≡ stock PPO): the same-reward,
+same-algorithm, same-seed UNCONSTRAINED baseline — the vacuous-check pairs c3_imp vs c3_imp0.
+c3_track (r_imit-only) and c3_catsoft (velocity CaT, same-tree re-run) are secondary comparators.
