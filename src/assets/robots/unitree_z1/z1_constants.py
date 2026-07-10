@@ -128,7 +128,7 @@ Z1_ARTICULATION = EntityArticulationInfoCfg(
 # to the URDF rating (no separate continuous datasheet value exists). NOTE this routes the
 # arm through mjlab's Python torque-level IdealPdActuator (a <motor> + explicit PD) instead
 # of the native <position> affine PD; gravcomp (get_spec) is unaffected. CAVEAT (research
-# JOINT_VELOCITY_BOUND_RESEARCH.md): the curve limits each joint's OWN motor, so it removes
+# docs/research/reward-design/CONSTRAINED_RL_LANDSCAPE.md): the curve limits each joint's OWN motor, so it removes
 # the actuator-driven windup but cannot brake chain-coupled momentum delivered through the
 # linkage -- so it may reduce, not fully eliminate, the 4.3-4.65 rad/s overshoot.
 _Z1_VELOCITY_LIMIT: float = 3.1415  # rad/s, URDF no-load speed (all joints)
@@ -174,23 +174,25 @@ NEUTRAL_JOINT_POS: dict[str, float] = {
     "jointGripper": -0.000964725,
 }
 
-# Manually tuned via viewer (2026-05-27), then RE-SOLVED 2026-06-16 via position-only 6-DOF IK
-# for GRASP #10 (hammer geoms at quat 0.7071 0 0 0.7071, pos 0 0.006 0 — the 80 mm grip slide
-# toward the head), placing the c4 FACE centroid at world (0.5, 0, 0.15) so the flat striking face
-# leads (not the claw).
-# RE-SOLVED AGAIN 2026-06-18 via ORIENTATION-AWARE IK with joint1 LOCKED=0
-# (hammer_z1_env/solve_ik_oriented.py --lock-joint1): the strike axis now points DEAD-vertical
-# (tilt 0.002 deg vs the old position-only solution's 7.4 deg oblique) AND the arm is IN-PLANE
-# (joint1=0). The wrist (joint6) absorbs the lateral face-centroid offset, so no base yaw and no
-# re-grasp are needed — a clean, perpendicular, in-plane strike for well-defined impact impulse.
-# Earlier belief that the ~6 deg base yaw was "grasp-forced" was a position-only-IK artifact.
+# RE-SOLVED 2026-07-06 for the NEW hammer grasp (SimplifiedLink06 holder; hammer body rotated
+# -90 deg about Z so the handle is coaxial in the holder bore -> the poll FACE points perpendicular
+# to the handle). With this grasp a perfectly vertical strike AT the floor nail is kinematically
+# impossible (in-plane face-down only becomes reachable above z~0.20). So this is a RESET poised
+# ~15 cm ABOVE the (still-on-floor) nail, at the one place an IN-PLANE (joint1=0) DEAD-VERTICAL pose
+# IS reachable: face target world (0.5, 0, 0.25), tilt 0 deg. The policy drives DOWN from here to
+# the nail and discovers the (necessarily oblique near the floor) contact angle itself. Block stays
+# on the FLOOR (no raise / no pedestal). Solved via the in-plane windup sweep (scratchpad). The old
+# value (solved for the pre-2026-07-06 grasp) is in git history.
+# NOTE (open thread): posture at contact is an ~8.5x impact lever (effective-mass analysis), but the
+# position-only DiffIK action space collapses the redundancy, so bracing must EMERGE via the
+# delivered-impulse reward + (future) null-space access, not be baked into this reset.
 NEAR_NAIL_JOINT_POS: dict[str, float] = {
     "joint1":  0.00000000,
-    "joint2":  1.99068114,
-    "joint3": -1.79578707,
-    "joint4":  1.37590226,
-    "joint5": -0.00003641,
-    "joint6":  1.64860944,
+    "joint2":  1.60600000,
+    "joint3": -0.43010000,
+    "joint4": -1.19760000,
+    "joint5": -0.00130000,
+    "joint6":  1.55440000,
     "jointGripper": -0.001,
 }
 
@@ -222,7 +224,7 @@ HAMMER_HEAD_SITE_NAME = "hammer_head_site"
 # servo push, not a momentum blow. 0.15 -> ~1.35 m/s (max joint ~2.2 rad/s, under the
 # 3.1415 rad/s velocity rail; head KE ~0.45 J) enabling a genuine single strike. The
 # rail (env_cfgs.py max_dq) keeps the achievable speed hardware-faithful.
-# See docs/superpowers/specs/2026-06-17-z1-strike-not-press-redesign-design.md.
+# See docs/archive/2026-06-17-z1-strike-not-press-redesign-design.md.
 Z1_HAMMER_DELTA_POS_SCALE: float = 0.15
 
 
