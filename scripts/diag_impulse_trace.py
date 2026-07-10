@@ -143,6 +143,13 @@ def _run_ckpt(args: argparse.Namespace) -> tuple[list[tuple], float]:
 
   env_cfg = load_env_cfg(args.task, play=args.play)
   env_cfg.scene.num_envs = args.num_envs
+  # auto_reset=False (Task 6 deferred fix, 2026-07 review finding): with the default auto_reset=True
+  # a success mid-trace resets the env IN-STEP (_reset_idx runs before env.step() returns), zeroing
+  # the accumulators/nail state and silently splicing a fresh episode into what is meant to be ONE
+  # continuous single-strike trace. Mirrors the SAME idiom already used by _run_reference above /
+  # reward_design_util.run_reference_strikes: auto_reset=False + break on the first success keeps the
+  # terminal state readable and the trace honest.
+  env_cfg.auto_reset = False
   agent_cfg = load_rl_cfg(args.task)
 
   env = ManagerBasedRlEnv(cfg=env_cfg, device=args.device, render_mode=None)
@@ -159,6 +166,13 @@ def _run_ckpt(args: argparse.Namespace) -> tuple[list[tuple], float]:
     with torch.no_grad():
       actions = policy(obs)
     obs, rew, dones, extras = wrapped.step(actions)
+    # Break on success (reset_terminated) OR timeout (reset_time_outs): auto_reset=False keeps the
+    # terminal state readable, but it also arms _manual_reset_pending for ANY done env -- one more
+    # step() after a timeout (possible without --play: training cfg episode_length_s=20 s = 1000
+    # control steps) would raise mjlab's manual-reset RuntimeError. Either way the episode is over;
+    # tracing past it would splice a stale terminal state into the figure.
+    if bool((env.reset_terminated | env.reset_time_outs).any()):
+      break
   return rec, float(env.physics_dt)
 
 

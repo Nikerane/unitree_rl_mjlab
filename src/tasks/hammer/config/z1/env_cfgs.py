@@ -25,6 +25,13 @@ from src.tasks.hammer.cat import CatSoftHook
 from src.tasks.hammer.hammer_env_cfg import make_hammer_env_cfg
 from src.tasks.hammer.nail_block import get_nail_block_entity_cfg
 
+# Fixture-era per-joint impulse caps, MEASURED by derive_impulse_thresholds.py on 2026-07-06 (windup
+# NEAR_NAIL reset, oblique contact; gate log: /tmp/derive_thresholds_fixture.txt -> dated record at
+# C3). J_limit_j = tau_rated_j x 2 (HD Repeated-Peak) x Delta_t_impact. Module-level (not
+# function-local) so downstream tooling (e.g. scripts/eval_impulse.py) IMPORTS this instead of
+# hardcoding a second copy that could drift.
+IMP_J_LIMIT: list[float] = [1.640, 3.280, 1.640, 1.640, 1.640, 1.640]  # N·m·s
+
 
 def z1_hammer_env_cfg(
   play: bool = False,
@@ -248,10 +255,7 @@ def z1_hammer_env_cfg(
     # use_vel follows the cat_soft flag: cat_impulse alone = impulse-only (clean attribution);
     # cat_soft + cat_impulse = ONE hook with BOTH constraints (velocity ∪ impulse soft-OR, C5) —
     # previously this block silently overwrote the velocity hook (2026-07 review finding #8).
-    # Fixture-era per-joint impulse caps, MEASURED by derive_impulse_thresholds.py on 2026-07-06
-    # (windup NEAR_NAIL reset, oblique contact; gate log: /tmp/derive_thresholds_fixture.txt →
-    # dated record at C3). J_limit_j = τ_rated_j × 2 (HD Repeated-Peak) × Δt_impact.
-    IMP_J_LIMIT = [1.640, 3.280, 1.640, 1.640, 1.640, 1.640]  # ← paste section [4], N·m·s
+    # IMP_J_LIMIT is the module-level constant defined above.
     cfg.metrics["cat_soft"] = MetricsTermCfg(
       func=CatSoftHook,
       per_substep=False,
