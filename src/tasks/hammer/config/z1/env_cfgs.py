@@ -227,6 +227,14 @@ def z1_hammer_env_cfg(
         # the dominant dof-friction share; residual quantified by the Track-2 contact-row metric.
       },
     )
+    # Track-2 RIGOROUS metric: contact-row-only Λ (JᵀF over hammer↔nail efc rows) — validates the
+    # enforced baseline-subtracted Λ; LOG-ONLY, never feeds joint_impulse_excess/δ.
+    cfg.metrics["substep_impulse_rows"] = MetricsTermCfg(
+      func=hammer_mdp.ContactRowImpulseAccumulator,
+      per_substep=True,
+      reduce="last",
+      params={"sensor_name": "hammer_nail_contact", "robot_cfg": vb_robot_cfg},
+    )
     # Object-side delivered axial impulse (episode-cumulative, per-event capped — see the class).
     cfg.metrics["substep_delivered"] = MetricsTermCfg(
       func=hammer_mdp.SubstepDeliveredImpulse,
