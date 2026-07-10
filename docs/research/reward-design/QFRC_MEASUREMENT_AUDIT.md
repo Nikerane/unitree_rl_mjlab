@@ -3,8 +3,10 @@
 **Date:** 2026-07-10 · **Method:** deep-research harness (5 search angles → primary-source fetch →
 3-vote adversarial verification; the verify phase was twice interrupted by session limits, so each
 claim below carries an explicit status tag) + code checks run directly on this repo.
-**Status tags:** `[3-0]`/`[2-0]` = adversarially verified this run; `[doc]` = direct quote fetched
-from the primary source, votes did not run; `[code]` = verified by running code in this repo;
+**Status tags:** `[3-0]`/`[2-0]` = adversarially verified this run; `[doc✓]` = quote re-verified
+verbatim against the primary source by direct fetch (2026-07-10 spot-check, after the vote phase
+was cut short); `[doc]` = direct quote fetched from the primary source, not independently
+re-checked; `[code]` = verified by running code in this repo;
 `[session]` = full-text read verified earlier (2026-07-06 notation sweep); `[background]` =
 standard literature cited from knowledge — run `/ars-citation-check` before thesis use.
 
@@ -48,7 +50,8 @@ contact-rows-only isolation `[doc]` — the approach is API-blessed, not a hack.
    sensitivity run — re-run `derive_impulse_thresholds.py` with timestep halved and `solref`
    doubled and report the Λ_j delta; if the impulse moves by percent while peak force moves by
    tens of percent, the "impulse is the robust quantity" claim is demonstrated, not asserted.
-2. **MJWarp-specific pitfalls (directly affect the Track-2 validator; all `[doc]`).**
+2. **MJWarp-specific pitfalls (directly affect the Track-2 validator; all `[doc✓]` — every quote
+   below re-verified verbatim against the MJWarp docs and `io.py` source on 2026-07-10).**
    (a) `efc.J` on GPU is **dense and padded** — sparse Jacobians are "not implemented" per the
    MJWarp docs, even though the sparse-index fields exist in the dataclass; the Task-8 probe must
    resolve which path is live and never trust padding rows. (b) **Row ordering is not C MuJoCo's**
@@ -59,7 +62,7 @@ contact-rows-only isolation `[doc]` — the approach is API-blessed, not a hack.
    validator needs explicit `nefc < njmax` / `nacon < naconmax` asserts. (d) MJWarp computes in
    **float32** and is **non-deterministic run-to-run on GPU** (atomic ordering) — Λ_j is
    backend-dependent and not bit-reproducible; tolerances and statistics, never bit-comparison.
-3. **Sensor-gate false-positive caveat (`[doc]`, mitigated).** MJWarp's contact sensing can report
+3. **Sensor-gate false-positive caveat (`[doc✓]`, mitigated).** MJWarp's contact sensing can report
    a contact entry for a sensed geom pair even when not in collision. Our gate reads the sensor's
    `found` field, and the C0 gate's leak check (`shipped accumulator ≡ 0 before any contact`)
    empirically proves the gate does not leak on this scene — that leak check must stay a permanent
