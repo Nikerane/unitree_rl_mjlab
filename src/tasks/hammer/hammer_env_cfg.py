@@ -124,7 +124,7 @@ def make_hammer_env_cfg(imitation: bool = False) -> ManagerBasedRlEnvCfg:
 
   # --- Events ---
   events = {
-    # FUTURE_UPDATES #2a (applied 2026-06-10): ±0.05 rad (~3°) joint noise at
+    # docs/archive/FUTURE_UPDATES.md #2a (applied 2026-06-10): ±0.05 rad (~3°) joint noise at
     # reset so the policy must close the loop on joint_pos instead of replaying
     # one memorised trajectory. Zeroed in play mode (config/z1/env_cfgs.py) so
     # validation scripts stay deterministic.

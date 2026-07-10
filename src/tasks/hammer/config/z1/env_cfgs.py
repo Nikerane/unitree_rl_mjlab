@@ -34,6 +34,7 @@ def z1_hammer_env_cfg(
   cat_substep: bool = False,
   vel_hard_term: bool = False,
   cat_soft: bool = False,
+  cat_impulse: bool = False,
   dcmotor: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Create Z1 hammer-nail task configuration.
@@ -176,11 +177,13 @@ def z1_hammer_env_cfg(
       per_substep=True,
     )
 
-  if cat_soft:
+  if cat_soft and not cat_impulse:
     # C3: faithful soft γ(1−δ) CaT. Full-step MetricsTerm computes δ + r_pos and writes env.extras
     # for CatPPO. It is a METRICS term, so it can NEVER feed reset_buf (Decision 5 — a soft violation
     # discounts the value target, it does not end the episode). MUST be paired with the CatPPO rl_cfg
     # (z1_hammer_ppo_runner_cfg(cat_soft=True)) or δ is computed but never consumed (silent no-op).
+    # (When cat_impulse is ALSO set, the cat_impulse block below installs ONE hook with BOTH
+    # constraints — velocity ∪ impulse soft-OR, the C5 composition — instead of overwriting this.)
     cfg.metrics["cat_soft"] = MetricsTermCfg(
       func=CatSoftHook,
       per_substep=False,
@@ -190,6 +193,78 @@ def z1_hammer_env_cfg(
         "min_p": 0.0,
         "tau": 0.95,
         "robot_cfg": vb_robot_cfg,
+      },
+    )
+
+  if cat_impulse:
+    # C0 IMPULSE arm (Unitree-Z1-Hammer-CaT-Impulse): the thesis headline -- BOUND the robot-side
+    # per-joint reaction impulse (soft-CaT, LOG-ONLY at C0) WHILE MAXIMIZING the object-side delivered
+    # impulse (reward). Run as a SEPARATE arm from velocity (use_vel=False) for clean attribution;
+    # velocity∪impulse combined is the trivial C5 step. See IMPULSE_CAT_IMPL_PLAN.md C0.
+
+    # Object-side net contact wrench in the WORLD frame (reduce=netforce): the delivered-impulse
+    # signal AND the weld/friction-immune ground truth for the C0 quantity gate (the sensor sees ONLY
+    # the hammer<->nail contact). Separate from hammer_nail_contact (maxforce, used by impact_progress).
+    hammer_nail_impulse = ContactSensorCfg(
+      name="hammer_nail_impulse",
+      primary=ContactMatch(mode="geom", pattern="hammer_head_.*", entity="robot"),
+      secondary=ContactMatch(mode="body", pattern="nail", entity="nail_block"),
+      fields=("found", "force"),
+      reduce="netforce",
+      track_air_time=False,
+    )
+    cfg.scene.sensors = (cfg.scene.sensors or ()) + (hammer_nail_impulse,)
+
+    # Robot-side per-joint reaction impulse Λ_j = Σ|qfrc_constraint_j|·dt, contact-anchored, 500 Hz.
+    cfg.metrics["substep_impulse"] = MetricsTermCfg(
+      func=hammer_mdp.SubstepImpulseAccumulator,
+      per_substep=True,
+      reduce="last",  # the term returns the EPISODE-PEAK worst-joint Λ — log the final value
+      params={
+        "sensor_name": "hammer_nail_contact",
+        "robot_cfg": vb_robot_cfg,
+        "subtract_baseline": False,  # C0 gate decides raw vs baseline-subtracted (friction removal)
+      },
+    )
+    # Object-side delivered axial impulse (episode-cumulative, per-event capped — see the class).
+    cfg.metrics["substep_delivered"] = MetricsTermCfg(
+      func=hammer_mdp.SubstepDeliveredImpulse,
+      per_substep=True,
+      reduce="last",  # cumulative signal — log the episode-final total, not a time-average
+      params={"sensor_name": "hammer_nail_impulse", "axis": (0.0, 0.0, -1.0)},
+    )
+    # soft-CaT hook with the IMPULSE constraint, LOG-ONLY (imp_max_p=0 ⇒ δ≡0). MUST pair with the
+    # CatPPO rl_cfg (z1_hammer_ppo_runner_cfg(cat_soft=True)). Do NOT raise imp_max_p until (a) the C0
+    # quantity gate passes, (b) Khadiv confirms soft-CaT (vs CMDP/Lagrangian), (c) the local gate is green.
+    # use_vel follows the cat_soft flag: cat_impulse alone = impulse-only (clean attribution);
+    # cat_soft + cat_impulse = ONE hook with BOTH constraints (velocity ∪ impulse soft-OR, C5) —
+    # previously this block silently overwrote the velocity hook (2026-07 review finding #8).
+    cfg.metrics["cat_soft"] = MetricsTermCfg(
+      func=CatSoftHook,
+      per_substep=False,
+      params={
+        "use_vel": bool(cat_soft),
+        "use_impulse": True,
+        "imp_limit": hammer_mdp.Z1_JOINT_IMPULSE_LIMIT,  # placeholder; real per-joint J_limit at C0/C2
+        "imp_max_p": 0.0,  # C0 LOG-ONLY
+        "imp_seed": 1e-3,  # C0 gate replaces with the reference-strike p95 over-limit excess
+        "robot_cfg": vb_robot_cfg,
+        "limit": hammer_mdp.Z1_JOINT_VEL_LIMIT,
+        "max_p": 0.5,
+        "min_p": 0.0,
+        "tau": 0.95,
+      },
+    )
+    # MAXIMIZE objective: object-side delivered impact impulse (positive term; rides the (1−δ) discount
+    # so an over-limit strike's delivered-impulse reward is worth less -- the two-sides interplay).
+    # weight + i_ref are C0 PLACEHOLDERS; derive_impulse_thresholds.py sets i_ref and C2 tunes the weight.
+    cfg.rewards["delivered_impulse"] = RewardTermCfg(
+      func=hammer_mdp.DeliveredImpulseTerm,
+      weight=2.0,
+      params={
+        "i_ref": 1.0,
+        "eps": 5e-4,
+        "nail_cfg": SceneEntityCfg("nail_block", joint_names=("nail_slide",)),
       },
     )
 

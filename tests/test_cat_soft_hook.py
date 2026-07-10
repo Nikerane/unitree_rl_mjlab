@@ -12,6 +12,7 @@ import torch
 from src.tasks.hammer.cat import CaT
 from src.tasks.hammer.cat.hook import CatSoftHook, _NEG_TERMS
 from src.tasks.hammer.cat.keys import CAT_DELTA_KEY, CAT_R_POS_KEY
+from src.tasks.hammer.mdp.impulse_bound import _ENV_SUBSTEP_IMPULSE_ATTR
 from src.tasks.hammer.mdp.velocity_bound import Z1_JOINT_VEL_LIMIT
 
 LIM = Z1_JOINT_VEL_LIMIT
@@ -26,6 +27,21 @@ def _hook(max_p=0.5, tau=0.95, min_p=0.0):
   h._max_p, h._limit = max_p, LIM
   h._robot_cfg = SimpleNamespace(name="robot", joint_ids=list(range(6)))
   h._neg_idx = None
+  h._use_vel, h._use_impulse = True, False
+  return h
+
+
+def _ihook(imp_max_p=0.0, imp_seed=0.2, imp_limit=0.1, use_vel=False, tau=0.95, min_p=0.0, J=6):
+  """Hook configured for the impulse arm (use_impulse=True). imp_max_p=0 ⇒ C0 log-only."""
+  h = object.__new__(CatSoftHook)
+  h._cat = CaT(tau=tau, min_p=min_p)
+  h._max_p, h._limit = 0.5, LIM
+  h._robot_cfg = SimpleNamespace(name="robot", joint_ids=list(range(6)))
+  h._neg_idx = None
+  h._use_vel, h._use_impulse = use_vel, True
+  h._imp_limit, h._imp_max_p, h._imp_seed = imp_limit, imp_max_p, imp_seed
+  h._imp_cmax = torch.full((1, J), imp_seed)
+  h._imp_seeded = torch.zeros(1, J, dtype=torch.bool)
   return h
 
 
@@ -34,11 +50,14 @@ def _term_cfg(n):
   return SimpleNamespace(weight=w)
 
 
-def _env(qv, step_reward, step_dt=0.02):
+def _env(qv, step_reward, step_dt=0.02, impulse=None):
   robot = SimpleNamespace(data=SimpleNamespace(joint_vel=qv))
   rm = SimpleNamespace(_step_reward=step_reward, active_terms=list(ACTIVE),
                        get_term_cfg=_term_cfg, _scale_by_dt=True)
-  return SimpleNamespace(scene={"robot": robot}, reward_manager=rm, step_dt=step_dt, extras={})
+  env = SimpleNamespace(scene={"robot": robot}, reward_manager=rm, step_dt=step_dt, extras={})
+  if impulse is not None:
+    setattr(env, _ENV_SUBSTEP_IMPULSE_ATTR, SimpleNamespace(impulse=impulse))
+  return env
 
 
 def test_writes_extras_keys_with_shape_and_range():
@@ -123,3 +142,129 @@ def test_neg_sign_guard_raises_on_unregistered_negative_term():
     reward_manager=rm, step_dt=0.02, extras={})
   with pytest.raises(RuntimeError, match="rogue_penalty"):
     _hook()(env)
+
+
+# --- Impulse arm (use_impulse=True) -------------------------------------------------------------
+
+def test_impulse_log_only_delta_is_zero_even_over_limit():
+  # C0 ships log-only (imp_max_p=0): δ must be identically 0 even when Λ is grossly over the limit.
+  B = 4
+  env = _env(torch.zeros(B, 6), torch.zeros(B, len(ACTIVE)), impulse=torch.full((B, 6), 0.5))
+  out = _ihook(imp_max_p=0.0)(env)
+  assert out.shape == (B,)
+  assert torch.allclose(out, torch.zeros(B)), out
+  assert torch.allclose(env.extras[CAT_DELTA_KEY], torch.zeros(B))
+
+
+def test_impulse_raw_margin_logged_for_histogram():
+  # Even log-only, the RAW per-joint margin must be stored (the C0 histogram / binding-ness gate).
+  B = 4
+  env = _env(torch.zeros(B, 6), torch.zeros(B, len(ACTIVE)), impulse=torch.full((B, 6), 0.5))
+  h = _ihook(imp_max_p=0.0, imp_limit=0.1)
+  h(env)
+  assert "joint_impulse_excess" in h._cat.raw_constraints
+  assert torch.allclose(h._cat.raw_constraints["joint_impulse_excess"], torch.full((B, 6), 0.4))
+
+
+def test_impulse_only_arm_returns_B_shaped_delta():
+  # use_vel=False, use_impulse=True: get_probs must still yield (B,) (no empty-tensor bug when the
+  # impulse term is the only term and it is always added).
+  B = 3
+  env = _env(torch.zeros(B, 6), torch.zeros(B, len(ACTIVE)), impulse=torch.zeros(B, 6))
+  out = _ihook(imp_max_p=0.5)(env)
+  assert out.shape == (B,)
+  assert torch.allclose(out, torch.zeros(B))  # under limit -> 0
+
+
+def test_impulse_delta_graded_not_saturated():
+  # imp_max_p>0 with a meaningful seed: a moderate excess yields δ well below max_p (GRADED), the
+  # property the velocity batch-max EMA would destroy on a sparse signal.
+  B = 4
+  h = _ihook(imp_max_p=0.5, imp_seed=0.2, imp_limit=0.1)
+  env = _env(torch.zeros(B, 6), torch.zeros(B, len(ACTIVE)), impulse=torch.full((B, 6), 0.15))  # excess 0.05
+  out = h(env)
+  assert (out > 0).all() and (out < 0.5 * 0.9).all(), out  # graded, not pinned at max_p
+
+
+def test_impulse_normalizer_no_collapse_after_idle():
+  # The EMA-collapse guard: many idle (under-limit) steps must NOT decay the normalizer to ~1e-6
+  # (which would saturate δ to max_p on the next contact). Seed-floored + contact-masked update.
+  B = 4
+  h = _ihook(imp_max_p=0.5, imp_seed=0.2, imp_limit=0.1)
+  for _ in range(50):  # idle: Λ=0 -> margin negative -> no normalizer update
+    h(_env(torch.zeros(B, 6), torch.zeros(B, len(ACTIVE)), impulse=torch.zeros(B, 6)))
+  out = h(_env(torch.zeros(B, 6), torch.zeros(B, len(ACTIVE)), impulse=torch.full((B, 6), 0.2)))  # excess 0.1
+  assert (out > 0).all() and (out < 0.5 * 0.95).all(), out  # NOT saturated => normalizer held at seed
+
+
+def test_impulse_soft_or_combines_with_velocity():
+  # Combined arm: a compliant velocity but over-limit impulse must still drive δ (soft-OR MAX).
+  B = 4
+  h = _ihook(imp_max_p=0.5, use_vel=True, imp_seed=0.2, imp_limit=0.1)
+  env = _env(torch.full((B, 6), 2.0), torch.zeros(B, len(ACTIVE)), impulse=torch.full((B, 6), 0.6))
+  out = h(env)  # vel 2.0 < 3.1415 (δ_vel=0); impulse over -> δ_imp>0
+  assert (out > 0).all(), out
+
+
+def test_impulse_log_only_zero_even_with_positive_min_p():
+  # Review finding #7: with min_p>0 the old formula gave δ = min_p·(1−normalized) > 0 under
+  # imp_max_p=0 (and INVERSELY graded). Log-only must mean δ_imp ≡ 0 regardless of min_p.
+  B = 4
+  h = _ihook(imp_max_p=0.0, min_p=0.05, imp_seed=0.2, imp_limit=0.1)
+  env = _env(torch.zeros(B, 6), torch.zeros(B, len(ACTIVE)), impulse=torch.full((B, 6), 0.15))
+  out = h(env)  # over the limit, but log-only
+  assert torch.allclose(out, torch.zeros(B)), out
+  # ... while the RAW margin is still recorded for the C0 histogram.
+  assert "joint_impulse_excess" in h._cat.raw_constraints
+
+
+def test_impulse_ema_update_is_per_column():
+  # Review hygiene: a violating joint must not decay a NON-violating joint's normalizer.
+  B = 4
+  h = _ihook(imp_max_p=0.5, imp_seed=0.1, imp_limit=0.1)
+  imp = torch.full((B, 6), 0.05)  # under limit everywhere...
+  imp[:, 0] = 1.2                 # ...except joint0, grossly over
+  for _ in range(10):
+    h(_env(torch.zeros(B, 6), torch.zeros(B, len(ACTIVE)), impulse=imp))
+  # joint0's cmax grew toward its excess; every other column stayed at the seed (NOT decayed).
+  assert h._imp_cmax[0, 0] > 0.1
+  assert torch.allclose(h._imp_cmax[0, 1:], torch.full((5,), 0.1)), h._imp_cmax
+
+
+def test_impulse_first_violation_seeds_scale():
+  # xhigh-review finding: a tiny imp_seed (shipped 1e-3) must NOT cause long saturation at C2.
+  # The first over-limit sample per column SEEDS cmax to max(batch_max, seed) — CaT.add's own
+  # first-batch seeding — so grading is scale-correct from the second violation on.
+  B = 4
+  h = _ihook(imp_max_p=0.5, imp_seed=1e-3, imp_limit=0.1)
+  h(_env(torch.zeros(B, 6), torch.zeros(B, len(ACTIVE)), impulse=torch.full((B, 6), 1.1)))  # excess 1.0
+  assert torch.allclose(h._imp_cmax[0, 0], torch.tensor(1.0), atol=1e-6), h._imp_cmax  # seeded, not 1e-3
+  out = h(_env(torch.zeros(B, 6), torch.zeros(B, len(ACTIVE)), impulse=torch.full((B, 6), 0.6)))  # excess 0.5
+  assert (out < 0.5 * 0.8).all() and (out > 0).all(), out  # graded (~0.25), not pinned at max_p
+
+
+def test_validate_params_guards():
+  import pytest
+
+  # Both constraints off: expressible misconfiguration must fail loudly at construction.
+  with pytest.raises(RuntimeError, match="use_vel"):
+    CatSoftHook._validate_params({"use_vel": False, "use_impulse": False})
+  # Enforcement against the not-to-ship placeholder limit must fail loudly (env_cfgs passes the
+  # placeholder EXPLICITLY at C0, so presence-checking alone cannot catch the C2 flip).
+  with pytest.raises(RuntimeError, match="placeholder"):
+    CatSoftHook._validate_params(
+      {"use_vel": False, "use_impulse": True, "imp_limit": 0.1, "imp_max_p": 0.5}
+    )
+  # use_impulse without an explicit imp_limit: the placeholder must never be a silent fallback.
+  with pytest.raises(RuntimeError, match="imp_limit"):
+    CatSoftHook._validate_params({"use_vel": False, "use_impulse": True, "imp_max_p": 0.0})
+  # Enforcement ceiling below the probability floor is incoherent (inverse grading).
+  with pytest.raises(RuntimeError, match="min_p"):
+    CatSoftHook._validate_params(
+      {"use_vel": False, "use_impulse": True, "imp_limit": 1.0, "imp_max_p": 0.1, "min_p": 0.3}
+    )
+  # Valid configs pass.
+  CatSoftHook._validate_params({"use_vel": True, "use_impulse": False})
+  CatSoftHook._validate_params(
+    {"use_vel": False, "use_impulse": True, "imp_limit": 1.0, "imp_max_p": 0.5}
+  )

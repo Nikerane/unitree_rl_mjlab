@@ -9,6 +9,7 @@ import torch
 from mjlab.entity import Entity
 from mjlab.managers.manager_base import ManagerTermBase, ManagerTermBaseCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
+from src.tasks.hammer.mdp.impulse_bound import _ENV_SUBSTEP_DELIVERED_ATTR
 from src.tasks.hammer.mdp.references import get_strike_reference
 from src.tasks.hammer.nail_block import NAIL_GOAL_DEPTH
 
@@ -206,6 +207,66 @@ class ImpactProgressTerm(ManagerTermBase):
     # Contact gate: fire only on the step a fresh contact begins.
     fc = sensor.compute_first_contact(dt=dt).any(-1).to(head.dtype)
     return (v_axial / v_expected) * fc * advanced
+
+
+class DeliveredImpulseTerm(ManagerTermBase):
+  """Maximize the OBJECT-side delivered impact impulse: pay the positive increment of the
+  episode-cumulative axial impulse I_total = Σ F_axial·dt, DEPTH-GATED and normalized by I_ref.
+
+  The maximize half of the thesis's two-sides-of-one-collision claim (the constraint half is the
+  robot-side per-joint reaction impulse bounded by soft-CaT). Reads ``SubstepDeliveredImpulse``:
+  episode-cumulative (monotone, so the delta-credit below can never re-pay or zero-pay across
+  windows) with a per-event accrual cap (~50 ms) so a slow quasi-static press cannot out-earn
+  striking (the anti-press rule of the v2 reward deep-dive). Per ``TRACKING_IMPACT_IMPULSE_
+  IMPL_PLAN.md`` T3; on the Z1 (posture ≈ fixed at contact, m_eff ≈ const) this delivered-impulse
+  measure needs no effective-mass / J·M⁻¹·Jᵀ computation (reserve hitting-flux for the G1).
+
+  Delta-tracking (mirrors NailDepthDeltaTerm): credits only the positive increase in delivered
+  impulse since last paid, and ONLY on steps the nail advances past its max depth by > eps.
+  Augment-not-replace: a NEW positive term; impact_progress is untouched. Stateful: _credited
+  (delivered credited so far), _prev_depth; reset per episode.
+  """
+
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv):
+    super().__init__(env)
+    self._credited: torch.Tensor = torch.zeros(self.num_envs, device=self.device)
+    self._prev_depth: torch.Tensor = torch.zeros(self.num_envs, device=self.device)
+
+  def reset(self, env_ids: torch.Tensor | slice | None) -> None:
+    if env_ids is None:
+      self._credited.zero_()
+      self._prev_depth.zero_()
+    else:
+      self._credited[env_ids] = 0.0
+      self._prev_depth[env_ids] = 0.0
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    i_ref: float = 1.0,
+    eps: float = 5e-4,
+    nail_cfg: SceneEntityCfg = _DEFAULT_NAIL_CFG,
+  ) -> torch.Tensor:
+    """Returns shape (B,)."""
+    acc = getattr(env, _ENV_SUBSTEP_DELIVERED_ATTR, None)
+    if acc is None:
+      raise RuntimeError(
+        "DeliveredImpulseTerm needs the SubstepDeliveredImpulse per_substep metric wired into "
+        "cfg.metrics (see env_cfgs.py cat_impulse) so it stashes itself on the env."
+      )
+    cur = acc.delivered  # (B,) EPISODE-CUMULATIVE delivered axial impulse (monotone)
+    depth = clamped_nail_depth(env, nail_cfg)
+    advanced = (depth - self._prev_depth) > eps
+    self._prev_depth = torch.maximum(self._prev_depth, depth)
+    delta = (cur - self._credited).clamp_min(0.0)
+    # Credit (and pay) only on a depth-advancing step; otherwise hold _credited so the as-yet-unpaid
+    # impulse is paid once the nail actually moves. The accumulator is monotone BY CONTRACT, so the
+    # torch.maximum is purely defensive: credit must never lower even if that contract ever breaks
+    # (a lowered credit re-pays already-paid impulse — the farming exploit).
+    self._credited = torch.where(
+      advanced, torch.maximum(self._credited, cur), self._credited
+    )
+    return torch.where(advanced, delta, torch.zeros_like(delta)) / i_ref
 
 
 class ImitationPriorTerm(ManagerTermBase):

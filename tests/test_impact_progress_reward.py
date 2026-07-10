@@ -1,6 +1,6 @@
 """Unit tests for the `impact_progress` reward term (ImpactProgressTerm).
 
-Design source: docs/research/reward-design/IMPACT_PROGRESS_IMPL_SPEC.md
+Design source: docs/archive/IMPACT_PROGRESS_IMPL_SPEC.md
 
 The term implements the double-gated momentum reward
 

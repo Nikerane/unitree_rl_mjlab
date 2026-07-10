@@ -1,0 +1,118 @@
+"""Freshness regression guard: the LIVING doc set must never re-assert superseded facts.
+
+The LIVING set is everything reachable by default without deliberate digging — CLAUDE.md,
+the docs/README.md index, the thesis digest, and the reward-design living docs. docs/archive/,
+docs/results/, dated evidence-records, and the agent-memory dir are EXEMPT: they carry banners
+and may legitimately quote old facts as history, so they are not scanned here.
+
+Each POISON_PHRASE is a fact that a docs-consolidation iteration superseded. Every phrase is
+chosen to be:
+  * RED now  — it currently matches at least one LIVING doc, and
+  * GREEN after consolidation — a fix/merge/archive step removes that match.
+When an iteration supersedes a new fact, add its phrase here (full-phrase, specific — never a
+current fact like "7-term" or "position-only DiffIK", and never a phrase that lives only in
+memory/archive, which this guard does not scan).
+
+The curated list below was validated by an adversarial review (2026-07-05): each entry was
+grep-confirmed to hit a living doc now and traced to the consolidation step that removes it.
+"""
+import re
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+
+# LIVING set — default-reachable, must stay current. docs/README.md is created by the
+# consolidation (Task 6); the reward-design glob shrinks as merge-sources are archived (Task 5).
+LIVING_SET = [
+    REPO / "CLAUDE.md",
+    REPO / "docs/README.md",
+    *sorted((REPO / "docs/thesis").glob("*.md")),
+    *sorted((REPO / "docs/research/reward-design").glob("*.md")),
+]
+
+# Each phrase is tagged with the living doc it currently hits and the consolidation step that
+# clears it. `fix` = fixed in place (Task 3/7); `merge/archive` = source leaves the living glob
+# (Task 4/5). Unicode literals (× · − – ≈ Λ) are matched as-is (source is UTF-8).
+POISON_PHRASES = [
+    # IMPULSE_CAT_IMPL_PLAN.md:6 gripper-era constants — Task 3 poison-free replacement (C-1)
+    r"4\.7% of the worst-joint limit",
+    r"0\.137 N[·.]s",
+    r"~?21× more violent",
+    r"not the weld \(~0\.2\)",
+    r"\[3\.44, 6\.88",
+    # IMPULSE_CAT_IMPL_PLAN.md:87 quoted stale code comment — Task 3 rewrite (C-10)
+    r"not exposed on the Entity",
+    # FAITHFUL_SOFT_CAT_IMPL_PLAN.md:3 status — Task 3 fix
+    r"\*\*Status:\*\* pre-implementation",
+    # FAITHFUL_SOFT_CAT_IMPL_PLAN.md:275,304 stale filename — Task 3 fix (incl. C-9 line 304)
+    # (\b keeps a future soft_cat_hook.py from false-positing: "_" is a word char, so no boundary)
+    r"\bcat_hook\.py",
+    # gate phase counts: FAITHFUL:309 fixed; OPUS_AUDIT/IMPACT_PROGRESS/PEER/TRACKING archived (Task 5)
+    # (lookbehind so a future "19 phases" doesn't false-positive)
+    r"(?<!\d)9 phases",
+    r"All 8 validation phases",
+    r"all 8 phases pass",
+    r"8 phases pass unchanged",
+    # reward-stack term count: OPEN_QUESTIONS:185 fixed (C-11); OPUS_AUDIT archived
+    r"6-term reward stack",
+    # aspirational 9-term spec: PEER_REVIEW_v2 archived
+    r"9-term SPEC",
+    # CAT_DEEP_DIVE.md claims falsified by shipped code — dropped on merge, source archived (Task 4/5)
+    r"NOT real CaT",
+    r"the crude approximation",
+    r"A3's is a no-op",
+    r"mjlab 1\.4\.0 may not expose",
+    r"does mjlab expose substep",
+    # stale nail_depth_delta weight arithmetic: REWARD_LITERATURE/RVM archived; OPEN_QUESTIONS table replaced (C-11)
+    # (short pattern by design — a spurious hit on future arithmetic like "4096 × 500" is a cheap
+    # human inspection, a missed weight-arithmetic regression is not)
+    r"× 500",
+    r"already at −1\.0 in current config",
+    # TRACKING_IMPACT_IMPULSE_IMPL_PLAN.md archived (Task 5) — stale counts/gripper-era I_ref/superseded design
+    r"147 unit tests",
+    r"10/10 phases",
+    r"I_ref ≈ 0\.32 N·s",
+    r"windowed axial impulse",
+    r"phases A–I \*\*\+ J/K/L/M",
+    # CLAUDE.md:14 — Task 7 fix (C-2)
+    r"weld-pollution blocker",
+    # CAT_DEEP_DIVE.md link must be retargeted to FAITHFUL everywhere (Task 4/5, C-12)
+    r"CAT_DEEP_DIVE\.md",
+]
+
+
+def test_no_poison_phrases_in_living_docs():
+    hits = []
+    for p in LIVING_SET:
+        if not p.exists():
+            continue
+        text = p.read_text(encoding="utf-8")
+        for pat in POISON_PHRASES:
+            for m in re.finditer(pat, text):
+                line = text.count("\n", 0, m.start()) + 1
+                hits.append(f"{p.relative_to(REPO)}:{line}: {pat!r} -> {m.group(0)!r}")
+    assert not hits, "Superseded facts in LIVING docs:\n" + "\n".join(hits)
+
+
+def test_index_and_claude_md_paths_exist():
+    # hammer_z1_env/ paths are sibling-repo (never exist here) and are deliberately NOT matched;
+    # bare script names (validate_rewards.py) are ambiguous and also unchecked.
+    missing = []
+    for src in (REPO / "CLAUDE.md", REPO / "docs/README.md"):
+        if not src.exists():
+            missing.append(f"{src} itself missing")
+            continue
+        text = src.read_text(encoding="utf-8")
+        # backticked repo paths, optionally command-prefixed (`python scripts/x.py --flag`);
+        # the path must end at a backtick or a space (flags/args may follow inside the span)
+        for ref in re.findall(
+            r"`(?:(?:mj)?python3? |pytest )?((?:docs|src|tests|scripts)/[^`\s]+?\.(?:md|py))[`\s]",
+            text,
+        ):
+            if not (REPO / ref).exists():
+                missing.append(f"{src.name} -> {ref}")
+        # the three repo-root direction docs are referenced bare — check them too
+        for ref in re.findall(r"`(thesis_[a-z_]+\.md)`", text):
+            if not (REPO / ref).exists():
+                missing.append(f"{src.name} -> {ref}")
+    assert not missing, "Dangling doc references:\n" + "\n".join(missing)

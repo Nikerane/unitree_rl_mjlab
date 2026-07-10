@@ -18,8 +18,10 @@ as a constraint):
 
 WAVE-1 SIGNAL = CONTROL-RATE joint velocity (post-decimation robot.data.joint_vel), the
 same quantity diag_policy_trace.py reports, so the bound target and the eval are consistent.
-The substep-peak refinement (a per_substep MetricsTerm) and per-joint impulse Lambda_j
-logging are deferred to v2 (Lambda_j needs qfrc_constraint, not exposed on the Entity).
+The substep-peak refinement (a per_substep MetricsTerm) is SubstepPeakJointVel below; the
+per-joint impulse Lambda_j accumulator is now implemented in impulse_bound.py. (CORRECTION:
+qfrc_constraint IS accessible per-DoF via entity.data._joint_dof_field("qfrc_constraint") --
+the earlier "not exposed on the Entity" note was outdated; no site-packages edit is needed.)
 """
 
 from __future__ import annotations

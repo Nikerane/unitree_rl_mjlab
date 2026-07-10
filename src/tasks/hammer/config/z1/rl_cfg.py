@@ -50,7 +50,7 @@ def z1_hammer_ppo_runner_cfg(cat_soft: bool = False) -> RslRlOnPolicyRunnerCfg:
     save_interval=500,
     num_steps_per_env=24,
     max_iterations=5000,
-    # FUTURE_UPDATES #1 (applied 2026-06-10): bound Gaussian policy outputs.
+    # docs/archive/FUTURE_UPDATES.md #1 (applied 2026-06-10): bound Gaussian policy outputs.
     # Unclipped, iter-500 policies emitted actions up to ±7.8, which the IK
     # saturated into ~40 cm/step requests — hostile to sim-to-real and to the
     # action_rate penalty's assumed scale.

@@ -25,7 +25,7 @@ register_mjlab_task(
 
 # Velocity-bound ablation arms (keep delta_pos_scale=0.15; bound joint velocity to the
 # real 3.1415 rad/s Z1 limit as a constraint). See docs/research/reward-design/
-# JOINT_VELOCITY_BOUND_RESEARCH.md. A1 (delta->0.10) needs no task -- it is a CLI override.
+# CONSTRAINED_RL_LANDSCAPE.md. A1 (delta->0.10) needs no task -- it is a CLI override.
 # A2: annealed squared joint-velocity-excess reward penalty.
 register_mjlab_task(
     task_id="Unitree-Z1-Hammer-VPenalty",
@@ -84,6 +84,19 @@ register_mjlab_task(
     task_id="Unitree-Z1-Hammer-CaT-Soft",
     env_cfg=z1_hammer_env_cfg(cat_soft=True),
     play_env_cfg=z1_hammer_env_cfg(play=True, cat_soft=True),
+    rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+    runner_cls=HammerOnPolicyRunner,
+)
+
+# C0 IMPULSE arm (IMPULSE_CAT_IMPL_PLAN.md): the thesis headline -- BOUND the robot-side per-joint
+# reaction impulse Λ_j via the SAME soft-CaT machinery (LOG-ONLY at C0, imp_max_p=0) WHILE MAXIMIZING
+# the object-side delivered impulse (DeliveredImpulseTerm reward). Reuses CatPPO (cat_soft=True rl_cfg):
+# at imp_max_p=0, δ≡0 so the discount + dual-mask GAE are exact no-ops -- it trains identically to the
+# baseline until enforcement is turned on. Separate from the velocity arm for clean attribution.
+register_mjlab_task(
+    task_id="Unitree-Z1-Hammer-CaT-Impulse",
+    env_cfg=z1_hammer_env_cfg(cat_impulse=True),
+    play_env_cfg=z1_hammer_env_cfg(play=True, cat_impulse=True),
     rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
     runner_cls=HammerOnPolicyRunner,
 )

@@ -45,7 +45,7 @@ class SingleStrikeReference:
     # head (z≈0.228 vs nail_top 0.102): at 0.10 the apex sat 2.6 cm BELOW the
     # reset head and the wind-up segment degenerated to a 2-step nudge (review
     # finding, 2026-06-10). Wind-up stays short until the start-pose curriculum
-    # (FUTURE_UPDATES #3) moves the reset away from the nail.
+    # (docs/archive/FUTURE_UPDATES.md #3) moves the reset away from the nail.
     approach_height: float = 0.15,
     # Strike target this far below nail_top (hammer follow-through). Playback-
     # calibrated 2026-06-10: 0.005 stalls at ~25.5 mm (target ends above the
