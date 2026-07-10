@@ -32,7 +32,6 @@ from src.tasks.hammer.mdp.rewards import clamped_nail_depth
 # lands on the last scripted waypoint finish settling / the success termination fire).
 HOLD_STEPS = 6
 
-_NAIL_CFG = SceneEntityCfg("nail_block", joint_names=("nail_slide",))
 _BAND_LO, _BAND_HI = 0.8, 1.0  # [3] band_fraction: worst-joint Λ within this fraction of J_limit
 
 
@@ -74,6 +73,11 @@ def run_reference_strikes(
   rcfg.resolve(env.scene)
   ncfg = SceneEntityCfg("nail_block", site_names=("nail_top",))
   ncfg.resolve(env.scene)
+  # Resolved per-env (a fresh env is built per call, so a module-scope cfg cannot be pre-resolved):
+  # unresolved, joint_ids defaults to slice(None), which reads the right column only by the
+  # single-joint coincidence of the nail_block entity (review finding, Task 5).
+  nail_cfg = SceneEntityCfg("nail_block", joint_names=("nail_slide",))
+  nail_cfg.resolve(env.scene)
 
   def head() -> torch.Tensor:
     return robot.data.site_pos_w[:, rcfg.site_ids].squeeze(1)
@@ -118,7 +122,7 @@ def run_reference_strikes(
     limit = hook._imp_limit  # (J,) — the possibly-overridden limit, read live (not cached)
     max_excess.append(float((peak_lambda - limit).max()))
     max_delta.append(peak_delta)
-    depth.append(float(clamped_nail_depth(env, _NAIL_CFG)[0]))
+    depth.append(float(clamped_nail_depth(env, nail_cfg)[0]))
     ratios.append(float((peak_lambda / limit.clamp_min(1e-9)).max()))
 
   cmax = hook._imp_cmax[0].tolist()  # snapshot AFTER all strikes
