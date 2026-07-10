@@ -36,9 +36,10 @@ docstrings AND live probing (`d = env.sim.wp_data` during a driven strike):
   mathematically equivalent to summing ``J_row * force_row`` over active rows).
 * **Overflow rows contain STALE, NONZERO garbage**, not zero — confirmed empirically (previous
   step's contact force values, magnitude ~10, were observed sitting past ``nefc`` on a step where
-  those rows were inactive). The ``nefc < njmax`` / ``nacon < naconmax`` guards below are load-
+  those rows were inactive). The ``nefc <= njmax`` / ``nacon <= naconmax`` guards below are load-
   bearing, not defensive: a naive full-width sum would silently include a stale contact force
-  from N steps ago.
+  from N steps ago. (Boundary per mujoco_warp's own docs: overflow is count **>** capacity —
+  ``==`` is a valid fully-packed state, so the guards use ``<=``, not strict ``<``.)
 * Row ordering is grouped by constraint TYPE within a world, not by C MuJoCo's construction order:
   observed order for the single-contact single-env case was 8 ``FRICTION_DOF`` rows (one per DOF,
   ``mujoco.mjtConstraint.mjCNSTR_FRICTION_DOF == 1``) followed by 3 ``CONTACT_ELLIPTIC`` rows
@@ -136,8 +137,10 @@ def reconstruct_qfrc_from_efc(env: "ManagerBasedRlEnv") -> torch.Tensor:
   d = env.sim.wp_data
   nefc = wp.to_torch(d.nefc).long()  # (nworld,) — PER-WORLD active row count.
   njmax = d.njmax
-  assert bool((nefc < njmax).all()), (
-    f"efc row overflow: nefc={nefc.tolist()} >= njmax={njmax} — mujoco_warp silently "
+  # Boundary per mujoco_warp itself (collision_driver.py: overflow is count > capacity):
+  # nefc == njmax is a legitimate fully-packed state; only > means rows were silently truncated.
+  assert bool((nefc <= njmax).all()), (
+    f"efc row overflow: nefc={nefc.tolist()} > njmax={njmax} — mujoco_warp silently "
     "truncates constraint rows past this cap; increase njmax in the sim cfg."
   )
 
@@ -167,8 +170,11 @@ def contact_row_qfrc(env: "ManagerBasedRlEnv") -> torch.Tensor:
   d = env.sim.wp_data
   nacon = int(wp.to_torch(d.nacon)[0])  # GLOBAL scalar, summed across all worlds.
   naconmax = d.naconmax
-  assert nacon < naconmax, (
-    f"contact overflow: nacon={nacon} >= naconmax={naconmax} — mujoco_warp silently "
+  # Boundary per mujoco_warp itself (collision_driver.py:766-769: "If d.nacon is larger than
+  # d.naconmax then an overflow has occurred and the remaining contacts will be skipped"):
+  # nacon == naconmax is a legitimate fully-packed state; only > means silent truncation.
+  assert nacon <= naconmax, (
+    f"contact overflow: nacon={nacon} > naconmax={naconmax} — mujoco_warp silently "
     "truncates contacts past this cap; increase naconmax in the sim cfg."
   )
 
