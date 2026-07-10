@@ -370,10 +370,11 @@ def main() -> None:
   #   M3  the object-side delivered-impulse maximize reward fires on the strike;
   #   M4  joint_impulse_excess = Λ_j − limit checked at a step with NONZERO Λ (not a tautology).
   #   M5  Track-2 ContactRowImpulseAccumulator (Task 9, LOG-ONLY, wired as substep_impulse_rows):
-  #       wired on the env, zero before contact, positive after the scripted strike, and ≤ a
-  #       genuine RAW Λ (a manually-driven raw-mode SubstepImpulseAccumulator instance — see below
-  #       for why a second normally-constructed instance can't be used). Full three-way histogram +
-  #       figure: derive_impulse_thresholds.py section [6].
+  #       wired on the env, zero before contact, positive after the scripted strike, and satisfies
+  #       the sign-aware bound rows ≤ raw + noncontact (ADJUDICATED 2026-07-10; a manually-driven
+  #       raw-mode SubstepImpulseAccumulator instance is the RAW comparator — see below for why a
+  #       second normally-constructed instance can't be used — plus a manually-accumulated
+  #       noncontact term). Full three-way histogram + figure: derive_impulse_thresholds.py section [6].
   # auto_reset is DISABLED for this phase (mjlab-native): nail_driven still TERMINATES (the MDP is
   # unchanged, and the metrics-before-reset ordering on the terminal strike is exercised), but the
   # in-step auto-reset — which zeroed the accumulators before step() returned and silently discarded
@@ -384,7 +385,11 @@ def main() -> None:
 
   from src.assets.robots.unitree_z1.z1_constants import ARM_JOINT_NAMES
   from src.tasks.hammer.cat.constraints import joint_impulse_excess
-  from src.tasks.hammer.mdp.contact_row_impulse import _ENV_SUBSTEP_ROWS_ATTR
+  from src.tasks.hammer.mdp.contact_row_impulse import (
+    _ENV_SUBSTEP_ROWS_ATTR,
+    arm_dof_cols,
+    contact_row_qfrc,
+  )
   from src.tasks.hammer.mdp.impulse_bound import (
     SubstepImpulseAccumulator,
     _ENV_SUBSTEP_IMPULSE_ATTR,
@@ -424,11 +429,31 @@ def main() -> None:
   raw_acc._in_contact_prev = torch.zeros(1, dtype=torch.bool, device=device)
   raw_acc._episode_peak = torch.zeros(1, device=device)
   raw_acc._episode_peak_perjoint = torch.zeros(1, 6, device=device)
+  raw_acc._env = imp_env  # object.__new__ bypasses ManagerTermBase.__init__; set for robustness.
+
+  # M5 sign-aware bound comparator (ADJUDICATED 2026-07-10): manually accumulate
+  # noncontact_j = Σ|qfrc_j − contact_row_qfrc_j|·dt over the SAME contact window as raw_acc,
+  # mirroring raw_acc's own pulse/running windowing so rows_peak ≤ raw_peak + noncontact_peak
+  # (the triangle-inequality bound) is evaluated on genuinely comparable per-event-pulse quantities.
+  m5_cols = arm_dof_cols(imp_env)  # GLOBAL dof columns, same ARM order as raw_arm_cfg.joint_ids
+  noncontact_pulse = torch.zeros(1, 6, device=device)
+  noncontact_running = torch.zeros(1, 6, device=device)
+  noncontact_in_contact_prev = torch.zeros(1, dtype=torch.bool, device=device)
   orig_substep_m5 = imp_env.metrics_manager.compute_substep
 
   def _patched_m5() -> None:
+    nonlocal noncontact_pulse, noncontact_running, noncontact_in_contact_prev
     orig_substep_m5()
     raw_acc(imp_env)
+    qfrc_now = imp_env.scene["robot"].data._joint_dof_field("qfrc_constraint")[:, raw_acc._joint_ids]  # (1,6)
+    contact_qfrc_now = contact_row_qfrc(imp_env)[:, m5_cols]  # (1,6) same substep as qfrc_now
+    in_contact = (raw_acc._sensor.data.found > 0).any(dim=-1)
+    in_c = in_contact[:, None]
+    falling = (~in_contact & noncontact_in_contact_prev)[:, None]
+    noncontact_running = noncontact_running + (qfrc_now - contact_qfrc_now).abs() * imp_env.physics_dt * in_c
+    noncontact_pulse = torch.where(falling, torch.maximum(noncontact_pulse, noncontact_running), noncontact_pulse)
+    noncontact_running = torch.where(falling, torch.zeros_like(noncontact_running), noncontact_running)
+    noncontact_in_contact_prev = in_contact
 
   imp_env.metrics_manager.compute_substep = _patched_m5  # type: ignore[method-assign]
   imp_rm = imp_env.reward_manager
@@ -436,6 +461,7 @@ def main() -> None:
   peak_lambda = torch.zeros(6, device=device)
   raw_peak = torch.zeros(6, device=device)
   rows_peak = torch.zeros(6, device=device)
+  noncontact_peak = torch.zeros(6, device=device)  # sign-aware bound term (rows ≤ raw + noncontact)
   rows_pre_contact_max = 0.0
   rows_contact_seen = False
   max_delta, max_dimp_reward = 0.0, 0.0
@@ -447,6 +473,8 @@ def main() -> None:
     peak_lambda = torch.maximum(peak_lambda, imp_now)
     raw_now = raw_acc.impulse[0].clone()
     raw_peak = torch.maximum(raw_peak, raw_now)
+    noncontact_now = torch.maximum(noncontact_pulse, noncontact_running)[0].clone()
+    noncontact_peak = torch.maximum(noncontact_peak, noncontact_now)
     rows_now = rows_acc.impulse[0].clone()
     if not rows_contact_seen:
       if float(rows_now.max()) > TOL_ZERO:
@@ -491,13 +519,14 @@ def main() -> None:
   if not (rows_peak.max() > TOL_ZERO):
     print(f"\n[FAIL] M5: Track-2 contact-row Λ never went positive on the strike ({rows_peak.tolist()})")
     sys.exit(1)
-  if not bool((rows_peak <= 1.05 * raw_peak + 1e-6).all()):
-    print(f"\n[FAIL] M5: Track-2 contact-row Λ exceeds 1.05× raw Λ — "
-          f"rows={rows_peak.tolist()}  raw={raw_peak.tolist()}")
+  if not bool((rows_peak <= 1.05 * (raw_peak + noncontact_peak) + 1e-6).all()):
+    print(f"\n[FAIL] M5: Track-2 contact-row Λ exceeds the sign-aware bound 1.05×(raw Λ + noncontact Λ) — "
+          f"rows={rows_peak.tolist()}  raw={raw_peak.tolist()}  noncontact={noncontact_peak.tolist()}")
     sys.exit(1)
   print(f"  M5 PASS  Track-2 rows wired + zero pre-contact + peak Λ_j(rows) = "
-        f"{[f'{v:.3f}' for v in rows_peak.tolist()]} ≤ 1.05×peak Λ_j(raw) = "
-        f"{[f'{v:.3f}' for v in raw_peak.tolist()]} N·m·s")
+        f"{[f'{v:.3f}' for v in rows_peak.tolist()]} ≤ 1.05×(peak Λ_j(raw) + peak Λ_j(noncontact)) = "
+        f"1.05×({[f'{v:.3f}' for v in raw_peak.tolist()]} + {[f'{v:.3f}' for v in noncontact_peak.tolist()]}) "
+        "N·m·s (sign-aware bound)")
   summary.append(("M. Impulse arm", {}))
 
   # --- Summary table ---

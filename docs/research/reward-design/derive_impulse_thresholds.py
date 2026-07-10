@@ -56,8 +56,12 @@ APPROACH_HEIGHTS = [0.06, 0.10, 0.15]
 REPEATS = 5
 HOLD_STEPS = 6
 WELD_TOL = 0.5  # max acceptable off-contact-baseline fraction of the contact-window Λ (gate)
-ROWS_RAW_TOL = 1.05  # Track-2 hard gate: contact-row Λ (efc-row-only, Task 9) must be a strict
-# subset of the raw qfrc_constraint sum by construction; 5% slack covers float/window-boundary noise.
+ROWS_RAW_TOL = 1.05  # Track-2 hard gate (AMENDED 2026-07-10, sign-aware): contact-row Λ must
+# satisfy rows ≤ raw + noncontact (triangle inequality; exact per substep given the Task-8
+# reconstruction invariant) — NOT `rows ≤ raw` alone, which joint3's dof-friction sign-cancellation
+# falsifies (raw undershoots the true reaction there; see IMPULSE_CAT_IMPL_PLAN.md Status area).
+# noncontact_j = Σ_substeps |qfrc_constraint_j − contact_row_qfrc_j| · dt over the SAME window as
+# raw/rows; 5% slack covers float/window-boundary noise.
 TRACK2_RATIO_SPREAD_TOL = 5.0  # Track-2 cross-check: worst-joint contact-row Λ [N·m·s] and object-
 # side ∫F·dt [N·s] are DIFFERENT units, so only the SPREAD of their ratio across strikes is
 # meaningful (both should scale together with impact intensity). Wider than this across the
@@ -97,7 +101,11 @@ def main() -> None:
   # Each record also snapshots the SHIPPED accumulators (the buffers training actually uses), so
   # the gate certifies the wired code, not just this script's parallel computation (2026-07 review
   # finding #3: the old gate's off-contact check was vacuous and never read the shipped metric).
-  from src.tasks.hammer.mdp.contact_row_impulse import _ENV_SUBSTEP_ROWS_ATTR
+  from src.tasks.hammer.mdp.contact_row_impulse import (
+    _ENV_SUBSTEP_ROWS_ATTR,
+    arm_dof_cols,
+    contact_row_qfrc,
+  )
   from src.tasks.hammer.mdp.impulse_bound import (
     _ENV_SUBSTEP_DELIVERED_ATTR,
     _ENV_SUBSTEP_IMPULSE_ATTR,
@@ -106,8 +114,11 @@ def main() -> None:
   acc_shipped = getattr(env, _ENV_SUBSTEP_IMPULSE_ATTR)
   dacc_shipped = getattr(env, _ENV_SUBSTEP_DELIVERED_ATTR)
   acc_rows = getattr(env, _ENV_SUBSTEP_ROWS_ATTR)  # Track 2 (Task 9): rigorous efc-row-only Λ
-  # (in_contact, qfrc_arm(6), f_axial, shipped_impulse(6), shipped_delivered, shipped_rows_impulse(6))
-  rec: list[tuple[bool, torch.Tensor, float, torch.Tensor, float, torch.Tensor]] = []
+  cols = arm_dof_cols(env)  # GLOBAL dof columns for ARM (same order), so contact_row_qfrc's
+  # (nworld, nv) output selects the identical 6 arm joints as `jid` does on qfrc_constraint.
+  # (in_contact, qfrc_arm(6), contact_qfrc_arm(6), f_axial, shipped_impulse(6), shipped_delivered,
+  #  shipped_rows_impulse(6)) — contact_qfrc_arm feeds the sign-aware bound's noncontact term.
+  rec: list[tuple[bool, torch.Tensor, torch.Tensor, float, torch.Tensor, float, torch.Tensor]] = []
   # Hook AFTER the shipped accumulators run (metrics_manager.compute_substep follows scene.update
   # in the decimation loop), so every record's shipped snapshot includes its OWN substep — the
   # cross-check is exact by construction, with no alignment tolerance to hide an off-by-one behind.
@@ -116,11 +127,14 @@ def main() -> None:
   def patched() -> None:
     orig_substep()
     qfrc = robot.data._joint_dof_field("qfrc_constraint")[0, jid].clone()  # (6,)
+    contact_qfrc = contact_row_qfrc(env)[0, cols].clone()  # (6,) signed contact-row projection,
+    # read at this SAME substep as `qfrc` above — required for the triangle-inequality bound
+    # |contact| ≤ |qfrc| + |qfrc − contact| to hold (sign-aware rows≤raw+noncontact gate).
     in_c = bool((contact.data.found > 0).any())
     f = netf.data.force  # (1, N, 3) world
     f_ax = float((f * axis).sum(-1).sum(-1).clamp_min(0.0)[0])
     rec.append((
-      in_c, qfrc, f_ax,
+      in_c, qfrc, contact_qfrc, f_ax,
       acc_shipped.impulse[0].clone(), float(dacc_shipped.delivered[0]),
       acc_rows.impulse[0].clone(),
     ))
@@ -131,6 +145,7 @@ def main() -> None:
   per_joint_raw: list[torch.Tensor] = []      # Λ_j raw-gated, per strike (script-side)
   per_joint_sub: list[torch.Tensor] = []      # Λ_j baseline-subtracted, per strike (script-side)
   per_joint_rows: list[torch.Tensor] = []     # Track 2: rigorous efc-row-only Λ_j, per strike (shipped)
+  per_joint_noncontact: list[torch.Tensor] = []  # Σ|qfrc − contact_row_qfrc|·dt, per strike (sign-aware bound term)
   delivered: list[float] = []                 # object-side ∫F_axial dt, per strike (script-side)
   durations: list[int] = []                   # contact-window substeps, per strike
   friction_baseline: list[torch.Tensor] = []  # off-contact |qfrc| per joint (the contaminant scale)
@@ -156,6 +171,7 @@ def main() -> None:
       baseline = torch.zeros(6)
       raw = torch.zeros(6)
       sub = torch.zeros(6)
+      noncontact = torch.zeros(6)
       dur = 0
       deliv = 0.0
       seen_contact = False
@@ -164,7 +180,7 @@ def main() -> None:
       shipped_del_start = 0.0
       shipped_del_end = 0.0
       deliv_capped = 0.0  # script-side mirror of the shipped per-event accrual cap (first 25 substeps)
-      for in_c, qfrc, f_ax, ship_imp, ship_del, ship_rows in rec:
+      for in_c, qfrc, contact_qfrc, f_ax, ship_imp, ship_del, ship_rows in rec:
         if not in_c:
           baseline = qfrc  # rolling pre-contact reference (frozen once contact opens)
           friction_baseline.append(qfrc.abs())
@@ -179,6 +195,10 @@ def main() -> None:
           seen_contact = True
           raw += qfrc.abs() * dt
           sub += (qfrc - baseline).abs() * dt
+          # Sign-aware bound term (ADJUDICATED 2026-07-10): the non-contact-row component of qfrc
+          # (dof-friction/limit contamination), accumulated over the IDENTICAL contact window as
+          # raw/rows above — so rows_j ≤ raw_j + noncontact_j (triangle inequality) holds exactly.
+          noncontact += (qfrc - contact_qfrc).abs() * dt
           deliv += f_ax * dt
           if dur < 25:  # mirrors SubstepDeliveredImpulse's event_window_substeps default
             deliv_capped += f_ax * dt
@@ -190,6 +210,7 @@ def main() -> None:
         per_joint_raw.append(raw)
         per_joint_sub.append(sub)
         per_joint_rows.append(shipped_rows_win)
+        per_joint_noncontact.append(noncontact)
         delivered.append(deliv)
         durations.append(dur)
         # Cross-check the SHIPPED buffers against this script's independent sums — records snapshot
@@ -210,6 +231,7 @@ def main() -> None:
   RAW = torch.stack(per_joint_raw)   # (S, 6)
   SUB = torch.stack(per_joint_sub)   # (S, 6)
   ROWS = torch.stack(per_joint_rows) # (S, 6) Track 2: rigorous efc-row-only Λ_j (Task 9)
+  NONCONTACT = torch.stack(per_joint_noncontact)  # (S, 6) Σ|qfrc−contact_row_qfrc|·dt (sign-aware bound term)
   DEL = torch.tensor(delivered)      # (S,)
   DUR = torch.tensor(durations, dtype=torch.float32)  # (S,)
   FB = torch.stack(friction_baseline) if friction_baseline else torch.zeros(1, 6)
@@ -272,20 +294,26 @@ def main() -> None:
   print("\n[6] TRACK 2 — THREE-WAY QUANTITY VALIDATION "
         "(raw Λ | baseline-subtracted Λ | contact-row Λ | object-side ∫F·dt)")
   rows_mean = ROWS.mean(0)
+  noncont_mean = NONCONTACT.mean(0)  # sign-aware bound term (ADJUDICATED 2026-07-10): the
+  # non-contact-row share of qfrc; rows_j ≤ raw_j + noncont_j is the amended hard gate below.
   # friction share: fraction of the raw contact-window sum that is dof-friction contamination, not
   # real hammer<->nail contact reaction (rows is the rigorous efc-row-only ground truth, Task 9).
+  # NOTE: friction_share/residual_after_sub below are ratios-OF-MEANS (mean over strikes, THEN one
+  # ratio) — NOT the mean of each strike's own ratio; quote per-strike numbers before citing these
+  # percentages in the thesis.
   friction_share = (raw_mean - rows_mean) / raw_mean.clamp_min(1e-9) * 100.0
   # residual after subtraction: fraction the SHIPPED enforced quantity (baseline-subtracted Λ, C2)
   # still overshoots the rigorous ground truth by, after the cheaper baseline-subtraction correction.
   residual_after_sub = (sub_mean - rows_mean) / rows_mean.clamp_min(1e-9) * 100.0
-  print(f"    {'joint':<8}{'raw':>9}{'sub':>9}{'rows':>9}{'fric-shr%':>11}{'resid%':>9}")
+  print(f"    {'joint':<8}{'raw':>9}{'sub':>9}{'rows':>9}{'noncont':>9}{'fric-shr%':>11}{'resid%':>9}")
   for j in range(6):
     print(f"    {ARM[j]:<8}{raw_mean[j]:>9.4f}{sub_mean[j]:>9.4f}{rows_mean[j]:>9.4f}"
-          f"{friction_share[j]:>10.1f}%{residual_after_sub[j]:>8.1f}%")
+          f"{noncont_mean[j]:>9.4f}{friction_share[j]:>10.1f}%{residual_after_sub[j]:>8.1f}%")
   print(f"    object-side ∫F_axial dt (task-space N·s, single scalar, NOT per-joint): "
         f"mean {DEL.mean():.4f}  max {DEL.amax():.4f}")
   print("    friction share = (raw − rows)/raw; residual after subtraction = (subtracted − rows)/rows "
-        "(rows = the rigorous efc-row-only ground truth, Task 9; see the module docstring's [2]).")
+        "(rows = the rigorous efc-row-only ground truth, Task 9; see the module docstring's [2]). "
+        "noncont = Σ|qfrc − contact_row_qfrc|·dt, the sign-aware bound term (rows ≤ raw + noncont).")
 
   fig_dir = Path(__file__).parent / "figures"
   fig_dir.mkdir(parents=True, exist_ok=True)
@@ -338,15 +366,22 @@ def main() -> None:
     print(f"\n[GATE WARN] worst-joint contamination {worst_contam:.0f}% > {WELD_TOL*100:.0f}% tol — "
           "prefer subtract_baseline=True for the shipped quantity (report decision).")
 
-  # [6] hard gate: contact-row Λ is a strict subset of the raw qfrc sum by construction.
-  rows_ok = bool((ROWS <= RAW * ROWS_RAW_TOL + 1e-6).all())
+  # [6] hard gate (AMENDED 2026-07-10, sign-aware): rows ≤ raw + noncontact — the triangle-
+  # inequality bound |contact| ≤ |qfrc| + |qfrc − contact| (exact per substep given the Task-8
+  # reconstruction invariant), NOT `rows ≤ raw` alone (falsified by joint3's dof-friction sign-
+  # cancellation, see IMPULSE_CAT_IMPL_PLAN.md Status area / task-10-report.md).
+  rows_bound = (RAW + NONCONTACT) * ROWS_RAW_TOL + 1e-6
+  rows_ok = bool((ROWS <= rows_bound).all())
   if not rows_ok:
-    excess = float((ROWS - RAW * ROWS_RAW_TOL).clamp_min(0.0).max())
-    print(f"\n[GATE FAIL] contact-row Λ exceeds {ROWS_RAW_TOL:.2f}× raw Λ (worst excess {excess:.4f}) — "
-          "the rigorous efc-row reconstruction must be a strict subset of the full qfrc_constraint sum.")
+    excess = float((ROWS - rows_bound).clamp_min(0.0).max())
+    print(f"\n[GATE FAIL] contact-row Λ exceeds {ROWS_RAW_TOL:.2f}× (raw Λ + noncontact Λ) "
+          f"(worst excess {excess:.4f}) — the sign-aware bound rows ≤ raw + noncontact "
+          "(triangle inequality) is violated; this indicates a genuine attribution bug "
+          "(double-counted rows, wrong-world reads), not physical sign-cancellation.")
     ok = False
   else:
-    print(f"\n    [6] hard gate PASS: contact-row Λ ≤ {ROWS_RAW_TOL:.2f}× raw Λ for all {S} strikes.")
+    print(f"\n    [6] hard gate PASS: contact-row Λ ≤ {ROWS_RAW_TOL:.2f}× (raw Λ + noncontact Λ) "
+          f"for all {S} strikes (sign-aware bound).")
 
   # [6] Track-2 cross-check: contact-row Λ vs. the weld/friction-immune object-side ∫F·dt. Different
   # units (N·m·s per joint vs N·s task-space) so we check (a) rows is never absent when a real strike
