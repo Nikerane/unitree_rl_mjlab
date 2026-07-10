@@ -369,14 +369,24 @@ def main() -> None:
   #       identically 0 under imp_max_p=0 (log-only is a TRUE no-op — the enforcement gate);
   #   M3  the object-side delivered-impulse maximize reward fires on the strike;
   #   M4  joint_impulse_excess = Λ_j − limit checked at a step with NONZERO Λ (not a tautology).
+  #   M5  Track-2 ContactRowImpulseAccumulator (Task 9, LOG-ONLY, wired as substep_impulse_rows):
+  #       wired on the env, zero before contact, positive after the scripted strike, and ≤ a
+  #       genuine RAW Λ (a manually-driven raw-mode SubstepImpulseAccumulator instance — see below
+  #       for why a second normally-constructed instance can't be used). Full three-way histogram +
+  #       figure: derive_impulse_thresholds.py section [6].
   # auto_reset is DISABLED for this phase (mjlab-native): nail_driven still TERMINATES (the MDP is
   # unchanged, and the metrics-before-reset ordering on the terminal strike is exercised), but the
   # in-step auto-reset — which zeroed the accumulators before step() returned and silently discarded
   # the home-driving strike's Λ (2026-07 review finding #5) — does not run, so terminal-step values
   # stay readable. Full histogram + shipped-accumulator cross-check: derive_impulse_thresholds.py.
   print("\n--- Phase M: impulse-CaT arm (Λ_j, log-only δ≡0, delivered impulse) ---")
+  from mjlab.managers.scene_entity_config import SceneEntityCfg
+
+  from src.assets.robots.unitree_z1.z1_constants import ARM_JOINT_NAMES
   from src.tasks.hammer.cat.constraints import joint_impulse_excess
+  from src.tasks.hammer.mdp.contact_row_impulse import _ENV_SUBSTEP_ROWS_ATTR
   from src.tasks.hammer.mdp.impulse_bound import (
+    SubstepImpulseAccumulator,
     _ENV_SUBSTEP_IMPULSE_ATTR,
     Z1_JOINT_IMPULSE_LIMIT,
   )
@@ -389,9 +399,45 @@ def main() -> None:
   imp_down = torch.zeros(1, imp_env.action_manager.total_action_dim, device=device)
   imp_down[:, 2] = -1.0
   acc = getattr(imp_env, _ENV_SUBSTEP_IMPULSE_ATTR)
+  rows_acc = getattr(imp_env, _ENV_SUBSTEP_ROWS_ATTR, None)
+  if rows_acc is None:
+    print(f"\n[FAIL] M5: {_ENV_SUBSTEP_ROWS_ATTR} not wired on the env — "
+          "ContactRowImpulseAccumulator (substep_impulse_rows) is missing from cat_impulse=True")
+    sys.exit(1)
+  # M5's RAW-Λ comparator: SubstepImpulseAccumulator.__init__ ALWAYS does
+  # `setattr(env, _ENV_SUBSTEP_IMPULSE_ATTR, self)`, so a second normally-constructed instance would
+  # silently replace `acc` (the enforced, baseline-subtracted one M1-M4 depend on) on the same env
+  # attribute. Build a raw-mode instance by bypassing __init__ (mirrors tests/test_impulse_bound.py's
+  # object.__new__ pattern) and drive it manually in lockstep with the real per-substep metrics.
+  raw_acc = object.__new__(SubstepImpulseAccumulator)
+  raw_acc._subtract_baseline = False
+  raw_arm_cfg = SceneEntityCfg("robot", joint_names=ARM_JOINT_NAMES)
+  raw_arm_cfg.resolve(imp_env.scene)
+  raw_acc._joint_ids = raw_arm_cfg.joint_ids
+  raw_acc._robot = imp_env.scene["robot"]
+  raw_acc._sensor = imp_env.scene["hammer_nail_contact"]
+  raw_acc._dec = int(imp_env.cfg.decimation)
+  raw_acc._i = 0
+  raw_acc._pulse = torch.zeros(1, 6, device=device)
+  raw_acc._running = torch.zeros(1, 6, device=device)
+  raw_acc._last_off_qfrc = torch.zeros(1, 6, device=device)
+  raw_acc._in_contact_prev = torch.zeros(1, dtype=torch.bool, device=device)
+  raw_acc._episode_peak = torch.zeros(1, device=device)
+  raw_acc._episode_peak_perjoint = torch.zeros(1, 6, device=device)
+  orig_substep_m5 = imp_env.metrics_manager.compute_substep
+
+  def _patched_m5() -> None:
+    orig_substep_m5()
+    raw_acc(imp_env)
+
+  imp_env.metrics_manager.compute_substep = _patched_m5  # type: ignore[method-assign]
   imp_rm = imp_env.reward_manager
   didx = imp_rm.active_terms.index("delivered_impulse")
   peak_lambda = torch.zeros(6, device=device)
+  raw_peak = torch.zeros(6, device=device)
+  rows_peak = torch.zeros(6, device=device)
+  rows_pre_contact_max = 0.0
+  rows_contact_seen = False
   max_delta, max_dimp_reward = 0.0, 0.0
   m4_margin = m4_impulse = None
   terminated = False
@@ -399,6 +445,15 @@ def main() -> None:
     imp_env.step(imp_down)
     imp_now = acc.impulse[0].clone()
     peak_lambda = torch.maximum(peak_lambda, imp_now)
+    raw_now = raw_acc.impulse[0].clone()
+    raw_peak = torch.maximum(raw_peak, raw_now)
+    rows_now = rows_acc.impulse[0].clone()
+    if not rows_contact_seen:
+      if float(rows_now.max()) > TOL_ZERO:
+        rows_contact_seen = True
+      else:
+        rows_pre_contact_max = max(rows_pre_contact_max, float(rows_now.max()))
+    rows_peak = torch.maximum(rows_peak, rows_now)
     delta = imp_env.extras.get("cat_delta")
     if delta is None:
       print(f"\n[FAIL] M2: extras['cat_delta'] missing at step {step} — the CaT hook is not wired")
@@ -412,6 +467,7 @@ def main() -> None:
     if bool(imp_env.reset_terminated.any()):
       terminated = True  # success fired; with auto_reset=False the terminal state is still live
       break
+  imp_env.metrics_manager.compute_substep = orig_substep_m5  # type: ignore[method-assign]
   if terminated:
     print("  (success termination fired on the strike step; terminal-step Λ read pre-reset)")
   if not (peak_lambda.max() > TOL_ZERO):
@@ -431,6 +487,17 @@ def main() -> None:
     print(f"\n[FAIL] M4: joint_impulse_excess must equal Λ_j − limit, shape (1,6); got {m4_margin.shape}")
     sys.exit(1)
   print(f"  M4 PASS  joint_impulse_excess = Λ_j − {Z1_JOINT_IMPULSE_LIMIT} at nonzero Λ (raw signed margin)")
+  assert_zero(rows_pre_contact_max, "M5: Track-2 contact-row Λ must be 0 before contact", tol=TOL_ZERO)
+  if not (rows_peak.max() > TOL_ZERO):
+    print(f"\n[FAIL] M5: Track-2 contact-row Λ never went positive on the strike ({rows_peak.tolist()})")
+    sys.exit(1)
+  if not bool((rows_peak <= 1.05 * raw_peak + 1e-6).all()):
+    print(f"\n[FAIL] M5: Track-2 contact-row Λ exceeds 1.05× raw Λ — "
+          f"rows={rows_peak.tolist()}  raw={raw_peak.tolist()}")
+    sys.exit(1)
+  print(f"  M5 PASS  Track-2 rows wired + zero pre-contact + peak Λ_j(rows) = "
+        f"{[f'{v:.3f}' for v in rows_peak.tolist()]} ≤ 1.05×peak Λ_j(raw) = "
+        f"{[f'{v:.3f}' for v in raw_peak.tolist()]} N·m·s")
   summary.append(("M. Impulse arm", {}))
 
   # --- Summary table ---

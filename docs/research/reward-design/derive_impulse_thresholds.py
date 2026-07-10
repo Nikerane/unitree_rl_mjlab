@@ -29,7 +29,13 @@ Run: ~/miniconda3/envs/unitree_mjlab/bin/python docs/research/reward-design/deri
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")  # headless (macOS/CI safe) — must precede pyplot import
+
+import matplotlib.pyplot as plt
 import torch
 
 from mjlab.envs import ManagerBasedRlEnv
@@ -50,6 +56,12 @@ APPROACH_HEIGHTS = [0.06, 0.10, 0.15]
 REPEATS = 5
 HOLD_STEPS = 6
 WELD_TOL = 0.5  # max acceptable off-contact-baseline fraction of the contact-window Λ (gate)
+ROWS_RAW_TOL = 1.05  # Track-2 hard gate: contact-row Λ (efc-row-only, Task 9) must be a strict
+# subset of the raw qfrc_constraint sum by construction; 5% slack covers float/window-boundary noise.
+TRACK2_RATIO_SPREAD_TOL = 5.0  # Track-2 cross-check: worst-joint contact-row Λ [N·m·s] and object-
+# side ∫F·dt [N·s] are DIFFERENT units, so only the SPREAD of their ratio across strikes is
+# meaningful (both should scale together with impact intensity). Wider than this across the
+# APPROACH_HEIGHTS sweep signals a row-attribution bug (Task 8/9), not physical scaling.
 
 
 def _pct(x: torch.Tensor, q: float) -> torch.Tensor:
@@ -85,6 +97,7 @@ def main() -> None:
   # Each record also snapshots the SHIPPED accumulators (the buffers training actually uses), so
   # the gate certifies the wired code, not just this script's parallel computation (2026-07 review
   # finding #3: the old gate's off-contact check was vacuous and never read the shipped metric).
+  from src.tasks.hammer.mdp.contact_row_impulse import _ENV_SUBSTEP_ROWS_ATTR
   from src.tasks.hammer.mdp.impulse_bound import (
     _ENV_SUBSTEP_DELIVERED_ATTR,
     _ENV_SUBSTEP_IMPULSE_ATTR,
@@ -92,8 +105,9 @@ def main() -> None:
 
   acc_shipped = getattr(env, _ENV_SUBSTEP_IMPULSE_ATTR)
   dacc_shipped = getattr(env, _ENV_SUBSTEP_DELIVERED_ATTR)
-  # (in_contact, qfrc_arm(6), f_axial, shipped_impulse(6), shipped_delivered)
-  rec: list[tuple[bool, torch.Tensor, float, torch.Tensor, float]] = []
+  acc_rows = getattr(env, _ENV_SUBSTEP_ROWS_ATTR)  # Track 2 (Task 9): rigorous efc-row-only Λ
+  # (in_contact, qfrc_arm(6), f_axial, shipped_impulse(6), shipped_delivered, shipped_rows_impulse(6))
+  rec: list[tuple[bool, torch.Tensor, float, torch.Tensor, float, torch.Tensor]] = []
   # Hook AFTER the shipped accumulators run (metrics_manager.compute_substep follows scene.update
   # in the decimation loop), so every record's shipped snapshot includes its OWN substep — the
   # cross-check is exact by construction, with no alignment tolerance to hide an off-by-one behind.
@@ -105,18 +119,23 @@ def main() -> None:
     in_c = bool((contact.data.found > 0).any())
     f = netf.data.force  # (1, N, 3) world
     f_ax = float((f * axis).sum(-1).sum(-1).clamp_min(0.0)[0])
-    rec.append((in_c, qfrc, f_ax, acc_shipped.impulse[0].clone(), float(dacc_shipped.delivered[0])))
+    rec.append((
+      in_c, qfrc, f_ax,
+      acc_shipped.impulse[0].clone(), float(dacc_shipped.delivered[0]),
+      acc_rows.impulse[0].clone(),
+    ))
 
   env.metrics_manager.compute_substep = patched  # type: ignore[method-assign]
 
   # --- collect many reference strikes ---
   per_joint_raw: list[torch.Tensor] = []      # Λ_j raw-gated, per strike (script-side)
   per_joint_sub: list[torch.Tensor] = []      # Λ_j baseline-subtracted, per strike (script-side)
+  per_joint_rows: list[torch.Tensor] = []     # Track 2: rigorous efc-row-only Λ_j, per strike (shipped)
   delivered: list[float] = []                 # object-side ∫F_axial dt, per strike (script-side)
   durations: list[int] = []                   # contact-window substeps, per strike
   friction_baseline: list[torch.Tensor] = []  # off-contact |qfrc| per joint (the contaminant scale)
   shipped_leak = 0.0                          # SHIPPED acc.impulse seen before any contact (must be 0)
-  ximp_err: list[float] = []                  # |shipped window Λ − script raw Λ| per strike (abs, worst joint)
+  ximp_err: list[float] = []                  # |shipped window Λ − script baseline-subtracted Λ| per strike
   xdel_err: list[float] = []                  # |shipped delivered Δ − script deliv| per strike
 
   for h in APPROACH_HEIGHTS:
@@ -141,10 +160,11 @@ def main() -> None:
       deliv = 0.0
       seen_contact = False
       shipped_win = torch.zeros(6)  # per-joint max of the SHIPPED acc.impulse over the window
+      shipped_rows_win = torch.zeros(6)  # per-joint max of the SHIPPED rows acc.impulse (Track 2)
       shipped_del_start = 0.0
       shipped_del_end = 0.0
       deliv_capped = 0.0  # script-side mirror of the shipped per-event accrual cap (first 25 substeps)
-      for in_c, qfrc, f_ax, ship_imp, ship_del in rec:
+      for in_c, qfrc, f_ax, ship_imp, ship_del, ship_rows in rec:
         if not in_c:
           baseline = qfrc  # rolling pre-contact reference (frozen once contact opens)
           friction_baseline.append(qfrc.abs())
@@ -164,15 +184,21 @@ def main() -> None:
             deliv_capped += f_ax * dt
           dur += 1
           shipped_win = torch.maximum(shipped_win, ship_imp)
+          shipped_rows_win = torch.maximum(shipped_rows_win, ship_rows)
           shipped_del_end = ship_del
       if seen_contact and dur > 0:
         per_joint_raw.append(raw)
         per_joint_sub.append(sub)
+        per_joint_rows.append(shipped_rows_win)
         delivered.append(deliv)
         durations.append(dur)
         # Cross-check the SHIPPED buffers against this script's independent sums — records snapshot
-        # AFTER metrics.compute_substep, so agreement must be exact (float tolerance only).
-        ximp_err.append(max(0.0, float((shipped_win - raw).abs().max()) - 1e-4))
+        # AFTER metrics.compute_substep, so agreement must be exact (float tolerance only). The
+        # shipped substep_impulse accumulator is configured subtract_baseline=True (C2, env_cfgs.py),
+        # so its window value IS the baseline-subtracted sum — compare against `sub`, not `raw`
+        # (fixed 2026-07-10: this previously compared against `raw`, a stale leftover from before
+        # the C2 subtract_baseline=True switch, which spuriously FAILed the gate).
+        ximp_err.append(max(0.0, float((shipped_win - sub).abs().max()) - 1e-4))
         xdel_err.append(max(0.0, abs((shipped_del_end - shipped_del_start) - deliv_capped) - 1e-4))
 
   env.metrics_manager.compute_substep = orig_substep  # type: ignore[method-assign]
@@ -183,6 +209,7 @@ def main() -> None:
 
   RAW = torch.stack(per_joint_raw)   # (S, 6)
   SUB = torch.stack(per_joint_sub)   # (S, 6)
+  ROWS = torch.stack(per_joint_rows) # (S, 6) Track 2: rigorous efc-row-only Λ_j (Task 9)
   DEL = torch.tensor(delivered)      # (S,)
   DUR = torch.tensor(durations, dtype=torch.float32)  # (S,)
   FB = torch.stack(friction_baseline) if friction_baseline else torch.zeros(1, 6)
@@ -242,6 +269,49 @@ def main() -> None:
         "first over-limit sample (CaT-style), so no excess-scale statistic is needed here; any "
         "small floor (e.g. 1e-3) is safe.")
 
+  print("\n[6] TRACK 2 — THREE-WAY QUANTITY VALIDATION "
+        "(raw Λ | baseline-subtracted Λ | contact-row Λ | object-side ∫F·dt)")
+  rows_mean = ROWS.mean(0)
+  # friction share: fraction of the raw contact-window sum that is dof-friction contamination, not
+  # real hammer<->nail contact reaction (rows is the rigorous efc-row-only ground truth, Task 9).
+  friction_share = (raw_mean - rows_mean) / raw_mean.clamp_min(1e-9) * 100.0
+  # residual after subtraction: fraction the SHIPPED enforced quantity (baseline-subtracted Λ, C2)
+  # still overshoots the rigorous ground truth by, after the cheaper baseline-subtraction correction.
+  residual_after_sub = (sub_mean - rows_mean) / rows_mean.clamp_min(1e-9) * 100.0
+  print(f"    {'joint':<8}{'raw':>9}{'sub':>9}{'rows':>9}{'fric-shr%':>11}{'resid%':>9}")
+  for j in range(6):
+    print(f"    {ARM[j]:<8}{raw_mean[j]:>9.4f}{sub_mean[j]:>9.4f}{rows_mean[j]:>9.4f}"
+          f"{friction_share[j]:>10.1f}%{residual_after_sub[j]:>8.1f}%")
+  print(f"    object-side ∫F_axial dt (task-space N·s, single scalar, NOT per-joint): "
+        f"mean {DEL.mean():.4f}  max {DEL.amax():.4f}")
+  print("    friction share = (raw − rows)/raw; residual after subtraction = (subtracted − rows)/rows "
+        "(rows = the rigorous efc-row-only ground truth, Task 9; see the module docstring's [2]).")
+
+  fig_dir = Path(__file__).parent / "figures"
+  fig_dir.mkdir(parents=True, exist_ok=True)
+  fig, ax = plt.subplots(figsize=(9, 5))
+  x = list(range(6))
+  w = 0.25
+  ax.bar([xi - w for xi in x], raw_mean.tolist(), width=w, label="raw Λ (qfrc, uncorrected)")
+  ax.bar(x, sub_mean.tolist(), width=w, label="baseline-subtracted Λ (shipped, enforced, C2)")
+  ax.bar(
+    [xi + w for xi in x], rows_mean.tolist(), width=w,
+    label="contact-row Λ (efc rows, rigorous GT, Task 9)",
+  )
+  ax.set_xticks(x)
+  ax.set_xticklabels(ARM)
+  ax.set_ylabel(f"Λ_j  [N·m·s]  (mean over {S} reference strikes)")
+  ax.set_title(
+    "Impulse-CaT quantity-contamination gate\n"
+    f"object-side ∫F_axial·dt (task-space GT) mean={DEL.mean():.3f} N·s"
+  )
+  ax.legend()
+  fig.tight_layout()
+  fig_path = fig_dir / "impulse_contamination.png"
+  fig.savefig(fig_path, dpi=150)
+  plt.close(fig)
+  print(f"    figure saved: {fig_path}")
+
   # --- gate verdict ---
   ok = True
   if shipped_leak > 1e-9:
@@ -267,6 +337,45 @@ def main() -> None:
   if worst_contam > WELD_TOL * 100.0:
     print(f"\n[GATE WARN] worst-joint contamination {worst_contam:.0f}% > {WELD_TOL*100:.0f}% tol — "
           "prefer subtract_baseline=True for the shipped quantity (report decision).")
+
+  # [6] hard gate: contact-row Λ is a strict subset of the raw qfrc sum by construction.
+  rows_ok = bool((ROWS <= RAW * ROWS_RAW_TOL + 1e-6).all())
+  if not rows_ok:
+    excess = float((ROWS - RAW * ROWS_RAW_TOL).clamp_min(0.0).max())
+    print(f"\n[GATE FAIL] contact-row Λ exceeds {ROWS_RAW_TOL:.2f}× raw Λ (worst excess {excess:.4f}) — "
+          "the rigorous efc-row reconstruction must be a strict subset of the full qfrc_constraint sum.")
+    ok = False
+  else:
+    print(f"\n    [6] hard gate PASS: contact-row Λ ≤ {ROWS_RAW_TOL:.2f}× raw Λ for all {S} strikes.")
+
+  # [6] Track-2 cross-check: contact-row Λ vs. the weld/friction-immune object-side ∫F·dt. Different
+  # units (N·m·s per joint vs N·s task-space) so we check (a) rows is never absent when a real strike
+  # delivered impulse, and (b) the ratio between them doesn't swing wildly across strikes — a bug
+  # (e.g. row misattribution) would decouple the two independent measurements of the SAME event.
+  rows_worst = ROWS.amax(dim=1)  # (S,) worst-joint contact-row Λ per strike
+  strike_mask = DEL > 1e-6
+  if bool(strike_mask.any()):
+    missing = strike_mask & (rows_worst <= 1e-9)
+    if bool(missing.any()):
+      print(f"\n[TRACK-2 BUG] contact-row Λ is zero on {int(missing.sum())}/{S} strike(s) where "
+            "object-side ∫F·dt shows a real strike. This blocks TRACK-2 (contact-row / Task 8-10) "
+            "conclusions ONLY — the enforced Track-1 quantity (raw / baseline-subtracted Λ, "
+            "sections [1]-[2]) is measured independently and is UNAFFECTED.")
+      ok = False
+    elif int(strike_mask.sum()) >= 2:
+      ratio = rows_worst[strike_mask] / DEL[strike_mask]
+      spread = float(ratio.max() / ratio.min().clamp_min(1e-9))
+      if spread > TRACK2_RATIO_SPREAD_TOL:
+        print(f"\n[TRACK-2 BUG] contact-row Λ / object-side ∫F·dt ratio spreads {spread:.1f}× across "
+              f"strikes (tol {TRACK2_RATIO_SPREAD_TOL:.1f}×; units differ so only the SPREAD is "
+              "checked). This blocks TRACK-2 (contact-row / Task 8-10) conclusions ONLY — Track-1 "
+              "(raw / baseline-subtracted Λ) is measured independently and is UNAFFECTED.")
+        ok = False
+      else:
+        print(f"    Track-2 cross-check PASS: contact-row Λ(worst-joint)/object-side ∫F·dt ratio "
+              f"spread {spread:.1f}× across {int(strike_mask.sum())} strikes "
+              f"(tol {TRACK2_RATIO_SPREAD_TOL:.1f}×).")
+
   print(f"\n=== C0 QUANTITY GATE: {'PASS' if ok else 'FAIL'} ===")
   sys.exit(0 if ok else 1)
 
