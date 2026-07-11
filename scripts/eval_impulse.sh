@@ -18,7 +18,9 @@
 #     --episode-len-s finitizes the play-cfg horizon so this holds even for a 0%-success checkpoint
 #   - action mode:     mean-action rollout (primary, the CSV row) + one sampled-action repeat
 #     (robustness check, condensed "_sampled" columns on the SAME row)
-#   - eval seed:       42 (fixed; the sampled-action repeat uses seed+1, still deterministic)
+#   - eval seed:       42 (fixed; the sampled-action repeat uses seed+1). Bit-reproducible on CPU
+#     only; on CUDA, mujoco_warp is non-deterministic run-to-run (atomic-reduction ordering), so the
+#     seeds pin the PROTOCOL -- CUDA results are statistical, not bitwise.
 #   - provenance:      host + UTC timestamp + checkpoint path + repo git hash recorded per CSV row
 #
 # Rsync (NOT run by this script -- run manually before the production pass):
@@ -27,11 +29,16 @@
 # Production default targets the 12 C3 checkpoints (4 arms x 3 seeds: c3_imp, c3_imp0, c3_track,
 # c3_catsoft -- docs/VEGA_TRAINING_PLAN.md "C3 campaign"), globbed as they arrive from rsync.
 #
+# Re-runs are NON-DESTRUCTIVE by default: existing $OUT is kept, and any checkpoint whose name
+# already has a summary.csv row is SKIPped ("SKIP <name> (row exists)") -- so re-running after
+# late-arriving checkpoints only evaluates the new ones. Set FRESH=1 to wipe $OUT and re-evaluate
+# everything (also the recovery path when eval_impulse.py rejects a stale-schema summary.csv).
+#
 # Override CKPTS to point at a different/smaller checkpoint set (e.g. local smoke checkpoints, one
 # "name:path" pair per line -- name should end "_seedN" so the seed0 ones get a trace figure below).
 # Keep NSTEPS >= 2 x EPLEN x 50 (control steps/s) or a never-succeeding smoke checkpoint completes
-# ZERO episodes and the row degenerates to n_episodes=0:
-#   CKPTS="smoke_impcfg_seed0:logs/rsl_rl/z1_hammer/2026-07-10_10-33-23/model_4.pt
+# ZERO episodes and eval_impulse.py fails the row loudly (n_episodes=0):
+#   FRESH=1 CKPTS="smoke_impcfg_seed0:logs/rsl_rl/z1_hammer/2026-07-10_10-33-23/model_4.pt
 # smoke_impcfg2_seed1:logs/rsl_rl/z1_hammer/2026-07-10_11-58-15/model_1.pt" \
 #     NENVS=16 NSTEPS=110 EPLEN=1.0 DEV=cpu PY=~/miniconda3/envs/unitree_mjlab/bin/python \
 #     scripts/eval_impulse.sh
@@ -46,9 +53,11 @@ DEV="${DEV:-cuda:0}"
 SEED="${SEED:-42}"
 OUT="${OUT:-/tmp/eval_impulse}"
 PY="${PY:-.venv/bin/python}"   # Vega provisions .venv; override for local runs (see smoke example above)
+FRESH="${FRESH:-0}"            # FRESH=1: wipe $OUT first. Default: keep output, skip existing rows.
 
-rm -rf "$OUT"
+if [ "$FRESH" = "1" ]; then rm -rf "$OUT"; fi
 mkdir -p "$OUT/traces"
+SUMMARY_CSV="$OUT/summary.csv"
 
 if [ -n "${CKPTS:-}" ]; then
   # Override mode: "name:path" pairs, one per line (smoke / ad hoc checkpoint sets).
@@ -76,14 +85,29 @@ if [ "${#PAIRS[@]}" -eq 0 ]; then
 fi
 
 # J_limit is READ from the shipped config (never hardcoded here) so the trace-figure cap lines can
-# never drift from the same IMP_J_LIMIT the eval/reward code actually uses.
-J_LIMIT_CSV=$("$PY" -c "from src.tasks.hammer.config.z1.env_cfgs import IMP_J_LIMIT; print(','.join(str(x) for x in IMP_J_LIMIT))")
+# never drift from the same IMP_J_LIMIT the eval/reward code actually uses. The substitution is
+# CHECKED: a broken $PY/import must abort loudly, not silently drop the cap lines from every figure.
+if ! J_LIMIT_CSV=$("$PY" -c "from src.tasks.hammer.config.z1.env_cfgs import IMP_J_LIMIT; print(','.join(str(x) for x in IMP_J_LIMIT))") \
+    || [ -z "$J_LIMIT_CSV" ]; then
+  echo "eval_impulse.sh: ERROR -- failed to read IMP_J_LIMIT via \$PY ($PY); every trace figure would"
+  echo "  silently lose its J_limit cap lines. Fix the interpreter/env (PY=...) and re-run."
+  exit 1
+fi
 
 FAILS=0
 for pair in "${PAIRS[@]}"; do
+  case "$pair" in
+    *:*) ;;
+    *) echo "MALFORMED ENTRY '$pair' (expected name:path)"; FAILS=$((FAILS + 1)); echo; continue ;;
+  esac
   name="${pair%%:*}"
   ckpt="${pair#*:}"
   echo "########## $name :: $ckpt ##########"
+  # Non-destructive re-run default: a name that already has a summary.csv row is done -- skip it
+  # (FRESH=1 wipes $OUT up front, so every name re-runs).
+  if [ -f "$SUMMARY_CSV" ] && awk -F, -v n="$name" 'NR>1 && $1==n{found=1} END{exit !found}' "$SUMMARY_CSV"; then
+    echo "SKIP $name (row exists)"; echo; continue
+  fi
   if [ ! -f "$ckpt" ]; then echo "MISSING CHECKPOINT"; FAILS=$((FAILS + 1)); echo; continue; fi
 
   "$PY" scripts/eval_impulse.py \

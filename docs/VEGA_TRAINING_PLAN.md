@@ -177,3 +177,7 @@ One GPU per run (`--gres=gpu:1`), 3 seeds via array, ITERS=5000, NENVS=4096.
 c3_imp0 = SAME task, repo-default imp_max_p=0 (CatPPO at δ≡0 ≡ stock PPO): the same-reward,
 same-algorithm, same-seed UNCONSTRAINED baseline — the vacuous-check pairs c3_imp vs c3_imp0.
 c3_track (r_imit-only) and c3_catsoft (velocity CaT, same-tree re-run) are secondary comparators.
+
+Post-queue eval: `scripts/eval_impulse.sh` (protocol pinned in its header) → `/tmp/eval_impulse/summary.csv`
+(one row per checkpoint) + per-arm seed-0 trace figures under `/tmp/eval_impulse/traces/`. Outputs stay
+under /tmp until the Task 12 results record promotes the keepers to `docs/results/assets/`.

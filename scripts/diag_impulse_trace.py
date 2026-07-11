@@ -166,13 +166,22 @@ def _run_ckpt(args: argparse.Namespace) -> tuple[list[tuple], float]:
     with torch.no_grad():
       actions = policy(obs)
     obs, rew, dones, extras = wrapped.step(actions)
-    # Break on success (reset_terminated) OR timeout (reset_time_outs): auto_reset=False keeps the
-    # terminal state readable, but it also arms _manual_reset_pending for ANY done env -- one more
-    # step() after a timeout (possible without --play: training cfg episode_length_s=20 s = 1000
-    # control steps) would raise mjlab's manual-reset RuntimeError. Either way the episode is over;
-    # tracing past it would splice a stale terminal state into the figure.
-    if bool((env.reset_terminated | env.reset_time_outs).any()):
+    # Break on the TRACED env's done only -- success (reset_terminated) OR timeout (reset_time_outs;
+    # reachable without --play: training cfg episode_length_s=20 s = 1000 control steps). Either way
+    # ITS episode is over; tracing past it would splice a stale terminal state into the figure, and
+    # auto_reset=False keeps that terminal state readable. Breaking on ANY env's done (the pre-
+    # 2026-07-11 behavior) truncated an --env-idx > 0 trace mid-episode when another env finished
+    # first.
+    done = env.reset_terminated | env.reset_time_outs
+    if bool(done[args.env_idx]):
       break
+    other_done = torch.nonzero(done, as_tuple=False).flatten()
+    if other_done.numel() > 0:
+      # A NON-traced env finished: with auto_reset=False it arms _manual_reset_pending and the next
+      # step() would raise mjlab's manual-reset RuntimeError. Partial-reset ONLY those envs (envs are
+      # physically independent -- the traced env's state/accumulators/nail are untouched, and reset()
+      # runs no substeps so the hook records nothing) and keep tracing the traced env's episode.
+      env.reset(env_ids=other_done)
   return rec, float(env.physics_dt)
 
 

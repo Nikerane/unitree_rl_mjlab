@@ -16,7 +16,8 @@ Per checkpoint, extracts ONE summary.csv row:
   hardcoded), delivered impulse mean+-std, success rate, nail depth mean+-std, episode length
   mean+-std, episode count -- for a MEAN-ACTION rollout (primary, the row's numbers) plus a condensed
   SAMPLED-ACTION repeat (robustness check: success/worst-ratio/delivered/n_episodes, ``_sampled``
-  suffix) -- appended to ``<out>/summary.csv`` with a provenance header (host/timestamp/git hash).
+  suffix) -- appended to ``<out>/summary.csv`` with provenance columns (host/timestamp/git hash, plus
+  the effective ``imp_max_p`` so a non-default override is distinguishable from the pinned 0).
 
 Auto-reset correctness (Task 6 deferred fix -- the SAME bug class fixed in diag_impulse_trace.py's
 --ckpt mode, one level up): ``metrics_manager.compute()`` (full-step) runs BEFORE the in-step
@@ -53,8 +54,10 @@ from __future__ import annotations
 import argparse
 import copy
 import csv
+import math
 import socket
 import subprocess
+import sys
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -76,7 +79,7 @@ ARM_JOINTS = ("joint1", "joint2", "joint3", "joint4", "joint5", "joint6")
 
 FIELDNAMES = [
   "name", "ckpt_path", "task",
-  "num_envs", "nsteps", "episode_len_s", "seed",
+  "num_envs", "nsteps", "episode_len_s", "seed", "imp_max_p",
   "n_episodes",
   *[f"lambda_max_{j}" for j in ARM_JOINTS],
   *[f"lambda_p95_{j}" for j in ARM_JOINTS],
@@ -263,6 +266,18 @@ def main() -> None:
   mean_rec = _rollout(env_cfg, agent_cfg, runner_cls, args.ckpt, args.device,
                        args.nsteps, args.seed, stochastic=False)
   n_ep = len(mean_rec["ep_len"])
+  if n_ep == 0:
+    print(f"[eval_impulse] ERROR: ZERO completed episodes in the mean-action rollout for '{name}' "
+          f"(num_envs={args.num_envs}, nsteps={args.nsteps}, episode_len_s={args.episode_len_s}) -- "
+          f"NO row written. Keep nsteps >= 2 x episode_len_s x 50 control steps so even a "
+          f"never-succeeding checkpoint times out into >=2 episodes/env (see the "
+          f"scripts/eval_impulse.sh header).", file=sys.stderr)
+    raise SystemExit(1)
+  if n_ep < 2 * args.num_envs:
+    print(f"[eval_impulse] WARNING: n_episodes={n_ep} < {2 * args.num_envs} -- below the pinned "
+          f">=2 episodes/env floor for num_envs={args.num_envs}. The row is still written "
+          f"(n_episodes is a column), but its tail statistics are under-populated vs the protocol.",
+          file=sys.stderr)
   lam_max = [0.0] * len(ARM_JOINTS)
   lam_p95 = [0.0] * len(ARM_JOINTS)
   if n_ep > 0:
@@ -298,6 +313,7 @@ def main() -> None:
     "nsteps": args.nsteps,
     "episode_len_s": args.episode_len_s,
     "seed": args.seed,
+    "imp_max_p": args.imp_max_p,
     "n_episodes": n_ep,
     **{f"lambda_max_{j}": lam_max[k] for k, j in enumerate(ARM_JOINTS)},
     **{f"lambda_p95_{j}": lam_p95[k] for k, j in enumerate(ARM_JOINTS)},
@@ -319,10 +335,33 @@ def main() -> None:
     "git_hash": _git_hash(Path(__file__).resolve().parents[1]),
   }
 
+  # Finiteness guard: a silent NaN/inf in the thesis CSV is exactly the failure mode to prevent --
+  # refuse the whole row loudly instead of appending a poisoned value.
+  nonfinite = {
+    k: v for k, v in row.items()
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and not math.isfinite(v)
+  }
+  if nonfinite:
+    print(f"[eval_impulse] ERROR: non-finite value(s) in the row for '{name}': {nonfinite} -- "
+          f"NO row written.", file=sys.stderr)
+    raise SystemExit(1)
+
   out_dir = Path(args.out)
   out_dir.mkdir(parents=True, exist_ok=True)
   csv_path = out_dir / args.csv_name
   write_header = not csv_path.exists()
+  if not write_header:
+    # Schema drift must never misalign rows: an existing file appended to by a DIFFERENT
+    # FIELDNAMES vintage would silently shift every column right of the drift point.
+    with open(csv_path, newline="") as f:
+      existing_header = next(csv.reader(f), None)
+    if existing_header != FIELDNAMES:
+      print(f"[eval_impulse] ERROR: {csv_path} has a different header schema "
+            f"({len(existing_header) if existing_header else 0} cols) than this script's FIELDNAMES "
+            f"({len(FIELDNAMES)} cols) -- appending would misalign rows. Re-run with FRESH=1 "
+            f"(scripts/eval_impulse.sh) to wipe the output dir, or move the stale CSV aside.",
+            file=sys.stderr)
+      raise SystemExit(1)
   with open(csv_path, "a", newline="") as f:
     writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
     if write_header:
