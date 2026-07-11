@@ -1,0 +1,65 @@
+=== ABSOLUTE VALUES (means over 15 strikes) ===
+quantity                        baseline      halfdt    solref2x
+raw Λ joint1 [N·m·s]              0.0044      0.0042      0.0038
+raw Λ joint2 [N·m·s]              0.0689      0.0654      0.0531
+raw Λ joint3 [N·m·s]              0.0146      0.0106      0.0044
+raw Λ joint4 [N·m·s]              0.0572      0.0534      0.0462
+raw Λ joint5 [N·m·s]              0.0017      0.0018      0.0013
+raw Λ joint6 [N·m·s]              0.0005      0.0003      0.0004
+sub Λ joint1 [N·m·s]              0.0011      0.0011      0.0005
+sub Λ joint2 [N·m·s]              0.0416      0.0394      0.0257
+sub Λ joint3 [N·m·s]              0.0420      0.0366      0.0263
+sub Λ joint4 [N·m·s]              0.0299      0.0274      0.0189
+sub Λ joint5 [N·m·s]              0.0007      0.0008      0.0003
+sub Λ joint6 [N·m·s]              0.0000      0.0001      0.0000
+rows Λ joint1 [N·m·s]             0.0030      0.0029      0.0017
+rows Λ joint2 [N·m·s]             0.0416      0.0394      0.0257
+rows Λ joint3 [N·m·s]             0.0420      0.0366      0.0263
+rows Λ joint4 [N·m·s]             0.0303      0.0275      0.0189
+rows Λ joint5 [N·m·s]             0.0017      0.0017      0.0009
+rows Λ joint6 [N·m·s]             0.0001      0.0001      0.0001
+object ∫F·dt [N·s]                0.0811      0.0770      0.0502
+peak F_axial mean [N]               3.39        3.38        2.02
+peak F_axial max [N]                3.41        3.40        2.03
+peak |qfrc| joint1 [N·m]           0.168       0.169       0.141
+peak |qfrc| joint2 [N·m]           2.728       2.725       2.040
+peak |qfrc| joint3 [N·m]           0.745       0.521       0.470
+peak |qfrc| joint4 [N·m]           2.195       2.134       1.805
+peak |qfrc| joint5 [N·m]           0.071       0.081       0.053
+peak |qfrc| joint6 [N·m]           0.019       0.012       0.018
+window [substeps]                   13.7        26.0        13.7
+window [ms]                        27.33       26.00       27.33
+
+=== % DELTA vs BASELINE ===
+quantity                          halfdt    solref2x
+raw Λ joint1                       -4.1%      -14.2%
+raw Λ joint2                       -5.1%      -23.0%
+raw Λ joint3                      -27.5%      -69.8%
+raw Λ joint4                       -6.6%      -19.2%
+raw Λ joint5                       +8.1%      -22.0%
+raw Λ joint6                      -37.1%      -10.1%
+sub Λ joint1                       +1.1%      -57.0%
+sub Λ joint2                       -5.2%      -38.1%
+sub Λ joint3                      -12.8%      -37.3%
+sub Λ joint4                       -8.3%      -36.7%
+sub Λ joint5                      +18.5%      -52.2%
+sub Λ joint6                      +71.2%      -53.9%
+rows Λ joint1                      -2.6%      -45.1%
+rows Λ joint2                      -5.2%      -38.1%
+rows Λ joint3                     -12.8%      -37.3%
+rows Λ joint4                      -9.4%      -37.7%
+rows Λ joint5                      -2.7%      -45.2%
+rows Λ joint6                      +0.7%      -50.3%
+object ∫F·dt                       -5.0%      -38.1%
+peak F_axial                       -0.2%      -40.4%
+peak |qfrc| joint1                 +0.6%      -15.9%
+peak |qfrc| joint2                 -0.1%      -25.2%
+peak |qfrc| joint3                -30.1%      -36.9%
+peak |qfrc| joint4                 -2.7%      -17.7%
+peak |qfrc| joint5                +13.8%      -25.5%
+peak |qfrc| joint6                -36.6%       -9.4%
+window [ms]                        -4.9%       +0.0%
+
+=== HEADLINE (load-bearing joints 2/3/4; |%| shown) ===
+halfdt: worst |Δ| impulse (sub/rows, j2-4) = 12.8%   worst |Δ| raw Λ = 27.5%   object ∫F·dt Δ = -5.0%   peak F Δ = -0.2%   worst peak|qfrc| Δ = 30.1%   window Δ = -4.9%
+solref2x: worst |Δ| impulse (sub/rows, j2-4) = 38.1%   worst |Δ| raw Λ = 69.8%   object ∫F·dt Δ = -38.1%   peak F Δ = -40.4%   worst peak|qfrc| Δ = 36.9%   window Δ = +0.0%

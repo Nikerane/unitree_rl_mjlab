@@ -16,7 +16,11 @@ impulses internally with forces reported as impulse/h — which makes our `Σ|qf
 right; and the "how it can fail" list must be extended with MJWarp-specific pitfalls). The biggest
 *scientific* critique — solver-parameter dependence — is real, confirmed from the primary sources,
 and has a standard defense (bound the impulse, not the force, and cross-check against the
-object-side ∫F·dt), plus a cheap sensitivity experiment worth running.
+object-side ∫F·dt), plus a cheap sensitivity experiment worth running. **(2026-07-10 qualifier:
+that experiment was run — [`../../results/2026-07-10_solver_sensitivity.md`](../../results/2026-07-10_solver_sensitivity.md)
+— and the defense holds only conditionally on this scene: Λ is timestep-robust (~5%) but
+solref-fragile (−37…−38%, the same scale as peak force −40%), because the reference strike is a
+protocol-truncated press, not a completed impact; see §2 item 1.)**
 
 ---
 
@@ -40,16 +44,32 @@ contact-rows-only isolation `[doc]` — the approach is API-blessed, not a hack.
    `R = (1−d)/d·A_diag` comes from `solimp`, the reference acceleration is a virtual spring-damper
    from `solref`, and the docs demand `timeconst ≥ 2×timestep` — so the contact *force profile* is
    a modeling choice, not physics. Todorov 2014 says the same of its ε/κ ancestors `[doc]`.
-   **Why the impulse survives this:** the *integral* is pinned by momentum transfer — stopping the
-   hammer requires `∫F·dt ≈ m_eff·Δv` regardless of how the force is shaped in time, provided the
-   accumulation window covers the whole event (ours is contact-anchored, so it does). Peak force
-   is parameter-fragile; its integral is not. This is the core thesis defense for bounding impulse
-   and must be stated in the writeup. **Mitigations shipped/planned:** the object-side ∫F·dt
-   cross-check (weld/friction-free by construction); the solref/solimp/timestep values recorded in
-   the results provenance. **Recommended addition (cheap, strong defense artifact):** a one-off
-   sensitivity run — re-run `derive_impulse_thresholds.py` with timestep halved and `solref`
-   doubled and report the Λ_j delta; if the impulse moves by percent while peak force moves by
-   tens of percent, the "impulse is the robust quantity" claim is demonstrated, not asserted.
+   **Why the impulse can survive this — CONDITIONAL (restated 2026-07-10 after the sensitivity
+   run):** the *integral* is pinned by momentum transfer — stopping the hammer requires
+   `∫F·dt ≈ m_eff·Δv` regardless of how the force is shaped in time — **but only for a completed
+   ballistic/impulsive event whose release is observed inside the accumulation window**. The
+   recommended sensitivity run (below) was executed 2026-07-10
+   ([`../../results/2026-07-10_solver_sensitivity.md`](../../results/2026-07-10_solver_sensitivity.md))
+   with a **split verdict**: momentum-pinning is *demonstrated for the integration-grid axis*
+   (half-timestep moves the enforced/GT Λ ~5% on the load-bearing joints) but **falsified for the
+   solref axis on this scene** (solref×2 moves Λ −37…−38%, tracking peak force's −40%) — because
+   the measured event is a **protocol-truncated press**: the 0.44 m/s reference strike never
+   releases contact inside the window, so Λ ≈ F̄·T_window with T fixed by the protocol and
+   F̄ ∝ contact stiffness. The premise (Δv fixed by approach kinematics, event contained in the
+   window) does not hold for this event class; the defense may only be claimed for
+   ballistic/impulsive events with an observed release inside the window, and for the current
+   scene **solref/solimp/timestep must be reported as modeling provenance of the Λ figures**
+   (which are themselves protocol-clocked — "first 27 ms of a continuing press"). Peak force was
+   fragile on the solref axis (−40%) but *stable* under timestep (−0.2%): the profile is a
+   resistance-limited plateau, not a stiffness-limited spike. **Mitigations shipped/planned:** the
+   object-side ∫F·dt cross-check (weld/friction-free by construction — note it shares the contact
+   model and moved −38% in lockstep with Λ, confirming the solref shift is physical, not
+   instrumentation); the solref/solimp/timestep values recorded in the results provenance.
+   **Recommended addition — DONE 2026-07-10:** the one-off sensitivity run (timestep halved;
+   solref doubled) is executed and recorded in
+   [`../../results/2026-07-10_solver_sensitivity.md`](../../results/2026-07-10_solver_sensitivity.md);
+   the "impulse is the robust quantity" claim is demonstrated on the timestep axis only — NOT on
+   solref for this event class.
 2. **MJWarp-specific pitfalls (directly affect the Track-2 validator; all `[doc✓]` — every quote
    below re-verified verbatim against the MJWarp docs and `io.py` source on 2026-07-10).**
    (a) `efc.J` on GPU is **dense and padded** — sparse Jacobians are "not implemented" per the
@@ -91,12 +111,18 @@ contact-rows-only isolation `[doc]` — the approach is API-blessed, not a hack.
 | **Pre-impact proxies** (control what you're *about* to transfer) | Vu et al. 2026, hal-05516105 — maximize `P = m_eff·ẋᵀn`, impulse `i = ΔP` `[session]`; Khurana & Billard 2024/2025 — hitting flux `[session]` | kinematics + inertia model only | Avoids measuring the impact entirely — robust, sensor-free, but blind to chain rebound and multi-joint distribution; complements rather than replaces a reaction bound (Vu et al. explicitly leave the joint-recoil bound as future work). |
 | **Constraint-RL enforcement of joint load** | Ma et al. 2025, arXiv:2505.22974 — N-P3O on arm current `\|I_total\| < 8 A` `[session]`; Kang et al. 2025 termination-on-τ_load `[session]`; Chane-Sane et al. CaT, arXiv:2403.18765 — foot-force limit `[session]` | RL framework | Direct precedents that per-joint/actuator load is *enforced* (not just penalized) in current RL practice — the constraint-mechanism company our soft-CaT keeps. |
 
-**The defense sentence this buys:** *in simulation*, integrating the solver's per-joint constraint
-impulse is the only path that gives exact per-joint attribution with chain coupling; its known
-solver-dependence is disarmed by bounding the momentum-pinned integral (not the parameter-fragile
-peak) and validating against the solver-independent object-side ∫F·dt; and *on hardware*, the same
-quantity is recoverable with the standard momentum-observer machinery — so the sim constraint has
-a measurable real-robot counterpart.
+**The defense sentence this buys** *(2026-07-10: state conditionally — see
+[`../../results/2026-07-10_solver_sensitivity.md`](../../results/2026-07-10_solver_sensitivity.md))*:
+*in simulation*, integrating the solver's per-joint constraint impulse is the only path that gives
+exact per-joint attribution with chain coupling; its known solver-dependence is disarmed by
+bounding the momentum-pinned integral (not the parameter-fragile peak) **only for
+ballistic/impulsive events with an observed release inside the window — on the current press-like
+Z1 reference event Λ tracks contact stiffness (−38% under solref×2, same scale as peak force), so
+solref/solimp/timestep must be reported as modeling provenance of the Λ figures instead** — and by
+validating against the object-side ∫F·dt (weld/friction-free by construction, though it shares the
+contact model and moved in lockstep in the sensitivity run); and *on hardware*, the same quantity
+is recoverable with the standard momentum-observer machinery — so the sim constraint has a
+measurable real-robot counterpart.
 
 ## 4. Actions taken from this audit
 
@@ -107,4 +133,9 @@ a measurable real-robot counterpart.
   contamination = dof friction + joint limits.
 - The old visual explainer (plan-c00a0e0144274fe4) still names the weld as a contaminant and its
   Trap-2 text carries a weld share — flagged to the user for a plan-side correction.
-- Recommended (pending user OK): the solver-sensitivity run in §2.1 as a one-off defense artifact.
+- ~~Recommended (pending user OK): the solver-sensitivity run in §2.1 as a one-off defense
+  artifact.~~ **EXECUTED 2026-07-10** — split verdict (Λ timestep-robust ~5%; solref-fragile
+  −37…−38%, same scale as peak force; the momentum-pinning premise fails on the press-like,
+  protocol-truncated reference event) —
+  [`../../results/2026-07-10_solver_sensitivity.md`](../../results/2026-07-10_solver_sensitivity.md);
+  §2 item 1, the Bottom line, and §3's defense sentence restated conditionally above.
