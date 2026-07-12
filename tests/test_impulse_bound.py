@@ -48,6 +48,8 @@ def _acc(B: int, subtract_baseline: bool = False, n_joints: int = 6):
   a._running = torch.zeros(B, n_joints)
   a._last_off_qfrc = torch.zeros(B, n_joints)
   a._in_contact_prev = torch.zeros(B, dtype=torch.bool)
+  a._window = 25
+  a._event_age = torch.zeros(B, dtype=torch.long)
   a._episode_peak = torch.zeros(B)
   a._episode_peak_perjoint = torch.zeros(B, n_joints)
   robot_data = SimpleNamespace(_joint_dof_field=None)
@@ -127,10 +129,49 @@ def test_gentle_tap_cannot_erase_a_violent_window():
   for _ in range(5):                     # substeps 5-9 off: still visible this step
     feed(torch.zeros(1, 6), torch.zeros(1, 1))
   assert torch.allclose(acc.impulse[0, 0], torch.tensor(violent), atol=1e-9)
-  # next control step: tap for 1 substep, release
-  feed(small, torch.ones(1, 1))          # substep 10: pulse cleared, tap window opens
+  # next control step: a gentle tap makes its OWN tiny pulse (nothing to erase — no persistence).
+  feed(small, torch.ones(1, 1))          # substep 10: pulse cleared at the control-step boundary
   feed(torch.zeros(1, 6), torch.zeros(1, 1))  # substep 11: tap closes -> its own tiny pulse
   assert torch.allclose(acc.impulse[0, 0], torch.tensor(0.1 * DT), atol=1e-9), acc.impulse
+
+
+def test_press_cap_bounds_a_sustained_press():
+  # Robot-side press guard (2026-07-12 vacuity §4/§5): a contact EVENT accumulates for at most
+  # _window substeps, so a bottomed-out press cannot grow Λ without bound (mirrors the object side).
+  acc, feed = _acc(B=1)
+  acc._window = 10  # short window for the test
+  q = torch.tensor([[3.0, 0, 0, 0, 0, 0]])
+  for _ in range(40):  # 40-substep sustained press, far past the 10-substep window
+    feed(q, torch.ones(1, 1))
+  # only the first 10 substeps accumulate; _running (uncleared by the control-step grid) holds it
+  assert torch.allclose(acc.impulse[0, 0], torch.tensor(3.0 * DT * 10), atol=1e-9), acc.impulse
+
+
+def test_brief_impact_under_window_is_uncapped():
+  # A genuine impact (window < cap) is untouched by the press guard.
+  acc, feed = _acc(B=1)
+  acc._window = 25
+  q = torch.tensor([[4.0, 0, 0, 0, 0, 0]])
+  for _ in range(8):  # brief impact, well under the window
+    feed(q, torch.ones(1, 1))
+  assert torch.allclose(acc.impulse[0, 0], torch.tensor(4.0 * DT * 8), atol=1e-9), acc.impulse
+
+
+def test_press_cap_re_arms_on_a_new_contact_event():
+  # The event age RESETS on the rising edge, so a second contact event gets its own fresh window.
+  # Assert acc._running directly (not impulse) so the check ISOLATES re-arm and is robust to the
+  # pulse-grid clear: if the age did NOT reset, event 2 would inherit event 1's saturated age and
+  # accumulate nothing (running would stay 0).
+  acc, feed = _acc(B=1)
+  acc._window = 3
+  q = torch.tensor([[2.0, 0, 0, 0, 0, 0]])
+  for _ in range(5):  # event 1: 5 substeps, capped at 3
+    feed(q, torch.ones(1, 1))
+  assert torch.allclose(acc._running[0, 0], torch.tensor(2.0 * DT * 3), atol=1e-9), acc._running
+  feed(torch.zeros(1, 6), torch.zeros(1, 1))  # falling edge closes event 1 (running -> 0)
+  for _ in range(2):  # event 2: 2 substeps -> a fresh window pays BOTH only if the age re-armed
+    feed(q, torch.ones(1, 1))
+  assert torch.allclose(acc._running[0, 0], torch.tensor(2.0 * DT * 2), atol=1e-9), acc._running
 
 
 def test_two_windows_closing_in_one_step_max_combine():

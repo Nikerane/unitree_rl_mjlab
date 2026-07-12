@@ -232,12 +232,15 @@ class ContactRowImpulseAccumulator(ManagerTermBase):
   enforced accumulator — no baseline subtraction is needed: the raw contact-row signal is already
   exactly zero on every off-contact substep.
 
-  Shares the IDENTICAL window/pulse semantics as ``SubstepImpulseAccumulator``
-  (``impulse_bound.py:68-155``, mirrored here line-for-line where shared) so the two quantities'
-  episode peaks are directly comparable: a rising contact edge opens a running-sum window, a
-  falling edge MAX-combines the closed window into a pulse visible for the remainder of that
-  control step (cleared at the next control step's first substep), and ``impulse`` =
-  max(pulse, running).
+  Shares the window/pulse semantics of ``SubstepImpulseAccumulator`` (``impulse_bound.py``): a
+  rising contact edge opens a running-sum window, a falling edge MAX-combines the closed window into
+  a pulse visible for the remainder of that control step (cleared at the next control step's first
+  substep), and ``impulse`` = max(pulse, running). ONE deliberate difference (2026-07-12): this
+  diagnostic is UNCAPPED, whereas the enforced accumulator now applies an ``event_window_substeps``
+  press cap. The two agree exactly for an impact window shorter than the cap — the regime of the
+  reference strike — but DIVERGE for a sustained press (> event_window), where this ground truth
+  keeps integrating while the enforced Λ saturates. Peak comparisons are therefore apples-to-apples
+  only for sub-window events (cap this identically if a press-scenario validation needs parity).
 
   NOTHING consumes this for control or δ — it is a diagnostic/validation signal only (metric key
   ``substep_impulse_rows``), never read by ``joint_impulse_excess``/``CatSoftHook``. Unlike

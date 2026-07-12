@@ -70,9 +70,11 @@ class SubstepImpulseAccumulator(ManagerTermBase):
   exposed with PER-EVENT PULSE semantics (see module docstring).
 
   Per env, per substep: a window OPENS on the rising contact edge (running sum reset),
-  ACCUMULATES the rectified per-joint reaction while in contact, and on the falling edge
-  MAX-combines the completed window into ``_pulse`` — which is cleared at the first substep of
-  each control step, so a completed window is visible to exactly one 50 Hz constraint read.
+  ACCUMULATES the rectified per-joint reaction while in contact — for at most
+  ``event_window_substeps`` per event (a press guard mirroring the object side; a sustained press
+  cannot grow Λ without bound) — and on the falling edge MAX-combines the completed window into
+  ``_pulse`` — which is cleared at the first substep of each control step, so a completed window is
+  visible to exactly one 50 Hz constraint read.
   ``impulse`` = max(pulse, running): an in-progress window is always visible too (including a
   strike that terminates the episode while still in contact).
 
@@ -96,6 +98,14 @@ class SubstepImpulseAccumulator(ManagerTermBase):
     self._running = torch.zeros(env.num_envs, J, device=env.device)
     self._last_off_qfrc = torch.zeros(env.num_envs, J, device=env.device)
     self._in_contact_prev = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    # PRESS CAP (mirrors SubstepDeliveredImpulse): a contact EVENT accumulates for at most
+    # event_window_substeps (default 25 ≈ 50 ms, above the measured ~p95 strike window of ~20
+    # substeps). Without it, a sustained bottomed-out press integrates |qfrc_constraint| over an
+    # open-ended window, so the enforced Λ measures a press integral, not an impact reaction — the
+    # robot-side gap the 2026-07-12 vacuity record flags (§4/§5): against a rigid target the uncapped
+    # read inflated ~18× over the ballistic impact-only Λ. A brief impact (< window) is untouched.
+    self._window = int(p.get("event_window_substeps", 25))
+    self._event_age = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
     # Episode-peak worst-joint Λ — the LOGGED metric (cfg reduce="last"): the C0 log-only run must
     # be able to observe learned Λ against J_limit; a substep-mean of the transient pulse dilutes
     # it ~100× and is phase-dependent.
@@ -118,6 +128,7 @@ class SubstepImpulseAccumulator(ManagerTermBase):
     self._running[idx] = 0.0
     self._last_off_qfrc[idx] = 0.0
     self._in_contact_prev[idx] = False
+    self._event_age[idx] = 0
     self._episode_peak[idx] = 0.0
     self._episode_peak_perjoint[idx] = 0.0
     return None
@@ -131,12 +142,20 @@ class SubstepImpulseAccumulator(ManagerTermBase):
     in_contact = (self._sensor.data.found > 0).any(dim=-1)  # (B,)
     in_c = in_contact[:, None]
     falling = (~in_contact & self._in_contact_prev)[:, None]
+    # PRESS CAP: age each contact event (0 on the rising edge, +1 per in-contact substep); only the
+    # first `_window` substeps of an event accumulate, so a sustained press cannot grow Λ without
+    # bound — it bounds a ballistic impact interval, not an open press. A brief impact (< window) is
+    # unaffected. Mirrors SubstepDeliveredImpulse's event_window guard.
+    rising = in_contact & ~self._in_contact_prev  # (B,)
+    self._event_age = torch.where(rising, torch.zeros_like(self._event_age), self._event_age)
+    payable = (in_contact & (self._event_age < self._window))[:, None]  # (B,1)
 
-    # ACCUMULATE the rectified per-joint reaction while in contact (baseline frozen off-contact).
-    # No rising-edge reset is needed: _running is provably 0 at every window open (the falling edge
-    # below zeroes it, episode reset zeroes it, and accumulation is contact-masked).
+    # ACCUMULATE the rectified per-joint reaction while in contact & within the event window
+    # (baseline frozen off-contact). No rising-edge reset of _running is needed: it is provably 0 at
+    # every window open (the falling edge below zeroes it, episode reset zeroes it, masked accum).
     signal = qfrc - self._last_off_qfrc if self._subtract_baseline else qfrc
-    self._running = self._running + signal.abs() * (env.physics_dt) * in_c
+    self._running = self._running + signal.abs() * (env.physics_dt) * payable
+    self._event_age = self._event_age + in_contact.long()
     # CLOSE: max-combine the completed window into the pulse; zero the running sum.
     self._pulse = torch.where(falling, torch.maximum(self._pulse, self._running), self._pulse)
     self._running = torch.where(falling, torch.zeros_like(self._running), self._running)
