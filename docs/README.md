@@ -1,4 +1,4 @@
-# Docs index — current truth map (2026-07-05)
+# Docs index — current truth map (2026-07-14)
 
 **Authority rule: code > this index > the living docs it lists.** `docs/archive/**` and dated
 records are historical evidence — never act on them without checking here first. When a doc and
@@ -50,6 +50,9 @@ Dated research records kept in place (bannered, bodies frozen):
 - 2026-06-18 — impulse-CaT C0 shipped LOG-ONLY: substep Λ_j accumulator, object-side delivered ∫F·dt, quantity gate (`docs/research/reward-design/IMPULSE_CAT_IMPL_PLAN.md`, `docs/research/reward-design/derive_impulse_thresholds.py`)
 - 2026-06-22 — L6 fixture EE change (gripper → 3D-printed bracket in the sibling repo) → all gate numbers EE-dependent (re-derive per `docs/research/reward-design/IMPULSE_CAT_IMPL_PLAN.md` C0 findings); the NEAR_NAIL re-solve blocker is tracked in `docs/research/reward-design/OPEN_QUESTIONS.md` ("Remaining blockers")
 - 2026-07-05 — two deep code-review rounds hardened the impulse arm (per-event pulse Λ, episode-cumulative capped delivered, first-violation seeding, log-only invariant); docs consolidated into this index (`docs/superpowers/plans/2026-07-05-docs-consolidation.md`)
+- 2026-07-06 — L6 NEAR_NAIL reset re-solved (windup pose; vertical-at-floor infeasible with the fixture grasp); fixture-era `IMP_J_LIMIT`/`i_ref` re-derived; Khadiv verbal go-ahead for soft-CaT as the impulse mechanism
+- 2026-07-10 — Track-2 efc-row ground truth shipped (joint3 sign-cancellation finding); C2 enforcement gate PASS, `imp_max_p=0.5` chosen (`docs/results/2026-07-10_c2_enforcement_record.md`); feasibility gate re-greened via `playback_reference.py` (`test_single_strike.py` probe retired)
+- 2026-07-12/13 — **vacuity finding**: the impulse constraint is vacuous for reachable ballistic impacts on fixed impedance (velocity effort-clamped); the *windowed press-through* reaction is what binds, conditional on the window/cap pairing → the Λ-quantity is Khadiv decision (e) (`docs/results/2026-07-12_impulse_vacuity.md`, `2026-07-12_state_of_everything.md`, `2026-07-12_khadiv_vic_addendum.md`). Λ re-semanticized as a time-based **sliding window** after an adversarial review falsified the prefix cap (masking bypass). Reference prior fixed (follow-through strike, `i_ref` 0.0811→0.6094)
 
 ## 4. Code entry map (`src/tasks/hammer/` — suggested read order)
 
@@ -60,7 +63,7 @@ Dated research records kept in place (bannered, bodies frozen):
 | 3 | `src/tasks/hammer/nail_block.py` | Nail asset loader + goal-depth / success-threshold constants (the physics XML incl. frictionloss lives in the sibling-repo scene it loads) |
 | 4 | `src/tasks/hammer/mdp/rewards.py` | Reward terms incl. `ImpactProgressTerm`, `DeliveredImpulseTerm`, imitation prior |
 | 5 | `src/tasks/hammer/mdp/velocity_bound.py` | Substep peak-\|q̇\| metric + naive CaT ablation reference (A3) |
-| 6 | `src/tasks/hammer/mdp/impulse_bound.py` | **The thesis quantity**: `SubstepImpulseAccumulator` (per-event pulse Λ_j) + `SubstepDeliveredImpulse` (episode-cumulative capped ∫F·dt) |
+| 6 | `src/tasks/hammer/mdp/impulse_bound.py` | **The thesis quantity**: `SubstepImpulseAccumulator` (sliding-window Λ_j, 50 ms contact-masked) + `SubstepDeliveredImpulse` (episode-cumulative capped ∫F·dt, debounced re-arm) |
 | 7 | `src/tasks/hammer/cat/constraints.py` | Raw margins: `joint_velocity_excess`, `joint_impulse_excess(env, limit)` |
 | 8 | `src/tasks/hammer/cat/constraint_manager.py` | CaT δ-math: EMA-normalized margin → per-constraint termination probability between `min_p` and `max_p`, max-combine (exact formula in the docstring) |
 | 9 | `src/tasks/hammer/cat/hook.py` | `CatSoftHook`: velocity ∪ impulse soft-OR, first-violation seeding, log-only short-circuit, guards |
@@ -75,9 +78,10 @@ Dated research records kept in place (bannered, bodies frozen):
 `docs/research/reward-design/verify_contact_sensor.py` ·
 `docs/research/reward-design/verify_reward_setup.py` ·
 `docs/research/reward-design/derive_impulse_thresholds.py` (impulse quantity gate; re-run after any EE change) ·
-`docs/research/reward-design/test_single_strike.py` / `docs/research/reward-design/playback_reference.py` (strike feasibility probes).
+`docs/research/reward-design/playback_reference.py` (strike feasibility gate; the crude `test_single_strike.py` probe was retired 2026-07-10 — the script remains but is not a gate).
 
 **Entry scripts:** `scripts/train.py` · `scripts/play.py` · `scripts/diag_policy_trace.py` (strike-vs-press classifier + peak-|q̇| eval) ·
+`scripts/eval_impulse.py` + `scripts/eval_impulse.sh` (**standalone C3 checkpoint eval**: per-joint Λ max/p95, worst Λ/cap ratios, delivered impulse, success — one summary.csv row per checkpoint, same-env cross-arm protocol) ·
+`scripts/diag_impulse_trace.py` (per-substep impulse trace) · `scripts/compare_runs.py` ·
 `scripts/render_reference.py` (headless strike render) · `scripts/verify_cat_soft.py` + `scripts/smoke_cat_soft.py` (CaT plumbing).
-Impulse eval for trained policies lives in the logged `substep_impulse`/`substep_delivered` metrics, not in a standalone script.
 **Tests:** `tests/` (unit suite incl. `tests/test_docs_current.py`, the freshness guard for this very index).

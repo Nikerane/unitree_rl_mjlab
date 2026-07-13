@@ -209,6 +209,20 @@ class SubstepDeliveredImpulse(ManagerTermBase):
   slow quasi-static press (long duration × moderate force) accrues unbounded ∫F·dt and out-earns
   striking — the anti-press failure mode the v2 reward deep-dive forbids. Strikes are unaffected;
   presses pay only their first 50 ms.
+
+  RE-ARM DEBOUNCE (2026-07-14, closes the C1 flicker-press reward farm): a rising contact edge
+  re-arms the event age (opening a fresh payable window) ONLY after ``rearm_gap_substeps``
+  (default = the window) consecutive OFF-contact substeps. Previously EVERY rising edge re-armed,
+  so a press chopped by 1-substep releases (2 ms flicker — physical bounce chatter, or in
+  principle an adversarial policy) re-opened the 50 ms cap indefinitely and paid at ~100% duty
+  cycle. With the debounce, a flicker-chopped press pays exactly one window total (the age
+  persists across sub-gap flickers), and the best possible farm rate is bounded at
+  window/(window+gap) ≤ 50% duty. A genuine re-strike (retreat + wind-up = hundreds of
+  substeps off contact) always re-arms; a quick post-strike bounce continues paying from the
+  first event's remaining age (partial credit — undercounting reward is the safe direction).
+  Reachability context: the 2026-07-12 probe found substep-rate toggling is NOT
+  policy-commandable (20 ms action floor), so this is defense-in-depth against bounce chatter
+  and future action-space changes, not a live exploit.
   """
 
   def __init__(self, cfg: ManagerTermBaseCfg, env: "ManagerBasedRlEnv"):
@@ -218,8 +232,16 @@ class SubstepDeliveredImpulse(ManagerTermBase):
     self._axis = torch.tensor(axis, device=env.device, dtype=torch.float32)
     self._sensor = env.scene[p.get("sensor_name", "hammer_nail_impulse")]
     self._window = int(p.get("event_window_substeps", 25))
+    self._rearm_gap = int(p.get("rearm_gap_substeps", self._window))
+    if self._rearm_gap < 1:
+      raise ValueError(f"rearm_gap_substeps must be >= 1, got {self._rearm_gap}")
     self._total = torch.zeros(env.num_envs, device=env.device)
     self._event_age = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+    # Consecutive off-contact substeps; starts (and resets) ARMED so an episode's first contact
+    # always opens a payable window.
+    self._off_streak = torch.full(
+      (env.num_envs,), self._rearm_gap, dtype=torch.long, device=env.device
+    )
     self._in_contact_prev = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
     setattr(env, _ENV_SUBSTEP_DELIVERED_ATTR, self)
 
@@ -232,6 +254,7 @@ class SubstepDeliveredImpulse(ManagerTermBase):
     idx = slice(None) if env_ids is None else env_ids
     self._total[idx] = 0.0
     self._event_age[idx] = 0
+    self._off_streak[idx] = self._rearm_gap  # armed: the first contact opens a payable window
     self._in_contact_prev[idx] = False
     return None
 
@@ -239,12 +262,18 @@ class SubstepDeliveredImpulse(ManagerTermBase):
     f = self._sensor.data.force  # (B, N, 3) world-frame net contact force per primary
     f_axial = (f * self._axis).sum(dim=-1).sum(dim=-1).clamp_min(0.0)  # (B,) net downward force
     in_contact = (self._sensor.data.found > 0).any(dim=-1)  # (B,)
-    # Event age: 0 on the rising edge, +1 per in-contact substep (branchless).
+    # Event age: 0 on a DEBOUNCED rising edge (see class docstring: re-arm requires >= rearm_gap
+    # consecutive off-contact substeps, so flicker/bounce chatter cannot re-open the payable
+    # window), +1 per in-contact substep (branchless).
     rising = in_contact & ~self._in_contact_prev
-    self._event_age = torch.where(rising, torch.zeros_like(self._event_age), self._event_age)
+    rearm = rising & (self._off_streak >= self._rearm_gap)
+    self._event_age = torch.where(rearm, torch.zeros_like(self._event_age), self._event_age)
     payable = in_contact & (self._event_age < self._window)
     self._total += f_axial * env.physics_dt * payable  # in-place: keep tensor identity
     self._event_age = self._event_age + in_contact.long()
+    self._off_streak = torch.where(
+      in_contact, torch.zeros_like(self._off_streak), self._off_streak + 1
+    )
     self._in_contact_prev = in_contact
     return self._total  # (B,) cumulative — pair with MetricsTermCfg reduce="last"
 
@@ -258,6 +287,23 @@ def joint_impulse_peak(env: "ManagerBasedRlEnv", joint: int) -> torch.Tensor:
   if acc is None:
     raise RuntimeError("joint_impulse_peak requires the SubstepImpulseAccumulator metric (cat_impulse).")
   return acc._episode_peak_perjoint[:, joint]
+
+
+def delivered_impulse_total(env: "ManagerBasedRlEnv") -> torch.Tensor:
+  """Full-step metric: the EXACT episode-cumulative delivered impulse I_total, from the stashed
+  ``SubstepDeliveredImpulse`` (adversarial-review I3 fix, 2026-07-14). The per-substep
+  ``substep_delivered`` metric with reduce="last" logs the TERMINAL control step's substep-MEAN
+  of the ramping cumulative signal — for a strike-terminated episode (the success case, where
+  most of I_total accrues inside that very step) it undercounts by up to ~half, and the
+  undercount fraction differs across arms (strike-and-terminate vs timeout episodes), biasing
+  any C3 cross-arm delivered-impulse comparison. Same full-step reduce="last" idiom as
+  ``joint_impulse_peak``: logs the exact compute-time value of the monotone buffer."""
+  dacc = getattr(env, _ENV_SUBSTEP_DELIVERED_ATTR, None)
+  if dacc is None:
+    raise RuntimeError(
+      "delivered_impulse_total requires the SubstepDeliveredImpulse metric (cat_impulse)."
+    )
+  return dacc.delivered
 
 
 class CatDeltaPeak(ManagerTermBase):

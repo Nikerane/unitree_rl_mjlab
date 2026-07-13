@@ -19,7 +19,10 @@ short-lived first-N-substeps prefix cap the Codex adversarial review falsified):
 * ``SubstepDeliveredImpulse`` (object side, the REWARD signal) is **episode-cumulative** with a
   per-event PREFIX cap (undercounting reward is the safe direction — anti-press-farming):
   I_total = Σ over payable contact substeps of F_axial·dt — monotone non-decreasing,
-  so the delta-crediting reward can never re-pay or zero-pay (review finding #4).
+  so the delta-crediting reward can never re-pay or zero-pay (review finding #4). Since
+  2026-07-14 the cap's re-arm is DEBOUNCED: a rising edge opens a fresh payable window only
+  after ``rearm_gap_substeps`` (default = window) consecutive off-contact substeps, closing
+  the C1 flicker-press farm (1-substep releases used to re-arm the cap indefinitely).
 
 Tests fake the env in the repo's SimpleNamespace style and drive one substep at a time. The
 accumulators cache the robot/sensor handles at construction, so the helpers expose mutable fake
@@ -280,12 +283,15 @@ def test_reset_mid_contact_no_phantom_window():
 # --- Object-side delivered axial impulse: EPISODE-CUMULATIVE I_total = Σ F_axial·dt -------------
 
 
-def _dacc(B: int, window: int = 25):
+def _dacc(B: int, window: int = 25, rearm_gap: int | None = None):
+  """rearm_gap defaults to the window, mirroring the class's own default."""
   a = object.__new__(SubstepDeliveredImpulse)
   a._axis = torch.tensor([0.0, 0.0, -1.0])
   a._total = torch.zeros(B)
   a._event_age = torch.zeros(B, dtype=torch.long)
   a._window = window
+  a._rearm_gap = window if rearm_gap is None else rearm_gap
+  a._off_streak = torch.full((B,), a._rearm_gap, dtype=torch.long)  # armed at episode start
   a._in_contact_prev = torch.zeros(B, dtype=torch.bool)
   sensor_data = SimpleNamespace(force=None, found=None)
   a._sensor = SimpleNamespace(data=sensor_data)
@@ -347,16 +353,59 @@ def test_delivered_event_window_cap_blocks_press_farming():
   # 'delivered impulse' (long duration × moderate force) and out-earn striking. Each contact event
   # pays only its first `window` substeps — covers real strikes (measured p95 ≈ 20 substeps),
   # truncates presses.
-  acc, feed = _dacc(1, window=3)
+  acc, feed = _dacc(1, window=3, rearm_gap=2)
   f = torch.tensor([[[0.0, 0.0, -10.0]]])
   for _ in range(8):  # sustained press, 8 substeps in one event
     feed(f, torch.ones(1, 1))
   # only the first 3 substeps accrued
   assert torch.allclose(acc.delivered, torch.tensor([10.0 * DT * 3]), atol=1e-9), acc.delivered
-  # a NEW event (release then re-contact) gets a fresh window
-  feed(torch.zeros(1, 1, 3), torch.zeros(1, 1))
+  # a GENUINE new event (release for >= rearm_gap substeps, then re-contact) gets a fresh window
+  for _ in range(2):
+    feed(torch.zeros(1, 1, 3), torch.zeros(1, 1))
   feed(f, torch.ones(1, 1))
   assert torch.allclose(acc.delivered, torch.tensor([10.0 * DT * 4]), atol=1e-9), acc.delivered
+
+
+def test_delivered_flicker_rearm_farm_is_closed():
+  # C1 adversarial-review finding (fixed 2026-07-14): _event_age used to reset on EVERY rising
+  # edge, so a press chopped by 1-substep releases (2 ms flicker / bounce chatter) re-armed the
+  # anti-press cap indefinitely — an unbounded reward farm at ~100% duty. Now a rising edge
+  # re-arms only after >= rearm_gap consecutive off-contact substeps: the flicker-chopped press
+  # pays exactly one window total, no matter how many flicker cycles run.
+  acc, feed = _dacc(1, window=3, rearm_gap=5)
+  f = torch.tensor([[[0.0, 0.0, -10.0]]])
+  for _ in range(3):
+    feed(f, torch.ones(1, 1))            # event pays its full window (3 substeps)
+  paid = acc.delivered.clone()
+  assert torch.allclose(paid, torch.tensor([10.0 * DT * 3]), atol=1e-9)
+  for _ in range(6):                      # 6 flicker cycles: 1 substep off, 3 substeps pressing
+    feed(torch.zeros(1, 1, 3), torch.zeros(1, 1))  # sub-gap release — must NOT re-arm
+    for _ in range(3):
+      feed(f, torch.ones(1, 1))
+  assert torch.allclose(acc.delivered, paid, atol=1e-9), (
+    f"flicker farm re-opened the payable window: {acc.delivered} vs {paid}"
+  )
+
+
+def test_delivered_rearm_requires_full_gap_and_reset_rearms():
+  # The debounce boundary: a gap one substep short of rearm_gap does not re-arm; a gap of exactly
+  # rearm_gap does. Episode reset() re-arms immediately (off_streak restored to the gap).
+  acc, feed = _dacc(1, window=2, rearm_gap=4)
+  f = torch.tensor([[[0.0, 0.0, -10.0]]])
+  for _ in range(2):
+    feed(f, torch.ones(1, 1))            # window exhausted
+  for _ in range(3):                      # gap of 3 < 4: NOT re-armed
+    feed(torch.zeros(1, 1, 3), torch.zeros(1, 1))
+  feed(f, torch.ones(1, 1))
+  assert torch.allclose(acc.delivered, torch.tensor([10.0 * DT * 2]), atol=1e-9), acc.delivered
+  for _ in range(4):                      # gap of exactly 4: re-armed
+    feed(torch.zeros(1, 1, 3), torch.zeros(1, 1))
+  feed(f, torch.ones(1, 1))
+  assert torch.allclose(acc.delivered, torch.tensor([10.0 * DT * 3]), atol=1e-9), acc.delivered
+  acc.reset(None)
+  assert acc.delivered.item() == 0.0
+  feed(f, torch.ones(1, 1))               # first contact after reset pays immediately (armed)
+  assert torch.allclose(acc.delivered, torch.tensor([10.0 * DT]), atol=1e-9), acc.delivered
 
 
 def test_delivered_reset_and_shape():

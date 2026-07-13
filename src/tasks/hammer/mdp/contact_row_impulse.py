@@ -251,11 +251,21 @@ class ContactRowImpulseAccumulator(ManagerTermBase):
   buffer or per-joint TB metrics — only the worst-joint ``_episode_peak`` scalar, since nothing
   needs to compare this quantity per-column against the per-joint cap vector (that comparison is
   the enforced quantity's job).
+
+  PERF FLAG-GATE (adversarial-review I6 fix, 2026-07-14): ``contact_row_qfrc`` runs a Python
+  loop over ALL detected contacts plus several warp→torch copies EVERY substep — untested at
+  GPU training scale (B=4096). The ``enabled`` param (default True) short-circuits ``__call__``
+  to the zero buffer so the cost can be toggled per-run WITHOUT re-registering the metric:
+  ``--env.metrics.substep-impulse-rows.params.enabled False`` (same tyro dict-param mechanism
+  as the verified ``--env.metrics.cat-soft.params.imp-max-p``). Profile with/without on the
+  first GPU run; leave disabled for production training if it dominates the step budget (the
+  metric is diagnostic-only, so disabling costs nothing but the log stream).
   """
 
   def __init__(self, cfg: ManagerTermBaseCfg, env: "ManagerBasedRlEnv"):
     super().__init__(env)
     p = cfg.params
+    self._enabled = bool(p.get("enabled", True))
     self._cols = arm_dof_cols(env)  # GLOBAL dof columns, cached once (Task 8's arm_dof_cols).
     J = int(self._cols.shape[0])
     self._sensor = env.scene[p.get("sensor_name", "hammer_nail_contact")]
@@ -286,6 +296,8 @@ class ContactRowImpulseAccumulator(ManagerTermBase):
   def __call__(self, env: "ManagerBasedRlEnv", **params) -> torch.Tensor:
     # **params absorbs the MetricsTermCfg.params the manager re-passes each substep.
     # Branchless masked math throughout: no data-dependent `.any()` host syncs in the 500 Hz loop.
+    if not self._enabled:  # perf flag-gate (I6): skip the per-contact loop + warp→torch copies
+      return self._episode_peak  # stays 0 — the TB stream shows an inert metric, not a gap
     if self._i % self._dec == 0:  # first substep of a control step: last step's pulse was consumed
       self._pulse.zero_()
     qfrc_rows = contact_row_qfrc(env)[:, self._cols]  # (B, J) — exactly 0 off contact by construction

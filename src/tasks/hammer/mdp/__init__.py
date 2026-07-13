@@ -11,6 +11,7 @@ from .impulse_bound import (  # noqa: F401
   SubstepDeliveredImpulse,
   SubstepImpulseAccumulator,
   Z1_JOINT_IMPULSE_LIMIT,
+  delivered_impulse_total,
   joint_impulse_peak,
 )
 from .observations import *  # noqa: F403
