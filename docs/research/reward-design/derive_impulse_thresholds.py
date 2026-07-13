@@ -19,7 +19,9 @@ Reports / asserts (fail-not-warn → exit 1):
      IMMUNE by construction) is the independent cross-check that an impact impulse of this scale is
      real. Pinocchio impulseDynamics(r_coeff=0) leg is scaffolded behind an availability check.
   4. THRESHOLDS: per-joint J_limit = τ_rated,j × 2 (Harmonic-Drive Repeated-Peak) × Δt_impact, with the
-     1e4-event fatigue-budget note. Binding-ness: Λ_j(p95) / J_limit_j.
+     1e4-event fatigue-budget note. Binding-ness: Λ_j(p95) / J_limit_j — REPORT ONLY: never read it
+     as a "binds at Nx more violent" headroom (falsified 2026-07-12/13, see section [4]'s in-line
+     note; strike velocity is effort-clamped, binding is the windowed press-through quantity).
   5. NORMALIZER FLOOR: section [5] prints p95(Λ_j) for reference only — imp_seed stays a small decay
      floor (1e-3); the hook self-seeds from the first over-limit sample.
 
@@ -52,20 +54,28 @@ ARM = ("joint1", "joint2", "joint3", "joint4", "joint5", "joint6")
 # Per-joint rated peak torque [N·m] from z1_constants effort_limit (joint2 = heavy shoulder).
 TAU_RATED = torch.tensor([30.0, 60.0, 30.0, 30.0, 30.0, 30.0])
 REPEATED_PEAK = 2.0  # Harmonic-Drive Repeated-Peak ≈ 2× rated (< Momentary-Peak ≈ 4×)
-APPROACH_HEIGHTS = [0.06, 0.10, 0.15]
+# Sweep variable (CHANGED 2026-07-14, adversarial review R2-F3): at the L6 near-nail reset
+# the apex floor (references.py min_windup_clearance) clamps ALL approach heights 0.06/0.10/0.15
+# to the SAME apex (head0+clearance) — the old height sweep silently collapsed to 15 identical
+# deterministic strikes (fingerprint: mean=p95=max exactly equal). The live intensity knob at
+# this reset is the CLEARANCE itself (drop height above the head): sweep it instead.
+# 0.05 = the shipped default (this config's strikes define i_ref; see [3]).
+WINDUP_CLEARANCES = [0.03, 0.05, 0.08]
 REPEATS = 5
 HOLD_STEPS = 6
 WELD_TOL = 0.5  # max acceptable off-contact-baseline fraction of the contact-window Λ (gate)
-ROWS_RAW_TOL = 1.05  # Track-2 hard gate (AMENDED 2026-07-10, sign-aware): contact-row Λ must
-# satisfy rows ≤ raw + noncontact (triangle inequality; exact per substep given the Task-8
-# reconstruction invariant) — NOT `rows ≤ raw` alone, which joint3's dof-friction sign-cancellation
-# falsifies (raw undershoots the true reaction there; see IMPULSE_CAT_IMPL_PLAN.md Status area).
-# noncontact_j = Σ_substeps |qfrc_constraint_j − contact_row_qfrc_j| · dt over the SAME window as
-# raw/rows; 5% slack covers float/window-boundary noise.
+ROWS_RAW_TOL = 1.05  # Track-2 triangle-inequality check (AMENDED 2026-07-10 sign-aware; DEMOTED
+# to INFORMATIONAL 2026-07-14, adversarial-review I5): rows ≤ raw + noncontact is the algebraic
+# identity |c| ≤ |q| + |q − c| — it holds by construction when all three sums share the same
+# per-substep signals, so it certifies nothing (the 2026-07-10 amendment fixed the falsified
+# `rows ≤ raw` by making it unfalsifiable). Kept as a drift tripwire only (a violation = shipped
+# accumulator vs script-sum divergence); the ASSERTED Track-2 gates are the object-side ∫F·dt
+# cross-checks. noncontact_j = Σ_substeps |qfrc_constraint_j − contact_row_qfrc_j| · dt over the
+# SAME window as raw/rows; 5% slack covers float/window-boundary noise.
 TRACK2_RATIO_SPREAD_TOL = 5.0  # Track-2 cross-check: worst-joint contact-row Λ [N·m·s] and object-
 # side ∫F·dt [N·s] are DIFFERENT units, so only the SPREAD of their ratio across strikes is
 # meaningful (both should scale together with impact intensity). Wider than this across the
-# APPROACH_HEIGHTS sweep signals a row-attribution bug (Task 8/9), not physical scaling.
+# WINDUP_CLEARANCES sweep signals a row-attribution bug (Task 8/9), not physical scaling.
 
 
 def _pct(x: torch.Tensor, q: float) -> torch.Tensor:
@@ -153,10 +163,12 @@ def main() -> None:
   ximp_err: list[float] = []                  # |shipped window Λ − script baseline-subtracted Λ| per strike
   xdel_err: list[float] = []                  # |shipped delivered Δ − script deliv| per strike
 
-  for h in APPROACH_HEIGHTS:
+  cfg_of_strike: list[float] = []  # which clearance produced each strike (distinctness + i_ref)
+  for c in WINDUP_CLEARANCES:
     for _ in range(REPEATS):
+      cfg_of_strike.append(c)
       env.reset()
-      ref = SingleStrikeReference(1, env.device, approach_height=h)
+      ref = SingleStrikeReference(1, env.device, min_windup_clearance=c)
       ref.update(head(), nail_top(), torch.zeros(1, dtype=torch.long, device=env.device))
       n = ref.playback_length()
       rec.clear()
@@ -279,6 +291,26 @@ def main() -> None:
   print("\n[3] OBJECT-SIDE delivered axial impulse (weld/friction-IMMUNE ground truth)")
   print(f"    ∫F_axial dt over the window: mean {DEL.mean():.4f}  p95 {_pct(DEL.unsqueeze(1),0.95)[0]:.4f}  "
         f"max {DEL.amax():.4f} N·s")
+  # Per-clearance breakdown + the i_ref contract line (R2-F3): i_ref is defined as the
+  # DEFAULT-config (clearance 0.05) reference strike's delivered impulse — the number
+  # env_cfgs.py's DeliveredImpulseTerm i_ref must match. The sweep rows exist to give the
+  # Λ statistics REAL intensity variation, not to move i_ref.
+  cfg_t = torch.tensor(cfg_of_strike)
+  per_cfg_del = []
+  for c in WINDUP_CLEARANCES:
+    m = cfg_t == c
+    d = DEL[m]
+    per_cfg_del.append(float(d.mean()))
+    tag = "  <-- i_ref (default config)" if abs(c - 0.05) < 1e-9 else ""
+    print(f"    clearance {c:.2f}: ∫F_axial dt mean {d.mean():.4f} N·s over {int(m.sum())} strikes{tag}")
+  # Distinctness gate (R2-F3): the sweep must actually sweep — identical intensities across
+  # configs means the variation knob is dead and every mean/p95 above is a pseudo-replicate.
+  spread = max(per_cfg_del) - min(per_cfg_del)
+  if spread < 1e-3:
+    print(f"[GATE FAIL] sweep collapsed: per-clearance delivered impulses {per_cfg_del} "
+          f"differ by only {spread:.2e} N·s — the intensity sweep is not sweeping.")
+    sys.exit(1)
+  print(f"    sweep distinctness OK: per-clearance delivered spread {spread:.4f} N·s")
   # Pinocchio independent cross-check (impulseDynamics, r_coeff=0) — scaffolded.
   try:
     import pinocchio  # noqa: F401
@@ -292,13 +324,24 @@ def main() -> None:
   print("\n[4] PER-JOINT J_limit (Harmonic-Drive Repeated-Peak × impact duration)")
   j_limit = TAU_RATED * REPEATED_PEAK * dt_impact  # (6,) N·m·s
   print(f"    τ_rated [N·m]: {TAU_RATED.tolist()}  ×{REPEATED_PEAK} (Repeated-Peak)  ×{dt_impact*1000:.1f} ms")
-  print(f"    J_limit [N·m·s]: {[f'{v:.3f}' for v in j_limit.tolist()]}")
+  print(f"    J_limit [N·m·s]: {[f'{v:.3f}' for v in j_limit.tolist()]}  "
+        "(at THIS run's measured Δt — the SHIPPED IMP_J_LIMIT stays the 2026-07-06 fixture-era "
+        "derivation until the window/cap pairing is decided; Khadiv decision (e))")
   binding = raw_p95 / j_limit.clamp_min(1e-9)
   print(f"    binding-ness Λ_j(p95)/J_limit: {[f'{v:.3f}' for v in binding.tolist()]}")
-  print(f"    → reference strike sits at {binding.max()*100:.1f}% of the worst-joint hardware limit "
-        f"(NON-binding for gentle reference strikes; binds for the ~{1/binding.max().clamp_min(1e-9):.0f}× "
-        "more violent LEARNED strikes the velocity result showed). 1e4-event fatigue budget: a strike "
-        f"at Λ_j(p95) uses 1/1e4 of the per-joint budget; the bound targets the aggressive tail.")
+  # HEADROOM FRAMING (amended 2026-07-14, adversarial-review I4): do NOT read the ratio below as
+  # "the constraint binds at 1/ratio× more violent strikes". That extrapolation was FALSIFIED by
+  # the 2026-07-12/13 probes (docs/results/2026-07-12_impulse_vacuity.md + _state_of_everything.md
+  # §9/§10): strike velocity is effort-clamped at ~1.35-1.4 m/s regardless of commanded scale, so
+  # the "more violent" regime is unreachable ballistically (worst reachable ballistic Λ/cap
+  # ≤ 0.38); the binding that DOES exist is windowed press-through reaction (1.12-1.17× cap),
+  # conditional on the window/cap pairing — a different quantity, not a scaled-up strike.
+  print(f"    → reference strike sits at {binding.max()*100:.1f}% of the worst-joint limit at this "
+        "Δt — NON-binding, as expected for the gentle scripted reference. Do NOT extrapolate a "
+        "'binds at Nx more violent' headroom from this ratio: reachable strike velocity is "
+        "effort-clamped (vacuity result, docs/results/2026-07-12_impulse_vacuity.md); observed "
+        "binding is windowed press-through, not scaled-up impact (Khadiv decision (e)). "
+        "1e4-event fatigue budget: a strike at Λ_j(p95) uses 1/1e4 of the per-joint budget.")
 
   print("\n[5] NORMALIZER FLOOR (C2; env_cfgs cat_soft imp_seed)")
   print(f"    reference p95(Λ_j) worst joint = {raw_p95.max():.4f}  (small-sample caveat: p95 of "
@@ -382,22 +425,29 @@ def main() -> None:
     print(f"\n[GATE WARN] worst-joint contamination {worst_contam:.0f}% > {WELD_TOL*100:.0f}% tol — "
           "prefer subtract_baseline=True for the shipped quantity (report decision).")
 
-  # [6] hard gate (AMENDED 2026-07-10, sign-aware): rows ≤ raw + noncontact — the triangle-
-  # inequality bound |contact| ≤ |qfrc| + |qfrc − contact| (exact per substep given the Task-8
-  # reconstruction invariant), NOT `rows ≤ raw` alone (falsified by joint3's dof-friction sign-
-  # cancellation, see IMPULSE_CAT_IMPL_PLAN.md Status area / task-10-report.md).
+  # [6] triangle-inequality check — DEMOTED TO INFORMATIONAL (2026-07-14, adversarial-review I5):
+  # rows ≤ raw + noncontact is the algebraic identity |c| ≤ |q| + |q − c| — when all three sums
+  # come from the same per-substep signals it holds BY CONSTRUCTION and certifies nothing about
+  # measurement quality (the 2026-07-10 amendment made the old falsified `rows ≤ raw` gate
+  # unfalsifiable rather than correct). A violation can still flag gross implementation drift
+  # between the SHIPPED rows accumulator and this script's sums (different windowing, double
+  # counting), so it is still computed and printed — but the ASSERTED Track-2 gates are the
+  # independent ones below: the object-side ∫F·dt cross-checks (missing-rows + ratio-spread) and
+  # the shipped-vs-script agreement gates in [1].
   rows_bound = (RAW + NONCONTACT) * ROWS_RAW_TOL + 1e-6
   rows_ok = bool((ROWS <= rows_bound).all())
   if not rows_ok:
     excess = float((ROWS - rows_bound).clamp_min(0.0).max())
-    print(f"\n[GATE FAIL] contact-row Λ exceeds {ROWS_RAW_TOL:.2f}× (raw Λ + noncontact Λ) "
-          f"(worst excess {excess:.4f}) — the sign-aware bound rows ≤ raw + noncontact "
-          "(triangle inequality) is violated; this indicates a genuine attribution bug "
-          "(double-counted rows, wrong-world reads), not physical sign-cancellation.")
-    ok = False
+    print(f"\n[GATE WARN — informational] contact-row Λ exceeds {ROWS_RAW_TOL:.2f}× "
+          f"(raw Λ + noncontact Λ) (worst excess {excess:.4f}). This triangle-inequality identity "
+          "should be unviolable when rows/raw/noncontact share the same substeps — a violation "
+          "means the shipped rows accumulator and this script's sums have drifted apart "
+          "(windowing/double-count drift), NOT a physics finding. Investigate, but the verdict "
+          "rests on the asserted ∫F·dt cross-checks below.")
   else:
-    print(f"\n    [6] hard gate PASS: contact-row Λ ≤ {ROWS_RAW_TOL:.2f}× (raw Λ + noncontact Λ) "
-          f"for all {S} strikes (sign-aware bound).")
+    print(f"\n    [6] triangle-inequality check (informational): contact-row Λ ≤ "
+          f"{ROWS_RAW_TOL:.2f}× (raw Λ + noncontact Λ) for all {S} strikes — holds by "
+          "construction; the asserted Track-2 gates are the ∫F·dt cross-checks below.")
 
   # [6] Track-2 cross-check: contact-row Λ vs. the weld/friction-immune object-side ∫F·dt. Different
   # units (N·m·s per joint vs N·s task-space) so we check (a) rows is never absent when a real strike

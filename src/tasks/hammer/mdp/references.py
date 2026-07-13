@@ -79,6 +79,22 @@ class SingleStrikeReference:
     # nail height read phi≈0.93 ("strike nearly complete") and the monotone
     # latch made the aliasing irreversible — poison for the T2 imitation prior.
     axis_tol: float = 0.05,
+    # Descent additionally requires the head to have descended at least this
+    # far BELOW its own anchor projection on the strike axis (2026-07-14,
+    # adversarial review R2-F2): rel_step >= n_windup alone let a head that
+    # anchors ON the descent axis (the L6 near-nail reset sits INSIDE the
+    # corridor at s0≈0.14) hold perfectly still, "enter descent" by clock,
+    # latch its own projection (phi≈0.57), and collect the full prior forever
+    # without moving. Gating on progress-below-anchor kills that free credit:
+    # a stationary head never enters descent (waypoint stays at the apex, the
+    # prior decays to exp(-1)≈0.37 at the L6 pose) while a genuinely striking
+    # head crosses its anchor altitude immediately and gets full credit.
+    # NOTE a spatial apex-REACHED latch (the reviewer's suggestion) was tried
+    # and MEASURED unworkable: the physical head's closest approach to the
+    # apex during the genuine scripted strike is 23-46 mm (servo lag is
+    # structural to open-loop playback), overlapping the idle head's 30-50 mm
+    # — and it would punish legitimate corner-cutting strikes.
+    descent_margin: float = 0.01,
   ):
     self.num_envs = num_envs
     self.device = device
@@ -88,6 +104,7 @@ class SingleStrikeReference:
     self.windup_speed = float(windup_speed)
     self.descent_speed = float(descent_speed)
     self.axis_tol = float(axis_tol)
+    self.descent_margin = float(descent_margin)
 
     self._head0 = torch.zeros(num_envs, 3, device=device)
     self._apex = torch.zeros(num_envs, 3, device=device)
@@ -96,6 +113,10 @@ class SingleStrikeReference:
     self._step0 = torch.zeros(num_envs, device=device)  # episode step at anchor time
     self._phi = torch.zeros(num_envs, device=device)
     self._anchored = torch.zeros(num_envs, dtype=torch.bool, device=device)
+    # Anchor projection s0 on the apex->target axis (R2-F2): descent-phase
+    # credit requires the head to be descent_margin BELOW this — the anchor's
+    # own corridor position is never free strike progress.
+    self._s0 = torch.zeros(num_envs, device=device)
 
   # -- anchoring ------------------------------------------------------------
 
@@ -136,25 +157,25 @@ class SingleStrikeReference:
     self._step0[mask] = step[mask]
     self._phi[mask] = 0.0
     self._anchored[mask] = True
+    # Anchor projection on the strike axis (R2-F2 descent gate): where the
+    # head STARTS in the corridor; only progress BELOW this earns descent phase.
+    axis_m = target - apex
+    len_m = axis_m.norm(dim=-1).clamp(min=1e-9)
+    u_m = axis_m / len_m.unsqueeze(-1)
+    self._s0[mask] = (
+      ((head_w[mask] - apex) * u_m).sum(-1) / len_m
+    ).clamp(0.0, 1.0)
 
   # -- phase ------------------------------------------------------------------
 
-  def update(
+  def _phi_now(
     self,
     head_w: torch.Tensor,
-    nail_top_w: torch.Tensor,
-    episode_step: torch.Tensor,
+    rel_step: torch.Tensor,
   ) -> torch.Tensor:
-    """Advance phase from live state; re-anchors any env with episode_step == 0.
-
-    Idempotent within a control step (safe to call from several obs/reward
-    terms in the same step). Returns phi with shape (num_envs,).
-    """
-    step = episode_step.to(self._phi.dtype)
-    fresh = (~self._anchored) | (episode_step == 0)
-    if bool(fresh.any()):
-      self._anchor(fresh, head_w, nail_top_w, step)
-    rel_step = (step - self._step0).clamp(min=0.0)
+    """Instantaneous (un-latched) phase from live state — PURE function of its
+    inputs and the anchors; shared by update() and preview() so the two paths
+    can never drift (R2-F1 fix discipline)."""
     # Wind-up: step-indexed first half of phase.
     phi_w = 0.5 * (rel_step / self._n_windup).clamp(max=1.0)
     # Descent: projection of the head onto the apex->target strike axis,
@@ -167,25 +188,67 @@ class SingleStrikeReference:
     perp = (head_w - self._apex) - (s * length).unsqueeze(-1) * u
     on_axis = perp.norm(dim=-1) <= self.axis_tol
     phi_d = 0.5 + 0.5 * s
-    in_descent = (rel_step >= self._n_windup) & on_axis
-    phi_now = torch.where(in_descent, phi_d, phi_w)
+    # Descent entry needs elapsed wind-up AND real progress BELOW the anchor's
+    # own corridor projection (R2-F2): the clock alone let an on-axis head that
+    # never moved latch its anchor projection as "strike progress" and collect
+    # the full prior forever. Only descent EARNED below s0 counts.
+    below_anchor = (s - self._s0) * length >= self.descent_margin
+    in_descent = (rel_step >= self._n_windup) & on_axis & below_anchor
+    return torch.where(in_descent, phi_d, phi_w)
+
+  def update(
+    self,
+    head_w: torch.Tensor,
+    nail_top_w: torch.Tensor,
+    episode_step: torch.Tensor,
+  ) -> torch.Tensor:
+    """Advance phase from live state; re-anchors any env with episode_step == 0.
+
+    Idempotent within a control step (safe to call from several obs terms in
+    the same step). THE ONLY WRITER of the shared phase state — reward terms
+    must use preview() (see there). Returns phi with shape (num_envs,).
+    """
+    step = episode_step.to(self._phi.dtype)
+    fresh = (~self._anchored) | (episode_step == 0)
+    if bool(fresh.any()):
+      self._anchor(fresh, head_w, nail_top_w, step)
+    rel_step = (step - self._step0).clamp(min=0.0)
+    phi_now = self._phi_now(head_w, rel_step)
     self._phi = torch.maximum(self._phi, phi_now)  # monotone latch per env
     return self._phi.clone()
 
-  def peek(self) -> torch.Tensor:
-    """Latched phase WITHOUT advancing or anchoring (non-mutating read).
+  def preview(
+    self,
+    head_w: torch.Tensor,
+    episode_step: torch.Tensor,
+  ) -> torch.Tensor:
+    """Reward-time phase: computed from CURRENT kinematics, WRITES NOTHING.
 
-    For reward-time callers (2026-07-13, adversarial review F1): mjlab computes
-    rewards on kinematics one physics substep stale, BEFORE sim.forward() and
-    the observation pass (manager_based_rl_env.step: reward → forward → obs).
-    Calling update() there let the reward path commit a stale phase into the
-    shared monotone latch that the obs terms then re-read — a policy-visible
-    side channel that made the imitation arm differ from its no-prior twin by
-    more than the reward term. Reward terms read the phase committed by the
-    LAST observation pass instead (≤ one control step stale) and never write.
-    Returns zeros for envs whose anchors have not been built yet (the obs pass
-    anchors on the reset that precedes any reward computation in mjlab).
+    History (two adversarial-review rounds):
+    - Round 1 (F1): the reward path called update() on kinematics one physics
+      substep stale (mjlab order: reward → sim.forward → obs), committing a
+      stale phase into the shared monotone latch the obs terms re-read — a
+      policy-visible side channel between the imitation arm and its twin.
+    - The first fix (peek(): read the phase the LAST obs pass committed) closed
+      the side channel but made the reward compare the current head against the
+      PREVIOUS step's waypoint (R2-F1): faithful reference-following then
+      scored exp(-1)…0.74 per step while hovering scored 1.0 — a wrong-sign,
+      anti-motion shaping gradient the pre-fix code never had.
+    This preview computes the instantaneous phase from the reward-time head
+    (restoring current-progress semantics, follower ≥ hoverer) via the same
+    _phi_now() as update(), but never anchors, never latches, never writes —
+    the obs pass remains the sole committer, so the side channel stays closed.
+    Envs not yet anchored return their latch (zeros); in mjlab the reset-time
+    obs pass always anchors before any reward computation.
     """
+    step = episode_step.to(self._phi.dtype)
+    rel_step = (step - self._step0).clamp(min=0.0)
+    phi_now = self._phi_now(head_w, rel_step)
+    phi_now = torch.where(self._anchored, phi_now, torch.zeros_like(phi_now))
+    return torch.maximum(self._phi, phi_now)
+
+  def peek(self) -> torch.Tensor:
+    """Latched phase as committed by the last update() — non-mutating read."""
     return self._phi.clone()
 
   # -- waypoints --------------------------------------------------------------

@@ -26,8 +26,11 @@ from src.tasks.hammer.hammer_env_cfg import make_hammer_env_cfg
 from src.tasks.hammer.nail_block import get_nail_block_entity_cfg
 
 # Fixture-era per-joint impulse caps, MEASURED by derive_impulse_thresholds.py on 2026-07-06 (windup
-# NEAR_NAIL reset, oblique contact; gate log: /tmp/derive_thresholds_fixture.txt -> dated record at
-# C3). J_limit_j = tau_rated_j x 2 (HD Repeated-Peak) x Delta_t_impact. Module-level (not
+# NEAR_NAIL reset, oblique contact; committed record: docs/results/2026-07-10_c2_enforcement_record.md).
+# J_limit_j = tau_rated_j x 2 (HD Repeated-Peak) x Delta_t_impact at the 2026-07-06 measured
+# Delta_t ~= 27.3 ms — NOTE the shipped sliding window integrates 50 ms and the post-reference-fix
+# impact window measures ~44 ms; whether to re-derive at a different Delta_t is the window/cap
+# pairing inside Khadiv decision (e). Values stay FIXED until that decision. Module-level (not
 # function-local) so downstream tooling (e.g. scripts/eval_impulse.py) IMPORTS this instead of
 # hardcoding a second copy that could drift.
 IMP_J_LIMIT: list[float] = [1.640, 3.280, 1.640, 1.640, 1.640, 1.640]  # N·m·s
@@ -240,11 +243,14 @@ def z1_hammer_env_cfg(
     )
     # Track-2 RIGOROUS metric: contact-row-only Λ (JᵀF over hammer↔nail efc rows) — validates the
     # enforced baseline-subtracted Λ; LOG-ONLY, never feeds joint_impulse_excess/δ.
+    # "enabled" is the per-run perf toggle (I6): the per-contact Python loop is untested at GPU
+    # scale — disable via --env.metrics.substep-impulse-rows.params.enabled False if profiling
+    # shows it dominating the step budget (diagnostic-only metric, nothing consumes it).
     cfg.metrics["substep_impulse_rows"] = MetricsTermCfg(
       func=hammer_mdp.ContactRowImpulseAccumulator,
       per_substep=True,
       reduce="last",
-      params={"sensor_name": "hammer_nail_contact", "robot_cfg": vb_robot_cfg},
+      params={"sensor_name": "hammer_nail_contact", "robot_cfg": vb_robot_cfg, "enabled": True},
     )
     # Object-side delivered axial impulse (episode-cumulative, per-event capped — see the class).
     cfg.metrics["substep_delivered"] = MetricsTermCfg(
@@ -252,7 +258,16 @@ def z1_hammer_env_cfg(
       per_substep=True,
       reduce="last",  # cumulative signal — log the episode-final total, not a time-average
       params={"sensor_name": "hammer_nail_impulse", "axis": (0.0, 0.0, -1.0),
-              "event_window_substeps": 25},  # explicit (2026-07-13): keep gate mirror in sync
+              "event_window_substeps": 25,  # explicit (2026-07-13): keep gate mirror in sync
+              "rearm_gap_substeps": 25},  # flicker-re-arm debounce (2026-07-14, C1 farm fix)
+    )
+    # I3 fix (2026-07-14): the AUTHORITATIVE episode-total delivered impulse. The per-substep
+    # metric above logs the TERMINAL step's substep-MEAN of the ramping cumulative signal
+    # (metrics_manager reduce="last" reads _step_values = the within-step average), undercounting
+    # strike-terminated episodes arm-dependently — unusable for the C3 cross-arm comparison.
+    # This full-step reader logs the exact buffer value (same idiom as imp_peak_* below).
+    cfg.metrics["delivered_total"] = MetricsTermCfg(
+      func=hammer_mdp.delivered_impulse_total, per_substep=False, reduce="last", params={},
     )
     # soft-CaT hook with the IMPULSE constraint, LOG-ONLY (imp_max_p=0 ⇒ δ≡0). MUST pair with the
     # CatPPO rl_cfg (z1_hammer_ppo_runner_cfg(cat_soft=True)). Do NOT raise imp_max_p until (a) the C0
@@ -294,8 +309,9 @@ def z1_hammer_env_cfg(
     # (derive_impulse_thresholds.py section [3] mean). 0.0811 (2026-07-06, endpoint-servo-era
     # reference) -> 0.6094 (2026-07-13): the F3 follow-through fix turned the scripted reference
     # into a genuine 1.37 m/s in-script strike, so the reference-level impulse baseline rose ~7.5x.
-    # delivered_impulse SHARE was measured at C2 (/tmp/c2_gate.txt) against the OLD normalizer;
-    # re-check the share on the first post-fix training run before trusting the weight.
+    # delivered_impulse SHARE (26.5% of positive) was measured at C2 against the OLD normalizer
+    # (committed record: docs/results/2026-07-10_c2_enforcement_record.md, incl. the staleness
+    # note); re-check the share on the first post-fix training run before trusting the weight.
     cfg.rewards["delivered_impulse"] = RewardTermCfg(
       func=hammer_mdp.DeliveredImpulseTerm,
       weight=2.0,

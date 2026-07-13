@@ -69,16 +69,24 @@ def test_descent_phase_is_projection_indexed():
     n_w = int(ref._n_windup[0].item())
     apex = NAIL.clone()
     apex[:, 2] += 0.10
-    # Head at the apex when descent begins -> phi == 0.5.
+    # Head at the apex when descent begins -> phi == 0.5 (s=0: at/above the
+    # anchor projection, so descent credit is gated off — R2-F2 — and the
+    # saturated wind-up phase reads the same 0.5).
     phi = ref.update(apex, NAIL, _steps(n_w))
     assert torch.allclose(phi, torch.full((B,), 0.5), atol=1e-6)
-    # Head halfway down the strike axis -> phi == 0.75.
+    # Probe BELOW the anchor projection (the R2-F2 gate frees descent credit
+    # only for progress below s0 = the anchor head's own corridor position;
+    # HEAD0 z=0.12 anchors deep in this short corridor, s0 ≈ 0.78) ->
+    # phi == 0.5 + 0.5*s exactly (projection-indexed).
+    probe = NAIL.clone()
+    probe[:, 2] = 0.105
+    length = 0.10 + 0.005  # apex -> target axis length for this geometry
+    s = (float(apex[0, 2]) - 0.105) / length
+    phi = ref.update(probe, NAIL, _steps(n_w + 1))
+    assert torch.allclose(phi, torch.full((B,), 0.5 + 0.5 * s), atol=1e-3)
+    # Head at the strike target -> phi == 1.
     target = NAIL.clone()
     target[:, 2] -= 0.005
-    halfway = (apex + target) / 2
-    phi = ref.update(halfway, NAIL, _steps(n_w + 1))
-    assert torch.allclose(phi, torch.full((B,), 0.75), atol=1e-3)
-    # Head at the strike target -> phi == 1.
     phi = ref.update(target, NAIL, _steps(n_w + 2))
     assert torch.allclose(phi, torch.ones(B), atol=1e-3)
 
@@ -129,7 +137,7 @@ def test_lateral_motion_does_not_advance_descent_phase():
     off_axis[:, 0] += 0.14  # 14 cm lateral of the nail, at nail height
     phi = ref.update(off_axis, NAIL, _steps(n_w + 1))
     assert torch.all(phi <= 0.5 + 1e-6), f"off-axis head advanced phase: {phi}"
-    # Returning to the axis resumes normal descent indexing.
+    # Returning to the axis (below the anchor projection) resumes descent indexing.
     apex = NAIL.clone()
     apex[:, 2] += ref.approach_height
     target = NAIL.clone()
@@ -298,6 +306,68 @@ def test_peek_is_pure_and_matches_latch():
     p = ref.peek()
     p += 1.0
     assert torch.equal(ref.peek(), phi)
+
+
+def test_hold_still_never_enters_descent():
+    """R2-F2 regression: a head that anchors ON the descent axis (the L6 near-nail
+    reset sits between apex and target) and never lifts must NOT enter descent by
+    clock alone — phi stays <= 0.5 and the waypoint keeps pointing at the apex
+    (nonzero error), so the prior decays instead of paying 1.0 forever."""
+    head_l6 = NAIL.clone()
+    head_l6[:, 2] = 0.102 + 0.148  # z = 0.250: on-axis, between apex and target
+    ref = _ref()
+    ref.update(head_l6, NAIL, _steps(0))
+    n_w = int(ref._n_windup[0].item())
+    for t in range(1, n_w + 6):  # hold still well past the wind-up clock
+        phi = ref.update(head_l6, NAIL, _steps(t))
+    assert torch.all(phi <= 0.5 + 1e-6), f"hold-still entered descent: phi={phi}"
+    # Waypoint at the saturated wind-up phase is the APEX, 5 cm above the head.
+    err = (ref.waypoint(phi) - head_l6).norm(dim=-1)
+    assert torch.all(err >= 0.04), f"waypoint collapsed onto the idle head: err={err}"
+    # Genuine descent BELOW the anchor projection unlocks descent credit.
+    # (Head at nail−5mm projects to phi = 0.5+0.5·(0.208/0.348) ≈ 0.80.)
+    deep = NAIL.clone()
+    deep[:, 2] -= 0.005
+    phi = ref.update(deep, NAIL, _steps(n_w + 7))
+    assert torch.all(phi > 0.75)
+
+
+def test_preview_is_pure_and_rewards_current_progress():
+    """R2-F1 regression: preview() must (a) write NOTHING and (b) compute the phase
+    from the CURRENT head, so under production ordering (obs commits at t-1, reward
+    reads at t) a faithful follower scores ~1.0 — not exp(-1)/0.74 against the
+    previous step's waypoint — while a hoverer's reward decays as the wind-up
+    waypoint marches away from it."""
+    ref = _ref()
+    ref.update(HEAD0, NAIL, _steps(0))  # obs pass at t=0 anchors
+    apex = ref._apex.clone()
+    n_w = int(ref._n_windup[0].item())
+    sigma = 0.05
+    # t=1..n_w: follower rides the wind-up waypoints; production order = reward
+    # BEFORE the obs pass of the same step.
+    for t in range(1, n_w + 1):
+        frac = t / float(n_w)
+        head_t = HEAD0 + frac * (apex - HEAD0)
+        state = (ref._phi.clone(), ref._anchored.clone(), ref._s0.clone())
+        phi_r = ref.preview(head_t, _steps(t))              # reward-time read
+        assert torch.equal(ref._phi, state[0])              # pure: no writes
+        assert torch.equal(ref._anchored, state[1])
+        assert torch.equal(ref._s0, state[2])
+        r_follow = torch.exp(-((head_t - ref.waypoint(phi_r)) ** 2).sum(-1) / sigma**2)
+        phi_h = ref.preview(HEAD0, _steps(t))               # the hoverer, same step
+        r_hover = torch.exp(-((HEAD0 - ref.waypoint(phi_h)) ** 2).sum(-1) / sigma**2)
+        assert torch.all(r_follow >= 0.999), f"follower under-rewarded at t={t}: {r_follow}"
+        assert torch.all(r_follow >= r_hover - 1e-6)
+        ref.update(head_t, NAIL, _steps(t))                 # obs pass commits
+    # Descent: head well below the anchor projection (R2-F2 gate satisfied) —
+    # preview must credit the CURRENT projection (self-referential ~1.0), not
+    # the stale one committed at the previous obs pass.
+    head_d = apex.clone()
+    head_d[:, 2] = 0.09  # 3 cm below the HEAD0 anchor (z=0.12): R2-F2 gate open
+    phi_r = ref.preview(head_d, _steps(n_w + 1))
+    r_follow = torch.exp(-((head_d - ref.waypoint(phi_r)) ** 2).sum(-1) / sigma**2)
+    assert torch.all(r_follow >= 0.999), (
+        f"descent follower scored {r_follow} — stale-phi anti-motion gradient is back")
 
 
 def test_apex_clearance_floors_windup_at_near_apex_reset():

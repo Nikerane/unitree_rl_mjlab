@@ -281,15 +281,17 @@ class ImitationPriorTerm(ManagerTermBase):
 
   Stateful: a per-env "has contacted this episode" latch, reset per episode.
 
-  Purity contract (2026-07-13, adversarial review F1): this term is a PURE READER of
-  the shared SingleStrikeReference — it peeks the phase committed by the last
-  observation pass and never calls update(). Rewards run on kinematics one physics
-  substep stale (before sim.forward + obs); a reward-time update() committed that
-  stale phase into the shared monotone latch the obs terms re-read, making the
-  imitation arm's OBSERVATIONS differ from its no-prior twin (policy-visible side
-  channel, empirically reproduced on rebound steps). The cost of the fix is that the
-  reward's phase is ≤ one control step (20 ms) stale — immaterial for a weak annealed
-  shaping prior.
+  Purity contract (2026-07-13 F1, revised 2026-07-14 R2-F1): this term is a PURE
+  READER of the shared SingleStrikeReference. Round 1: a reward-time update()
+  committed a substep-stale phase into the shared monotone latch the obs terms
+  re-read — a policy-visible side channel vs the no-prior twin (empirically
+  reproduced on rebound steps). Round 2: the first fix (peek() = last obs pass's
+  phase) compared the current head against the PREVIOUS step's waypoint, so
+  faithful following scored exp(-1)…0.74/step while hovering scored 1.0 — a
+  wrong-sign anti-motion gradient. Now: ref.preview() computes the phase from
+  reward-time kinematics via the same _phi_now() as the obs path but WRITES
+  NOTHING — current-progress semantics (follower ≥ hoverer) with the side
+  channel still closed (update() remains the sole writer).
 
   Ante-impact latch (hardened 2026-07-13, adversarial review F2A): `found` alone is
   the instantaneous last-substep contact state at reward time, so a touch that began
@@ -335,11 +337,14 @@ class ImitationPriorTerm(ManagerTermBase):
     nail_top_w = nail.data.site_pos_w[:, nail_cfg.site_ids].squeeze(1)
 
     ref = get_strike_reference(env)
-    # PURE READ (2026-07-13, F1 fix): the phase is committed ONLY by the post-
-    # forward observation pass (strike_phase / strike_ref_error -> ref.update);
-    # reward-time kinematics are one substep stale and must never write the
-    # shared monotone latch. phi is therefore <= one control step (20 ms) stale.
-    phi = ref.peek()
+    # PURE READ, CURRENT KINEMATICS (2026-07-14, R2-F1 fix): preview() computes
+    # the instantaneous phase from the reward-time head but WRITES NOTHING —
+    # the obs pass (strike_phase / strike_ref_error -> ref.update) remains the
+    # sole committer of the shared latch (round-1 F1 side channel stays closed),
+    # while the reward compares the head against ITS OWN step's waypoint
+    # (round-2 F1: the stale peek() made faithful following score 0.74 vs 1.0
+    # for hovering — a wrong-sign gradient).
+    phi = ref.preview(head_w, env.episode_length_buf)
     p_star = ref.waypoint(phi)
 
     dist_sq = torch.sum((head_w - p_star) ** 2, dim=-1)

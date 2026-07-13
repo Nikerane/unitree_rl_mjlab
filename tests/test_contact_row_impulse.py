@@ -290,17 +290,24 @@ class TestTwoEnvAttribution:
 
 
 @pytest.fixture(scope="module")
-def strike_trace_1env_rows_vs_raw():
-  """Drive the same open-loop reference strike as ``strike_trace_1env``, but with
-  ``subtract_baseline=False`` forced on the shipped ``substep_impulse`` metric — the brief's
-  RAW-signal physical upper bound (baseline subtraction can UNDERSHOOT; raw cannot). Both the
-  shipped ``SubstepImpulseAccumulator`` (raw mode) and the new ``ContactRowImpulseAccumulator``
-  are wired simultaneously by ``z1_hammer_env_cfg(cat_impulse=True)``, so a single env exercises
-  both and their final episode-peak buffers are directly comparable."""
+def strike_trace_1env_rows_vs_shipped():
+  """Drive the same open-loop reference strike as ``strike_trace_1env`` with the SHIPPED config
+  (``subtract_baseline=True``, the C2 enforced mode). Both the shipped
+  ``SubstepImpulseAccumulator`` and the ``ContactRowImpulseAccumulator`` are wired simultaneously
+  by ``z1_hammer_env_cfg(cat_impulse=True)``, so a single env exercises both.
+
+  History (adversarial-review I10, fixed 2026-07-14): this fixture used to FORCE
+  ``subtract_baseline=False`` and the test asserted ``rows <= 1.05 x raw`` — a FALSIFIED
+  invariant (joint3's dof-friction partially CANCELS the contact reaction inside raw
+  ``qfrc_constraint``, so rows can genuinely EXCEED raw; measured ~1.2-2.9x over — see
+  IMPULSE_CAT_IMPL_PLAN.md "Track-2 finding" / task-10-report.md, adjudicated 2026-07-10).
+  It passed on this fixture's straight-down strike by luck — a latent landmine teaching the
+  wrong invariant. The replacement asserts what Task 10 actually established: the shipped
+  baseline-subtracted quantity CONVERGES to the rigorous contact-row ground truth on the
+  load-bearing joints (joint3 measured sub=0.0420 vs rows=0.0420, ~0% residual)."""
   cfg = z1_hammer_env_cfg(play=True, cat_impulse=True)
   cfg.scene.num_envs = 1
   cfg.auto_reset = False
-  cfg.metrics["substep_impulse"].params["subtract_baseline"] = False
   env = ManagerBasedRlEnv(cfg, device="cpu")
   head, nail_top, _ = _build_driving_helpers(env)
 
@@ -316,25 +323,75 @@ def strike_trace_1env_rows_vs_raw():
     if bool(env.reset_terminated.any()):
       break
 
-  raw_peak = env._hammer_substep_impulse._episode_peak.clone()
+  acc = env._hammer_substep_impulse
+  robot_joint_names = env.scene["robot"].joint_names
+  resolved_order = [robot_joint_names[int(i)] for i in acc._joint_ids]
+  shipped_perjoint = acc._episode_peak_perjoint[0].clone()  # (6,) baseline-subtracted peaks
+  shipped_peak = acc._episode_peak.clone()
   rows_peak = env._hammer_substep_impulse_rows._episode_peak.clone()
   env.close()
-  return {"raw_peak": raw_peak, "rows_peak": rows_peak}
+  return {
+    "shipped_peak": shipped_peak,
+    "shipped_perjoint": shipped_perjoint,
+    "rows_peak": rows_peak,
+    "resolved_order": resolved_order,
+  }
 
 
-class TestContactRowAccumulatorVsRawShipped:
-  def test_rows_peak_positive_and_shape_matches_shipped(self, strike_trace_1env_rows_vs_raw):
-    raw_peak = strike_trace_1env_rows_vs_raw["raw_peak"]
-    rows_peak = strike_trace_1env_rows_vs_raw["rows_peak"]
-    assert rows_peak.shape == raw_peak.shape
+class TestContactRowAccumulatorVsShipped:
+  def test_rows_peak_positive_and_shape_matches_shipped(self, strike_trace_1env_rows_vs_shipped):
+    shipped_peak = strike_trace_1env_rows_vs_shipped["shipped_peak"]
+    rows_peak = strike_trace_1env_rows_vs_shipped["rows_peak"]
+    assert rows_peak.shape == shipped_peak.shape
     assert bool((rows_peak > 0).all()), rows_peak
 
-  def test_rows_peak_within_1p05x_raw_upper_bound(self, strike_trace_1env_rows_vs_raw):
-    raw_peak = strike_trace_1env_rows_vs_raw["raw_peak"]
-    rows_peak = strike_trace_1env_rows_vs_raw["rows_peak"]
-    assert bool((rows_peak <= 1.05 * raw_peak).all()), (
-      f"rows_peak={rows_peak.tolist()} exceeds 1.05x raw_peak={raw_peak.tolist()}"
+  def test_shipped_subtracted_converges_to_rows_ground_truth(
+    self, strike_trace_1env_rows_vs_shipped
+  ):
+    # The I10 replacement invariant (see fixture docstring): on the worst (binding) joint, the
+    # shipped baseline-subtracted episode-peak must agree with the contact-row ground truth's
+    # worst-joint episode-peak. Both are per-event sums for this sub-window single strike
+    # (sliding window == full event sum below 25 substeps), so they are directly comparable.
+    # Tolerance 25%: Task-10 measured ~0% residual on the load-bearing joints; 25% still
+    # falsifies both failure modes this guards (baseline subtraction broken -> residual jumps to
+    # the ~45% dof-friction share; row attribution broken -> rows collapses toward 0).
+    shipped_perjoint = strike_trace_1env_rows_vs_shipped["shipped_perjoint"]
+    rows_peak = float(strike_trace_1env_rows_vs_shipped["rows_peak"][0])
+    shipped_worst = float(shipped_perjoint.max())
+    assert rows_peak > 0.0
+    rel = abs(shipped_worst - rows_peak) / rows_peak
+    assert rel <= 0.25, (
+      f"shipped baseline-subtracted worst-joint peak {shipped_worst:.4f} vs contact-row ground "
+      f"truth {rows_peak:.4f}: residual {rel:.1%} > 25% — the enforced quantity has drifted "
+      "from the rigorous ground truth (Task 10 measured ~0% on the binding joints)."
     )
+
+
+class TestJointOrderPin:
+  """Adversarial-review I11 (2026-07-14): IMP_J_LIMIT[1]=3.28 (joint2's 2x cap, tau_rated=60)
+  rides on POSITIONAL alignment between the cap vector and the accumulator's resolved joint
+  order. test_configs.py only set-compares the names; a chain rebuild (the L6 fixture change
+  already happened once) that reorders joints in the compiled model would silently misassign
+  every cap. This pins the end-to-end chain on the COMPILED model: entity joint order ->
+  SceneEntityCfg resolution -> the accumulator's _joint_ids -> positional cap pairing."""
+
+  def test_resolved_joint_order_matches_cap_vector_order(
+    self, strike_trace_1env_rows_vs_shipped
+  ):
+    from src.tasks.hammer.config.z1.env_cfgs import IMP_J_LIMIT
+
+    order = strike_trace_1env_rows_vs_shipped["resolved_order"]
+    assert order == list(ARM), (
+      f"resolved arm-joint order {order} != expected {list(ARM)} — IMP_J_LIMIT and every "
+      "per-joint cap/metric would be positionally misassigned."
+    )
+    assert len(IMP_J_LIMIT) == len(ARM)
+    # joint2 (index 1) is the heavy shoulder: tau_rated 60 vs 30 -> its cap must be exactly 2x
+    # the others', and it must sit at the position where "joint2" resolved.
+    assert order[1] == "joint2"
+    others = [v for k, v in enumerate(IMP_J_LIMIT) if k != 1]
+    assert all(abs(v - others[0]) < 1e-9 for v in others)
+    assert abs(IMP_J_LIMIT[1] - 2.0 * others[0]) < 1e-9
 
 
 # --- Task 9 Step 1(b): synthetic pulse-semantics unit test (fake env, mirrors --------------------
@@ -349,6 +406,7 @@ def _rows_acc(B: int, n_joints: int = 6):
   Bypasses __init__ (object.__new__) the same way tests/test_impulse_bound.py's ``_acc`` does,
   and monkeypatches the module-level ``contact_row_qfrc`` the class calls internally."""
   a = object.__new__(ContactRowImpulseAccumulator)
+  a._enabled = True
   a._cols = torch.arange(n_joints)
   a._dec = DEC
   a._i = 0

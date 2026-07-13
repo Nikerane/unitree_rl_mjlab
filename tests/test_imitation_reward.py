@@ -144,8 +144,9 @@ def test_within_interval_touch_release_closes_gate():
 
 
 def test_reward_call_never_mutates_phase():
-    """F1 fix: the reward term is a pure reader — repeated calls with moving
-    (even rebounding) kinematics must not advance or re-anchor the shared phase."""
+    """F1/R2-F1 fix: the reward term is a pure reader — repeated calls with moving
+    (even rebounding) kinematics must not advance, re-anchor, or latch anything on
+    the shared reference (preview() computes from current kinematics, writes nothing)."""
     env, robot, nail, sensor = _make_env()
     term = ImitationPriorTerm(cfg=None, env=env)
     _set(robot, nail, head=(0.0, 0.0, 0.30))
@@ -154,6 +155,7 @@ def test_reward_call_never_mutates_phase():
     ref = get_strike_reference(env)
     phi_before = ref._phi.clone()
     anchored_before = ref._anchored.clone()
+    s0_before = ref._s0.clone()
     # Deep-descent kinematics + later step index: update() would advance phi here.
     _set(robot, nail, head=(0.0, 0.0, 0.105))
     env.episode_length_buf[:] = 7
@@ -161,6 +163,7 @@ def test_reward_call_never_mutates_phase():
         term(env, **_PARAMS)
     assert torch.equal(ref._phi, phi_before)
     assert torch.equal(ref._anchored, anchored_before)
+    assert torch.equal(ref._s0, s0_before)
     # The returned phase is a defensive copy: mutating it must not leak back.
     peeked = ref.peek()
     peeked += 123.0

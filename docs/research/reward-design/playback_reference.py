@@ -55,7 +55,7 @@ PRESS_STEPS = 200    # slow-press probe duration
 PRESS_ACTION = -0.1  # 5 mm/step commanded descent — quasi-static by design
 
 
-def main() -> None:
+def main() -> int:
     cfg = z1_hammer_env_cfg(play=True)
     cfg.scene.num_envs = 1
     env = ManagerBasedRlEnv(cfg, device="cpu")
@@ -174,6 +174,7 @@ def main() -> None:
             print(f"  (strike contacts at step ~{best_contact}; press needs "
                   f"{press_steps_to_success} steps — speed gap is the anti-press margin "
                   "the reward design must exploit via time penalty + one-payout impact window)")
+        return 0
     elif best >= thr:
         print(
             "PHASE M GATE: NOT MET — depth reached ONLY via the endpoint-hold "
@@ -182,12 +183,18 @@ def main() -> None:
             "windup/descent pacing) until contact lands within the script at "
             f">= {CONTACT_SPEED_FLOOR} m/s."
         )
+        return 1
     else:
         print(
             "PHASE M GATE: NOT MET — improve the reference (approach height, "
             f"alignment) or lower NAIL_SUCCESS_THRESHOLD toward ~{0.95 * best * 1000:.0f} mm."
         )
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    # Fail CLOSED (2026-07-14, adversarial review R2-F6): NOT MET must exit
+    # nonzero so automation (lightning_pair.sh-era pre-flight) cannot treat a
+    # regressed reference as gate-green. Matches the repo norm — validate_rewards
+    # exits 1 on any phase FAIL.
+    raise SystemExit(main())
