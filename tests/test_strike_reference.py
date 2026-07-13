@@ -84,12 +84,19 @@ def test_descent_phase_is_projection_indexed():
 
 
 def test_descent_phase_clamped_for_overshoot_below_target():
-    """Head below the strike target must clamp to phi = 1, not exceed it."""
+    """Head below the strike target must clamp to phi = 1, not exceed it.
+
+    Probe point is anchored to the reference's OWN target so the test stays a
+    clamp-law test under any overshoot default (the 2026-07-13 follow-through fix
+    moved the default from 0.035 to 0.15). It sits WITHIN axis_tol below the
+    target: past the clamped s=1, the excess below-target distance projects into
+    the perp term, so a probe deeper than axis_tol reads off-axis by design and
+    would test the axis gate, not the clamp."""
     ref = _ref()
     ref.update(HEAD0, NAIL, _steps(0))
     n_w = int(ref._n_windup[0].item())
     below = NAIL.clone()
-    below[:, 2] -= 0.05
+    below[:, 2] -= ref.overshoot + 0.8 * ref.axis_tol
     phi = ref.update(below, NAIL, _steps(n_w + 1))
     assert torch.allclose(phi, torch.ones(B), atol=1e-6)
 
@@ -267,3 +274,48 @@ def test_get_strike_reference_is_cached_per_env():
     r1 = get_strike_reference(env)
     r2 = get_strike_reference(env)
     assert r1 is r2
+
+
+# --- 2026-07-13 adversarial-review fixes (F1 peek purity, F3 apex clearance) ---
+
+
+def test_peek_is_pure_and_matches_latch():
+    """peek() returns the latched phase without anchoring or advancing (F1)."""
+    ref = _ref()
+    # Before any update: unanchored, peek returns zeros and does NOT anchor.
+    assert torch.allclose(ref.peek(), torch.zeros(B))
+    assert not bool(ref._anchored.any())
+    # After anchoring + descent progress, peek == the latch, and repeated
+    # peeks with no update in between never move it.
+    ref.update(HEAD0, NAIL, _steps(0))
+    n_w = int(ref._n_windup[0].item())
+    deep = NAIL.clone()
+    deep[:, 2] -= 0.005
+    phi = ref.update(deep, NAIL, _steps(n_w + 2))
+    for _ in range(3):
+        assert torch.equal(ref.peek(), phi)
+    # Defensive copy: mutating the peeked tensor must not leak into the latch.
+    p = ref.peek()
+    p += 1.0
+    assert torch.equal(ref.peek(), phi)
+
+
+def test_apex_clearance_floors_windup_at_near_apex_reset():
+    """F3 fix: when the head anchors AT/ABOVE nail_top+approach_height (the L6
+    near-nail reset), the apex is floored at head0+min_windup_clearance so the
+    wind-up cannot degenerate to a 1-step nudge."""
+    # L6-like: head 2 mm below the nominal apex (0.252) — the degenerate case.
+    head_l6 = NAIL.clone()
+    head_l6[:, 2] = 0.102 + 0.148  # z = 0.250 vs nail_top+0.15 = 0.252
+    ref = _ref()
+    ref.update(head_l6, NAIL, _steps(0))
+    apex_z = ref._apex[:, 2]
+    assert torch.allclose(apex_z, head_l6[:, 2] + ref.min_windup_clearance)
+    assert int(ref._n_windup[0].item()) >= 2  # real lift, not a 1-step nudge
+    # waypoint(0.5) is the floored apex.
+    wp_apex = ref.waypoint(torch.full((B,), 0.5))
+    assert torch.allclose(wp_apex[:, 2], apex_z, atol=1e-6)
+    # Heads well BELOW the nominal apex keep the classic anchor untouched.
+    ref2 = _ref()
+    ref2.update(HEAD0, NAIL, _steps(0))  # head z=0.12 << 0.252
+    assert torch.allclose(ref2._apex[:, 2], NAIL[:, 2] + ref2.approach_height)

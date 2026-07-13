@@ -170,8 +170,14 @@ def strike_trace_2env():
     contact_flags.append(in_c.clone())
     cr_traces.append(contact_row_qfrc(env).clone())
 
-    # No `[0]`-only break: both worlds must be allowed to finish their (offset) strikes.
-    if bool(env.reset_terminated.all()):
+    # Break on ANY termination (2026-07-13): the follow-through reference now
+    # terminates IN-SCRIPT, so the lead world finishes ~2 steps before its
+    # lagged twin — stepping a terminated world with auto_reset=False raises.
+    # The 1-step stagger still guarantees, BEFORE the lead world terminates,
+    # (a) a step where exactly one world is in contact (the lead contacts one
+    # phase-step early) and (b) first contact in BOTH worlds (contact spans
+    # ~3 steps; the lagged world contacts one step after the lead).
+    if bool(env.reset_terminated.any()):
       break
 
   env.close()

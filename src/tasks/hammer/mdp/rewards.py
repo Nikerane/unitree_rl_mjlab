@@ -281,12 +281,29 @@ class ImitationPriorTerm(ManagerTermBase):
 
   Stateful: a per-env "has contacted this episode" latch, reset per episode.
 
+  Purity contract (2026-07-13, adversarial review F1): this term is a PURE READER of
+  the shared SingleStrikeReference — it peeks the phase committed by the last
+  observation pass and never calls update(). Rewards run on kinematics one physics
+  substep stale (before sim.forward + obs); a reward-time update() committed that
+  stale phase into the shared monotone latch the obs terms re-read, making the
+  imitation arm's OBSERVATIONS differ from its no-prior twin (policy-visible side
+  channel, empirically reproduced on rebound steps). The cost of the fix is that the
+  reward's phase is ≤ one control step (20 ms) stale — immaterial for a weak annealed
+  shaping prior.
+
+  Ante-impact latch (hardened 2026-07-13, adversarial review F2A): `found` alone is
+  the instantaneous last-substep contact state at reward time, so a touch that began
+  AND released within one 20 ms control interval was invisible and the prior kept
+  paying post-impact. The latch now also ORs the sensor's substep-tracked air-time
+  fields (current_contact_time / last_contact_time, both per-episode-reset), which
+  latch any completed within-interval contact.
+
   KNOWN RISK (watch-item, not yet guarded): the latch bounds accumulation only once
   contact occurs. A policy that hovers near the wind-up apex without contacting keeps
   earning ~weight/step. Mitigated by (a) the anneal to 0 by step 6000, and (b) the +100
-  completion bonus that terminates the episode (striking dominates hovering). The
-  deviation-norm / press-watchdog training metrics surface it; add a per-episode cap or
-  a phi-descent gate only if observed (augment-not-replace).
+  completion bonus that terminates the episode (striking dominates hovering: perpetuity
+  ≤ 0.1/(1−γ) = 10 ≪ 100). The deviation-norm / press-watchdog training metrics surface
+  it; add a per-episode cap or a phi-descent gate only if observed (augment-not-replace).
   """
 
   def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv):
@@ -318,16 +335,29 @@ class ImitationPriorTerm(ManagerTermBase):
     nail_top_w = nail.data.site_pos_w[:, nail_cfg.site_ids].squeeze(1)
 
     ref = get_strike_reference(env)
-    phi = ref.update(head_w, nail_top_w, env.episode_length_buf)
+    # PURE READ (2026-07-13, F1 fix): the phase is committed ONLY by the post-
+    # forward observation pass (strike_phase / strike_ref_error -> ref.update);
+    # reward-time kinematics are one substep stale and must never write the
+    # shared monotone latch. phi is therefore <= one control step (20 ms) stale.
+    phi = ref.peek()
     p_star = ref.waypoint(phi)
 
     dist_sq = torch.sum((head_w - p_star) ** 2, dim=-1)
     gauss = torch.exp(-dist_sq / sigma**2)
 
-    # Ante-impact latch: zero from the first contact of the episode onward. Level-
-    # triggered on current contact state (data.found), not the first-contact rising
-    # edge -- we want "has contacted at all this episode", OR-accumulated below.
-    found = (sensor.data.found > 0).any(-1)
-    self._contacted = self._contacted | found
+    # Ante-impact latch: zero from the first contact of the episode onward.
+    # `found` alone is the instantaneous last-substep state and misses a touch
+    # that began AND released within one control interval (F2A); OR in the
+    # substep-tracked, per-episode-reset air-time fields, which latch any
+    # completed within-interval contact (current>0 = in contact now,
+    # last>0 = a contact interval completed earlier this episode).
+    touched = (sensor.data.found > 0).any(-1)
+    cct = getattr(sensor.data, "current_contact_time", None)
+    lct = getattr(sensor.data, "last_contact_time", None)
+    if cct is not None:
+      touched = touched | (cct > 0).any(-1)
+    if lct is not None:
+      touched = touched | (lct > 0).any(-1)
+    self._contacted = self._contacted | touched
     gate = (~self._contacted).to(head_w.dtype)
     return gauss * gate

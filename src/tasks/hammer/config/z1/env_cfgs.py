@@ -290,13 +290,17 @@ def z1_hammer_env_cfg(
     )
     # MAXIMIZE objective: object-side delivered impact impulse (positive term; rides the (1−δ) discount
     # so an over-limit strike's delivered-impulse reward is worth less -- the two-sides interplay).
-    # i_ref MEASURED 2026-07-06 (gate section [3] mean); delivered_impulse SHARE measured at C2 (see
-    # /tmp/c2_gate.txt) — weight decision recorded there.
+    # i_ref contract: the reference strike's delivered impulse, MEASURED via the C0 gate
+    # (derive_impulse_thresholds.py section [3] mean). 0.0811 (2026-07-06, endpoint-servo-era
+    # reference) -> 0.6094 (2026-07-13): the F3 follow-through fix turned the scripted reference
+    # into a genuine 1.37 m/s in-script strike, so the reference-level impulse baseline rose ~7.5x.
+    # delivered_impulse SHARE was measured at C2 (/tmp/c2_gate.txt) against the OLD normalizer;
+    # re-check the share on the first post-fix training run before trusting the weight.
     cfg.rewards["delivered_impulse"] = RewardTermCfg(
       func=hammer_mdp.DeliveredImpulseTerm,
       weight=2.0,
       params={
-        "i_ref": 0.0811,
+        "i_ref": 0.6094,
         "eps": 5e-4,
         "nail_cfg": SceneEntityCfg("nail_block", joint_names=("nail_slide",)),
       },

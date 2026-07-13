@@ -104,9 +104,10 @@ register_mjlab_task(
 # C0 IMPULSE + reference-guided arm: the -CaT-Impulse measurement arm (cat_impulse=True) PLUS the
 # weak-annealed ante-impact tracking prior r_imit (imitation=True) -- i.e. "reference-guided online
 # RL". The scripted SingleStrikeReference bootstraps the approach (r_imit weight 0.1 -> 0 by iter 250,
-# ante-impact gated), then hands off to free RL for the impact, so it does NOT contaminate the Λ
-# measurement (ante-impact + annealed off). This is the reference-guided TWIN of -CaT-Impulse: the
-# prior-vs-none pair (this vs -CaT-Impulse) isolates whether the motion prior moves Λ on this task.
+# ante-impact gated), then hands off to free RL for the impact. The prior never touches the Λ
+# measurement MACHINERY (substep accumulators/hook are byte-identical to -CaT-Impulse and never read
+# r_imit or phase) -- but the trained policy remains a prior-shaped policy after the anneal; that
+# path dependence is precisely the treatment the prior-vs-none pair (this vs -CaT-Impulse) isolates.
 # The weak-prior form is the light-touch reference guidance that SURVIVED the DeepMimic/
 # generate-then-track walk-back -- heavier persistent tracking would need Khadiv re-confirmation.
 # imitation+cat_impulse are independent factory blocks (validate_rewards Phase K / Phase M exercise

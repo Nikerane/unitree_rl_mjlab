@@ -41,23 +41,37 @@ class SingleStrikeReference:
     self,
     num_envs: int,
     device: str | torch.device,
-    # Apex height above nail_top. 0.15 keeps the apex ABOVE the near-nail reset
-    # head (z≈0.228 vs nail_top 0.102): at 0.10 the apex sat 2.6 cm BELOW the
-    # reset head and the wind-up segment degenerated to a 2-step nudge (review
-    # finding, 2026-06-10). Wind-up stays short until the start-pose curriculum
-    # (docs/archive/FUTURE_UPDATES.md #3) moves the reset away from the nail.
+    # Apex height above nail_top. NOTE (2026-07-13): this alone no longer
+    # guarantees a real wind-up — the 2026-07-06 L6 NEAR_NAIL re-solve moved
+    # the reset head to z≈0.250, i.e. 2 mm BELOW nail_top+0.15=0.252, so the
+    # wind-up degenerated to a 1-step nudge (adversarial review F3; the old
+    # z≈0.228 reset this comment used to cite is history). The apex is now
+    # additionally floored at head0_z + min_windup_clearance in _anchor(), so
+    # the reference always encodes a genuine lift-then-strike regardless of
+    # where the reset places the head.
     approach_height: float = 0.15,
-    # Strike target this far below nail_top (hammer follow-through). Playback-
-    # calibrated 2026-06-10: 0.005 stalls at ~25.5 mm (target ends above the
-    # driven nail head); 0.015 drives past the 30 mm threshold in 13 steps at
-    # approach heights 0.06-0.10 with a single contact event.
-    # 0.015 -> 0.035 (2026-06-15, real-hammer fix): the box-hammer site sat at
-    # the head-box CENTRE, 25 mm above the contact face, so 0.015 of follow-
-    # through reached ~30 mm. The claw-mesh site now sits ON the striking face
-    # (z1_hammer_robot.xml, hammer_head_site = face centroid), so overshoot must
-    # equal the desired drive depth: sweep gave 0.015->21 mm, 0.030->success,
-    # 0.040->success; 0.035 lands ~35 mm with margin and stays above block top.
-    overshoot: float = 0.035,
+    # Minimum apex clearance ABOVE the anchored head (2026-07-13, F3 fix):
+    # apex_z = max(nail_top_z + approach_height, head0_z + min_windup_clearance).
+    # 0.05 → ≥3 wind-up steps at windup_speed=0.02 and a descent long enough to
+    # build genuine strike speed from the near-nail reset.
+    min_windup_clearance: float = 0.05,
+    # Strike target this far below nail_top (hammer FOLLOW-THROUGH).
+    # 0.035 -> 0.15 (2026-07-13, adversarial review F3): the old value was
+    # calibrated as "overshoot = desired drive depth" — an ENDPOINT-SERVO
+    # model in which playback reached depth by holding the final waypoint and
+    # pressing through. With the carrot parked 35 mm below the nail, the arm
+    # decelerated into contact at ~0.46-0.49 m/s at EVERY pacing (measured
+    # 15-combo scan) — a press-through, not a strike. A real strike commands
+    # THROUGH the nail: with 0.15 of follow-through the carrot is still moving
+    # at contact and open-loop playback strikes IN-SCRIPT at 1.37 m/s (the
+    # ~1.35 m/s delta-scale design intent) and drives to success (overshoot
+    # sweep 2026-07-13: 0.035->0.49 m/s post-script; 0.08->0.98; 0.10->1.19;
+    # 0.12->1.34; 0.15->1.37 m/s, contact@11 of n=10+2 slack). Depth now comes
+    # from impact momentum, not from the endpoint hold. The prior is
+    # ante-impact gated, so below-nail waypoints are never rewarded; the
+    # descent LINE through the nail is unchanged — only its parameterization
+    # (phi at contact reads ~0.78 instead of ~0.93).
+    overshoot: float = 0.15,
     windup_speed: float = 0.02,     # metres per control step during wind-up
     descent_speed: float = 0.05,    # metres per control step during descent (= IK max)
     # Descent phase engages only within this lateral distance of the strike
@@ -69,6 +83,7 @@ class SingleStrikeReference:
     self.num_envs = num_envs
     self.device = device
     self.approach_height = float(approach_height)
+    self.min_windup_clearance = float(min_windup_clearance)
     self.overshoot = float(overshoot)
     self.windup_speed = float(windup_speed)
     self.descent_speed = float(descent_speed)
@@ -103,6 +118,13 @@ class SingleStrikeReference:
     self._head0[mask] = head_w[mask]
     apex = nail_top_w[mask].clone()
     apex[:, 2] += self.approach_height
+    # Wind-up degeneracy guard (2026-07-13, adversarial review F3): the apex
+    # must clear the ANCHORED head, or a near-nail reset (L6: head z≈0.250 vs
+    # nail_top+0.15=0.252) collapses the wind-up to a 1-step nudge and the
+    # prior degenerates to axis-centering with no lift-then-strike content.
+    apex[:, 2] = torch.maximum(
+      apex[:, 2], head_w[mask][:, 2] + self.min_windup_clearance
+    )
     self._apex[mask] = apex
     target = nail_top_w[mask].clone()
     target[:, 2] -= self.overshoot
@@ -148,6 +170,22 @@ class SingleStrikeReference:
     in_descent = (rel_step >= self._n_windup) & on_axis
     phi_now = torch.where(in_descent, phi_d, phi_w)
     self._phi = torch.maximum(self._phi, phi_now)  # monotone latch per env
+    return self._phi.clone()
+
+  def peek(self) -> torch.Tensor:
+    """Latched phase WITHOUT advancing or anchoring (non-mutating read).
+
+    For reward-time callers (2026-07-13, adversarial review F1): mjlab computes
+    rewards on kinematics one physics substep stale, BEFORE sim.forward() and
+    the observation pass (manager_based_rl_env.step: reward → forward → obs).
+    Calling update() there let the reward path commit a stale phase into the
+    shared monotone latch that the obs terms then re-read — a policy-visible
+    side channel that made the imitation arm differ from its no-prior twin by
+    more than the reward term. Reward terms read the phase committed by the
+    LAST observation pass instead (≤ one control step stale) and never write.
+    Returns zeros for envs whose anchors have not been built yet (the obs pass
+    anchors on the reset that precedes any reward computation in mjlab).
+    """
     return self._phi.clone()
 
   # -- waypoints --------------------------------------------------------------
