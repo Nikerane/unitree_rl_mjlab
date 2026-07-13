@@ -91,7 +91,10 @@ def _install_substep_hook(env: ManagerBasedRlEnv, env_idx: int) -> list[tuple]:
     qv = robot.data.joint_vel[env_idx, jid].abs().clone()  # (6,)
     delta = env.extras.get("cat_delta")
     d = float(delta[env_idx]) if delta is not None else 0.0
-    rec.append((qfrc.numpy(), f_ax, imp.numpy(), deliv, in_c, qv.numpy(), d))
+    # .cpu() before .numpy() (2026-07-14, Lightning smoke): on CUDA rollouts the
+    # tensors live on the GPU and .numpy() raises TypeError — first-ever GPU run
+    # of this script caught it (CPU-only local runs never exercised the path).
+    rec.append((qfrc.cpu().numpy(), f_ax, imp.cpu().numpy(), deliv, in_c, qv.cpu().numpy(), d))
 
   env.metrics_manager.compute_substep = patched  # type: ignore[method-assign]
   return rec

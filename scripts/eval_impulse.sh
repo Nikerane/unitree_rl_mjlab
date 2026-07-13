@@ -43,7 +43,11 @@
 #     NENVS=16 NSTEPS=110 EPLEN=1.0 DEV=cpu PY=~/miniconda3/envs/unitree_mjlab/bin/python \
 #     scripts/eval_impulse.sh
 set -uo pipefail
-cd "${SLURM_SUBMIT_DIR:-$HOME/repos/unitree_rl_mjlab}"
+# Repo root: SLURM submit dir (Vega) or SCRIPT-RELATIVE (2026-07-14 fix: the old
+# $HOME/repos/unitree_rl_mjlab fallback broke on any box with a different layout,
+# e.g. Lightning /teamspace/studios/...; it printed "No such file" and relied on
+# the caller already being in the right cwd).
+cd "${SLURM_SUBMIT_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
 
 TASK="${TASK:-Unitree-Z1-Hammer-CaT-Impulse}"
 NENVS="${NENVS:-256}"
