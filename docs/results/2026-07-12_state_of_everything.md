@@ -224,11 +224,15 @@ old pulse semantics' termination pressure) and logged mean δ inflates ~3× per 
 task-*completing* strike gets only 1 read (reset truncates). Harmless log-only; **must be folded
 into any `imp_max_p` calibration** (the C2 value 0.5 was chosen under single-read semantics).
 
-**2. §9's verdict was over-transferred — the ENFORCED Λ is not vacuous.** The ceiling's physics
-(ballistic; kp never enters `M(q)`) stands, but the enforced Λ also counts **active press
-reaction** inside its window: re-measured on the shipped accumulator, a fixed-impedance
-drive-through on a rigid target reads **1.12–1.17× cap at every kp 0.5×–20×** (≈0.91× from 50 ms
-of clamp-level press + the impact spike). So: *vacuity is scoped to ballistic impacts*; the
+**2. §9's verdict was over-transferred — the ENFORCED Λ is not vacuous *under the shipped
+window/cap pairing*.** The ceiling's physics (ballistic; kp never enters `M(q)`) stands, but the
+enforced Λ also counts **active press reaction** inside its window: re-measured on the shipped
+accumulator, a fixed-impedance drive-through on a rigid target reads **1.12–1.17× cap at every
+kp 0.5×–20×** (≈0.91× from 50 ms of clamp-level press + the impact spike). **Conditionality
+(second Codex pass, 2026-07-13):** the caps were derived at Δt = 27.3 ms; rescaling their
+formula to the 50 ms window gives [3.0, 6.0, …], under which the same measurement reads
+0.61–0.64× and does *not* bind — the binding result exists only under the shipped (conservative)
+pairing, making the window/cap pairing a load-bearing sub-choice of decision (e), not a detail. So: *vacuity is scoped to ballistic impacts*; the
 shipped constraint is live against press-through — arguably the correct gearbox repeated-peak
 semantics. VIC's honest authority over the enforced Λ is **downward** (comply below the effort
 clamp; stiffening saturates — Λ measured flat across 40× kp). The `binds_impact` flag in

@@ -29,12 +29,20 @@ crossing velocity of ~3.6–7 m/s is unreachable while driving into contact). Fo
 collision itself, impulse, energy (½·m_eff·v²) and peak force are all fixed by reflected mass ×
 velocity — commanded stiffness shapes none of them.
 
-**Finding 2 — the *enforced* Λ is NOT vacuous, and it binds today (new, corrects v1).**
+**Finding 2 — the *enforced* Λ is NOT vacuous under the shipped window/cap pairing (new,
+corrects v1; conditionality per a second adversarial review, 2026-07-13).**
 Re-measured on the shipped accumulator: a fixed-impedance drive-through strike against a rigid
 (bottomed-out) target reads **1.12–1.17× cap at every stiffness from 0.5× to 20×** — the ~50 ms
 window of clamp-level press reaction (≈0.91× cap by itself) plus the impact spike crosses the
 cap. v1's "a rigid target reaches ~0.6× and does not bind" described the *impact-gated
-diagnostic*, not the deployed metric. Two corollaries:
+diagnostic*, not the deployed metric. **Important conditionality:** the caps were derived at
+Δt = 27.3 ms (τ_rated × 2 × 0.0273); the window integrates 50 ms. Rescaling the caps' own
+formula to 50 ms gives [3.0, 6.0, …], under which the same measurement reads **0.61–0.64× and
+does not bind**. Whether the enforced metric binds is therefore decided by the **window/cap
+pairing** — a sub-choice of decision (e), not a settled fact. The shipped pairing (50 ms window
+against the 27.3 ms-derived cap) is the *conservative* reading (window-average torque allowed
+≈1.1× rated); the rescaled pairing is the *formula-consistent* one. We flag it rather than
+resolve it. Two corollaries:
 - The "constraint is vacuous" headline is **scoped to ballistic impacts only**. Against
   press-through on a non-yielding target, the shipped constraint is live and binding — arguably
   *correct* gearbox semantics (50 ms of clamp-level reaction **is** repeated-peak load, the same
@@ -81,7 +89,12 @@ will walk you through):
 **Our lean:** (2) as shipped default — it is the only option that is simultaneously enforceable,
 non-vacuous, and exploit-closed today — with (3) as the principled upgrade if you want the thesis
 to keep a *ballistic* claim distinct from the press bound. We have deliberately NOT rewritten the
-thesis framing around any option: the machinery ships log-only (`imp_max_p = 0`) until you choose.
+thesis framing around any option: the machinery ships log-only (`imp_max_p = 0`) until you
+choose — and regardless of the choice, enforcement additionally waits on four gates: the
+success-strike interference probe, the solver-convergence study for the binding regime, the
+armature verification, and an **event-level CaT-pressure calibration gate** (the sliding window
+makes one violation span ~3 consecutive 50 Hz reads → per-event survival ≈(1−δ)³; the existing
+C2 gate checks only peak δ and would not catch a mis-calibrated `imp_max_p`).
 
 ## Decisions for you (consolidated)
 
