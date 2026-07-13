@@ -100,3 +100,21 @@ register_mjlab_task(
     rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
     runner_cls=HammerOnPolicyRunner,
 )
+
+# C0 IMPULSE + reference-guided arm: the -CaT-Impulse measurement arm (cat_impulse=True) PLUS the
+# weak-annealed ante-impact tracking prior r_imit (imitation=True) -- i.e. "reference-guided online
+# RL". The scripted SingleStrikeReference bootstraps the approach (r_imit weight 0.1 -> 0 by iter 250,
+# ante-impact gated), then hands off to free RL for the impact, so it does NOT contaminate the Λ
+# measurement (ante-impact + annealed off). This is the reference-guided TWIN of -CaT-Impulse: the
+# prior-vs-none pair (this vs -CaT-Impulse) isolates whether the motion prior moves Λ on this task.
+# The weak-prior form is the light-touch reference guidance that SURVIVED the DeepMimic/
+# generate-then-track walk-back -- heavier persistent tracking would need Khadiv re-confirmation.
+# imitation+cat_impulse are independent factory blocks (validate_rewards Phase K / Phase M exercise
+# them separately). rl_cfg mirrors -CaT-Impulse (CatPPO, imp_max_p=0 -> δ≡0, so log-only).
+register_mjlab_task(
+    task_id="Unitree-Z1-Hammer-CaT-Impulse-Track",
+    env_cfg=z1_hammer_env_cfg(cat_impulse=True, imitation=True),
+    play_env_cfg=z1_hammer_env_cfg(play=True, cat_impulse=True, imitation=True),
+    rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+    runner_cls=HammerOnPolicyRunner,
+)
