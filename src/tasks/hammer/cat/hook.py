@@ -162,8 +162,10 @@ class CatSoftHook(ManagerTermBase):
   def _add_impulse_constraint(self, env: "ManagerBasedRlEnv") -> None:
     """Fold the per-joint impact-impulse margin into the CaT soft-OR with a SPARSE-signal normalizer.
 
-    The impulse margin is nonzero only while a contact window is open or just closed (per-event
-    pulse semantics, impulse_bound.py), so the velocity batch-max EMA (which updates every step)
+    The impulse margin is nonzero only around contact — while the sliding window still contains
+    reaction (impulse_bound.py, TIME-based sliding window since 2026-07-13: up to ~3 consecutive
+    50 Hz reads per event; see the δ MULTI-READ calibration note there before raising imp_max_p) —
+    so the velocity batch-max EMA (which updates every step)
     would decay to the ~1e-6 floor between strikes and saturate δ to max_p on every contact
     (IMPULSE_CAT_IMPL_PLAN.md §4). Instead the normalizer ``_imp_cmax`` is updated PER-COLUMN and
     only on that joint's over-limit samples, FLOORED at ``imp_seed`` (the C0 histogram scale), so

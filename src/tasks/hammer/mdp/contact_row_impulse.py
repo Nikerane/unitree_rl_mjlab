@@ -232,15 +232,18 @@ class ContactRowImpulseAccumulator(ManagerTermBase):
   enforced accumulator — no baseline subtraction is needed: the raw contact-row signal is already
   exactly zero on every off-contact substep.
 
-  Shares the window/pulse semantics of ``SubstepImpulseAccumulator`` (``impulse_bound.py``): a
-  rising contact edge opens a running-sum window, a falling edge MAX-combines the closed window into
-  a pulse visible for the remainder of that control step (cleared at the next control step's first
-  substep), and ``impulse`` = max(pulse, running). ONE deliberate difference (2026-07-12): this
-  diagnostic is UNCAPPED, whereas the enforced accumulator now applies an ``event_window_substeps``
-  press cap. The two agree exactly for an impact window shorter than the cap — the regime of the
-  reference strike — but DIVERGE for a sustained press (> event_window), where this ground truth
-  keeps integrating while the enforced Λ saturates. Peak comparisons are therefore apples-to-apples
-  only for sub-window events (cap this identically if a press-scenario validation needs parity).
+  Retains the ORIGINAL per-event pulse semantics: a rising contact edge opens a running-sum
+  window, a falling edge MAX-combines the closed window into a pulse visible for the remainder of
+  that control step (cleared at the next control step's first substep), and ``impulse`` =
+  max(pulse, running). DELIBERATE divergence from the enforced accumulator (2026-07-13): the
+  enforced ``SubstepImpulseAccumulator`` now computes a TIME-based SLIDING window (max
+  ``event_window_substeps``-substep sum), whereas this diagnostic integrates the full contact
+  event uncapped. The two agree exactly for an impact shorter than the window — the regime of the
+  reference strike (~9-20 substeps < 25) — but diverge for a sustained press (this ground truth
+  keeps integrating while the enforced Λ saturates at one window's worth) and for flickered
+  sub-events (the sliding window aggregates them; per-event pulses MAX-combine). Peak comparisons
+  are apples-to-apples only for sub-window single events (mirror the sliding window here if a
+  press-scenario validation needs parity).
 
   NOTHING consumes this for control or δ — it is a diagnostic/validation signal only (metric key
   ``substep_impulse_rows``), never read by ``joint_impulse_excess``/``CatSoftHook``. Unlike

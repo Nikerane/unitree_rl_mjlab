@@ -232,6 +232,10 @@ def z1_hammer_env_cfg(
         "robot_cfg": vb_robot_cfg,
         "subtract_baseline": True,  # C2 (2026-07-06): enforce the baseline-subtracted Λ_j — removes
         # the dominant dof-friction share; residual quantified by the Track-2 contact-row metric.
+        # Sliding-window length (2026-07-13): Λ_j = reaction impulse over the most recent 25
+        # substeps (50 ms) — explicit here (not the class default) so the C0 gate mirror can never
+        # silently desync from the shipped value. NOTE: scales with physics_dt if that ever changes.
+        "event_window_substeps": 25,
       },
     )
     # Track-2 RIGOROUS metric: contact-row-only Λ (JᵀF over hammer↔nail efc rows) — validates the
@@ -247,7 +251,8 @@ def z1_hammer_env_cfg(
       func=hammer_mdp.SubstepDeliveredImpulse,
       per_substep=True,
       reduce="last",  # cumulative signal — log the episode-final total, not a time-average
-      params={"sensor_name": "hammer_nail_impulse", "axis": (0.0, 0.0, -1.0)},
+      params={"sensor_name": "hammer_nail_impulse", "axis": (0.0, 0.0, -1.0),
+              "event_window_substeps": 25},  # explicit (2026-07-13): keep gate mirror in sync
     )
     # soft-CaT hook with the IMPULSE constraint, LOG-ONLY (imp_max_p=0 ⇒ δ≡0). MUST pair with the
     # CatPPO rl_cfg (z1_hammer_ppo_runner_cfg(cat_soft=True)). Do NOT raise imp_max_p until (a) the C0

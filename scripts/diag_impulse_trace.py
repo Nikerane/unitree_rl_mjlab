@@ -8,7 +8,7 @@ and records, at the true 500 Hz SUBSTEP rate:
 
   1. per-joint |qfrc_constraint_j|  -- the raw reaction, propagating down the arm chain
   2. object-side F_axial            -- the delivered contact force (weld/friction-immune)
-  3. the SHIPPED accumulator's running per-joint Λ_j (``acc.impulse``, per-event-pulse semantics)
+  3. the SHIPPED accumulator's running per-joint Λ_j (``acc.impulse``, sliding-window semantics 2026-07-13)
   4. δ  -- env.extras["cat_delta"], written once per CONTROL step by CatSoftHook and naturally
      forward-filled across this step's substeps (env.extras is not cleared between steps; see
      manager_based_rl_env.py -- metrics_manager.compute_substep() runs INSIDE the decimation loop,
@@ -86,7 +86,7 @@ def _install_substep_hook(env: ManagerBasedRlEnv, env_idx: int) -> list[tuple]:
     in_c = bool((contact.data.found[env_idx] > 0).any())
     f = netf.data.force  # (B, N, 3) world-frame net contact force per primary
     f_ax = float((f * axis).sum(-1).sum(-1).clamp_min(0.0)[env_idx])  # net downward axial force
-    imp = acc_shipped.impulse[env_idx].clone()  # (6,) running per-event-pulse Λ_j
+    imp = acc_shipped.impulse[env_idx].clone()  # (6,) sliding-window Λ_j (max 50 ms interval)
     deliv = float(dacc_shipped.delivered[env_idx])  # episode-cumulative delivered impulse
     qv = robot.data.joint_vel[env_idx, jid].abs().clone()  # (6,)
     delta = env.extras.get("cat_delta")

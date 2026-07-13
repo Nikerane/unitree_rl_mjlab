@@ -5,10 +5,11 @@ at impact — the opposite side of the same collision from the object-side deliv
 nail (the maximize objective; see ``rewards.DeliveredImpulseTerm``). The quantity, per
 ``IMPULSE_CAT_IMPL_PLAN.md`` §1 and ``tracking_impact_impulse_design_research.md`` SQ3:
 
-    Λ_j = Σ_{substeps s in a CONTACT window}  |qfrc_constraint_{s,j}|  · physics_dt   [N·m·s]
+    Λ_j = max over any ``event_window_substeps`` interval of  Σ |qfrc_constraint_{s,j}| · dt · 1[contact_s]
 
 accumulated at the **500 Hz substep rate** (never the 50 Hz control rate, which aliases the brief
-impact), over a **contact-anchored window** (first→last contact substep, NOT the 20 ms control grid).
+impact), over a **TIME-based sliding window** (2026-07-13; see the SLIDING WINDOW bullet below —
+NOT first→last contact-event anchoring, and NOT the 20 ms control grid).
 
 Correctness points (IMPULSE_CAT_IMPL_PLAN.md §1.1/§4, tightened after the 2026-07 deep review):
 
@@ -21,13 +22,15 @@ Correctness points (IMPULSE_CAT_IMPL_PLAN.md §1.1/§4, tightened after the 2026
     pre-contact reaction baseline during the window. The C0 quantity gate
     (``derive_impulse_thresholds.py``) measures the residual contamination against the object-side
     ground truth and certifies the SHIPPED accumulators, not a parallel reimplementation.
-  * PER-EVENT PULSE (constraint side) — a completed window's Λ_j is visible to the 50 Hz constraint
-    read for the REMAINDER of the control step it closed in (max-combined if several windows close
-    within one step), then cleared at the next step boundary. An in-progress window is visible via
-    its running sum. This is CaT's per-violation semantics: δ pressure exactly during and at the
-    close of a violating window — no episode-long persistence (which the review showed causes
-    duration-dependent punishment and EMA-normalizer saturation), and no latched value a later
-    gentle tap could erase.
+  * SLIDING WINDOW (constraint side, 2026-07-13) — Λ_j is the contact-masked reaction impulse over
+    the most recent ``event_window_substeps`` (≈50 ms), latched per control step as the max
+    window-sum seen. TIME-based, not event-based: it has no gentle-prefix masking blind spot (the
+    2026-07-13 Codex finding falsified the short-lived first-N-substeps prefix cap), bounds a
+    sustained press at one window's worth, aggregates flickered sub-events, and leaves brief
+    impacts (< window) reading their full event sum. Visibility after contact decays naturally
+    within one window (≤ ~2.5 control steps) — bounded, not the episode-long persistence the
+    2026-07 deep review rejected, and a later gentle tap cannot erase a violent window mid-decay
+    (the max latch and the window still contain it).
   * EPISODE-CUMULATIVE (object side) — the delivered impulse I_total is monotone non-decreasing
     (Σ over all contact substeps of the episode), so the delta-crediting reward can never re-pay
     or zero-pay across windows.
@@ -66,20 +69,46 @@ def _joint_count(joint_pos: torch.Tensor, joint_ids) -> int:
 
 
 class SubstepImpulseAccumulator(ManagerTermBase):
-  """per_substep MetricsTerm: contact-anchored Σ |qfrc_constraint_j| · dt per arm joint,
-  exposed with PER-EVENT PULSE semantics (see module docstring).
+  """per_substep MetricsTerm: SLIDING-WINDOW Σ |qfrc_constraint_j| · dt per arm joint —
+  Λ_j(t) = the contact-masked reaction impulse accumulated over the most recent
+  ``event_window_substeps`` (default 25 ≈ 50 ms) substeps.
 
-  Per env, per substep: a window OPENS on the rising contact edge (running sum reset),
-  ACCUMULATES the rectified per-joint reaction while in contact — for at most
-  ``event_window_substeps`` per event (a press guard mirroring the object side; a sustained press
-  cannot grow Λ without bound) — and on the falling edge MAX-combines the completed window into
-  ``_pulse`` — which is cleared at the first substep of each control step, so a completed window is
-  visible to exactly one 50 Hz constraint read.
-  ``impulse`` = max(pulse, running): an in-progress window is always visible too (including a
-  strike that terminates the episode while still in contact).
+  SEMANTICS (2026-07-13, replaces both the original unbounded per-event window and the
+  short-lived first-N-substeps prefix cap): the window is TIME-based, not event-based.
+  Off-contact substeps contribute zero but do NOT reset or shift the window. Consequences,
+  each verified empirically (Codex adversarial review + verification workflow, 2026-07-13):
+
+    * NO MASKING BLIND SPOT — a gentle 50 ms touch followed by a force spike in unbroken
+      contact registers the spike (the prefix cap read exactly 0 for it, missing 99.75% of
+      the true integral: the ``hold-then-spike`` bypass).
+    * PRESS STILL BOUNDED — a constant press reads at most F̄·window·dt, bit-identical to the
+      prefix cap for steady presses (the original 18×-inflation fix is preserved).
+    * FLICKER-PROOF — two sub-events inside one window aggregate (a 1-substep contact flicker
+      can no longer halve the read via per-event splitting).
+    * BRIEF IMPACTS UNCHANGED — a strike shorter than the window (reference strikes are
+      ~9-20 substeps) reads its full event sum, exactly as before.
+
+  The 50 Hz read: ``_pulse`` latches the max window-sum seen during the current control step
+  (cleared at each step boundary); ``impulse`` = max(pulse, current window sum). After contact
+  ends the reading decays naturally as the window slides past (≤ ``window`` substeps ≈ 2.5
+  control steps) — bounded visibility, NOT the episode-long persistence the 2026-07 deep
+  review rejected.
+
+  δ MULTI-READ (calibration note for enforcement, Fable verification 2026-07-13): because
+  window (25) > decimation (10), one brief violation stays at full magnitude for ~3 consecutive
+  50 Hz reads (+1 partial), vs exactly 1 under the old pulse semantics — per-event survival under
+  CaT becomes ≈(1−δ)³, i.e. ~3× stronger termination pressure per violation, and the logged mean
+  δ inflates ~3× per event. A task-COMPLETING strike gets only 1 read (env reset truncates the
+  tail). Harmless while log-only (imp_max_p=0) but MUST be folded into any imp_max_p calibration
+  (the C2 value 0.5 was chosen under single-read pulse semantics).
+
+  NOTE this deliberately COUNTS sustained press reaction (up to one window's worth). Whether
+  the enforced quantity should be this windowed reaction, a ballistic-only impulse, or split
+  constraints is an OPEN thesis decision (Khadiv decision (e), 2026-07-13 Λ-quantity plan);
+  this class is the mechanism, log-only until that is settled (imp_max_p=0).
 
   ``_last_off_qfrc`` (the most recent off-contact reaction) doubles as the frozen pre-contact
-  baseline during a window — it only updates while OFF contact.
+  baseline during contact — it only updates while OFF contact.
   """
 
   def __init__(self, cfg: ManagerTermBaseCfg, env: "ManagerBasedRlEnv"):
@@ -95,17 +124,18 @@ class SubstepImpulseAccumulator(ManagerTermBase):
     self._i = 0
     J = _joint_count(self._robot.data.joint_pos, self._joint_ids)
     self._pulse = torch.zeros(env.num_envs, J, device=env.device)
-    self._running = torch.zeros(env.num_envs, J, device=env.device)
     self._last_off_qfrc = torch.zeros(env.num_envs, J, device=env.device)
-    self._in_contact_prev = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
-    # PRESS CAP (mirrors SubstepDeliveredImpulse): a contact EVENT accumulates for at most
-    # event_window_substeps (default 25 ≈ 50 ms, above the measured ~p95 strike window of ~20
-    # substeps). Without it, a sustained bottomed-out press integrates |qfrc_constraint| over an
-    # open-ended window, so the enforced Λ measures a press integral, not an impact reaction — the
-    # robot-side gap the 2026-07-12 vacuity record flags (§4/§5): against a rigid target the uncapped
-    # read inflated ~18× over the ballistic impact-only Λ. A brief impact (< window) is untouched.
+    # SLIDING WINDOW state (see class docstring): ring buffer of the last `window` per-substep
+    # contributions + their current sum. `_buf_i` is a single global ring index (the substep clock
+    # is shared across envs); per-env reset just zeroes that env's buffer slice, which is correct
+    # at any ring position. `_rolling` is recomputed as buf.sum(-1) each substep — exact (no
+    # float-drift from incremental add/subtract) and trivially parallel at (B, J, window).
     self._window = int(p.get("event_window_substeps", 25))
-    self._event_age = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+    if self._window <= 0:
+      raise ValueError(f"event_window_substeps must be >= 1, got {self._window}")
+    self._buf = torch.zeros(env.num_envs, J, self._window, device=env.device)
+    self._buf_i = 0
+    self._rolling = torch.zeros(env.num_envs, J, device=env.device)
     # Episode-peak worst-joint Λ — the LOGGED metric (cfg reduce="last"): the C0 log-only run must
     # be able to observe learned Λ against J_limit; a substep-mean of the transient pulse dilutes
     # it ~100× and is phase-dependent.
@@ -118,17 +148,16 @@ class SubstepImpulseAccumulator(ManagerTermBase):
 
   @property
   def impulse(self) -> torch.Tensor:
-    """Per-joint contact-window impulse Λ_j the constraint reads, shape (B, J):
-    max(pulse of windows closed this control step, running sum of an open window)."""
-    return torch.maximum(self._pulse, self._running)
+    """Per-joint windowed impulse Λ_j the constraint reads, shape (B, J):
+    max(peak window-sum latched this control step, current window sum)."""
+    return torch.maximum(self._pulse, self._rolling)
 
   def reset(self, env_ids: torch.Tensor | slice | None) -> None:
     idx = slice(None) if env_ids is None else env_ids
     self._pulse[idx] = 0.0
-    self._running[idx] = 0.0
+    self._buf[idx] = 0.0
+    self._rolling[idx] = 0.0
     self._last_off_qfrc[idx] = 0.0
-    self._in_contact_prev[idx] = False
-    self._event_age[idx] = 0
     self._episode_peak[idx] = 0.0
     self._episode_peak_perjoint[idx] = 0.0
     return None
@@ -136,41 +165,31 @@ class SubstepImpulseAccumulator(ManagerTermBase):
   def __call__(self, env: "ManagerBasedRlEnv", **params) -> torch.Tensor:
     # **params absorbs the MetricsTermCfg.params the manager re-passes each substep.
     # Branchless masked math throughout: no data-dependent `.any()` host syncs in the 500 Hz loop.
-    if self._i % self._dec == 0:  # first substep of a control step: last step's pulse was consumed
+    if self._i % self._dec == 0:  # first substep of a control step: last step's latch was consumed
       self._pulse.zero_()
     qfrc = self._robot.data._joint_dof_field("qfrc_constraint")[:, self._joint_ids]  # (B,J)
     in_contact = (self._sensor.data.found > 0).any(dim=-1)  # (B,)
     in_c = in_contact[:, None]
-    falling = (~in_contact & self._in_contact_prev)[:, None]
-    # PRESS CAP: age each contact event (0 on the rising edge, +1 per in-contact substep); only the
-    # first `_window` substeps of an event accumulate, so a sustained press cannot grow Λ without
-    # bound — it bounds a ballistic impact interval, not an open press. A brief impact (< window) is
-    # unaffected. Mirrors SubstepDeliveredImpulse's event_window guard.
-    rising = in_contact & ~self._in_contact_prev  # (B,)
-    self._event_age = torch.where(rising, torch.zeros_like(self._event_age), self._event_age)
-    payable = (in_contact & (self._event_age < self._window))[:, None]  # (B,1)
 
-    # ACCUMULATE the rectified per-joint reaction while in contact & within the event window
-    # (baseline frozen off-contact). No rising-edge reset of _running is needed: it is provably 0 at
-    # every window open (the falling edge below zeroes it, episode reset zeroes it, masked accum).
+    # This substep's contribution: rectified (optionally baseline-subtracted) reaction × dt,
+    # contact-masked (off-contact substeps contribute 0 but still SLIDE the window — time-based).
     signal = qfrc - self._last_off_qfrc if self._subtract_baseline else qfrc
-    self._running = self._running + signal.abs() * (env.physics_dt) * payable
-    self._event_age = self._event_age + in_contact.long()
-    # CLOSE: max-combine the completed window into the pulse; zero the running sum.
-    self._pulse = torch.where(falling, torch.maximum(self._pulse, self._running), self._pulse)
-    self._running = torch.where(falling, torch.zeros_like(self._running), self._running)
-    # Track the rolling pre-contact baseline (updates only while OFF contact).
+    contrib = signal.abs() * (env.physics_dt) * in_c  # (B,J)
+    # Slide the window: overwrite the slot from `window` substeps ago, recompute the sum (exact).
+    self._buf[:, :, self._buf_i] = contrib
+    self._buf_i = (self._buf_i + 1) % self._window
+    self._rolling = self._buf.sum(dim=-1)
+    # Latch the peak window-sum seen this control step (the 50 Hz constraint read).
+    torch.maximum(self._pulse, self._rolling, out=self._pulse)
+    # Track the pre-contact baseline (updates only while OFF contact — frozen during contact).
     self._last_off_qfrc = torch.where(in_c, self._last_off_qfrc, qfrc)
 
-    self._in_contact_prev = in_contact
     self._i += 1
     # Logged metric: EPISODE-PEAK worst-joint Λ (pair with MetricsTermCfg reduce="last").
-    imp = torch.maximum(self._pulse, self._running).amax(dim=1)  # (B,)
+    imp = self._pulse.amax(dim=1)  # (B,) — _pulse >= _rolling after the latch above
     torch.maximum(self._episode_peak, imp, out=self._episode_peak)
     # Per-joint episode-peak Λ (Task 6): same monotone-max update, one column per arm joint.
-    torch.maximum(
-      self._episode_peak_perjoint, torch.maximum(self._pulse, self._running), out=self._episode_peak_perjoint
-    )
+    torch.maximum(self._episode_peak_perjoint, self._pulse, out=self._episode_peak_perjoint)
     return self._episode_peak
 
 

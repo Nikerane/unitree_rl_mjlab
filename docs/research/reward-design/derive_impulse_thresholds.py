@@ -171,7 +171,13 @@ def main() -> None:
       baseline = torch.zeros(6)
       raw = torch.zeros(6)
       sub = torch.zeros(6)
-      sub_capped = torch.zeros(6)  # mirror of the SHIPPED accumulator's event_window press cap
+      # Mirror of the SHIPPED accumulator's SLIDING window (2026-07-13): max over any
+      # `imp_window`-substep interval of the baseline-subtracted sum. Window length read from the
+      # runtime accumulator (never hardcoded) so the mirror cannot silently desync from the config.
+      imp_window = int(acc_shipped._window)
+      del_window = int(dacc_shipped._window)
+      sub_win_buf: list[torch.Tensor] = []  # last `imp_window` per-substep contributions
+      sub_capped = torch.zeros(6)           # max sliding-window sum seen (== full sum if dur < window)
       noncontact = torch.zeros(6)
       dur = 0
       deliv = 0.0
@@ -196,14 +202,18 @@ def main() -> None:
           seen_contact = True
           raw += qfrc.abs() * dt
           sub += (qfrc - baseline).abs() * dt
-          if dur < 25:  # mirror the shipped accumulator's event_window cap (impulse_bound.py) so
-            sub_capped += (qfrc - baseline).abs() * dt  # the ximp_err gate compares like with like
+          # Sliding-window mirror (impulse_bound.py, 2026-07-13): track the max window-sum so the
+          # ximp_err gate compares like with like. For dur < window this equals the full sum.
+          sub_win_buf.append((qfrc - baseline).abs() * dt)
+          if len(sub_win_buf) > imp_window:
+            sub_win_buf.pop(0)
+          sub_capped = torch.maximum(sub_capped, torch.stack(sub_win_buf).sum(dim=0))
           # Sign-aware bound term (ADJUDICATED 2026-07-10): the non-contact-row component of qfrc
           # (dof-friction/limit contamination), accumulated over the IDENTICAL contact window as
           # raw/rows above — so rows_j ≤ raw_j + noncontact_j (triangle inequality) holds exactly.
           noncontact += (qfrc - contact_qfrc).abs() * dt
           deliv += f_ax * dt
-          if dur < 25:  # mirrors SubstepDeliveredImpulse's event_window_substeps default
+          if dur < del_window:  # mirrors SubstepDeliveredImpulse's per-event PREFIX cap (unchanged)
             deliv_capped += f_ax * dt
           dur += 1
           shipped_win = torch.maximum(shipped_win, ship_imp)
@@ -221,9 +231,10 @@ def main() -> None:
         # shipped substep_impulse accumulator is configured subtract_baseline=True (C2, env_cfgs.py),
         # so its window value IS the baseline-subtracted sum — compare against `sub_capped`, not
         # `raw` (fixed 2026-07-10: previously compared `raw`, a stale leftover from before the C2
-        # subtract_baseline=True switch). sub_capped (2026-07-12) mirrors the shipped accumulator's
-        # event_window press cap; before it, an uncapped `sub` spuriously FAILed the gate on any
-        # strike whose window exceeds 25 substeps (the reference strike's ~9-20 is unaffected).
+        # subtract_baseline=True switch). sub_capped (sliding-window since 2026-07-13) mirrors the
+        # shipped accumulator's max window-sum with the window read from the runtime instance;
+        # an uncapped `sub` would spuriously FAIL the gate on any strike whose contact outlives
+        # the window (the reference strike's ~9-20 substeps is unaffected: windowed == full sum).
         ximp_err.append(max(0.0, float((shipped_win - sub_capped).abs().max()) - 1e-4))
         xdel_err.append(max(0.0, abs((shipped_del_end - shipped_del_start) - deliv_capped) - 1e-4))
 

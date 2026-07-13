@@ -424,36 +424,41 @@ def main() -> None:
   raw_acc._dec = int(imp_env.cfg.decimation)
   raw_acc._i = 0
   raw_acc._pulse = torch.zeros(1, 6, device=device)
-  raw_acc._running = torch.zeros(1, 6, device=device)
   raw_acc._last_off_qfrc = torch.zeros(1, 6, device=device)
-  raw_acc._in_contact_prev = torch.zeros(1, dtype=torch.bool, device=device)
+  # Sliding-window internals (2026-07-13): mirror the shipped accumulator's window so the raw
+  # comparator measures the same quantity class over the same interval.
+  raw_acc._window = int(acc._window)
+  raw_acc._buf = torch.zeros(1, 6, raw_acc._window, device=device)
+  raw_acc._buf_i = 0
+  raw_acc._rolling = torch.zeros(1, 6, device=device)
   raw_acc._episode_peak = torch.zeros(1, device=device)
   raw_acc._episode_peak_perjoint = torch.zeros(1, 6, device=device)
   raw_acc._env = imp_env  # object.__new__ bypasses ManagerTermBase.__init__; set for robustness.
 
-  # M5 sign-aware bound comparator (ADJUDICATED 2026-07-10): manually accumulate
-  # noncontact_j = Σ|qfrc_j − contact_row_qfrc_j|·dt over the SAME contact window as raw_acc,
-  # mirroring raw_acc's own pulse/running windowing so rows_peak ≤ raw_peak + noncontact_peak
-  # (the triangle-inequality bound) is evaluated on genuinely comparable per-event-pulse quantities.
+  # M5 sign-aware bound comparator (ADJUDICATED 2026-07-10; sliding-window since 2026-07-13):
+  # manually accumulate noncontact_j = Σ|qfrc_j − contact_row_qfrc_j|·dt over the SAME sliding
+  # window as raw_acc, so rows_peak ≤ raw_peak + noncontact_peak (the triangle-inequality bound)
+  # is evaluated on comparable windowed quantities. NOTE: rows_acc (Track 2) is deliberately
+  # UNCAPPED per-event; the bound stays exact because the fixture strike (~12-15 substeps) fits
+  # inside the window, where windowed == full-event sums. A >window strike would need rows capped
+  # identically first (see contact_row_impulse.py docstring).
   m5_cols = arm_dof_cols(imp_env)  # GLOBAL dof columns, same ARM order as raw_arm_cfg.joint_ids
-  noncontact_pulse = torch.zeros(1, 6, device=device)
-  noncontact_running = torch.zeros(1, 6, device=device)
-  noncontact_in_contact_prev = torch.zeros(1, dtype=torch.bool, device=device)
+  noncontact_buf = torch.zeros(1, 6, raw_acc._window, device=device)
+  noncontact_buf_i = 0
+  noncontact_peak_window = torch.zeros(1, 6, device=device)
   orig_substep_m5 = imp_env.metrics_manager.compute_substep
 
   def _patched_m5() -> None:
-    nonlocal noncontact_pulse, noncontact_running, noncontact_in_contact_prev
+    nonlocal noncontact_buf_i, noncontact_peak_window
     orig_substep_m5()
     raw_acc(imp_env)
     qfrc_now = imp_env.scene["robot"].data._joint_dof_field("qfrc_constraint")[:, raw_acc._joint_ids]  # (1,6)
     contact_qfrc_now = contact_row_qfrc(imp_env)[:, m5_cols]  # (1,6) same substep as qfrc_now
     in_contact = (raw_acc._sensor.data.found > 0).any(dim=-1)
     in_c = in_contact[:, None]
-    falling = (~in_contact & noncontact_in_contact_prev)[:, None]
-    noncontact_running = noncontact_running + (qfrc_now - contact_qfrc_now).abs() * imp_env.physics_dt * in_c
-    noncontact_pulse = torch.where(falling, torch.maximum(noncontact_pulse, noncontact_running), noncontact_pulse)
-    noncontact_running = torch.where(falling, torch.zeros_like(noncontact_running), noncontact_running)
-    noncontact_in_contact_prev = in_contact
+    noncontact_buf[:, :, noncontact_buf_i] = (qfrc_now - contact_qfrc_now).abs() * imp_env.physics_dt * in_c
+    noncontact_buf_i = (noncontact_buf_i + 1) % raw_acc._window
+    noncontact_peak_window = torch.maximum(noncontact_peak_window, noncontact_buf.sum(dim=-1))
 
   imp_env.metrics_manager.compute_substep = _patched_m5  # type: ignore[method-assign]
   imp_rm = imp_env.reward_manager
@@ -473,7 +478,7 @@ def main() -> None:
     peak_lambda = torch.maximum(peak_lambda, imp_now)
     raw_now = raw_acc.impulse[0].clone()
     raw_peak = torch.maximum(raw_peak, raw_now)
-    noncontact_now = torch.maximum(noncontact_pulse, noncontact_running)[0].clone()
+    noncontact_now = noncontact_peak_window[0].clone()
     noncontact_peak = torch.maximum(noncontact_peak, noncontact_now)
     rows_now = rows_acc.impulse[0].clone()
     if not rows_contact_seen:

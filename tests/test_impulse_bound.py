@@ -1,18 +1,24 @@
 """Unit tests for the substep impact-impulse accumulators (robot-side Λ_j + object-side I).
 
-SEMANTICS (post-review redesign, 2026-07):
+SEMANTICS (2026-07-13 sliding-window redesign; supersedes both the per-event pulse and the
+short-lived first-N-substeps prefix cap the Codex adversarial review falsified):
 
-* ``SubstepImpulseAccumulator`` (robot side, the CONSTRAINT signal) uses **per-event pulse**
-  semantics: while a contact window is open the running sum is visible; when the window closes
-  (falling edge) its total is latched into a PULSE that stays visible for the REMAINDER of that
-  control step only, and is cleared at the first substep of the next control step. Several windows
-  closing within one control step MAX-combine. Consequences (the review findings this encodes):
-  - a violation is visible to the 50 Hz constraint read for exactly the steps it happens in — no
-    episode-long persistence (no duration-dependent punishment, no EMA saturation), and
-  - a later gentle tap cannot erase a violent window's value (nothing persists to erase).
+* ``SubstepImpulseAccumulator`` (robot side, the CONSTRAINT signal) computes a **TIME-based
+  sliding window**: Λ_j(t) = contact-masked Σ|qfrc|·dt over the most recent
+  ``event_window_substeps`` (default 25 ≈ 50 ms). Off-contact substeps contribute 0 but do NOT
+  reset or shift the window. ``_pulse`` latches the max window-sum per control step (cleared at
+  each step boundary); ``impulse`` = max(pulse, current window sum). Encoded properties:
+  - NO masking blind spot: a gentle prefix + late spike in unbroken contact registers the spike
+    (the prefix cap read exactly 0 for it — the hold-then-spike bypass);
+  - a sustained press is bounded at F̄·window·dt (identical to the prefix cap for steady presses);
+  - flickered sub-events inside one window AGGREGATE (fragmentation can no longer halve the read);
+  - brief impacts (< window) read their full event sum, unchanged;
+  - visibility after contact decays within ≤ window substeps (bounded — not episode persistence),
+    so a later gentle tap cannot erase a violent reading mid-decay.
 
-* ``SubstepDeliveredImpulse`` (object side, the REWARD signal) is **episode-cumulative**:
-  I_total = Σ over ALL contact substeps of the episode of F_axial·dt — monotone non-decreasing,
+* ``SubstepDeliveredImpulse`` (object side, the REWARD signal) is **episode-cumulative** with a
+  per-event PREFIX cap (undercounting reward is the safe direction — anti-press-farming):
+  I_total = Σ over payable contact substeps of F_axial·dt — monotone non-decreasing,
   so the delta-crediting reward can never re-pay or zero-pay (review finding #4).
 
 Tests fake the env in the repo's SimpleNamespace style and drive one substep at a time. The
@@ -37,19 +43,20 @@ DT = 0.002  # physics_dt @ 500 Hz
 DEC = 10    # decimation (substeps per control step)
 
 
-def _acc(B: int, subtract_baseline: bool = False, n_joints: int = 6):
-  """Accumulator + feed(qfrc, found) closure driving one substep per call."""
+def _acc(B: int, subtract_baseline: bool = False, n_joints: int = 6, window: int = 25):
+  """Accumulator + feed(qfrc, found) closure driving one substep per call. `window` must be set
+  here (not mutated afterwards): the ring buffer is sized to it at construction."""
   a = object.__new__(SubstepImpulseAccumulator)
   a._joint_ids = list(range(n_joints))
   a._subtract_baseline = subtract_baseline
   a._dec = DEC
   a._i = 0
   a._pulse = torch.zeros(B, n_joints)
-  a._running = torch.zeros(B, n_joints)
   a._last_off_qfrc = torch.zeros(B, n_joints)
-  a._in_contact_prev = torch.zeros(B, dtype=torch.bool)
-  a._window = 25
-  a._event_age = torch.zeros(B, dtype=torch.long)
+  a._window = window
+  a._buf = torch.zeros(B, n_joints, a._window)
+  a._buf_i = 0
+  a._rolling = torch.zeros(B, n_joints)
   a._episode_peak = torch.zeros(B)
   a._episode_peak_perjoint = torch.zeros(B, n_joints)
   robot_data = SimpleNamespace(_joint_dof_field=None)
@@ -97,95 +104,111 @@ def test_window_spanning_control_steps_stays_visible_while_open():
   assert torch.allclose(acc.impulse[0, 0], torch.tensor(1.0 * DT * 25), atol=1e-9), acc.impulse
 
 
-def test_pulse_visible_for_remainder_of_closing_step_only():
-  # Window closes at substep 3 of a control step -> value visible through substep 9 (the 50 Hz
-  # read), then cleared at the first substep of the NEXT control step. NO persistence (review
-  # finding: episode-long latched margin caused duration-dependent punishment + EMA saturation).
-  acc, feed = _acc(B=1)
+def test_reading_decays_within_one_window_after_contact():
+  # Bounded visibility: after contact ends, the reading persists only while the sliding window
+  # still contains the event, then decays to zero within `window` substeps — NOT episode-long
+  # persistence (2026-07 deep-review rejection), NOT single-step consumption (old pulse).
+  acc, feed = _acc(B=1, window=10)
   q = torch.tensor([[2.0, 0, 0, 0, 0, 0]])
   for _ in range(3):
     feed(q, torch.ones(1, 1))          # substeps 0-2: in contact
-  feed(torch.zeros(1, 6), torch.zeros(1, 1))  # substep 3: falling edge -> pulse latched
   total = torch.tensor(2.0 * DT * 3)
-  for _ in range(6):                    # substeps 4-9: off contact, same control step
+  assert torch.allclose(acc.impulse[0, 0], total, atol=1e-6)
+  for _ in range(7):                    # substeps 3-9: window still contains all 3 contributions
     feed(torch.zeros(1, 6), torch.zeros(1, 1))
-    assert torch.allclose(acc.impulse[0, 0], total, atol=1e-9)  # visible at the step's read
-  feed(torch.zeros(1, 6), torch.zeros(1, 1))  # substep 10 = next control step -> pulse cleared
+    assert acc._rolling[0, 0] > 0.0     # event still inside the window
+  for _ in range(3):                    # substeps 10-12: contributions slide out one by one
+    feed(torch.zeros(1, 6), torch.zeros(1, 1))
+  assert acc._rolling[0, 0].item() == 0.0  # window fully past the event
+  for _ in range(DEC):                  # a full control step later, the read is 0 too
+    feed(torch.zeros(1, 6), torch.zeros(1, 1))
   assert acc.impulse[0, 0].item() == 0.0
 
 
-def test_gentle_tap_cannot_erase_a_violent_window():
-  # Review finding #2: the old latch-overwrite let a later gentle touch REPLACE a violent value.
-  # With pulse semantics the violent window is consumed at its own control step; a later tap makes
-  # its own small pulse and there is nothing to erase.
+def test_gentle_tap_cannot_erase_a_violent_reading():
+  # Review finding #2 held under sliding-window semantics, and more strongly: a later gentle tap
+  # cannot REPLACE a violent reading — while the window still contains the violent event the
+  # reading includes it (a tap only ADDS), and the per-step max latch never overwrites downward.
   acc, feed = _acc(B=1)
   big = torch.tensor([[5.0, 0, 0, 0, 0, 0]])
   small = torch.tensor([[0.1, 0, 0, 0, 0, 0]])
   for _ in range(4):
-    feed(big, torch.ones(1, 1))         # violent window, substeps 0-3
-  feed(torch.zeros(1, 6), torch.zeros(1, 1))  # substep 4: closes -> pulse = 5*4*dt
+    feed(big, torch.ones(1, 1))         # violent event, substeps 0-3
   violent = 5.0 * DT * 4
-  assert torch.allclose(acc.impulse[0, 0], torch.tensor(violent), atol=1e-9)
-  for _ in range(5):                     # substeps 5-9 off: still visible this step
+  assert torch.allclose(acc.impulse[0, 0], torch.tensor(violent), atol=1e-6)
+  for _ in range(6):                     # substeps 4-9 off contact: still inside the window
     feed(torch.zeros(1, 6), torch.zeros(1, 1))
-  assert torch.allclose(acc.impulse[0, 0], torch.tensor(violent), atol=1e-9)
-  # next control step: a gentle tap makes its OWN tiny pulse (nothing to erase — no persistence).
-  feed(small, torch.ones(1, 1))          # substep 10: pulse cleared at the control-step boundary
-  feed(torch.zeros(1, 6), torch.zeros(1, 1))  # substep 11: tap closes -> its own tiny pulse
-  assert torch.allclose(acc.impulse[0, 0], torch.tensor(0.1 * DT), atol=1e-9), acc.impulse
+  feed(small, torch.ones(1, 1))          # substep 10 (next step): gentle tap while window holds it
+  assert acc.impulse[0, 0] >= violent - 1e-9, acc.impulse  # tap cannot lower the reading
 
 
-def test_press_cap_bounds_a_sustained_press():
-  # Robot-side press guard (2026-07-12 vacuity §4/§5): a contact EVENT accumulates for at most
-  # _window substeps, so a bottomed-out press cannot grow Λ without bound (mirrors the object side).
-  acc, feed = _acc(B=1)
-  acc._window = 10  # short window for the test
+def test_sustained_press_is_bounded_at_one_window():
+  # A bottomed-out press cannot grow Λ without bound: a constant press reads exactly F̄·window·dt
+  # under the sliding window — bit-identical to the old prefix cap for steady presses (verified
+  # 2026-07-13), preserving the 18×-inflation fix without the masking blind spot.
+  acc, feed = _acc(B=1, window=10)
   q = torch.tensor([[3.0, 0, 0, 0, 0, 0]])
   for _ in range(40):  # 40-substep sustained press, far past the 10-substep window
     feed(q, torch.ones(1, 1))
-  # only the first 10 substeps accumulate; _running (uncleared by the control-step grid) holds it
-  assert torch.allclose(acc.impulse[0, 0], torch.tensor(3.0 * DT * 10), atol=1e-9), acc.impulse
+  assert torch.allclose(acc.impulse[0, 0], torch.tensor(3.0 * DT * 10), atol=1e-6), acc.impulse
 
 
-def test_brief_impact_under_window_is_uncapped():
-  # A genuine impact (window < cap) is untouched by the press guard.
-  acc, feed = _acc(B=1)
-  acc._window = 25
+def test_brief_impact_under_window_reads_full_event_sum():
+  # A genuine impact (shorter than the window) is untouched — reads its full event sum.
+  acc, feed = _acc(B=1, window=25)
   q = torch.tensor([[4.0, 0, 0, 0, 0, 0]])
   for _ in range(8):  # brief impact, well under the window
     feed(q, torch.ones(1, 1))
-  assert torch.allclose(acc.impulse[0, 0], torch.tensor(4.0 * DT * 8), atol=1e-9), acc.impulse
+  assert torch.allclose(acc.impulse[0, 0], torch.tensor(4.0 * DT * 8), atol=1e-6), acc.impulse
 
 
-def test_press_cap_re_arms_on_a_new_contact_event():
-  # The event age RESETS on the rising edge, so a second contact event gets its own fresh window.
-  # Assert acc._running directly (not impulse) so the check ISOLATES re-arm and is robust to the
-  # pulse-grid clear: if the age did NOT reset, event 2 would inherit event 1's saturated age and
-  # accumulate nothing (running would stay 0).
-  acc, feed = _acc(B=1)
-  acc._window = 3
-  q = torch.tensor([[2.0, 0, 0, 0, 0, 0]])
-  for _ in range(5):  # event 1: 5 substeps, capped at 3
-    feed(q, torch.ones(1, 1))
-  assert torch.allclose(acc._running[0, 0], torch.tensor(2.0 * DT * 3), atol=1e-9), acc._running
-  feed(torch.zeros(1, 6), torch.zeros(1, 1))  # falling edge closes event 1 (running -> 0)
-  for _ in range(2):  # event 2: 2 substeps -> a fresh window pays BOTH only if the age re-armed
-    feed(q, torch.ones(1, 1))
-  assert torch.allclose(acc._running[0, 0], torch.tensor(2.0 * DT * 2), atol=1e-9), acc._running
+def test_hold_then_spike_bypass_is_closed():
+  # THE Codex adversarial regression (2026-07-13): under the falsified prefix cap, holding gentle
+  # contact past the window then spiking force in unbroken contact contributed EXACTLY 0 to Λ
+  # (99.75% of the true integral missed). The sliding window must register the spike: the peak
+  # window covers the last 25 substeps = 5 gentle + 20 spike.
+  acc, feed = _acc(B=1, window=25)
+  gentle = torch.tensor([[0.1, 0, 0, 0, 0, 0]])
+  spike = torch.tensor([[50.0, 0, 0, 0, 0, 0]])
+  for _ in range(30):
+    feed(gentle, torch.ones(1, 1))      # 30 substeps of gentle hold (past the 25 window)
+  for _ in range(20):
+    feed(spike, torch.ones(1, 1))       # late spike, contact never breaks
+  expected = (5 * 0.1 + 20 * 50.0) * DT  # the window at peak: 5 gentle + 20 spike substeps
+  assert torch.allclose(acc.impulse[0, 0], torch.tensor(expected), atol=1e-5), acc.impulse
+  # and the episode-peak logged metric saw it too
+  assert acc._episode_peak[0] >= expected - 1e-5
 
 
-def test_two_windows_closing_in_one_step_max_combine():
-  # Bounce chatter within one control step must not REPLACE the bigger window (old bug).
+def test_flickered_subevents_within_window_aggregate():
+  # Fragmentation exploit closed: two sub-events split by a 1-substep contact flicker inside one
+  # window SUM (time-based window), instead of MAX-combining as separate events (which let a
+  # flicker halve the constraint read under per-event semantics).
+  acc, feed = _acc(B=1, window=25)
+  q = torch.tensor([[10.0, 0, 0, 0, 0, 0]])
+  for _ in range(12):
+    feed(q, torch.ones(1, 1))           # sub-event 1
+  feed(torch.zeros(1, 6), torch.zeros(1, 1))  # 1-substep flicker gap
+  for _ in range(12):
+    feed(q, torch.ones(1, 1))           # sub-event 2 (still inside the 25-substep window)
+  expected = 24 * 10.0 * DT             # both sub-events aggregate
+  assert torch.allclose(acc.impulse[0, 0], torch.tensor(expected), atol=1e-5), acc.impulse
+
+
+def test_bounce_chatter_within_window_aggregates():
+  # Bounce chatter within one window AGGREGATES (it is real reaction within the interval); a tap
+  # after a bigger event can only add to the reading, never replace it (old latch-overwrite bug).
   acc, feed = _acc(B=1)
   big = torch.tensor([[3.0, 0, 0, 0, 0, 0]])
   small = torch.tensor([[0.2, 0, 0, 0, 0, 0]])
   for _ in range(3):
-    feed(big, torch.ones(1, 1))          # substeps 0-2: big window (3*3*dt)
-  feed(torch.zeros(1, 6), torch.zeros(1, 1))  # substep 3: big closes
-  feed(small, torch.ones(1, 1))          # substep 4: tap opens
-  feed(torch.zeros(1, 6), torch.zeros(1, 1))  # substep 5: tap closes (0.2*dt)
-  # both closed within the SAME control step: pulse = max(big, tap) = big
-  assert torch.allclose(acc.impulse[0, 0], torch.tensor(3.0 * DT * 3), atol=1e-9), acc.impulse
+    feed(big, torch.ones(1, 1))          # substeps 0-2: big event (3*3*dt)
+  feed(torch.zeros(1, 6), torch.zeros(1, 1))  # substep 3: gap
+  feed(small, torch.ones(1, 1))          # substep 4: tap
+  feed(torch.zeros(1, 6), torch.zeros(1, 1))  # substep 5
+  expected = (3 * 3.0 + 0.2) * DT        # window covers big + tap
+  assert torch.allclose(acc.impulse[0, 0], torch.tensor(expected), atol=1e-6), acc.impulse
+  assert acc.impulse[0, 0] >= 3 * 3.0 * DT - 1e-9  # never below the big event alone
 
 
 def test_per_env_contact_independence():
@@ -242,8 +265,8 @@ def test_returns_episode_peak_shape_B():
 
 
 def test_reset_mid_contact_no_phantom_window():
-  # Terminating an episode while in contact must not leave a phantom window: reset clears
-  # _in_contact_prev, so the next substep (still touching, post-reset state) opens a FRESH window.
+  # Terminating an episode while in contact must not leave a phantom reading: reset zeroes the
+  # ring buffer + rolling sum, so the next substep (still touching, post-reset) starts fresh.
   acc, feed = _acc(B=1)
   q = torch.tensor([[4.0, 0, 0, 0, 0, 0]])
   feed(q, torch.ones(1, 1))
@@ -357,10 +380,11 @@ def test_episode_peak_perjoint_matches_window_and_survives_reset():
   feed(torch.zeros(1, 6), torch.zeros(1, 1))  # falling edge: window closes -> pulse latched
   expected = (q.abs() * DT * 3)[0]
   assert torch.allclose(acc._episode_peak_perjoint[0], expected, atol=1e-9), acc._episode_peak_perjoint
-  # survives well past the control-step boundary where .impulse (the pulse) clears
-  for _ in range(DEC + 2):
+  # survives well past the point where .impulse clears (the sliding window passes the event
+  # within `window` substeps; + DEC crosses a control-step boundary so the latch clears too)
+  for _ in range(acc._window + DEC):
     feed(torch.zeros(1, 6), torch.zeros(1, 1))
-  assert acc.impulse[0, 0].item() == 0.0  # pulse has cleared...
+  assert acc.impulse[0, 0].item() == 0.0  # transient reading has decayed to zero...
   assert torch.allclose(acc._episode_peak_perjoint[0], expected, atol=1e-9)  # ...but the peak persists
   acc.reset(None)
   assert torch.allclose(acc._episode_peak_perjoint, torch.zeros(1, 6))
