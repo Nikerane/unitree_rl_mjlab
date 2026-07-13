@@ -153,5 +153,9 @@ print(json.dumps({
     "worst_over_cap_FULL": round(max(over_full), 3),
     "worst_over_cap_ACCUM": round(max(over_acc), 3),
     "impact_over_cap_perjoint": [round(x, 3) for x in over_impact],
+    # binds_impact = the impact-gated DIAGNOSTIC only. The shipped/enforced metric is ACCUM —
+    # reported separately (2026-07-13: at fixed impedance vs a rigid target ACCUM binds
+    # ~1.12-1.17x while binds_impact stays false; conflating them misled the v1 advisor addendum).
     "binds_impact": bool(max(over_impact) >= 1.0 and lock_ok),
+    "binds_enforced_ACCUM": bool(max(over_acc) >= 1.0 and lock_ok),
 }))

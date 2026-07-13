@@ -63,3 +63,12 @@ exactly when VIC makes it necessary.
 Full physics, the four supporting figures, and the artifact-by-artifact breakdown of every
 apparent "binding" result (each traced to a sustained press or a super-hardware joint velocity)
 are in the linked record.
+
+> **UPDATE (2026-07-13):** an adversarial review sharpened this picture — see the revised
+> `2026-07-12_khadiv_vic_addendum.md`. In brief: the vacuity above is scoped to **ballistic
+> impacts** (it stands); the *enforced* windowed Λ additionally counts press reaction and
+> **does bind** on rigid-target press-through (measured 1.12–1.17× cap at fixed impedance), so
+> decision (c) is answered and decision (d)'s "press residual" is now the live binding pathway.
+> A masking blind spot in the accumulator found by that review is fixed (sliding window; all
+> gates green). The pivotal open choice is now **decision (e): what should Λ bound — ballistic
+> impulse, windowed reaction, or split constraints** (see the addendum + decision plan).

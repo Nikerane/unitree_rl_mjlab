@@ -179,6 +179,12 @@ The original "bank → Khadiv → VIC" understated the §0.6 risk and idled Khad
 
 ## 9. VIC-feasibility ceiling — RESULT (the go/no-go gate, run 2026-07-12)
 
+> **⚠️ SCOPE CORRECTION (2026-07-13, see §10):** everything in this section is about the
+> *ballistic* impact impulse and survives verification — but transferring its verdict to the
+> *enforced* Λ (which also counts active press reaction inside its window) was an overreach: the
+> enforced metric **binds** on rigid-target press-through (measured 1.12–1.17× cap at every kp).
+> Read §9's "VIC has ~zero lever" as "…on the ballistic impulse" only.
+
 The §7 gate is now executed (`docs/results/assets/2026-07-12_impulse_vacuity/probes/ceiling.py` + `armature_check.py`; independently re-derived + reproduced by an Opus verification pass). Reflected mass from the sim's mass matrix + head Jacobian at the strike pose; per-joint ceiling Λ_j = |(Jᵀu)_j|·m_eff·v·(1+e).
 
 **Numbers.** m_eff = **0.536 kg** (armature-coupled) / 0.401 kg (link-only) → reflected-mass lever only **1.33× as modeled**. Load joints: j2 (moment arm 0.50 m), j3 (0.43 m). Reachable head speed ~1.35 m/s; kinematic ceiling (all 6 joints at 3.14 rad/s, aligned) 3.97 m/s. Worst Λ/cap **at the reachable speed: 0.19 (inelastic) / 0.38 (elastic e=1)**. Crossing velocity: 7.13 m/s inelastic (*above* the kinematic ceiling → unreachable by any strike) / 3.57 m/s elastic (only in the unreachable coordinated-whip regime). Cross-check: m_eff = 0.54 matches the vacuity doc's independent analytic 0.49–0.55. The impedance sweep's apparent m_eff 2.9 kg / Λ 0.585 was **press-contaminated even in the impact-only window** (active kp force during deceleration): 2.9 kg exceeds even the ×30-armature reflected mass (1.39 kg), so it cannot be a physical reflected mass at any plausible armature — it must contain sustained press.
@@ -190,6 +196,57 @@ The §7 gate is now executed (`docs/results/assets/2026-07-12_impulse_vacuity/pr
 **A sharper corollary (from verification — the important one).** For an *impulsive* strike, commanded-VIC shapes **none** of the impact metrics: impulse, energy (½·m_eff·v²), *and* peak force are all governed by the fixed reflected mass and the effort-clamped velocity. VIC's only authority is over the **sustained / quasi-static contact force** — the active-press phase *after* the ballistic impact (and the contact-time that sets peak force is a solver property, not an arm one). So "re-point to energy/force and VIC becomes load-bearing" does **not** hold for the brief impulsive strike.
 
 **The fork (Khadiv decision, see `2026-07-12_khadiv_vic_addendum.md`):** (A) re-point the bound to the **sustained/quasi-static contact force** VIC *does* shape — but this rescues VIC only for a contact-dominated task emphasis, not the impulsive strike, and it is a *different* physical quantity than the gearbox impact-torque spike the impulse cap targets. (B) change the **physical lever** — heavier striker / a torque action space reaching higher velocity / physical variable-stiffness hardware (all raise physical m_eff·v, which the policy still doesn't command via kp, but at least make the constraint active). (C) **reframe** as a characterization result: the machinery + the rigorous demonstration that commanded-VIC cannot shape an impulsive impact on a rigid-transmission arm — a real finding mapping to the literature's open question. **No option is a clean "VIC rescues the impulsive-strike thesis"; that specific arc likely does not hold on the Z1.**
+
+---
+
+## 10. UPDATE (2026-07-13) — Codex adversarial review: bypass fixed, conclusions re-scoped
+
+A Codex adversarial review of the 2026-07-12 commits raised three claims; an empirical
+verification workflow confirmed all three (one sub-claim refuted). The consequences:
+
+**1. The press-cap had a masking blind spot — found, verified, FIXED.** The first-25-substeps
+prefix cap was a one-shot check: a gentle 50 ms hold exhausted the window, after which a force
+spike in unbroken contact registered **exactly 0** (99.75% of the true integral missed) while the
+constraint read compliant — and the hold-then-spike sequence is commandable by the DiffIK policy.
+Replaced with a **time-based sliding window** (max Σ|qfrc|·dt over any 25-substep interval, ring
+buffer): catches the spike (verified 400× the prefix read), bit-identical for steady presses
+(the 18×-inflation fix is preserved), aggregates flickered sub-events (closing the old
+fragmentation exploit as a bonus), leaves sub-window strikes unchanged, and bounds post-contact
+visibility to ≤ one window (~2.5 control steps — not the episode persistence the 2026-07 deep
+review rejected). The C0 gate mirror now reads its window from the runtime accumulators (no
+hardcoded 25), and Phase M's comparators were updated to match. Full suite (301) +
+`derive_impulse_thresholds` + `validate_rewards` A–M all green. An independent Fable-5
+adversarial pass then attacked the new mechanism (latch slide-out, ring-vs-reset, boundary
+straddle, time-spreading) and found **no exploit**; its one calibration-relevant finding:
+**δ multi-read** — window (25) > decimation (10) means one violation stays at full magnitude for
+~3 consecutive 50 Hz reads, so per-event survival under enforcement becomes ≈(1−δ)³ (~3× the
+old pulse semantics' termination pressure) and logged mean δ inflates ~3× per event, while a
+task-*completing* strike gets only 1 read (reset truncates). Harmless log-only; **must be folded
+into any `imp_max_p` calibration** (the C2 value 0.5 was chosen under single-read semantics).
+
+**2. §9's verdict was over-transferred — the ENFORCED Λ is not vacuous.** The ceiling's physics
+(ballistic; kp never enters `M(q)`) stands, but the enforced Λ also counts **active press
+reaction** inside its window: re-measured on the shipped accumulator, a fixed-impedance
+drive-through on a rigid target reads **1.12–1.17× cap at every kp 0.5×–20×** (≈0.91× from 50 ms
+of clamp-level press + the impact spike). So: *vacuity is scoped to ballistic impacts*; the
+shipped constraint is live against press-through — arguably the correct gearbox repeated-peak
+semantics. VIC's honest authority over the enforced Λ is **downward** (comply below the effort
+clamp; stiffening saturates — Λ measured flat across 40× kp). The `binds_impact` flag in
+`impedance_one.py` reports only the impact-gated diagnostic and reads false even when the
+enforced metric binds — interpret probe output accordingly.
+
+**3. The gate's uncapped-vs-capped labeling was latent, now consistent.** `sub_capped` fed only
+the equality check while tables/figures reported uncapped sums under "shipped/enforced" labels —
+bit-identical for the 12–15-substep reference strikes, so no published number was wrong; the
+mirror is now sliding-window and runtime-sourced. (Codex's sub-claim that the threshold
+derivation consumed the mislabeled sum was **refuted** — it uses `raw_p95` + `dt_impact`.)
+
+**What this re-opens:** the Λ-quantity choice — **ballistic impulse vs windowed reaction vs
+split constraints** — is now the pivotal Khadiv decision (e), superseding the impulse-vs-energy
+framing of the v1 addendum. See the revised `2026-07-12_khadiv_vic_addendum.md` and the
+Λ-quantity decision plan. The machinery stays log-only (`imp_max_p = 0`) until it is settled.
+Known risk to probe before C3 under option (2): the successful nail-bottoming strike may itself
+read near-cap (constraint-vs-success interference).
 
 ---
 

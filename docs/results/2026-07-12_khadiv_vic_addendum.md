@@ -1,84 +1,97 @@
-# Addendum to the one-pager — can variable impedance make the impulse constraint bind on the Z1?
+# Addendum to the one-pager — what should the impulse constraint bound, and what can VIC do about it?
 
-> Companion to `2026-07-12_khadiv_onepager.md`. Adds one **new decision (e)** and one **new
-> finding** that changes what the fixed-impedance → variable-impedance arc can claim. CPU/analytic,
-> HEAD `soft-cat`. Full detail: `2026-07-12_state_of_everything.md` §9.
+> Companion to `2026-07-12_khadiv_onepager.md`. **Revised 2026-07-13** after a Codex adversarial
+> review + an empirical verification pass falsified two claims in the first version (git history
+> has v1; corrections marked inline). Adds the pivotal **decision (e)** — the Λ-quantity choice —
+> with a decision plan. CPU/analytic, HEAD `soft-cat`. Full detail:
+> `2026-07-12_state_of_everything.md` §9–§10.
 
 ## What we did
 
-Before committing to build the variable-impedance (VIC) action space, we ran a ½-day analytic
-**feasibility ceiling**: using the simulator's own mass matrix and the head Jacobian at the strike
-pose, we bounded the *maximum* per-joint reaction impulse Λ_j any strike could produce, and asked
-whether VIC's stiffness command can move it. (`Λ_j = |Jᵀu|·m_eff·v·(1+e)`; effective mass
-`m_eff = 1/(uᵀ J M⁻¹ Jᵀ u)`, Khatib operational space.)
+Before committing to build the variable-impedance (VIC) action space, we ran an analytic
+**feasibility ceiling** (simulator mass matrix + head Jacobian at the strike pose:
+`Λ_j = |Jᵀu|·m_eff·v·(1+e)`, `m_eff = 1/(uᵀ J M⁻¹ Jᵀ u)`, Khatib operational space), then an
+adversarial review forced us to distinguish two quantities we had been conflating — and to
+re-measure the second one:
 
-## The finding (this is the load-bearing part)
+1. the **ballistic impact impulse** (the momentum exchanged in the collision itself), and
+2. the **enforced Λ** — what the shipped constraint actually reads: contact-masked
+   `Σ|qfrc_constraint|·dt` over a sliding ~50 ms window, which includes **actively-driven
+   reaction** (pressing) during contact, not just the collision.
 
-**Variable impedance, as a per-joint *commanded stiffness* (`set_gains`), has essentially no lever
-on the ballistic impact impulse on the Z1** — for a structural reason, not a tuning one:
+## The two verified findings
 
-- The impulse is set by **reflected mass × velocity**. Reflected mass lives in `M(q)` + joint
-  `armature` (a *physical* rotor-inertia property); the commanded PD stiffness `kp` does **not**
-  enter `M(q)`. So raising `kp` only adds an *active press* force during contact — it does not
-  raise the passive reflected mass that governs the momentum exchange.
-- Empirically consistent: across a 40× stiffness sweep against a rigid target, the genuine impact
-  Λ/cap barely moved (~0.47→0.64), and the arm's reflected mass ranges only **1.33×** between
-  fully-compliant and rigidly-coupled.
-- Velocity — the *other* lever — is **effort-clamped** (~1.35 m/s at the head); `set_gains` cannot
-  lift the motor torque limit. The cap is only reachable at ~3.6–7 m/s (a coordinated whip the
-  effort-limited controller cannot produce).
+**Finding 1 — VIC has ~zero lever on the *ballistic* impulse (v1 finding, survives verification).**
+Reflected mass lives in `M(q)` + joint `armature` (physical rotor inertia); the commanded PD
+stiffness `kp` never enters `M(q)`. The arm's reflected-mass range is only **1.33×** as modeled
+(0.40–0.54 kg), and impact velocity is effort-clamped (~1.35 m/s at the head; the ballistic
+crossing velocity of ~3.6–7 m/s is unreachable while driving into contact). For the brief
+collision itself, impulse, energy (½·m_eff·v²) and peak force are all fixed by reflected mass ×
+velocity — commanded stiffness shapes none of them.
 
-**Consequence:** the arc we had been assuming — *"fixed impedance can't reach a binding impulse →
-variable impedance unlocks it"* — **most likely does not hold on the Z1**, because VIC's stiffness
-command does not change the quantity the impulse constraint bounds. This also answers a genuine
-open question in the literature (does control-level impedance shape the *impulsive* peak, or only
-quasi-static force?): on a rigid-transmission arm, **it shapes only the sustained/quasi-static
-contact force — not the ballistic impact, whose impulse, energy (½·m_eff·v²) and peak force are all
-fixed by the reflected mass and the effort-clamped velocity.**
+**Finding 2 — the *enforced* Λ is NOT vacuous, and it binds today (new, corrects v1).**
+Re-measured on the shipped accumulator: a fixed-impedance drive-through strike against a rigid
+(bottomed-out) target reads **1.12–1.17× cap at every stiffness from 0.5× to 20×** — the ~50 ms
+window of clamp-level press reaction (≈0.91× cap by itself) plus the impact spike crosses the
+cap. v1's "a rigid target reaches ~0.6× and does not bind" described the *impact-gated
+diagnostic*, not the deployed metric. Two corollaries:
+- The "constraint is vacuous" headline is **scoped to ballistic impacts only**. Against
+  press-through on a non-yielding target, the shipped constraint is live and binding — arguably
+  *correct* gearbox semantics (50 ms of clamp-level reaction **is** repeated-peak load, the same
+  τ_rated × window formula that produced the caps).
+- **VIC's honest authority over the enforced Λ is downward**: stiffening saturates at the effort
+  clamp (measured: Λ flat across 40× kp), but *below* saturation lower stiffness → lower contact
+  force → lower windowed Λ. The defensible VIC story on the Z1 is *"comply to keep the enforced
+  windowed Λ under cap"* — not "stiffen to unlock binding" (refuted by Finding 1), and not "VIC
+  has zero lever on the constraint" (refuted by Finding 2).
 
-## One important caveat we cannot resolve without you / hardware data
+*(Also fixed in the same pass: the shipped accumulator had a masking blind spot — a gentle 50 ms
+touch could disarm it before a force spike; found by adversarial review, verified (the spike
+registered exactly zero), and closed with a time-based sliding window that bounds any 50 ms
+interval. All gates re-green.)*
+
+## One caveat we cannot resolve without you / hardware data
 
 The simulator's arm `armature` values (0.01–0.02 kg·m²) look like **nominal placeholders**, not
-values derived from the real harmonic-drive rotor inertia × gear² (which should be ~0.05–0.3). If
-the true value is 10–30× larger, the reflected mass — and therefore **both** the "constraint is
-slack" margin **and** how close a strike comes to the cap — would rise substantially (a strike
-could be *near-binding* at fixed impedance on real hardware). This does not change the VIC verdict
-(stiffness still can't command it), but it means our headline "vacuous" number is model-sensitive.
-**We should verify the Z1 rotor inertia before finalizing either claim.**
+rotor inertia × gear² (harmonic drive → plausibly ~0.05–2). At 10–30× larger, reflected mass
+rises to 0.89–1.39 kg and the ballistic reachable-speed Λ/cap from 0.38 toward ~0.6–1.0 — so the
+ballistic-vacuity *margin* is model-sensitive (the structural Finding 1 is not).
+**Please help us verify the Z1 rotor inertia before either number is treated as final.**
 
-## Decisions for you
+## The pivotal decision (e): what should Λ bound?
 
-Carrying over from the one-pager: **(a)** bless the compliance/negative-control reframe, **(b)**
-keep the caps fixed at hardware values, **(c)** — *now answered*: a rigid target reaches ~0.6× cap
-and still does not bind, so no separate rigid-target control is needed, **(d)** accept the
-sustained-press residual as reward-gated + C3-settled. **New:**
+This is now the load-bearing choice — it decides what the constraint means, whether it can bind,
+and what VIC optimizes against. Three coherent options (full trade-offs in the decision plan we
+will walk you through):
 
-- **(e) What quantity should the constraint bound — impulse, or peak-force / energy?** This is now
-  the pivotal choice, because it decides whether VIC can be load-bearing at all:
-  - **Impulse** (what we built): the right quantity for **gearbox / harmonic-drive reaction-torque
-    protection**, but — per the finding above — **not controllable by VIC** on this arm. Its
-    provenance is our own hardware derivation (τ_rated × repeated-peak × window); the safety
-    literature does not ground it.
-  - **Peak-force / energy** (v∝1/√μ, energy ≈ ½·m_eff·v²): what the **human-injury safety
-    literature** (ISO/TS 15066, Haddadin) actually bounds, and — crucially — **what control-level
-    variable impedance *does* shape.** Re-pointing the constraint here would make VIC genuinely
-    load-bearing (the policy trades stiffness against a force/energy cap), at the cost of changing
-    the thesis's headline quantity.
+1. **Ballistic impact impulse** — the collision's momentum exchange only (press excluded by a
+   force-gated impact window). Cleanest match to "impact-safe" and to the cap's Δt derivation;
+   but *provably vacuous on this platform* (Finding 1) and needs a watertight impact/press
+   separator (the naive ones were exploitable).
+2. **Windowed reaction impulse** (what now ships, log-only): any-50 ms `Σ|qfrc|·dt`, press
+   included. Hardware-faithful repeated-peak reading, non-vacuous (binds on press-through), gives
+   VIC a real downward role (comply) — but it binds on *pressing*, not *striking* (the thesis
+   headline says "impact"), may fire on the successful nail-bottoming strike (a training-shaping
+   risk to probe before C3), and for presses it reduces to average-torque × window ("why not just
+   bound torque?" must be answerable).
+3. **Split constraints** — a ballistic impact-impulse bound *plus* a separate sustained
+   reaction-torque bound. Cleanest engineering semantics, each cap on its native quantity; costs
+   a second constraint (tuning, normalizers) and needs the same impact/press separator as (1).
 
-- **(f) Which way do we take the thesis given (e)?**
-  - **(A)** Re-point the bounded quantity to **peak-force/energy** and keep the VIC arc *(our
-    recommendation — it rescues the VIC contribution and aligns with the safety literature)*.
-  - **(B)** Keep **impulse** but change the **lever** — a heavier striker or a harder/rigid task
-    that raises physical m_eff·v to the cap (VIC still doesn't command it, but the constraint at
-    least becomes active).
-  - **(C)** Keep impulse and **reframe the thesis around the negative finding + the machinery**:
-    a rigorous demonstration that control-VIC cannot shape ballistic impulse on a rigid-transmission
-    arm — a real, literature-relevant result, but a negative headline.
+**Our lean:** (2) as shipped default — it is the only option that is simultaneously enforceable,
+non-vacuous, and exploit-closed today — with (3) as the principled upgrade if you want the thesis
+to keep a *ballistic* claim distinct from the press bound. We have deliberately NOT rewritten the
+thesis framing around any option: the machinery ships log-only (`imp_max_p = 0`) until you choose.
 
-## Our recommendation
+## Decisions for you (consolidated)
 
-Pursue **(A)** — bound peak-force/energy — after verifying the rotor inertia. It is the option
-under which "variable impedance is the safety mechanism" is both *true on the Z1* and *supported by
-the safety literature*, and it reuses essentially all of the shipped machinery (the accumulators,
-soft-CaT, CatPPO) with a different measured quantity. We will not begin the VIC build until you
-weigh in on (e)/(f), since it determines what VIC optimizes against.
+- **(a)** Bless the reframe: fixed-impedance = compliance/negative-control **for ballistic
+  impacts**; the binding/protective story = VIC-compliance against the enforced windowed Λ
+  (per Finding 2), pending (e).
+- **(b)** Keep the per-joint caps fixed at hardware values — unchanged, still our position.
+- **(c)** *Superseded (corrects v1):* the rigid-target control is **done and it binds the shipped
+  metric** (1.12–1.17×); no further control needed.
+- **(d)** The sustained-press residual is no longer a residual — it is the binding pathway of
+  option (2); subsumed by decision (e).
+- **(e)** **Choose the bounded quantity: ballistic / windowed reaction / split** (above).
+- **(f)** Verify the Z1 rotor inertia (armature) so the ballistic margins are trustworthy.
