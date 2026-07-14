@@ -23,6 +23,9 @@
 #     only; on CUDA, mujoco_warp is non-deterministic run-to-run (atomic-reduction ordering), so the
 #     seeds pin the PROTOCOL -- CUDA results are statistical, not bitwise.
 #   - provenance:      host + UTC timestamp + checkpoint path + repo git hash recorded per CSV row
+#   - invariants:      every row carries impossible_success_n / lambda_dead_n (Tier-1 safety
+#     net, 2026-07-14: success-with-zero-impulse and cross-path disagreement are dead-instrument
+#     states, never physics); a nonzero count exits 2 and this driver counts the row as a FAIL
 #
 # Checkpoints must already be under logs/rsl_rl/ (on Lightning they are written in place by
 # scripts/lightning_pair.sh; for a remote box, rsync them back manually first).

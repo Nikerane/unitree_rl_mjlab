@@ -9,7 +9,9 @@ from .impulse_bound import (  # noqa: F401
   SubstepDeliveredImpulse,
   SubstepImpulseAccumulator,
   Z1_JOINT_IMPULSE_LIMIT,
+  contact_seen,
   delivered_impulse_total,
+  impossible_success,
   joint_impulse_peak,
 )
 from .observations import *  # noqa: F403

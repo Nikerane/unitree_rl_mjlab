@@ -53,10 +53,15 @@ except Exception:  # pragma: no cover - warp is always present with mjlab
   wp = None
 
 
-def main() -> None:
+def main() -> int:
   ap = argparse.ArgumentParser()
   ap.add_argument("--device", default="cuda:0")
   ap.add_argument("--hold-steps", type=int, default=10)
+  ap.add_argument("--gate", action="store_true",
+                  help="preflight-gate mode (Tier-2 safety net, 2026-07-14): exit 0 ONLY if the "
+                       "strike lands AND the full signal stack + shipped accumulators are live on "
+                       "this device — lightning_pair.sh runs this before ANY training so credits "
+                       "can never be spent with dead instrumentation.")
   args = ap.parse_args()
   dev = args.device
 
@@ -144,6 +149,10 @@ def main() -> None:
   print(f"max sum|qfrc_arm| immediate={qmax_imm:.3f}  warp-sync={qmax_wsy:.3f} N·m")
   print(f"shipped acc Λ max={acc_final:.4f} N·m·s   delivered max={del_final:.4f} N·s")
   print(f"nail depth max={depth_final * 1000:.1f} mm   terminated={bool(env.reset_terminated.any())}")
+  # Gate predicate: the strike landed AND both SHIPPED accumulators (what training's
+  # delivered-impulse reward and the eval Λ read) produced nonzero output. The raw
+  # immediate reads printed above are diagnostic — not gate criteria.
+  live = depth_final >= 0.02 and acc_final > 0.0 and del_final > 0.0
   print("\nVERDICT:")
   if depth_final < 0.005:
     print("  strike did not land — probe inconclusive, check the scripted drive first")
@@ -159,7 +168,11 @@ def main() -> None:
   else:
     print("  INSTRUMENTATION LIVE at substep rate — the zero-Λ came from the eval readout")
     print("  path, not the accumulators; re-check eval_impulse.py on this device.")
+  if args.gate:
+    print(f"\nGATE: {'PASS — instrumentation live on ' + dev if live else 'FAIL — do NOT train on ' + dev}")
+    return 0 if live else 1
+  return 0
 
 
 if __name__ == "__main__":
-  main()
+  raise SystemExit(main())

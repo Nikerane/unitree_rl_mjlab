@@ -44,6 +44,10 @@ checkpoint, appending one row each time):
   python scripts/eval_impulse.py --ckpt logs/rsl_rl/z1_hammer/.../model_4999.pt --name c3_imp_seed0 \
       --num-envs 256 --nsteps 400 --device cuda:0 --seed 42 --out /tmp/eval_impulse
 
+Tier-1 safety net (2026-07-14): every row carries the physical-impossibility counters
+``impossible_success_n`` / ``lambda_dead_n`` (see ``_invariant_violations``); a nonzero
+count exits 2 AFTER writing the row -- results are self-certifying at generation time.
+
 Pinned protocol (mirrored in scripts/eval_impulse.sh's header -- keep both in sync):
   task=Unitree-Z1-Hammer-CaT-Impulse, play cfg, imp_max_p forced to 0 at eval time (equivalent to
   scripts/train.py's --env.metrics.cat-soft.params.imp-max-p 0), 256 envs, seed 42, mean-action
@@ -88,10 +92,42 @@ FIELDNAMES = [
   "delivered_mean", "delivered_std",
   "success_rate", "nail_depth_mean_mm", "nail_depth_std_mm",
   "ep_len_mean", "ep_len_std",
+  # Physical-impossibility invariants (Tier-1 safety net, 2026-07-14) -- counted over BOTH
+  # rollouts; MUST both be 0 or the script exits 2 after writing the row (see main()).
+  "impossible_success_n", "lambda_dead_n",
   # sampled-action repeat (robustness check) -- condensed, NOT a second row (brief: rows=checkpoints)
   "n_episodes_sampled", "success_rate_sampled", "worst_ratio_max_sampled", "delivered_mean_sampled",
   "host", "timestamp_utc", "git_hash",
 ]
+
+
+def _invariant_violations(rec: dict) -> tuple[int, int]:
+  """Theorem-level physical-consistency counters over one rollout's episode records.
+
+  Tier-1 safety net (2026-07-14, zero-Lambda incident): the first GPU smoke produced
+  success=1.0 / depth=32 mm with Lambda == 0.0 and delivered == 0.0 -- physically
+  impossible with live instrumentation (a nail cannot be driven without contact
+  impulse), yet nothing complained. These counters make every summary row
+  self-certifying; they use only exact-zero comparisons (the accumulators are exact
+  zeros absent contact), so there are no tunable thresholds to drift.
+
+  impossible_success: episode terminated on SUCCESS but delivered == 0 or Lambda == 0
+    -- the nail was driven with no recorded impulse: dead instrument, never physics.
+  lambda_dead: object-side path saw delivered axial impulse > 0 while the robot-side
+    qfrc path recorded Lambda == 0 -- the two INDEPENDENT measurement paths disagree
+    in the one direction that is impossible (axial force delivered to the nail implies
+    a reaction impulse in the arm). The reverse (Lambda > 0, delivered == 0) is a
+    legitimate lateral graze and is NOT counted.
+  """
+  lam_worst = [float(lam.max()) for lam in rec["lam"]]
+  impossible = sum(
+    1 for s, d, lw in zip(rec["succ"], rec["delivered"], lam_worst)
+    if s and (d <= 0.0 or lw <= 0.0)
+  )
+  lam_dead = sum(
+    1 for d, lw in zip(rec["delivered"], lam_worst) if d > 0.0 and lw <= 0.0
+  )
+  return impossible, lam_dead
 
 
 def _install_episode_hook(env: ManagerBasedRlEnv) -> dict:
@@ -306,6 +342,12 @@ def main() -> None:
         f"success_rate={success_rate_s:.3f} worst_ratio_max={worst_max_s:.4f} "
         f"delivered_mean={delivered_mean_s:.4f}")
 
+  # --- Tier-1 physical-impossibility invariants (both rollouts) ---
+  imp_m, dead_m = _invariant_violations(mean_rec)
+  imp_s, dead_s = _invariant_violations(sampled_rec)
+  impossible_success_n = imp_m + imp_s
+  lambda_dead_n = dead_m + dead_s
+
   row = {
     "name": name,
     "ckpt_path": str(Path(args.ckpt).resolve()),
@@ -327,6 +369,8 @@ def main() -> None:
     "nail_depth_std_mm": depth_std,
     "ep_len_mean": ep_len_mean,
     "ep_len_std": ep_len_std,
+    "impossible_success_n": impossible_success_n,
+    "lambda_dead_n": lambda_dead_n,
     "n_episodes_sampled": n_ep_s,
     "success_rate_sampled": success_rate_s,
     "worst_ratio_max_sampled": worst_max_s,
@@ -369,6 +413,18 @@ def main() -> None:
       writer.writeheader()
     writer.writerow(row)
   print(f"[eval_impulse] appended row to {csv_path}")
+
+  # Fail CLOSED on invariant violations, AFTER writing the row (the counts are columns,
+  # so the violation is on the record; the nonzero exit makes eval_impulse.sh count a
+  # FAIL instead of presenting the row as a clean result).
+  if impossible_success_n > 0 or lambda_dead_n > 0:
+    print(f"[eval_impulse] INVARIANT VIOLATION for '{name}': "
+          f"impossible_success_n={impossible_success_n} (success episodes with zero recorded "
+          f"impulse -- a nail cannot be driven without impulse), "
+          f"lambda_dead_n={lambda_dead_n} (object-side impulse delivered while the robot-side "
+          f"qfrc path read exactly zero). The measurement instrument is NOT live on this "
+          f"device/configuration -- these numbers must not be used as results.", file=sys.stderr)
+    raise SystemExit(2)
 
 
 if __name__ == "__main__":

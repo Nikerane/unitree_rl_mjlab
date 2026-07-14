@@ -317,6 +317,18 @@ def z1_hammer_env_cfg(
     cfg.metrics["cat_delta_peak"] = MetricsTermCfg(
       func=hammer_mdp.CatDeltaPeak, per_substep=False, reduce="last", params={},
     )
+    # Live instrumentation SENTINELS (Tier-3 safety net, 2026-07-14): TB alarms that make a
+    # dead measurement instrument visible DURING training, not after (the first GPU smoke logged
+    # Λ≡0 while success=1.0 and no curve revealed it). contact_seen ≈ 1.0 healthy (independent
+    # object-side liveness); impossible_success flat 0.0 healthy (success-with-zero-Λ = dead qfrc
+    # path). Both arms carry them (pair integrity: only {r_imit, r_imit_anneal} differs).
+    cfg.metrics["contact_seen"] = MetricsTermCfg(
+      func=hammer_mdp.contact_seen, per_substep=False, reduce="last",
+      params={"sensor_name": "hammer_nail_contact"},
+    )
+    cfg.metrics["impossible_success"] = MetricsTermCfg(
+      func=hammer_mdp.impossible_success, per_substep=False, reduce="last", params={},
+    )
     # Ordering contract → guard (2026-07-14 audit): the metrics manager evaluates full-step terms
     # in dict-insertion order, and cat_delta_peak reads the δ that cat_soft wrote to env.extras in
     # the SAME compute pass. Until now this was guaranteed only by the line order in this function.

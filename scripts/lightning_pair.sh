@@ -31,6 +31,19 @@ SEED="${SEED:-0}"
 NENVS="${NENVS:-4096}"
 SAVE_EVERY="${SAVE_EVERY:-100}"
 PYBIN="${PYBIN:-$(command -v python)}"
+PREFLIGHT_DEVICE="${PREFLIGHT_DEVICE:-cuda:0}"
+
+# PREFLIGHT INSTRUMENTATION GATE (Tier-2 safety net, 2026-07-14): the first GPU smoke
+# read Lambda==0 / delivered==0 while the nail was demonstrably driven — a dead measurement
+# instrument that no training curve would ever reveal (success comes from depth-based
+# rewards). Never again: prove the full signal stack + shipped accumulators are LIVE on
+# the actual training device before a single credit goes to training.
+echo "[pair] preflight: instrumentation gate on $PREFLIGHT_DEVICE (~1-2 min)"
+if ! "$PYBIN" scripts/diag_cuda_substep_probe.py --device "$PREFLIGHT_DEVICE" --gate; then
+  echo "[pair] PREFLIGHT FAILED: impulse instrumentation is NOT live on $PREFLIGHT_DEVICE."
+  echo "[pair] Refusing to train — a run with dead instrumentation measures nothing."
+  exit 1
+fi
 
 for arm in track none; do
   if [ "$arm" = "track" ]; then TASK=Unitree-Z1-Hammer-CaT-Impulse-Track; else TASK=Unitree-Z1-Hammer-CaT-Impulse; fi

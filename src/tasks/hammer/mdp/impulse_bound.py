@@ -306,6 +306,46 @@ def delivered_impulse_total(env: "ManagerBasedRlEnv") -> torch.Tensor:
   return dacc.delivered
 
 
+def contact_seen(env: "ManagerBasedRlEnv", sensor_name: str) -> torch.Tensor:
+  """Full-step SENTINEL metric (Tier-3 safety net, 2026-07-14): 1.0 if the contact SENSOR
+  registered ANY hammer↔nail contact this episode, else 0.0 (reduce="last" logs the terminal
+  value, and the per-episode-reset air-time fields accumulate within the episode).
+
+  This is an INDEPENDENT liveness signal for the object-side contact path — a healthy trained
+  policy sits near 1.0 (it strikes every episode); a live drop, visible in TensorBoard mid-run,
+  means contact sensing died on this device. Reads current/last_contact_time (track_air_time=True)
+  so it never touches the qfrc accumulator it is meant to corroborate."""
+  sensor = env.scene[sensor_name]
+  seen = torch.zeros(env.num_envs, device=env.device)
+  cct = getattr(sensor.data, "current_contact_time", None)
+  lct = getattr(sensor.data, "last_contact_time", None)
+  if cct is not None:
+    seen = torch.maximum(seen, (cct > 0).any(dim=-1).float())
+  if lct is not None:
+    seen = torch.maximum(seen, (lct > 0).any(dim=-1).float())
+  return seen
+
+
+def impossible_success(env: "ManagerBasedRlEnv") -> torch.Tensor:
+  """Full-step SENTINEL/ALARM metric (Tier-3 safety net, 2026-07-14): 1.0 on an episode that
+  terminated on SUCCESS (env.reset_terminated -- the non-timeout nail_driven termination) while
+  the robot-side per-joint peak Λ is EXACTLY zero. A nail cannot be driven to success without a
+  reaction impulse, so this is dead instrumentation, never physics -- the exact false-negative
+  that produced Λ≡0 on the first GPU smoke while success=1.0.
+
+  reduce="last": at the terminal step, metrics_manager.compute() runs AFTER
+  termination_manager.compute() and BEFORE the in-step reset, so reset_terminated is fresh and
+  the accumulator peak is pre-reset. On timeout episodes reset_terminated is False -> 0.0.
+  A healthy run logs a flat 0.0; ANY uptick in TensorBoard means kill the run now, don't wait
+  for eval."""
+  acc = getattr(env, _ENV_SUBSTEP_IMPULSE_ATTR, None)
+  if acc is None:
+    raise RuntimeError("impossible_success requires the SubstepImpulseAccumulator metric (cat_impulse).")
+  lam_worst = acc._episode_peak_perjoint.amax(dim=1)  # (B,)
+  terminated = env.reset_terminated  # (B,) bool: non-timeout success termination
+  return (terminated & (lam_worst <= 0.0)).float()
+
+
 class CatDeltaPeak(ManagerTermBase):
   """Full-step metric: episode-peak δ from env.extras['cat_delta'] (episode-MEAN δ dilutes
   strike-time δ by ~episode length). Register AFTER cfg.metrics['cat_soft'] — the manager
