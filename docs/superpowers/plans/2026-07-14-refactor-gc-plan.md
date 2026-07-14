@@ -12,6 +12,26 @@
 cross-check, `src/` duplication, scripts/gates duplication, tests hygiene). Every finding below was
 returned with file:line evidence; the load-bearing ones were independently re-verified.
 
+> **Ponytail re-review of R2–R5 (2026-07-14, lazy-senior-dev pass over the full main RL code):
+> PRUNED.** Kept, in lazy form: R2.1 shrinks to extracting ONE `CaT.delta_map` static that the
+> hook reuses (skip `add_precomputed`, skip touching the frozen A3 ablation copy in
+> velocity_bound); R2.2 shrinks to two one-line changes (env_cfgs.py imp_peak loop → the already-
+> imported `ARM_JOINT_NAMES`; contact_row_impulse drops its own copy for `_ARM_CFG.joint_names`)
+> — TestJointOrderPin already guards the rest; R2.3 window constant kept (one name, two readers);
+> R2.4 velocity-limit dual-canonical: solved with a 2-line equality pin in test_configs instead
+> of a layering-crossing refactor; R4.1 shrinks to the legacy-velocity-arm split (deletion from
+> the live path) + the `_wire_site` helper — skip the full 5-function decomposition; R4.5 stale
+> comments kept in full (zero risk); R4.6 shrinks to caching ImpactProgressTerm's axis tensor.
+> **DROPPED as over-engineering: R4.2 accumulator base class** (4 classes share ~6 boring visible
+> lines each; a template-method base is the 3am-decode abstraction — the drift risk it addressed
+> is already pinned by tests + the stub() helper), **R4.3 DepthRatchet** (saves ~8 lines, adds
+> indirection inside the anti-farm money path), **R3's new playback module** (grow the existing
+> `reward_design_util.run_reference_strikes` when a consumer actually needs it; don't pre-build
+> stop/step_index enums), and the R5 fixture merge (churn > payoff). New one-liners found:
+> `rl/runner.py` top-level `import wandb` → move into the wandb branch; `ImitationPriorTerm`'s
+> per-step getattr probes for sensor air-time fields → resolve once in `__init__` (and fail loud
+> if the F2A hardening fields are absent).
+
 **Cross-check verdict first (context for sequencing):** the impulse machinery has **no code bugs at
 blocker/major level** — ring/reset interplay, in-step auto-reset ordering, debounce boundaries, gate
 mirrors, R2 preview purity all verified clean. The one BLOCKER is operational, not code: the
