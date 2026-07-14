@@ -43,7 +43,9 @@ def _nail_reachable_and_counted() -> tuple[list[str], re.Pattern, list[str]]:
   try:
     m = env.sim.mj_model
     nail = m.geom(_NAIL_GEOM)
-    nt, na = int(nail.contype), int(nail.conaffinity)
+    # .item() before int(): m.geom(name).contype is a length-1 array; int() on an ndim>0 array is
+    # a numpy DeprecationWarning locally and a hard ERROR on newer numpy (Lightning box, 2026-07-14).
+    nt, na = int(nail.contype.item()), int(nail.conaffinity.item())
     reachable = [
       m.geom(i).name
       for i in range(m.ngeom)
