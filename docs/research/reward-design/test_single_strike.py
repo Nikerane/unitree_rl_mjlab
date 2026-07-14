@@ -1,5 +1,11 @@
 """Q1 — Does a single maximum-velocity strike fully drive the nail?
 
+RETIRED AS A GATE (2026-07-10; banner added 2026-07-14). This crude constant-vertical probe
+FAILS from the L6 NEAR_NAIL pose because a pure-vertical descent is kinematically impossible
+with the fixture grasp near the floor (max 13.3 mm) — a property of the probe, not the task.
+The strike-feasibility gate is ``playback_reference.py`` (shaped reference, PASSES all heights).
+Kept only as historical Q1 evidence; do not run it as a feasibility check.
+
 Scripts a maximum-velocity downward swing from several approach heights
 and logs the resulting nail depth. Answers whether repeated-strike
 reward design is mandatory or just useful.

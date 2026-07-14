@@ -3,8 +3,9 @@
 The rollout collector + aggregator behind ``scripts/eval_impulse.sh`` (Task 11,
 ``.superpowers/sdd/task-11-brief.md``). Rolls a SINGLE checkpoint in the SAME instrumented env
 (default ``Unitree-Z1-Hammer-CaT-Impulse``, play cfg, ``imp_max_p`` forced to 0 -- log-only / pure
-instrumentation) regardless of which of the four C3 arms trained it -- mirrors ``eval_peak_qv.sh``'s
-same-env cross-arm protocol (velocity campaign), extended to the impulse metrics so the non-impulse
+instrumentation) regardless of which of the four C3 arms trained it -- mirrors the archived June
+velocity eval's (``docs/archive/tooling/eval_peak_qv.sh``) same-env cross-arm protocol, extended
+to the impulse metrics so the non-impulse
 arms (``c3_track``, ``c3_catsoft``) get the SAME per-joint Λ tail extracted as ``c3_imp``/``c3_imp0``.
 Training-logged ``Episode_Metrics/*`` cannot serve this purpose: they are env-MEANS (this needs the
 tail: max/p95 across episodes and envs), and the non-impulse arms never wire the impulse metrics in

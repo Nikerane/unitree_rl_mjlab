@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 # C3 checkpoint eval -- per-joint impulse Λ peaks/p95 + delivered impulse summary (the C4 analogue).
 # Thin driver: pins the protocol below, loops checkpoints, and calls scripts/eval_impulse.py once per
-# checkpoint (rollout + one summary.csv row appended). Companion to the June `eval_peak_qv.sh`
-# (frozen, historical joint-velocity protocol) -- read that script for the shared conventions; do NOT
-# edit it. `diag_impulse_trace.py --ckpt` produces one force-propagation figure per seed-0 checkpoint.
+# checkpoint (rollout + one summary.csv row appended). Protocol lineage: the June joint-velocity
+# eval (same-env cross-arm convention) is preserved at docs/archive/tooling/eval_peak_qv.sh
+# (frozen historical record, archived 2026-07-14). `diag_impulse_trace.py --ckpt` produces one
+# force-propagation figure per seed-0 checkpoint.
 #
 # PINNED PROTOCOL (task-11-brief.md Step 2; keep this header AND scripts/eval_impulse.py's docstring
 # in sync -- do not drift without updating both AND the eventual results record):
 #   - eval env:        Unitree-Z1-Hammer-CaT-Impulse, PLAY cfg (deterministic reset, no obs noise)
 #   - instrumentation: imp_max_p FORCED to 0 at eval time regardless of the checkpoint's training-time
 #     value (log-only hook = pure instrumentation; the obs/action space is IDENTICAL across all four
-#     hammer arms, so the SAME env scores any arm's checkpoint -- eval_peak_qv.sh's same-env
-#     cross-arm protocol, extended to the impulse metrics). Equivalent scripts/train.py-style override:
+#     hammer arms, so the SAME env scores any arm's checkpoint -- the archived eval_peak_qv.sh
+#     same-env cross-arm protocol, extended to the impulse metrics). Equivalent train.py override:
 #         --env.metrics.cat-soft.params.imp-max-p 0
 #   - checkpoint:      final model_4999.pt per run (production default below)
 #   - envs/steps:      256 envs x >=2 episodes/env (>=512 episodes/policy) -- eval_impulse.py's
@@ -23,11 +24,11 @@
 #     seeds pin the PROTOCOL -- CUDA results are statistical, not bitwise.
 #   - provenance:      host + UTC timestamp + checkpoint path + repo git hash recorded per CSV row
 #
-# Rsync (NOT run by this script -- run manually before the production pass):
-#   rsync -av vega:<remote-repo-path>/logs/rsl_rl/ logs/rsl_rl/
+# Checkpoints must already be under logs/rsl_rl/ (on Lightning they are written in place by
+# scripts/lightning_pair.sh; for a remote box, rsync them back manually first).
 #
 # Production default targets the 12 C3 checkpoints (4 arms x 3 seeds: c3_imp, c3_imp0, c3_track,
-# c3_catsoft -- docs/VEGA_TRAINING_PLAN.md "C3 campaign"), globbed as they arrive from rsync.
+# c3_catsoft -- docs/VEGA_TRAINING_PLAN.md "C3 campaign"), globbed as they arrive.
 #
 # Re-runs are NON-DESTRUCTIVE by default: existing $OUT is kept, and any checkpoint whose name
 # already has a summary.csv row is SKIPped ("SKIP <name> (row exists)") -- so re-running after
@@ -56,7 +57,9 @@ EPLEN="${EPLEN:-4.0}"          # finite eval episode horizon (s); see eval_impul
 DEV="${DEV:-cuda:0}"
 SEED="${SEED:-42}"
 OUT="${OUT:-/tmp/eval_impulse}"
-PY="${PY:-.venv/bin/python}"   # Vega provisions .venv; override for local runs (see smoke example above)
+# Interpreter: default to the active python (conda/Lightning). The old default (.venv/bin/python)
+# was the retired Vega layout and silently pointed at a nonexistent file everywhere else.
+PY="${PY:-$(command -v python)}"
 FRESH="${FRESH:-0}"            # FRESH=1: wipe $OUT first. Default: keep output, skip existing rows.
 
 if [ "$FRESH" = "1" ]; then rm -rf "$OUT"; fi
@@ -75,8 +78,8 @@ else
   for p in logs/rsl_rl/z1_hammer/*c3_*_seed*/model_4999.pt; do
     [ -f "$p" ] || continue
     run_dir=$(basename "$(dirname "$p")")
-    # Strip the leading "YYYY-MM-DD_HH-MM-SS_" timestamp prefix train_array.sbatch adds; keep the
-    # "c3_<arm>_seed<N>" run-name (docs/VEGA_TRAINING_PLAN.md "C3 campaign").
+    # Strip the leading "YYYY-MM-DD_HH-MM-SS_" timestamp prefix rsl_rl adds; keep the
+    # "<arm>_seed<N>" run-name (the RUN-NAME CONTRACT, canonical in scripts/compare_runs.py).
     name=$(echo "$run_dir" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}_//')
     PAIRS+=("${name:-$run_dir}:$p")
   done

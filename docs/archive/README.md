@@ -4,7 +4,8 @@ Superseded / historical documents. Nothing here is deleted — it is the provena
 trail. Every file carries an in-file banner; a `PreToolUse` hook also warns on any read under
 `docs/archive/`. **Do not act on anything here without checking `docs/README.md` (current truth).**
 
-Two waves: an initial declutter (2026-06-17) and the consolidation (2026-07-05).
+Three waves: an initial declutter (2026-06-17), the consolidation (2026-07-05), and the
+tooling garbage-collection (2026-07-14, `tooling/`).
 
 ## Merged into a living doc (content absorbed verbatim)
 
@@ -30,6 +31,17 @@ Two waves: an initial declutter (2026-06-17) and the consolidation (2026-07-05).
 | `REWARD_DESIGN_MATRIX.md` | Lightweight term table; duplicates `RECOMMENDED_REWARD_SPEC.md` §3–4 | `src/tasks/hammer/hammer_env_cfg.py` (live terms + weights) |
 | `IMPACT_TRACKING_REWARD_SPEC.md` | The generate-then-track / DeepMimic architecture the supervisor walked back | the single-policy direction — `../thesis/README.md` |
 | `BASELINE_AUDIT.md` | 2026-05-22 point-in-time validation snapshot | `../VEGA_TRAINING_PLAN.md` + `../results/` |
+
+## Archived tooling (`tooling/`, 2026-07-14 — the Vega layer; the cluster is retired)
+
+| Script | Why archived | Superseded by |
+|---|---|---|
+| `tooling/setup_vega.sh` | Vega (EuroHPC) is no longer the GPU route | `scripts/lightning_pair.sh` (Lightning.ai) |
+| `tooling/sanity.sbatch` | Vega Slurm smoke job | Lightning smoke: `ITERS=50 NENVS=2048 bash scripts/lightning_pair.sh` |
+| `tooling/train_array.sbatch` | Vega Slurm seed-array launcher. Its `<timestamp>_<arm>_seed<N>` run-name contract is still live — canonical statement now in `scripts/compare_runs.py` | `scripts/lightning_pair.sh` |
+| `tooling/eval_peak_qv.sh` | Frozen June joint-velocity eval protocol (hardcoded June Vega checkpoints); kept as the protocol lineage `scripts/eval_impulse.sh` cites | `scripts/eval_impulse.sh` (same-env cross-arm protocol, impulse metrics) |
+
+Deleted outright the same day (zero consumers; recoverable from git history): `record_reference_trajectory.py` + its orphan `reference_strike_qtraj.npz` (recorded with the pre-`117e070` degenerate reference, loaded nowhere), `diag_grip_choice.py` (gripper-era EE), `diag_strike_trace.py` (June site-bug one-off, two-generations-stale overshoot), `_play_sanity.py`, `_play_checkpoint_sanity.py`, `retest_video.sh` (2026-05-22 audit one-offs), `visualize_terrain.py` (vendored upstream, non-thesis robots).
 
 ## Dated records (kept for provenance; no single successor)
 

@@ -40,15 +40,11 @@ def _get_site_z(entity, site_name: str) -> float:
 
 
 class TestEnvConstruction:
-    def test_env_is_not_none(self, env_cpu):
-        assert env_cpu is not None
-
+    # (2026-07-14 hygiene: dropped test_env_is_not_none — the fixture failing covers it — and
+    # test_num_envs, which asserted the value the fixture itself set: a tautology.)
     def test_action_shape(self, env_cpu):
         """DifferentialIK produces 3D delta-position actions."""
         assert env_cpu.action_manager.action.shape == (1, 3)
-
-    def test_num_envs(self, env_cpu):
-        assert env_cpu.cfg.scene.num_envs == 1
 
 
 # ---------------------------------------------------------------------------
@@ -57,10 +53,8 @@ class TestEnvConstruction:
 
 
 class TestObservations:
-    def test_reset_returns_dict(self, env_cpu):
-        obs, _ = env_cpu.reset()
-        assert isinstance(obs, dict)
-
+    # (2026-07-14 hygiene: dropped test_reset_returns_dict — subsumed by the obs_after_reset
+    # fixture + the key/shape tests below.)
     def test_obs_has_actor_key(self, obs_after_reset):
         assert "actor" in obs_after_reset
 
@@ -91,12 +85,7 @@ class TestObservations:
 
 
 class TestStep:
-    def test_step_runs(self, env_cpu):
-        env_cpu.reset()
-        action = torch.zeros(1, 3)
-        result = env_cpu.step(action)
-        assert result is not None
-
+    # (2026-07-14 hygiene: dropped test_step_runs — subsumed by test_step_returns_5_tuple.)
     def test_step_returns_5_tuple(self, env_cpu):
         env_cpu.reset()
         action = torch.zeros(1, 3)

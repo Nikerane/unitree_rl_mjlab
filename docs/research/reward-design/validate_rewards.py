@@ -24,8 +24,7 @@ Phases (expected values scale with the live env config weights, not hardcoded):
                                      delivered-impulse reward fires, joint_impulse_excess = Λ_j − limit
 
 Run:
-    /home/nikhil/miniconda3/envs/unitree_mjlab/bin/python \\
-        docs/research/reward-design/validate_rewards.py
+    ~/miniconda3/envs/unitree_mjlab/bin/python docs/research/reward-design/validate_rewards.py
 """
 
 from __future__ import annotations

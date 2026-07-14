@@ -1,5 +1,13 @@
 # Vega GPU Training Plan — Z1 Hammer ablation campaign
 
+> **⚠️ PARTIALLY SUPERSEDED (2026-07-14): Vega is RETIRED — the GPU route is now Lightning.ai via
+> `scripts/lightning_pair.sh` (train both pair arms + auto-eval; no Slurm, no `.venv`, no rsync).**
+> The Vega launch machinery this plan describes was archived to `docs/archive/tooling/`
+> (`setup_vega.sh`, `sanity.sbatch`, `train_array.sbatch`, `eval_peak_qv.sh`); the run-name
+> contract's canonical statement moved to `scripts/compare_runs.py`. The **RESULT sections below
+> (V1, b_strike, the ablation campaign) remain the cited evidence records** — they are why this
+> doc stays; treat everything operational as historical.
+
 **Date:** 2026-06-15 · **Cluster:** EuroHPC Vega (`~/repos/VEGA_GPU.md` is the access guide).
 **Why:** every "needs GPU training" gate in this repo (Path-A press-survival, the constraint
 ablation arms, OPEN_QUESTIONS Q3/Q6/Q7/Q9/Q11/Q12) has been blocked on hardware. Vega

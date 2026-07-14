@@ -1,5 +1,3 @@
-from mjlab.envs.mdp import *  # noqa: F401, F403
-
 from .contact_row_impulse import (  # noqa: F401
   ContactRowImpulseAccumulator,
   arm_dof_cols,

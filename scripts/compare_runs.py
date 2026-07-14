@@ -14,10 +14,14 @@ is guarded with ``key in ea.Tags()["scalars"]``: a missing key means that arm is
 the affected panel (and blank in summary.csv), never a crash.
 
 Grouping: multiple seeds of the SAME arm share a run-name after stripping the leading timestamp
-(the standard rsl_rl log-dir prefix ``<timestamp>_<run_name>``) and the trailing ``_seedN`` suffix
-(the ``train_array.sbatch --agent.run-name ${RUN}_seed${SEED}`` contract). Runs with no run-name
-(bare-timestamp dirs, e.g. pre-array manual runs) keep their full basename as a distinct label so
-they do not spuriously merge into one arm.
+(the standard rsl_rl log-dir prefix ``<timestamp>_<run_name>``) and the trailing ``_seedN`` suffix.
+
+RUN-NAME CONTRACT (canonical statement — this script is its home since the Vega sbatch launcher
+was archived to docs/archive/tooling/train_array.sbatch, 2026-07-14): every campaign run passes
+``--agent.run-name <arm>_seed<N>`` so log dirs are ``<timestamp>_<arm>_seed<N>``; this script and
+``eval_impulse.sh`` both parse that shape (scripts/lightning_pair.sh follows it: ``pair_track_seed0``).
+Runs with no run-name (bare-timestamp dirs, e.g. manual runs) keep their full basename as a
+distinct label so they do not spuriously merge into one arm.
 
 Usage:
   python scripts/compare_runs.py --runs 'logs/rsl_rl/z1_hammer/*c3_*' --out /tmp/compare_runs \
@@ -48,7 +52,7 @@ Series = tuple[np.ndarray, np.ndarray]  # (steps, values)
 
 
 def arm_label(run_dir: Path) -> str:
-  """Basename minus the leading timestamp and trailing _seedN (train_array.sbatch's contract)."""
+  """Basename minus the leading timestamp and trailing _seedN (the RUN-NAME CONTRACT above)."""
   name = run_dir.name
   stripped = _SEED_RE.sub("", _TS_RE.sub("", name))
   return stripped if stripped else name  # bare-timestamp legacy dirs: keep the full name

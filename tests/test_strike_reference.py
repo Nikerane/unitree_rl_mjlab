@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pytest
 import torch
 
 from src.tasks.hammer.mdp.references import SingleStrikeReference, get_strike_reference
@@ -54,12 +53,19 @@ def test_waypoint_endpoints():
 
 
 def test_windup_phase_grows_with_step_count():
+    # (2026-07-14 hygiene fix: the old body checked ONE midpoint was in (0, 0.5) — no growth
+    # comparison at all, so a phase law frozen at a constant would have passed.) Two ascending
+    # pre-descent step counts must give strictly growing φ; strictness is meaningful because a
+    # constant law would make the monotone latch return EQUAL values, failing the <.
     ref = _ref()
     ref.update(HEAD0, NAIL, _steps(0))
     n_w = int(ref._n_windup[0].item())
-    phi_mid = ref.update(HEAD0, NAIL, _steps(max(n_w // 2, 1)))
-    assert 0.0 < phi_mid[0] < 0.5
-    # Wind-up phase never exceeds 0.5 even for huge step counts pre-descent...
+    k1 = max(n_w // 3, 1)
+    k2 = max(2 * n_w // 3, k1 + 1)
+    phi_1 = ref.update(HEAD0, NAIL, _steps(k1)).clone()
+    phi_2 = ref.update(HEAD0, NAIL, _steps(min(k2, n_w - 1) if n_w > k1 + 1 else k1 + 1)).clone()
+    assert 0.0 < phi_1[0] < 0.5
+    assert phi_1[0] < phi_2[0] <= 0.5
     # (step >= n_windup switches to the descent law, tested below).
 
 

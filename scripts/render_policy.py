@@ -3,13 +3,11 @@
 Loads a checkpoint (like `scripts/play.py --agent trained`) but renders with MuJoCo's
 offscreen renderer (like `scripts/render_reference.py`) so the trained policy can be
 inspected from images alone -- no browser, no display. Works headless on macOS (CGL,
-leave MUJOCO_GL unset) and on Linux/Vega (export MUJOCO_GL=egl first). CPU is fine:
+leave MUJOCO_GL unset) and on Linux (export MUJOCO_GL=egl first). CPU is fine:
 the checkpoint is map_location'd to the chosen device.
 
-Pull a checkpoint back from Vega first, e.g.:
-    rsync -av vega:~/repos/unitree_rl_mjlab/logs/rsl_rl/z1_hammer/<run>/model_499.pt /tmp/
-
-Then:
+Checkpoints train locally under logs/rsl_rl/ (Lightning writes them in place via
+scripts/lightning_pair.sh); for a remote box, rsync the .pt back first. Then:
     python scripts/render_policy.py --checkpoint-file /tmp/model_499.pt
     python scripts/render_policy.py --task Unitree-Z1-Hammer-Track \
         --checkpoint-file /tmp/a_track_seed0_model_499.pt --steps 80 --distance 0.85 --elevation -25
