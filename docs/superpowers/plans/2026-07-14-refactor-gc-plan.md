@@ -1,5 +1,13 @@
 # Refactor + garbage-collection plan (2026-07-14)
 
+> **Execution status (2026-07-14, same day):** **Phase R0 DONE** (commit `4e0e54c`) and
+> **Phase R1 DONE** (commit `220fcce`) — gates green after each (pytest 310, A–M PASS; the fast
+> path `-m "not integration"` now runs 263 tests in ~6 s). Exceptions carried forward: the
+> `_rows_*` unit-test split out of the integration marker (deferred to R5 with the helpers
+> consolidation), `render_reference_path.py` kept pending the R3 `--trail` fold-in, `peek()`
+> kept deliberately (purity-test pinned F1 history). **Phase 0 (CUDA probe on the GPU box) is
+> still open and still gates the launch. R2–R5 wait for the pilot to be launched and banked.**
+
 **Source:** five-agent deep-dive audit @ `528212b` (launch-readiness cross-check, machinery-semantics
 cross-check, `src/` duplication, scripts/gates duplication, tests hygiene). Every finding below was
 returned with file:line evidence; the load-bearing ones were independently re-verified.
