@@ -5,11 +5,13 @@
 Runs against a tiny stub env (no MuJoCo/Warp). The SingleStrikeReference is pure
 torch, so get_strike_reference() attaches a real instance to the stub env.
 
-PURITY CONTRACT (2026-07-13, adversarial review F1): the reward term is a pure
-READER of the shared reference — it peeks the phase committed by the last
-observation pass and never calls update(). The tests therefore drive the
-obs-path update explicitly via _obs_update() (in the real env the obs terms
-strike_phase/strike_ref_error do this every control step), then call the term.
+PURITY CONTRACT (2026-07-13 F1, revised 2026-07-14 R2-F1): the reward term is a
+pure READER of the shared reference — it calls preview(), which computes the
+instantaneous phase from reward-time kinematics but WRITES NOTHING; update()
+(the obs path) remains the sole committer of the shared monotone latch. The
+tests therefore drive the obs-path update explicitly via _obs_update() (in the
+real env the obs terms strike_phase/strike_ref_error do this every control
+step), then call the term.
 """
 
 from __future__ import annotations
