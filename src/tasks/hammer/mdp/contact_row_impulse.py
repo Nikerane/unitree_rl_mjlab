@@ -87,6 +87,8 @@ import warp as wp
 from mjlab.managers.manager_base import ManagerTermBase, ManagerTermBaseCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 
+from src.tasks.hammer.mdp.velocity_bound import _ARM_CFG
+
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
 
@@ -95,7 +97,10 @@ if TYPE_CHECKING:
 # Nothing wires such a consumer today — this metric is LOG-ONLY (see class docstring).
 _ENV_SUBSTEP_ROWS_ATTR = "_hammer_substep_impulse_rows"
 
-ARM_JOINT_NAMES = ("joint1", "joint2", "joint3", "joint4", "joint5", "joint6")
+# Single-sourced from velocity_bound._ARM_CFG (which impulse_bound also reads) so the ORDER-sensitive
+# arm-joint tuple — IMP_J_LIMIT and every per-joint metric key on its POSITION — has no divergable
+# copy here. test_configs pins _ARM_CFG.joint_names == z1_constants.ARM_JOINT_NAMES.
+ARM_JOINT_NAMES = _ARM_CFG.joint_names
 
 # Entity-prefixed compiled geom names (task brief; nail_block/block_geom deliberately excluded —
 # it is the wooden block, not a strikeable/struck surface).

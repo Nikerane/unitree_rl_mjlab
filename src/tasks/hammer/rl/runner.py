@@ -1,7 +1,5 @@
 """On-policy runner for the hammer-nail task."""
 
-import wandb
-
 from mjlab.entity import Entity
 from mjlab.envs.mdp.actions import DifferentialIKAction
 from mjlab.rl import RslRlVecEnvWrapper
@@ -31,12 +29,15 @@ class HammerOnPolicyRunner(MjlabOnPolicyRunner):
     policy_dir, filename, onnx_path = self._get_export_paths(path)
     try:
       self.export_policy_to_onnx(str(policy_dir), filename)
-      run_name: str = (
-        wandb.run.name if self.logger.logger_type == "wandb" and wandb.run else "local"
-      )  # type: ignore[assignment]
+      is_wandb = self.logger.logger_type == "wandb"
+      if is_wandb:
+        import wandb  # lazy: a tensorboard run (the Lightning default) must not require wandb installed
+        run_name = wandb.run.name if wandb.run else "local"
+      else:
+        run_name = "local"
       metadata = _get_hammer_metadata(self.env.unwrapped, run_name)
       attach_metadata_to_onnx(str(onnx_path), metadata)
-      if self.logger.logger_type in ["wandb"] and self.cfg.get("upload_model"):
+      if is_wandb and self.cfg.get("upload_model"):
         wandb.save(str(onnx_path), base_path=str(policy_dir))
     except Exception as e:
       print(f"[WARN] ONNX export failed (training continues): {e}")

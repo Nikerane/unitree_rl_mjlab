@@ -35,6 +35,16 @@ from src.tasks.hammer.nail_block import get_nail_block_entity_cfg
 IMP_J_LIMIT: list[float] = [1.640, 3.280, 1.640, 1.640, 1.640, 1.640]  # N·m·s
 
 
+def _wire_site(cfg, obs_keys: tuple[str, ...], param_key: str, site_name: str) -> None:
+  """Set ``site_names=(site_name,)`` on the given obs terms' ``param_key`` SceneEntityCfg, across
+  every observation group that carries the term (actor + critic share the term objects)."""
+  for obs_key in obs_keys:
+    for group in cfg.observations.values():
+      assert isinstance(group, ObservationGroupCfg)
+      if obs_key in group.terms:
+        group.terms[obs_key].params[param_key].site_names = (site_name,)
+
+
 def z1_hammer_env_cfg(
   play: bool = False,
   imitation: bool = False,
@@ -107,26 +117,10 @@ def z1_hammer_env_cfg(
   # (max_dq ~= 0.29 caps joint speed near 3.14 rad/s) and re-verify with diag_strike_probe.
 
   # --- Wire observation site names ---
-  # EE site observations.
-  for obs_key in ("ee_pos", "ee_vel"):
-    for group in cfg.observations.values():
-      assert isinstance(group, ObservationGroupCfg)
-      if obs_key in group.terms:
-        group.terms[obs_key].params["asset_cfg"].site_names = (EE_SITE_NAME,)
-
-  # Hammer head site observations.
-  for obs_key in ("head_pos", "head_vel"):
-    for group in cfg.observations.values():
-      assert isinstance(group, ObservationGroupCfg)
-      if obs_key in group.terms:
-        group.terms[obs_key].params["asset_cfg"].site_names = (HAMMER_HEAD_SITE_NAME,)
-
-  # Strike-reference observations (T1): wire the hammer head site.
-  for obs_key in ("strike_phase", "strike_ref_error"):
-    for group in cfg.observations.values():
-      assert isinstance(group, ObservationGroupCfg)
-      if obs_key in group.terms:
-        group.terms[obs_key].params["robot_cfg"].site_names = (HAMMER_HEAD_SITE_NAME,)
+  _wire_site(cfg, ("ee_pos", "ee_vel"), "asset_cfg", EE_SITE_NAME)
+  _wire_site(cfg, ("head_pos", "head_vel"), "asset_cfg", HAMMER_HEAD_SITE_NAME)
+  # Strike-reference obs (T1) carry the head site under "robot_cfg", not "asset_cfg".
+  _wire_site(cfg, ("strike_phase", "strike_ref_error"), "robot_cfg", HAMMER_HEAD_SITE_NAME)
 
   # --- Wire approach reward site name ---
   cfg.rewards["approach"].params["robot_cfg"].site_names = (HAMMER_HEAD_SITE_NAME,)
@@ -310,7 +304,7 @@ def z1_hammer_env_cfg(
     # Per-joint episode-peak Λ (TB: Episode_Metrics/imp_peak_joint1..6) — the authoritative peaks;
     # J_limit differs 2× across joints (joint2 τ_rated=60), so worst-joint alone can't be compared
     # to the cap vector. cat_delta_peak: peak binding pressure (episode-mean δ dilutes strikes).
-    for _j, _jn in enumerate(("joint1", "joint2", "joint3", "joint4", "joint5", "joint6")):
+    for _j, _jn in enumerate(ARM_JOINT_NAMES):  # single-sourced; positional order pinned by tests
       cfg.metrics[f"imp_peak_{_jn}"] = MetricsTermCfg(
         func=hammer_mdp.joint_impulse_peak, per_substep=False, reduce="last", params={"joint": _j},
       )

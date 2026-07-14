@@ -45,6 +45,17 @@ class CaT:
     self.probs.clear()
     self.raw_constraints.clear()
 
+  @staticmethod
+  def delta_map(
+    c: torch.Tensor, c_max: torch.Tensor, min_p: float, max_p: float
+  ) -> torch.Tensor:
+    """Per-column CaT termination probability: ``δ = min_p + clamp(c/c_max, 0, 1)·(max_p − min_p)``
+    for ``c > 0``, else 0. Pure (no state) — the single home of the δ formula, shared by ``add``
+    (velocity, every-step EMA) and ``CatSoftHook`` (impulse, per-column violation-masked EMA).
+    Callers pre-floor ``c_max`` to their own normalizer floor (1e-6 here, ``imp_seed`` in the hook)."""
+    normalized = (c / c_max).clamp(0.0, 1.0)  # broadcasts (B,C)/(1,C); c≤0 → clamps to 0
+    return torch.where(c > 0.0, min_p + normalized * (max_p - min_p), torch.zeros_like(c))
+
   def add(self, name: str, constraint: torch.Tensor, max_p: float = 0.1) -> None:
     """Process one constraint term's raw margin ``constraint`` (shape (B,) or (B, C))."""
     if not torch.is_floating_point(constraint):
@@ -60,16 +71,7 @@ class CaT:
     else:
       self.running_maxes[name] = constraint_max  # seed to the first batch max
 
-    probs = torch.zeros_like(constraint)
-    mask = constraint > 0.0  # violations only
-    if mask.any():
-      normalized = constraint / self.running_maxes[name]  # broadcasts (B,C)/(1,C)
-      probs = torch.where(
-        mask,
-        self.min_p + torch.clamp(normalized, 0.0, 1.0) * (max_p - self.min_p),
-        probs,
-      )
-    self.probs[name] = probs
+    self.probs[name] = self.delta_map(constraint, self.running_maxes[name], self.min_p, max_p)
 
   def get_probs(self) -> torch.Tensor:
     """Per-env termination probability δ, shape (B,): MAX over all terms and columns (soft OR)."""

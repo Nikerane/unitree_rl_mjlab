@@ -205,10 +205,11 @@ class CatSoftHook(ManagerTermBase):
       first, batch_max.clamp_min(self._imp_seed), torch.where(violated, ema, self._imp_cmax)
     )
     self._imp_seeded = self._imp_seeded | violated
+    # δ via the shared formula (CaT.delta_map) — the impulse normalizer floor is imp_seed (vs the
+    # velocity path's 1e-6), so floor cmax here and hand the pre-floored value to the pure map.
     cmax = self._imp_cmax.clamp_min(self._imp_seed)
-    normalized = (c / cmax).clamp(0.0, 1.0)
-    self._cat.probs["joint_impulse_excess"] = torch.where(
-      c > 0.0, self._cat.min_p + normalized * (self._imp_max_p - self._cat.min_p), torch.zeros_like(c)
+    self._cat.probs["joint_impulse_excess"] = CaT.delta_map(
+      c, cmax, self._cat.min_p, self._imp_max_p
     )
 
   def __call__(self, env: "ManagerBasedRlEnv", **params) -> torch.Tensor:

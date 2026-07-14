@@ -127,6 +127,19 @@ class TestNamedConstants:
             "joint1", "joint2", "joint3", "joint4", "joint5", "joint6"
         }
 
+    def test_arm_joint_names_single_source_no_drift(self):
+        # ORDER-sensitive: IMP_J_LIMIT (and every per-joint metric/cap) keys on this tuple's
+        # POSITION, so a silent divergence between the two physical definitions would misassign
+        # joint2's 2x cap. velocity_bound._ARM_CFG feeds the accumulators/hook/contact-row;
+        # z1_constants.ARM_JOINT_NAMES feeds env_cfgs. Pin them equal (ORDER, not just set) so a
+        # rename/reorder in one cannot drift from the other. (2026-07-14 dedup: contact_row and the
+        # env_cfgs imp_peak loop now derive from these instead of hardcoding their own copies.)
+        from src.assets.robots.unitree_z1.z1_constants import _Z1_VELOCITY_LIMIT
+        from src.tasks.hammer.mdp.velocity_bound import Z1_JOINT_VEL_LIMIT, _ARM_CFG
+        assert tuple(_ARM_CFG.joint_names) == tuple(ARM_JOINT_NAMES)
+        # Same drift guard for the scalar Z1 joint-velocity limit (two physical definitions).
+        assert Z1_JOINT_VEL_LIMIT == _Z1_VELOCITY_LIMIT
+
     def test_arm_actuator_names_match_joint_names(self):
         assert set(ARM_ACTUATOR_NAMES) == set(ARM_JOINT_NAMES)
 
