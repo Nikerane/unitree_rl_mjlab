@@ -33,6 +33,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from tests.helpers import stub
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 
@@ -401,21 +402,23 @@ DT = 0.002  # physics_dt @ 500 Hz
 DEC = 10    # decimation (substeps per control step)
 
 
-def _rows_acc(B: int, n_joints: int = 6):
+def _rows_acc(B: int, n_joints: int = 6, enabled: bool = True):
   """ContactRowImpulseAccumulator + feed(qfrc_rows, found) closure driving one substep per call.
-  Bypasses __init__ (object.__new__) the same way tests/test_impulse_bound.py's ``_acc`` does,
-  and monkeypatches the module-level ``contact_row_qfrc`` the class calls internally."""
-  a = object.__new__(ContactRowImpulseAccumulator)
-  a._enabled = True
-  a._cols = torch.arange(n_joints)
-  a._dec = DEC
-  a._i = 0
-  a._pulse = torch.zeros(B, n_joints)
-  a._running = torch.zeros(B, n_joints)
-  a._in_contact_prev = torch.zeros(B, dtype=torch.bool)
-  a._episode_peak = torch.zeros(B)
+  Built via helpers.stub (loud failure on __init__ drift — this factory silently broke once,
+  on `_enabled`), and monkeypatches the module-level ``contact_row_qfrc`` the class calls."""
   sensor_data = SimpleNamespace(found=None)
-  a._sensor = SimpleNamespace(data=sensor_data)
+  a = stub(
+    ContactRowImpulseAccumulator,
+    _enabled=enabled,
+    _cols=torch.arange(n_joints),
+    _dec=DEC,
+    _i=0,
+    _pulse=torch.zeros(B, n_joints),
+    _running=torch.zeros(B, n_joints),
+    _in_contact_prev=torch.zeros(B, dtype=torch.bool),
+    _episode_peak=torch.zeros(B),
+    _sensor=SimpleNamespace(data=sensor_data),
+  )
   env = SimpleNamespace(physics_dt=DT)
 
   def feed(qfrc_rows: torch.Tensor, found: torch.Tensor, monkeypatch) -> torch.Tensor:
@@ -433,6 +436,23 @@ def test_rows_off_contact_accumulates_nothing(monkeypatch):
   for _ in range(5):
     feed(torch.full((2, 6), 5.0), torch.zeros(2, 1), monkeypatch)
   assert torch.allclose(acc.impulse, torch.zeros(2, 6)), acc.impulse
+
+
+def test_rows_disabled_short_circuits_without_touching_state(monkeypatch):
+  # I6 perf flag-gate (previously untested): enabled=False must return the zero episode-peak
+  # WITHOUT running the per-contact reconstruction or advancing any state — the exact path the
+  # GPU run relies on when the metric is disabled for throughput.
+  acc, feed = _rows_acc(B=2, enabled=False)
+
+  def _boom(e):  # contact_row_qfrc must never be called on the disabled path
+    raise AssertionError("contact_row_qfrc was called despite enabled=False")
+
+  monkeypatch.setattr(contact_row_impulse, "contact_row_qfrc", _boom)
+  acc._sensor.data.found = torch.ones(2, 1)  # in contact, big signal available
+  for _ in range(3):
+    out = acc(SimpleNamespace(physics_dt=DT))
+  assert out.shape == (2,) and float(out.abs().sum()) == 0.0
+  assert acc._i == 0 and float(acc.impulse.abs().sum()) == 0.0  # state untouched
 
 
 def test_rows_accumulates_rectified_qfrc_dt_during_contact(monkeypatch):

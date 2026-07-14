@@ -34,6 +34,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from tests.helpers import stub
 from src.tasks.hammer.mdp.impulse_bound import (
   _ENV_SUBSTEP_IMPULSE_ATTR,
   CatDeltaPeak,
@@ -48,24 +49,27 @@ DEC = 10    # decimation (substeps per control step)
 
 def _acc(B: int, subtract_baseline: bool = False, n_joints: int = 6, window: int = 25):
   """Accumulator + feed(qfrc, found) closure driving one substep per call. `window` must be set
-  here (not mutated afterwards): the ring buffer is sized to it at construction."""
-  a = object.__new__(SubstepImpulseAccumulator)
-  a._joint_ids = list(range(n_joints))
-  a._subtract_baseline = subtract_baseline
-  a._dec = DEC
-  a._i = 0
-  a._pulse = torch.zeros(B, n_joints)
-  a._last_off_qfrc = torch.zeros(B, n_joints)
-  a._window = window
-  a._buf = torch.zeros(B, n_joints, a._window)
-  a._buf_i = 0
-  a._rolling = torch.zeros(B, n_joints)
-  a._episode_peak = torch.zeros(B)
-  a._episode_peak_perjoint = torch.zeros(B, n_joints)
+  here (not mutated afterwards): the ring buffer is sized to it at construction. Built via
+  helpers.stub, which fails loudly if SubstepImpulseAccumulator.__init__ gains a field."""
   robot_data = SimpleNamespace(_joint_dof_field=None)
   sensor_data = SimpleNamespace(found=None)
-  a._robot = SimpleNamespace(data=robot_data)
-  a._sensor = SimpleNamespace(data=sensor_data)
+  a = stub(
+    SubstepImpulseAccumulator,
+    _joint_ids=list(range(n_joints)),
+    _subtract_baseline=subtract_baseline,
+    _dec=DEC,
+    _i=0,
+    _pulse=torch.zeros(B, n_joints),
+    _last_off_qfrc=torch.zeros(B, n_joints),
+    _window=window,
+    _buf=torch.zeros(B, n_joints, window),
+    _buf_i=0,
+    _rolling=torch.zeros(B, n_joints),
+    _episode_peak=torch.zeros(B),
+    _episode_peak_perjoint=torch.zeros(B, n_joints),
+    _robot=SimpleNamespace(data=robot_data),
+    _sensor=SimpleNamespace(data=sensor_data),
+  )
   env = SimpleNamespace(physics_dt=DT)
 
   def feed(qfrc: torch.Tensor, found: torch.Tensor) -> torch.Tensor:
@@ -284,17 +288,21 @@ def test_reset_mid_contact_no_phantom_window():
 
 
 def _dacc(B: int, window: int = 25, rearm_gap: int | None = None):
-  """rearm_gap defaults to the window, mirroring the class's own default."""
-  a = object.__new__(SubstepDeliveredImpulse)
-  a._axis = torch.tensor([0.0, 0.0, -1.0])
-  a._total = torch.zeros(B)
-  a._event_age = torch.zeros(B, dtype=torch.long)
-  a._window = window
-  a._rearm_gap = window if rearm_gap is None else rearm_gap
-  a._off_streak = torch.full((B,), a._rearm_gap, dtype=torch.long)  # armed at episode start
-  a._in_contact_prev = torch.zeros(B, dtype=torch.bool)
+  """rearm_gap defaults to the window, mirroring the class's own default. Built via
+  helpers.stub (loud failure on __init__ drift)."""
+  gap = window if rearm_gap is None else rearm_gap
   sensor_data = SimpleNamespace(force=None, found=None)
-  a._sensor = SimpleNamespace(data=sensor_data)
+  a = stub(
+    SubstepDeliveredImpulse,
+    _axis=torch.tensor([0.0, 0.0, -1.0]),
+    _total=torch.zeros(B),
+    _event_age=torch.zeros(B, dtype=torch.long),
+    _window=window,
+    _rearm_gap=gap,
+    _off_streak=torch.full((B,), gap, dtype=torch.long),  # armed at episode start
+    _in_contact_prev=torch.zeros(B, dtype=torch.bool),
+    _sensor=SimpleNamespace(data=sensor_data),
+  )
   env = SimpleNamespace(physics_dt=DT)
 
   def feed(force: torch.Tensor, found: torch.Tensor) -> torch.Tensor:
@@ -469,8 +477,7 @@ def test_joint_impulse_peak_requires_accumulator():
 
 
 def test_cat_delta_peak_tracks_running_max_and_resets():
-  peak_term = object.__new__(CatDeltaPeak)
-  peak_term._peak = torch.zeros(2)
+  peak_term = stub(CatDeltaPeak, _peak=torch.zeros(2))
 
   env = SimpleNamespace(extras={"cat_delta": torch.tensor([0.1, 0.0])})
   out = peak_term(env)
@@ -489,14 +496,12 @@ def test_cat_delta_peak_tracks_running_max_and_resets():
 
 
 def test_cat_delta_peak_missing_key_is_a_noop():
-  peak_term = object.__new__(CatDeltaPeak)
-  peak_term._peak = torch.tensor([0.2, 0.0])
+  peak_term = stub(CatDeltaPeak, _peak=torch.tensor([0.2, 0.0]))
   out = peak_term(SimpleNamespace(extras={}))  # no "cat_delta" key yet this step
   assert torch.allclose(out, torch.tensor([0.2, 0.0]))
 
 
 def test_cat_delta_peak_reset_subset_of_envs():
-  peak_term = object.__new__(CatDeltaPeak)
-  peak_term._peak = torch.tensor([0.5, 0.7])
+  peak_term = stub(CatDeltaPeak, _peak=torch.tensor([0.5, 0.7]))
   peak_term.reset(torch.tensor([0]))
   assert torch.allclose(peak_term._peak, torch.tensor([0.0, 0.7]))

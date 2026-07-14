@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from tests.helpers import stub
 from src.tasks.hammer.mdp.impulse_bound import _ENV_SUBSTEP_DELIVERED_ATTR
 from src.tasks.hammer.mdp.rewards import DeliveredImpulseTerm
 
@@ -26,10 +27,8 @@ def _renv(delivered: torch.Tensor, depth: torch.Tensor):
 
 
 def _rterm(B: int) -> DeliveredImpulseTerm:
-  t = object.__new__(DeliveredImpulseTerm)
-  t._credited = torch.zeros(B)
-  t._prev_depth = torch.zeros(B)
-  return t
+  # helpers.stub fails loudly if DeliveredImpulseTerm.__init__ gains a field.
+  return stub(DeliveredImpulseTerm, _credited=torch.zeros(B), _prev_depth=torch.zeros(B))
 
 
 def test_pays_delivered_delta_when_nail_advances():

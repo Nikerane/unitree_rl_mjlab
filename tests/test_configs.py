@@ -349,6 +349,20 @@ class TestZ1EnvCfgWiring:
         assert robot_cfg.articulation is not None
 
 
+class TestArmCompositionGuards:
+    def test_vel_penalty_cannot_compose_with_soft_cat_hook_arms(self):
+        # 2026-07-14 audit: vel_penalty's vel_excess weight starts 0.0 and is curriculum-ramped
+        # NEGATIVE at step 1500, bypassing CatSoftHook's one-shot _NEG_TERMS guard — the
+        # penalty-evasion exploit Decision 1 forbids. The factory must refuse the composition.
+        with pytest.raises(ValueError, match="vel_penalty"):
+            z1_hammer_env_cfg(vel_penalty=True, cat_soft=True)
+        with pytest.raises(ValueError, match="vel_penalty"):
+            z1_hammer_env_cfg(vel_penalty=True, cat_impulse=True)
+        # The lone arms stay constructible.
+        z1_hammer_env_cfg(vel_penalty=True)
+        z1_hammer_env_cfg(cat_soft=True)
+
+
 # ---------------------------------------------------------------------------
 # Play mode overrides
 # ---------------------------------------------------------------------------

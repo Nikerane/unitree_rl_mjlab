@@ -10,6 +10,10 @@ from mjlab.envs import ManagerBasedRlEnv
 from mjlab.rl import RslRlVecEnvWrapper
 from src.tasks.hammer.config.z1.env_cfgs import z1_hammer_env_cfg
 
+# Full env-stack physics rollouts (among the slowest tests in the suite) — keep them out of the
+# documented fast path (`pytest -m "not integration"`).
+pytestmark = pytest.mark.integration
+
 # Device-agnostic (was hardcoded cuda:0, which errored on CPU-only machines and
 # meant these behavioural tests never ran on the Mac). Runs on GPU when present.
 _DEV = "cuda:0" if torch.cuda.is_available() else "cpu"

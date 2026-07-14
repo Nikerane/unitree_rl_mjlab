@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from mjlab.managers.manager_base import ManagerTermBase, ManagerTermBaseCfg
+from mjlab.managers.scene_entity_config import SceneEntityCfg
 
 from src.tasks.hammer.cat.constraint_manager import CaT
 from src.tasks.hammer.cat.constraints import joint_impulse_excess, joint_velocity_excess
@@ -65,18 +66,17 @@ class CatSoftHook(ManagerTermBase):
         "(largest for the smallest violations). Set imp_max_p ≥ min_p (or 0 for log-only)."
       )
     il = p.get("imp_limit", None)
-    if (
-      use_impulse
-      and imp_max_p > 0.0
-      and isinstance(il, (int, float))
-      and float(il) == Z1_JOINT_IMPULSE_LIMIT
-    ):
-      raise RuntimeError(
-        "CatSoftHook: enforcement (imp_max_p > 0) against the Z1_JOINT_IMPULSE_LIMIT placeholder "
-        "(0.1, ~23-69x tighter than the real caps) — env_cfgs passes the placeholder explicitly at "
-        "C0, so flipping imp_max_p alone is the exact mistake this guard exists for. Pass the "
-        "derived per-joint tensor from derive_impulse_thresholds.py as imp_limit."
-      )
+    if use_impulse and imp_max_p > 0.0 and il is not None:
+      # Covers the scalar, list, AND tensor forms (2026-07-14 audit: the original isinstance
+      # (int, float) check let a per-joint [0.1]*6 slip through to enforcement silently).
+      il_t = torch.as_tensor(il, dtype=torch.float32)
+      if bool((il_t == Z1_JOINT_IMPULSE_LIMIT).all()):
+        raise RuntimeError(
+          "CatSoftHook: enforcement (imp_max_p > 0) against the Z1_JOINT_IMPULSE_LIMIT placeholder "
+          "(0.1, ~23-69x tighter than the real caps) — env_cfgs passes the placeholder explicitly at "
+          "C0, so flipping imp_max_p alone is the exact mistake this guard exists for. Pass the "
+          "derived per-joint tensor from derive_impulse_thresholds.py as imp_limit."
+        )
 
   def __init__(self, cfg: ManagerTermBaseCfg, env: "ManagerBasedRlEnv"):
     super().__init__(env)
@@ -85,7 +85,13 @@ class CatSoftHook(ManagerTermBase):
     self._cat = CaT(tau=p.get("tau", 0.95), min_p=p.get("min_p", 0.0), device=env.device)
     self._max_p: float = float(p.get("max_p", 0.5))
     self._limit: float = float(p.get("limit", Z1_JOINT_VEL_LIMIT))
-    self._robot_cfg = p.get("robot_cfg", _ARM_CFG)
+    # Resolve a FRESH copy, never the passed instance (2026-07-14 audit): env_cfgs shares ONE
+    # SceneEntityCfg across the terminations dict, three metric params, and this hook — and the
+    # module-global _ARM_CFG is the default. Resolving the shared/global object in place would
+    # bind it to THIS env's scene for every other consumer (latent cross-env contamination; the
+    # accumulators already copy-then-resolve, see impulse_bound.py).
+    src_cfg = p.get("robot_cfg", _ARM_CFG)
+    self._robot_cfg = SceneEntityCfg(src_cfg.name, joint_names=src_cfg.joint_names)
     self._robot_cfg.resolve(env.scene)
     # Which constraints this arm enforces. Defaults reproduce the velocity-only -CaT-Soft arm; the
     # -CaT-Impulse arm sets use_vel=False, use_impulse=True for clean attribution (the two are

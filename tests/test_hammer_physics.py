@@ -1,8 +1,7 @@
 """Physics and reward correctness checks for the hammer-nail task.
 
 Run with:
-    cd unitree_rl_mjlab
-    python tests/test_hammer_physics.py
+    pytest tests/test_hammer_physics.py -v
 """
 
 import sys
@@ -15,6 +14,10 @@ from mjlab.envs import ManagerBasedRlEnv
 from mjlab.rl import RslRlVecEnvWrapper
 from src.tasks.hammer.config.z1.env_cfgs import z1_hammer_env_cfg
 from src.tasks.hammer.mdp.rewards import NailDepthDeltaTerm
+
+# Full env-stack physics rollouts (among the slowest tests in the suite) — keep them out of the
+# documented fast path (`pytest -m "not integration"`).
+pytestmark = pytest.mark.integration
 
 # Device-agnostic (was hardcoded cuda:0 → errored on CPU-only machines so these
 # never ran on the Mac). Uses GPU when available.
@@ -133,12 +136,3 @@ def test_contact_sensor_detects_contact_on_strike(env_wrapped):
         "ContactSensor never detected hammer-nail contact across 15 downward steps. "
         "Nail may be out of reach — check nail_block_scene.xml body positions."
     )
-
-
-if __name__ == "__main__":
-    import subprocess, sys
-    result = subprocess.run(
-        [sys.executable, "-m", "pytest", __file__, "-v"],
-        capture_output=False
-    )
-    sys.exit(result.returncode)

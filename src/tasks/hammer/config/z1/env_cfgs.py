@@ -4,7 +4,6 @@ from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import DifferentialIKActionCfg
 from mjlab.envs.mdp.curriculums import reward_curriculum
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
-from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.metrics_manager import MetricsTermCfg
 from mjlab.managers.observation_manager import ObservationGroupCfg
 from mjlab.managers.reward_manager import RewardTermCfg
@@ -56,6 +55,19 @@ def z1_hammer_env_cfg(
     dcmotor=True      -- A4: DC-motor torque-speed-envelope arm actuators (plant-level bound).
   All default False -> byte-identical A-BASE.
   """
+  # Guard (2026-07-14 audit): vel_penalty's `vel_excess` term starts at weight 0.0 and is ramped
+  # NEGATIVE by curriculum at env-step 1500 — but CatSoftHook's _NEG_TERMS penalty-evasion guard
+  # inspects weights ONCE, lazily, at its first __call__. Composing vel_penalty with a soft-CaT
+  # hook arm would pass the guard at step 0 and then silently (1-δ)-discount the ramped penalty:
+  # the exact exploit Decision 1 (scale-positives) exists to prevent. No registered arm composes
+  # them; fail loudly if one ever does (fix = add vel_excess to _NEG_TERMS + re-check the guard
+  # after curriculum mutations, then relax this).
+  if vel_penalty and (cat_soft or cat_impulse):
+    raise ValueError(
+      "z1_hammer_env_cfg: vel_penalty cannot be combined with cat_soft/cat_impulse — the "
+      "curriculum-ramped negative vel_excess weight bypasses CatSoftHook's one-shot _NEG_TERMS "
+      "guard (penalty-evasion exploit). See the guard comment in env_cfgs.py."
+    )
   cfg = make_hammer_env_cfg(imitation=imitation)
 
   # --- Scene entities ---
@@ -250,7 +262,9 @@ def z1_hammer_env_cfg(
       func=hammer_mdp.ContactRowImpulseAccumulator,
       per_substep=True,
       reduce="last",
-      params={"sensor_name": "hammer_nail_contact", "robot_cfg": vb_robot_cfg, "enabled": True},
+      # No robot_cfg param: the class hardcodes the arm joints via arm_dof_cols/ARM_JOINT_NAMES
+      # (a robot_cfg passed here was silently ignored — removed 2026-07-14, audit finding).
+      params={"sensor_name": "hammer_nail_contact", "enabled": True},
     )
     # Object-side delivered axial impulse (episode-cumulative, per-event capped — see the class).
     cfg.metrics["substep_delivered"] = MetricsTermCfg(
@@ -302,6 +316,14 @@ def z1_hammer_env_cfg(
       )
     cfg.metrics["cat_delta_peak"] = MetricsTermCfg(
       func=hammer_mdp.CatDeltaPeak, per_substep=False, reduce="last", params={},
+    )
+    # Ordering contract → guard (2026-07-14 audit): the metrics manager evaluates full-step terms
+    # in dict-insertion order, and cat_delta_peak reads the δ that cat_soft wrote to env.extras in
+    # the SAME compute pass. Until now this was guaranteed only by the line order in this function.
+    _mk = list(cfg.metrics)
+    assert _mk.index("cat_soft") < _mk.index("cat_delta_peak"), (
+      "cat_delta_peak must be registered AFTER cat_soft (insertion-order evaluation; it reads "
+      "this step's env.extras['cat_delta'])."
     )
     # MAXIMIZE objective: object-side delivered impact impulse (positive term; rides the (1−δ) discount
     # so an over-limit strike's delivered-impulse reward is worth less -- the two-sides interplay).

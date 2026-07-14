@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import torch
 
+from tests.helpers import stub
 from src.tasks.hammer.cat import CaT
 from src.tasks.hammer.cat.hook import CatSoftHook, _NEG_TERMS
 from src.tasks.hammer.cat.keys import CAT_DELTA_KEY, CAT_R_POS_KEY
@@ -22,27 +23,45 @@ I_ACTION_RATE, I_JOINT_LIM = ACTIVE.index("action_rate"), ACTIVE.index("joint_po
 
 
 def _hook(max_p=0.5, tau=0.95, min_p=0.0):
-  h = object.__new__(CatSoftHook)               # bypass ManagerTermBase.__init__ (no real env)
-  h._cat = CaT(tau=tau, min_p=min_p)
-  h._max_p, h._limit = max_p, LIM
-  h._robot_cfg = SimpleNamespace(name="robot", joint_ids=list(range(6)))
-  h._neg_idx = None
-  h._use_vel, h._use_impulse = True, False
-  return h
+  # Built via helpers.stub (loud failure on __init__ drift). Historical note: the bare
+  # object.__new__ version of this factory omitted all five _imp_* fields the real __init__
+  # unconditionally assigns — safe only because the vel-only paths never read them. stub()
+  # forces them to be set (to the class defaults) so the gap can never widen silently.
+  return stub(
+    CatSoftHook,
+    _cat=CaT(tau=tau, min_p=min_p),
+    _max_p=max_p,
+    _limit=LIM,
+    _robot_cfg=SimpleNamespace(name="robot", joint_ids=list(range(6))),
+    _neg_idx=None,
+    _use_vel=True,
+    _use_impulse=False,
+    # __init__ defaults for the impulse fields (unread on the vel-only paths, but real):
+    _imp_limit=torch.as_tensor(0.1, dtype=torch.float32),
+    _imp_max_p=0.0,
+    _imp_seed=1e-3,
+    _imp_cmax=torch.full((1, 6), 1e-3),
+    _imp_seeded=torch.zeros(1, 6, dtype=torch.bool),
+  )
 
 
 def _ihook(imp_max_p=0.0, imp_seed=0.2, imp_limit=0.1, use_vel=False, tau=0.95, min_p=0.0, J=6):
   """Hook configured for the impulse arm (use_impulse=True). imp_max_p=0 ⇒ C0 log-only."""
-  h = object.__new__(CatSoftHook)
-  h._cat = CaT(tau=tau, min_p=min_p)
-  h._max_p, h._limit = 0.5, LIM
-  h._robot_cfg = SimpleNamespace(name="robot", joint_ids=list(range(6)))
-  h._neg_idx = None
-  h._use_vel, h._use_impulse = use_vel, True
-  h._imp_limit, h._imp_max_p, h._imp_seed = imp_limit, imp_max_p, imp_seed
-  h._imp_cmax = torch.full((1, J), imp_seed)
-  h._imp_seeded = torch.zeros(1, J, dtype=torch.bool)
-  return h
+  return stub(
+    CatSoftHook,
+    _cat=CaT(tau=tau, min_p=min_p),
+    _max_p=0.5,
+    _limit=LIM,
+    _robot_cfg=SimpleNamespace(name="robot", joint_ids=list(range(6))),
+    _neg_idx=None,
+    _use_vel=use_vel,
+    _use_impulse=True,
+    _imp_limit=imp_limit,
+    _imp_max_p=imp_max_p,
+    _imp_seed=imp_seed,
+    _imp_cmax=torch.full((1, J), imp_seed),
+    _imp_seeded=torch.zeros(1, J, dtype=torch.bool),
+  )
 
 
 def _term_cfg(n):
@@ -255,6 +274,21 @@ def test_validate_params_guards():
     CatSoftHook._validate_params(
       {"use_vel": False, "use_impulse": True, "imp_limit": 0.1, "imp_max_p": 0.5}
     )
+  # …including the per-joint LIST and TENSOR forms (2026-07-14 audit: the original isinstance
+  # (int, float) check let [0.1]*6 through to ~23-69x-too-tight enforcement silently).
+  with pytest.raises(RuntimeError, match="placeholder"):
+    CatSoftHook._validate_params(
+      {"use_vel": False, "use_impulse": True, "imp_limit": [0.1] * 6, "imp_max_p": 0.5}
+    )
+  with pytest.raises(RuntimeError, match="placeholder"):
+    CatSoftHook._validate_params(
+      {"use_vel": False, "use_impulse": True, "imp_limit": torch.full((6,), 0.1), "imp_max_p": 0.5}
+    )
+  # A per-joint limit that merely CONTAINS 0.1 but is not all-placeholder is legitimate.
+  CatSoftHook._validate_params(
+    {"use_vel": False, "use_impulse": True, "imp_limit": [0.1, 3.28, 1.64, 1.64, 1.64, 1.64],
+     "imp_max_p": 0.5}
+  )
   # use_impulse without an explicit imp_limit: the placeholder must never be a silent fallback.
   with pytest.raises(RuntimeError, match="imp_limit"):
     CatSoftHook._validate_params({"use_vel": False, "use_impulse": True, "imp_max_p": 0.0})
