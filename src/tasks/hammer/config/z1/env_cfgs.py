@@ -94,7 +94,7 @@ def z1_hammer_env_cfg(
     # = c1/c2) and the shaft (hammer_handle_col = c0) are deliberately NOT named
     # hammer_head_* so this fullmatch regex excludes them -- only the striking head
     # counts as a strike (the FACE leads contact by 56 mm; diag_collision_recheck.py).
-    primary=ContactMatch(mode="geom", pattern="hammer_head_.*", entity="robot"),
+    primary=ContactMatch(mode="geom", pattern="hammer_head_0", entity="robot"),
     secondary=ContactMatch(mode="body", pattern="nail", entity="nail_block"),
     fields=("found", "force"),
     reduce="maxforce",
@@ -223,7 +223,7 @@ def z1_hammer_env_cfg(
     # the hammer<->nail contact). Separate from hammer_nail_contact (maxforce, used by impact_progress).
     hammer_nail_impulse = ContactSensorCfg(
       name="hammer_nail_impulse",
-      primary=ContactMatch(mode="geom", pattern="hammer_head_.*", entity="robot"),
+      primary=ContactMatch(mode="geom", pattern="hammer_head_0", entity="robot"),
       secondary=ContactMatch(mode="body", pattern="nail", entity="nail_block"),
       fields=("found", "force"),
       reduce="netforce",

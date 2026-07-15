@@ -104,7 +104,7 @@ ARM_JOINT_NAMES = _ARM_CFG.joint_names
 
 # Entity-prefixed compiled geom names (task brief; nail_block/block_geom deliberately excluded —
 # it is the wooden block, not a strikeable/struck surface).
-_HAMMER_GEOM_NAMES = ("robot/hammer_head_0", "robot/hammer_head_1")
+_HAMMER_GEOM_NAMES = ("robot/hammer_head_0",)
 _NAIL_GEOM_NAMES = ("nail_block/nail_shaft", "nail_block/nail_head")
 
 # mujoco_warp Contact.type is a `ContactType` IntFlag bitmask (CONSTRAINT=1, SENSOR=2); only
