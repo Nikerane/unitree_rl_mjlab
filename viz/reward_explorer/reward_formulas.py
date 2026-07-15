@@ -13,7 +13,7 @@ import numpy as np
 
 # --- Live defaults (mirror hammer_env_cfg.py + nail_block.py; pinned by the parity test) ---
 GOAL_DEPTH = 0.032         # nail_driven Gaussian centre (NAIL_GOAL_DEPTH)
-SUCCESS_THRESHOLD = 0.027  # completion threshold (NAIL_SUCCESS_THRESHOLD)
+SUCCESS_THRESHOLD = 0.030  # completion threshold (NAIL_SUCCESS_THRESHOLD)
 NAIL_DRIVEN_STD = 0.013
 APPROACH_STD = 0.08
 R_IMIT_SIGMA = 0.05

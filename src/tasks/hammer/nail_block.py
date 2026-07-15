@@ -48,15 +48,19 @@ NAIL_TOP_SITE_NAME = "nail_top"
 # the head bottom at 0.092 - qpos, full drive now ends with the head flush with
 # the block surface instead of passing through it. Matches XML range "0 0.032".
 NAIL_GOAL_DEPTH: float = 0.032
-# Success threshold (metres). Re-pinned 0.030 -> 0.027 (2026-06-17): with the real
-# claw-hammer (0.5 kg head) the best clean SHAPED single strike reaches 28.3 mm
-# (playback_reference.py @ approach 0.06 m), below the old 0.030 line. The RL reward
-# is anchored to a single-strike reference, so success must be single-strike-reachable
-# or the reference and the completion bonus pull in opposite directions; 0.027 =
-# 0.95 x best strike, leaving ~1.3 mm margin for an imperfect trained swing.
-# nail_driven's Gaussian still centres on the goal (0.032), so the policy keeps driving
-# deeper after success and the per-episode max-depth distribution is the real Q1 metric.
-# Invariant: press-stall < threshold <= best clean strike (here the press slow-succeeds
-# at ~step 93, so the reward design, not the threshold, must out-score it).
+# Success threshold (metres). Re-pinned 0.027 -> 0.030 (2026-07-15): the neck-drive fix
+# makes the flat FACE the only geom that can drive the nail, and the strengthened
+# post-degeneracy reference now drives the nail to its 0.032 physical cap in a single
+# strike (playback_reference.py, all heights) rather than the old weak-reference 28.3 mm.
+# So single-strike-reachability no longer pins the bar low: 0.030 ~= 0.94 x the 0.032 cap
+# requires a near-full drive and correctly FAILS a weak strike (e.g. the v2 none_seed1
+# that stopped at 28.7 mm), while staying single-strike-reachable.
+# History: 0.030 -> 0.027 (2026-06-17) held only while the best SHAPED single strike
+# reached 28.3 mm (old weak reference); that constraint is now stale.
+# CAVEAT: face-only trained policies (post neck-fix) are untested; if a retrain shows they
+# cap below ~30 mm, lower this toward the observed best strike -- keep threshold <= best
+# clean strike, else the reference and the completion bonus pull in opposite directions.
+# nail_driven's Gaussian still centres on the goal (0.032) and per-episode max nail_depth
+# stays the real strike-quality metric (already in eval_impulse summary.csv).
 # See OPEN_QUESTIONS.md Q1 and docs/archive/REAL_HAMMER_PLAN.md.
-NAIL_SUCCESS_THRESHOLD: float = 0.027
+NAIL_SUCCESS_THRESHOLD: float = 0.030

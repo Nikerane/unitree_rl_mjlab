@@ -185,17 +185,19 @@ class TestNailBlockConstants:
         assert NAIL_GOAL_DEPTH == pytest.approx(0.032)
 
     def test_success_threshold(self):
-        # Re-pinned 0.030 -> 0.027 (2026-06-17, real claw-hammer): best clean single
-        # strike = 28.3 mm < old 0.030, so success must be single-strike-reachable.
-        assert NAIL_SUCCESS_THRESHOLD == pytest.approx(0.027)
+        # Re-pinned 0.027 -> 0.030 (2026-07-15, post neck-fix): the strengthened reference
+        # drives the nail to its 0.032 cap in a single strike (playback_reference PASS at
+        # 0.030, all heights), so the bar rises to ~0.94x cap and stays single-strike-
+        # reachable. Lower again if a face-only retrain caps below ~30 mm.
+        assert NAIL_SUCCESS_THRESHOLD == pytest.approx(0.030)
 
     def test_threshold_less_than_goal(self):
         assert NAIL_SUCCESS_THRESHOLD < NAIL_GOAL_DEPTH
 
     def test_threshold_close_to_goal(self):
-        # Success should still mean "mostly driven" (>= 80% of full depth). Relaxed from
-        # 90% on 2026-06-17 because the real hammer's best single strike (88% of goal)
-        # leaves no room above the 90% line; 0.027 = 84% of goal.
+        # Success should mean "mostly driven" (>= 80% of full depth). 0.030 = 94% of goal:
+        # the strengthened reference reaches the 0.032 cap, so the bar no longer sits low.
+        # The >= 80% floor is kept loose to allow lowering if a face-only retrain caps low.
         assert NAIL_SUCCESS_THRESHOLD >= 0.8 * NAIL_GOAL_DEPTH
 
 
