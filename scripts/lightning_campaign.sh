@@ -12,7 +12,7 @@
 #   bash scripts/lightning_campaign.sh                 # 1 run per GPU (default)
 #   CONCURRENCY=3 bash scripts/lightning_campaign.sh   # pack a single GPU 3-deep (guarded, see below)
 #   DRYRUN=1 bash scripts/lightning_campaign.sh         # print the plan + commands, run nothing
-# Knobs: ITERS(500) NENVS(4096) SAVE_EVERY(100) SEEDS("0 1 2") EVAL_DEV(cpu) PYBIN(python).
+# Knobs: ITERS(500) NENVS(4096) SAVE_EVERY(100) SEEDS("0 1 2") EVAL_DEV(cpu) EVAL_NENVS(256) PYBIN(python).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p logs
@@ -78,7 +78,9 @@ eval_runs() {
     [ -n "$ck" ] && ckpts+="${name}:${ck}"$'\n'
   done
   [ -n "$ckpts" ] || { echo "[campaign] no checkpoints to eval"; return 1; }
-  OUT="$out" FRESH=1 PY="$PYBIN" DEV="$EVAL_DEV" CKPTS="$ckpts" bash scripts/eval_impulse.sh
+  # Eval at a SMALL env count regardless of the training NENVS: eval_impulse.sh reads $NENVS, and a
+  # `NENVS=4096 bash lightning_campaign.sh` invocation leaks that into the CPU eval -> hours per run.
+  OUT="$out" FRESH=1 PY="$PYBIN" DEV="$EVAL_DEV" NENVS="${EVAL_NENVS:-256}" CKPTS="$ckpts" bash scripts/eval_impulse.sh
 }
 
 # === 1. Preflight instrument gate (single process) ===========================================
