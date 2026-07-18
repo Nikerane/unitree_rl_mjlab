@@ -51,6 +51,16 @@ def test_depth_gate_blocks_payout_without_progress():
   assert torch.allclose(out2, torch.tensor([0.10]), atol=1e-6), out2  # credited on the advancing step
 
 
+def test_ungated_pays_regardless_of_progress():
+  # depth_gate=False (Phase-2 maximization arm): delivered impulse into a NON-advancing (seated) nail
+  # is paid; monotone _credited still prevents any re-pay.
+  t = _rterm(1)
+  out = t(_renv(torch.tensor([0.10]), torch.tensor([0.0])), i_ref=1.0, depth_gate=False, nail_cfg=NAIL_CFG)
+  assert torch.allclose(out, torch.tensor([0.10]), atol=1e-6), out  # pays despite zero depth advance
+  out2 = t(_renv(torch.tensor([0.10]), torch.tensor([0.0])), i_ref=1.0, depth_gate=False, nail_cfg=NAIL_CFG)
+  assert torch.allclose(out2, torch.tensor([0.0]), atol=1e-6), out2  # no NEW impulse -> no re-pay
+
+
 def test_one_payout_no_double_credit():
   t = _rterm(1)
   t(_renv(torch.tensor([0.10]), torch.tensor([0.010])), i_ref=1.0, nail_cfg=NAIL_CFG)

@@ -23,7 +23,7 @@ SETTLE_OFFSET = 0.004      # NailDepthDeltaTerm._SETTLE_OFFSET (4 mm dead zone)
 # Live reward weights (a_track / imitation arm). The parity test asserts these match.
 WEIGHTS = {
     "approach": 0.1,
-    "nail_driven": 2.0,
+    "nail_driven": 0.5,  # baked 2026-07-16 (farm-cut; was 2.0 -> parked the policy at ~28mm)
     "nail_depth_delta": 600.0,
     "impact_progress": 8.0,
     "completion": 100.0,

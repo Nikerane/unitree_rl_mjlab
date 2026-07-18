@@ -46,6 +46,7 @@ from mjlab.managers.manager_base import ManagerTermBase, ManagerTermBaseCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 
 from src.tasks.hammer.mdp.velocity_bound import _ARM_CFG
+from src.tasks.hammer.nail_block import NAIL_GOAL_DEPTH, NAIL_SUCCESS_THRESHOLD
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -343,7 +344,13 @@ def impossible_success(env: "ManagerBasedRlEnv") -> torch.Tensor:
     raise RuntimeError("impossible_success requires the SubstepImpulseAccumulator metric (cat_impulse).")
   lam_worst = acc._episode_peak_perjoint.amax(dim=1)  # (B,)
   terminated = env.reset_terminated  # (B,) bool: non-timeout success termination
-  return (terminated & (lam_worst <= 0.0)).float()
+  # NoTerm arms never set reset_terminated (only time_out remains) -- also key on depth-success
+  # directly so this dead-instrument alarm stays live under them. Identical on terminating arms: at
+  # the success step reset_terminated and depth>=threshold coincide (nail_fully_driven, same clamped
+  # predicate) and on timeouts both are False. Metric runs pre-reset (reduce="last") so depth is fresh.
+  depth = env.scene["nail_block"].data.joint_pos[:, 0].clamp(0.0, NAIL_GOAL_DEPTH)
+  succeeded = terminated | (depth >= NAIL_SUCCESS_THRESHOLD)
+  return (succeeded & (lam_worst <= 0.0)).float()
 
 
 class CatDeltaPeak(ManagerTermBase):

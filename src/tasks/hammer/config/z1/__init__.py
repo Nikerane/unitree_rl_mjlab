@@ -119,3 +119,19 @@ register_mjlab_task(
     rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
     runner_cls=HammerOnPolicyRunner,
 )
+
+# DAPG-style NON-TERMINATING variant of -CaT-Impulse (Option B, anti-parking): success no longer
+# ends the episode (time_out still truncates at 20 s), so holding just under the 0.030 threshold can
+# no longer out-earn completing (the terminate-on-success forfeit parked the mean policy at ~28 mm).
+# The un-latched completion bonus is retuned 100 -> 1.0/step (the popped termination was what made it
+# one-shot). Λ machinery byte-identical to -CaT-Impulse; log-only (imp_max_p=0 -> δ≡0). The PLAY cfg
+# deliberately KEEPS the success termination (eval keys success on reset_terminated / the
+# Episode_Termination-nail_driven panel; a frozen policy's success rate is unaffected by eval-time
+# termination). Do NOT pair a NoTerm arm against a terminating one in a prior-vs-none study.
+register_mjlab_task(
+    task_id="Unitree-Z1-Hammer-CaT-Impulse-NoTerm",
+    env_cfg=z1_hammer_env_cfg(cat_impulse=True, no_terminate=True),
+    play_env_cfg=z1_hammer_env_cfg(play=True, cat_impulse=True),
+    rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+    runner_cls=HammerOnPolicyRunner,
+)

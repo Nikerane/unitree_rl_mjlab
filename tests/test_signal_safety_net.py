@@ -52,15 +52,17 @@ def test_lateral_graze_not_flagged():
     assert _invariant_violations(rec) == (0, 0)
 
 
-def _stub_env(*, contact_time, lam_worst, terminated):
+def _stub_env(*, contact_time, lam_worst, terminated, depth=0.0):
     sensor = SimpleNamespace(data=SimpleNamespace(
         current_contact_time=torch.tensor([[contact_time]]),
         last_contact_time=torch.zeros(1, 1),
     ))
+    # nail_block entity: impossible_success reads its joint_pos depth (NoTerm depth-keyed alarm path).
+    nail = SimpleNamespace(data=SimpleNamespace(joint_pos=torch.tensor([[depth]])))
     acc = SimpleNamespace(_episode_peak_perjoint=torch.tensor([[0.0, lam_worst, 0.0, 0.0, 0.0, 0.0]]))
     env = SimpleNamespace(
         num_envs=1, device="cpu",
-        scene={"hammer_nail_contact": sensor},
+        scene={"hammer_nail_contact": sensor, "nail_block": nail},
         reset_terminated=torch.tensor([terminated]),
     )
     setattr(env, _ENV_SUBSTEP_IMPULSE_ATTR, acc)
@@ -81,3 +83,9 @@ def test_impossible_success_metric():
     assert float(impossible_success(_stub_env(contact_time=0.004, lam_worst=0.3, terminated=True))) == 0.0
     # Timeout (not terminated) with Λ == 0 -> silent (undertrained, not dead).
     assert float(impossible_success(_stub_env(contact_time=0.0, lam_worst=0.0, terminated=False))) == 0.0
+    # NoTerm arm: depth-success (>=0.030) but NOT terminated, Λ == 0 -> alarm STILL fires (dead qfrc).
+    assert float(impossible_success(_stub_env(contact_time=0.0, lam_worst=0.0, terminated=False, depth=0.031))) == 1.0
+    # NoTerm depth-success with real Λ -> silent.
+    assert float(impossible_success(_stub_env(contact_time=0.004, lam_worst=0.3, terminated=False, depth=0.031))) == 0.0
+    # NoTerm sub-threshold depth (parked <0.030) with Λ == 0 -> silent (not a success, undertrained).
+    assert float(impossible_success(_stub_env(contact_time=0.0, lam_worst=0.0, terminated=False, depth=0.028))) == 0.0

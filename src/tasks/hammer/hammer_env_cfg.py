@@ -169,7 +169,12 @@ def make_hammer_env_cfg(imitation: bool = False) -> ManagerBasedRlEnvCfg:
     # episode survival into a farm that beats the +100 completion bonus.
     "nail_driven": RewardTermCfg(
       func=hammer_mdp.nail_driven_reward,
-      weight=2.0,
+      # 2.0 was a FARM: a per-step Gaussian on the RATCHETING nail depth, so holding just under the
+      # 0.030 success line paid ~1.95/step forever (~205 discounted) while completing terminates and
+      # forfeits that stream for the one-time completion +100 -> the mean policy PARKED at ~28mm.
+      # Cut to 0.5 (hold ~49 < completion 100) restored completion. Verified on Vega a05 (2026-07-16):
+      # mean-action success 0->1.0, nail depth 28->32mm, all 6 seeds. See docs/results/2026-07-15_vega_campaign_plan.md.
+      weight=0.5,
       params={
         "goal_depth": NAIL_GOAL_DEPTH,
         "std": 0.013,

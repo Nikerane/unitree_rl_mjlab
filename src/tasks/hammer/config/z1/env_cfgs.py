@@ -55,6 +55,7 @@ def z1_hammer_env_cfg(
   cat_soft: bool = False,
   cat_impulse: bool = False,
   dcmotor: bool = False,
+  no_terminate: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Create Z1 hammer-nail task configuration.
 
@@ -347,8 +348,24 @@ def z1_hammer_env_cfg(
         "i_ref": 0.6094,
         "eps": 5e-4,
         "nail_cfg": SceneEntityCfg("nail_block", joint_names=("nail_slide",)),
+        # Phase-2 maximization sweep: keep True (shipped). Flip via
+        #   --env.rewards.delivered-impulse.params.depth-gate False
+        # to pay delivered impulse into a seated nail (impulse ungated from depth progress).
+        "depth_gate": True,
       },
     )
+
+  # --- Non-terminating (DAPG-style) variant: anti-parking (Option B) ---
+  if no_terminate:
+    # Success no longer ENDS the episode (time_out still truncates at 20 s), so completing no longer
+    # forfeits the per-step reward streams -- the ratcheted nail (frictionloss=30, no spring, gravcomp)
+    # otherwise farms nail_driven just under the 0.030 success line (hold ~193 discounted > one-time
+    # completion +100 at weight 2.0), parking the mean policy at ~28 mm. completion_bonus is UN-LATCHED
+    # (rewards.py fires every step depth>=success_depth); the termination was the only thing making it
+    # one-shot, so its weight MUST become a per-step stream: 1.0/step == the old one-time 100 in
+    # discounted value (1/(1-gamma)=100 at gamma=0.99).
+    cfg.terminations.pop("nail_driven")
+    cfg.rewards["completion"].weight = 1.0
 
   # --- Viewer ---
   cfg.viewer.body_name = "link00"

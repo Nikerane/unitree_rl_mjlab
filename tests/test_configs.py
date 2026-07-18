@@ -306,6 +306,41 @@ class TestZ1EnvCfgWiring:
         ik = cfg.actions["ik_hammer_head"]
         assert ik.actuator_names == ARM_ACTUATOR_NAMES
 
+    def test_no_terminate_variant(self):
+        # Option B: no_terminate pops the success termination + retunes the un-latched completion.
+        cfg = z1_hammer_env_cfg(cat_impulse=True, no_terminate=True)
+        base = z1_hammer_env_cfg(cat_impulse=True)
+        assert "nail_driven" not in cfg.terminations
+        assert "time_out" in cfg.terminations and cfg.terminations["time_out"].time_out is True
+        assert cfg.rewards["completion"].weight == pytest.approx(1.0)
+        # nail_driven reward stays; no hard 2.0 pin (Option A may later promote 0.5 as the code default).
+        assert cfg.rewards["nail_driven"].weight == base.rewards["nail_driven"].weight
+        assert "nail_driven" in base.terminations and base.rewards["completion"].weight == pytest.approx(100.0)
+
+    def test_nail_driven_not_farmable(self):
+        # ANTI-FARM invariant (2026-07-16): nail_driven is a per-step Gaussian on the RATCHETING nail
+        # depth, so holding just below the 0.030 success line pays w_nd*G(d) FOREVER, while completing
+        # terminates + forfeits that stream for the one-time completion bonus. The weight must be low
+        # enough that the max discounted sub-threshold hold value stays below completion, else the mean
+        # policy parks (the Vega nf1 bug at weight 2.0: hold ~205 > completion 100). Cut to 0.5 fixed it.
+        import math
+        cfg = z1_hammer_env_cfg(cat_impulse=True)
+        w_nd = cfg.rewards["nail_driven"].weight
+        w_ap = cfg.rewards["approach"].weight          # approach is also per-step (farmable)
+        w_cp = cfg.rewards["completion"].weight
+        goal = cfg.rewards["nail_driven"].params["goal_depth"]
+        std = cfg.rewards["nail_driven"].params["std"]
+        thresh = cfg.terminations["nail_driven"].params["success_depth"]
+        gamma = 0.99  # rl_cfg.py; effective horizon 1/(1-gamma)=100 steps
+        # Worst case: the Gaussian is largest at the sub-threshold depth CLOSEST to its 0.032 centre,
+        # i.e. d -> thresh (0.030). Hold-forever discounted value must stay below completion.
+        g_max = math.exp(-((goal - thresh) ** 2) / (std ** 2))
+        hold_value = (w_nd * g_max + w_ap) / (1.0 - gamma)
+        assert hold_value < w_cp, (
+            f"nail_driven weight {w_nd} is FARMABLE: sub-threshold hold value {hold_value:.1f} "
+            f">= completion {w_cp} -> the policy will park below {thresh} instead of completing."
+        )
+
     def test_ik_action_frame_name(self):
         cfg = z1_hammer_env_cfg()
         ik = cfg.actions["ik_hammer_head"]
