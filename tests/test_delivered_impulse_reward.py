@@ -102,6 +102,14 @@ def test_reset_zeros_state():
   assert torch.allclose(t._prev_depth, torch.zeros(2))
 
 
+def test_bad_i_ref_raises():
+  # F6 (2026-07-19 audit): a CLI sweep passing a zero/NaN normalizer must fail loud, not emit inf/NaN.
+  t = _rterm(1)
+  for bad in (0.0, -1.0, float("inf"), float("nan")):
+    with pytest.raises(ValueError, match="i_ref"):
+      t(_renv(torch.tensor([0.10]), torch.tensor([0.010])), i_ref=bad, nail_cfg=NAIL_CFG)
+
+
 def test_raises_without_accumulator():
   t = _rterm(1)
   env = SimpleNamespace(

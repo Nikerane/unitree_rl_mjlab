@@ -183,6 +183,8 @@ class ImpactProgressTerm(ManagerTermBase):
     v_expected: float = 1.0,
   ) -> torch.Tensor:
     """Returns shape (B,)."""
+    if not (v_expected > 0.0 and v_expected == v_expected and v_expected != float("inf")):  # F6
+      raise ValueError(f"ImpactProgressTerm: v_expected={v_expected} must be finite and > 0 (normalizer).")
     robot: Entity = env.scene[robot_cfg.name]
     sensor = env.scene[sensor_name]
     dt = env.step_dt
@@ -253,6 +255,8 @@ class DeliveredImpulseTerm(ManagerTermBase):
     later nudge, closing the escrow/press farm (2026-07-19 audit F1: the old code held ``_credited`` on
     non-advancing steps, so a press backlog was paid in full on the next >eps advance). ``_credited``
     is monotone (``torch.maximum``) so no increment is ever re-paid."""
+    if not (i_ref > 0.0 and i_ref == i_ref and i_ref != float("inf")):  # F6: guard the CLI-sweep divisor
+      raise ValueError(f"DeliveredImpulseTerm: i_ref={i_ref} must be finite and > 0 (reward normalizer).")
     acc = getattr(env, _ENV_SUBSTEP_DELIVERED_ATTR, None)
     if acc is None:
       raise RuntimeError(

@@ -182,3 +182,12 @@ def test_returns_per_env_shape():
     term = ImpactProgressTerm(cfg=None, env=env)
     r = _step(term, env, robot, nail, sensor, head_z=0.05, depth=0.0, first_contact=False)
     assert tuple(r.shape) == (3,)
+
+
+def test_bad_v_expected_raises():
+    """F6 (2026-07-19 audit): a CLI sweep passing a zero/NaN normalizer must fail loud, not divide by 0."""
+    env, robot, nail, sensor = _make_stub_env()
+    term = ImpactProgressTerm(cfg=None, env=env)
+    for bad in (0.0, -1.0, float("inf"), float("nan")):
+        with pytest.raises(ValueError, match="v_expected"):
+            term(env, **{**_PARAMS, "v_expected": bad})
