@@ -21,15 +21,27 @@ from src.tasks.hammer.mdp.impulse_bound import _ENV_SUBSTEP_DELIVERED_ATTR, _ENV
 ARM = ("joint1", "joint2", "joint3", "joint4", "joint5", "joint6")
 
 
+# BASE arm effort limits (z1_constants.py) — read from the CONSTANT, never from the (possibly-contaminated)
+# live actuator, so the scale is always applied to the true baseline.
+_BASE_EFFORT = {"joint2": 60.0}  # all other arm joints: 30.0
+
 def build(effort_scale: float):
+    # BUGFIX 2026-07-20 (Codex re-eval): z1_hammer_env_cfg() returns cfg instances that SHARE one
+    # module-level robot articulation object, so the previous `art.actuators = ...` mutated shared state
+    # and the sweep loop contaminated its own effort settings (the "effort is an exact no-op" artifact).
+    # Now: deepcopy the articulation (private per build) + set effort from the BASE constant × scale.
+    # SAFEST is still one-scale-per-fresh-process; this makes an in-process loop correct too.
     cfg = z1_hammer_env_cfg(play=True, cat_impulse=True); cfg.scene.num_envs = 1
+    robot_ent = cfg.scene.entities["robot"]
+    robot_ent.articulation = copy.deepcopy(robot_ent.articulation)
     if effort_scale != 1.0:
-        art = cfg.scene.entities["robot"].articulation
+        art = robot_ent.articulation
         newacts = []
         for a in art.actuators:
             tn = getattr(a, "target_names_expr", ())
             if any(j in tn for j in ARM):  # scale ARM effort only (gripper untouched)
-                b = copy.deepcopy(a); b.effort_limit = float(a.effort_limit) * effort_scale
+                base = next((v for j, v in _BASE_EFFORT.items() if j in tn), 30.0)
+                b = copy.deepcopy(a); b.effort_limit = base * effort_scale
                 newacts.append(b)
             else:
                 newacts.append(a)

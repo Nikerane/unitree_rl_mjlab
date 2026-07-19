@@ -7,13 +7,18 @@ index > living docs; `docs/archive/**` is historical evidence only. This documen
 handover, not marketing — every number below is quoted from the banked results docs, and every
 file:line was verified against the tree on 2026-07-20.
 
-> **LIVE CAVEAT (§3 B.2 ceiling verdict):** the "impact ceiling is a hardware joint-velocity limit"
-> conclusion is under an independent adversarial re-check (does a coordinated multi-joint *whip* reach
-> higher end-effector speed than the ~1.4 m/s scripted straight-down strike, within the per-joint
-> 3.1415 rad/s budget? `ceiling.py` reports a 3.97 m/s *kinematic* head-speed ceiling). If that
-> re-check finds real trajectory headroom, the ceiling is a controller/trajectory-shaping limit a
-> trained policy could beat — treat the "hardware wall" claim as PROVISIONAL until it resolves, and see
-> whether `docs/results/2026-07-20_B2_effort_ceiling.md` has been updated with the verdict.
+> **⚠ CORRECTION — §3 B.2 "hardware joint-velocity limit" verdict is OVERTURNED (2026-07-20 Codex re-eval).**
+> The "hardware wall at ~1.4 m/s" claim was WRONG on two counts: (1) the effort "exact no-op" was a PROBE
+> BUG (shared module-level articulation contaminated the sweep — effort ×2 actually gives +7.6% then
+> plateaus; the baseline IS torque-saturated); (2) the ~1.4 m/s ceiling is TRAJECTORY-specific — a
+> coordinated whip reaches ≈4.22 m/s downward head speed at the SAME per-joint 3.1415 rad/s budget, so the
+> straight-down strike exploits only ~45% of the reachable envelope. **What survives:** the constraint
+> vacuity is a soft-7g-target result (robust); but "reward can't maximize impulse" is PARTIALLY REOPENED —
+> a whip-capable fixed-impedance policy could strike faster and deliver more. **Read the corrected verdict
+> in `docs/results/2026-07-20_B2_effort_ceiling.md` (§ "CORRECTED VERDICT").** The decisive next experiment
+> is a CPU direct-trajectory optimization over the Cartesian action interface (max pre-contact head speed
+> s.t. |q̇|≤3.1415) — do this BEFORE concluding VIC is required. Treat §3's B.2 table below as the (buggy)
+> original; the corrected numbers supersede it.
 
 Primary sources (read these before trusting any secondary summary, including this one):
 

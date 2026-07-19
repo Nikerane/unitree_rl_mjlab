@@ -71,7 +71,7 @@ def run(dps: float):
 if __name__ == "__main__":
     print(f"{'dps':>6} | {'v_touch(m/s)':>12} | {'deliv x i_ref':>13} | {'peakF(N)':>8} | {'wrΛ/cap':>8} | "
           f"{'max|q̇|(rad/s)':>14} | reachable?")
-    for dps in (0.15, 0.30, 0.50, 1.00):
+    for dps in (0.15, 0.16, 0.17, 0.18, 0.20, 0.22, 0.25):
         r = run(dps)
         ok = "YES" if r["qv_max"] <= Z1_JOINT_VEL_LIMIT else f"NO (>{Z1_JOINT_VEL_LIMIT})"
         print(f"{dps:>6.2f} | {r['v_touch']:>12.3f} | {r['deliv_x']:>13.3f} | {r['peak_F']:>8.1f} | "

@@ -56,16 +56,58 @@ delta_pos_scale=0.15 already runs the dominant joint to 2.56 rad/s, ~81% of the 
 ceiling; dps=0.30 needs 4.95 rad/s (unreachable). So the reachable contact-speed ceiling (~1.4 m/s) is set
 by the **real Z1 per-joint velocity limit**, and 0.15 is already calibrated to it.
 
-## UNIFIED CEILING VERDICT (fixed impedance)
-"Why does delivered impulse plateau at ~0.87× i_ref / ~1.4 m/s?" — answered on all three axes:
-- **NOT reward-limited** — Phase 2: depth-gate + impact_progress reshaping don't move it.
-- **NOT torque-limited** — B.2 effort ×1→×3 (30→90 N·m): exact no-op on contact speed + delivered.
-- **Controller-bandwidth is the mechanism** (delta_pos_scale) BUT **capped by the real Z1 3.1415 rad/s
-  joint-velocity limit** — 0.15 already sits near it.
-⟹ **The fixed-impedance impact-impulse ceiling is a HARDWARE JOINT-VELOCITY limit.** Consistent with the
-prior closed-loop finding that the trained policy's worst-case |q̇| already exceeds π ([[softcat-velocity-result]],
-[[z1-velocity-bound-finding]]): the policy is already at the hardware velocity ceiling. This is the wall
-variable impedance is designed to beat (stiff windup stores strain energy; compliant release decouples
-contact speed from steady-state joint velocity) — the principled motivation for the VIC phase, now backed
-by a measured ceiling on every axis. NOT VIC-in-disguise: delta_pos_scale is an action-bandwidth knob with
-a strike-placement accuracy tradeoff, and it is already at the hardware cap.
+## ⚠ SUPERSEDED VERDICT — kept for the record, CORRECTED below
+"Why does delivered impulse plateau at ~0.87× i_ref / ~1.4 m/s?" — I originally answered:
+- NOT reward-limited (Phase 2); NOT torque-limited (effort ×1→×3 "exact no-op"); controller-bandwidth
+  capped by the real Z1 3.1415 rad/s joint-velocity limit ⟹ "a HARDWARE JOINT-VELOCITY limit."
+
+**This verdict was WRONG on two counts, found by an independent Codex re-evaluation (2026-07-20). See below.**
+
+## ✅ CORRECTED VERDICT (independent Codex re-evaluation, 2026-07-20)
+Two errors in the superseded verdict:
+
+1. **The effort "exact no-op" was a PROBE BUG, not physics.** `effort_sweep.build()` mutated a
+   **module-level SHARED articulation** (`z1_hammer_env_cfg()` returns cfg instances that share the SAME
+   robot articulation object — verified: `articulation shared identity == True`), so the sweep loop
+   cumulatively contaminated its own effort settings. Re-run in **isolated fresh processes**, effort ×2
+   raises aggressive contact speed **+7.5%** (1.308→1.407 m/s) then plateaus — small but NONZERO. And the
+   baseline straight-down strike IS genuinely torque-saturated: peak joint torques ≈ [1.07, **60, 30, 30**,
+   0.53, 0.08] N·m (j2/j3/j4 AT their clamps), ≥1 joint at the clamp for **87/117 pre-contact substeps**.
+   So torque is a (weak) contributor, not a proven non-factor. `effort_sweep.py` is now fixed (deepcopy).
+
+2. **The ~1.4 m/s ceiling is TRAJECTORY-specific, NOT a hardware wall.** Head speed = J(q)·q̇, so a
+   coordinated multi-joint whip reaches higher end-effector speed than the straight-down strike at the SAME
+   per-joint |q̇|. At the hardware rail (max_j|q̇| ≤ 3.1415 rad/s) the **global downward head-speed box
+   optimum is ≈ 4.22 m/s** (cf. `ceiling.py`'s 3.97 m/s kinematic ceiling); the shipped straight-down
+   strike exploits only **~45%** of it (1.4 of ~4.2 m/s). So the fixed-impedance CONTACT-SPEED ceiling is a
+   **trajectory/controller-shaping limit a trained policy could beat**, not a hardware velocity wall. My
+   "0.15 is calibrated to the hardware cap" reasoning conflated the straight-down |q̇| (2.56 rad/s) with the
+   reachable envelope.
+
+**What SURVIVES the correction (and is now the real story):** the DELIVERED-IMPULSE / constraint ceiling is
+dominated by the **soft yielding 7 g target**, not the velocity ceiling. Codex reproduced Phase-0 exactly:
+solref×2 → Λ −76.3% + delivered −76.55% (contact/yield/press-dependent, not pure pre-impact velocity); at
+the 3.1415-box velocity max the worst **inelastic (e≈0) Λ/cap is still only ≈0.616**; the inelastic
+cap-crossing speed is 6.95 m/s (above even the 3.97 m/s kinematic box). So **even a maximal whip would not
+make the realistic e≈0 ballistic constraint bind** under the current 7 g nail — the constraint vacuity is a
+TARGET-physics result, robust to the velocity correction.
+
+**Net corrected picture:**
+- Constraint vacuity (Phase 0 / A3) — **holds**, driven by the soft yielding target (not velocity).
+- "Reward can't maximize impulse" (Phase 2) — **partially reopened**: the Phase-2 policy strikes
+  straight-down; a policy able/incentivized to **whip** could reach higher contact speed (toward ~4 m/s)
+  and thus more delivered impulse, WITHIN the joint-velocity budget. The maximization question is NOT as
+  closed as claimed — the straight-down trajectory, not a hardware wall, is the binding limit.
+- VIC is still motivated (decouples contact speed from steady-state joint velocity), but the fixed-impedance
+  headroom is larger than I claimed — a whip-capable fixed-impedance policy should be tested FIRST.
+
+**DECISIVE NEXT EXPERIMENT (Codex's recommendation, CPU):** direct-trajectory optimization over the actual
+Cartesian DiffIK action interface — optimize 10–20 pre-contact actions a_t∈[−1,1]³ under the unchanged
+fixed PD + 30/60 N·m effort limits, enforce max|q̇|≤3.1415 rad/s at every 2 ms substep + joint limits +
+terminal hammer-face alignment, maximize pre-contact downward head speed; replay winners in fresh processes.
+Settles whether the ~4 m/s kinematic opportunity is DYNAMICALLY reachable through the real controller/actuator
+envelope, or collapses back toward ~1.6–1.8 m/s. If reachable → train a whip-capable policy and re-test
+impulse maximization before concluding VIC is required.
+
+[[softcat-velocity-result]] [[z1-velocity-bound-finding]] — the trained policy's |q̇|>π was for a specific
+learned trajectory, NOT proof the straight-down velocity is the global reachable max.
