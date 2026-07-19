@@ -242,12 +242,20 @@ def _worst_ratios(lam_records: list[torch.Tensor], j_limit: torch.Tensor) -> tup
 
 
 def _git_hash(repo_root: Path) -> str:
+  """Short HEAD hash, suffixed ``-dirty`` if any TRACKED file has uncommitted changes. Without the
+  suffix, code run from scp'd working-tree edits on a stale HEAD records a hash that does NOT reflect
+  what actually ran (2026-07-19: Vega did exactly this — the recorded b2ed6ee predated the deployed
+  fixes). Untracked files (eval/, logs/, .warp_cache/) are ignored — only code provenance matters."""
   try:
     out = subprocess.run(
       ["git", "rev-parse", "--short", "HEAD"],
       cwd=repo_root, capture_output=True, text=True, timeout=5, check=True,
-    )
-    return out.stdout.strip()
+    ).stdout.strip()
+    dirty = subprocess.run(
+      ["git", "status", "--porcelain", "--untracked-files=no"],
+      cwd=repo_root, capture_output=True, text=True, timeout=5, check=True,
+    ).stdout.strip()
+    return f"{out}-dirty" if dirty else out
   except Exception:
     return "unknown"
 

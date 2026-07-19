@@ -47,7 +47,12 @@ else
   seed=${SEEDARR[$((t/2))]}; ai=$((t%2)); task=${ARM_TASK[$ai]}; short=${ARM_SHORT[$ai]}
 fi
 RUN="${CAMPAIGN}_${short}_seed${seed}"
-echo "### TRAIN task=$t arm=$short seed=$seed run=$RUN host=$(hostname) $(date '+%F %T')"
+# Provenance: record the exact code state that trains (git hash + '-dirty' if the tree has uncommitted
+# tracked edits). Deploy via git pull, NOT scp, so this hash is trustworthy (2026-07-19 provenance fix).
+GITHASH=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+[ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ] && GITHASH="${GITHASH}-dirty"
+echo "### TRAIN task=$t arm=$short seed=$seed run=$RUN git=$GITHASH host=$(hostname) $(date '+%F %T')"
+[ "${GITHASH%-dirty}" != "$GITHASH" ] && echo "### WARN: working tree is DIRTY — results' git_hash will not fully reproduce this run."
 $PY -c "import torch; assert torch.cuda.is_available() and 'A100' in torch.cuda.get_device_name(0), 'no A100'; print('A100 ok:', torch.cuda.get_device_name(0))" || { echo "### NO GPU/A100 on $(hostname) — requeue+exit"; scontrol requeue "${SLURM_JOB_ID}" 2>/dev/null; exit 1; }
 $PY scripts/train.py "$task" --gpu-ids [0] --agent.logger tensorboard \
   --agent.run-name "$RUN" --agent.seed "$seed" --agent.max-iterations 500 --agent.save-interval 50 \
