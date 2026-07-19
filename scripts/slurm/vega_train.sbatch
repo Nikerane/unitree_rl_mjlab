@@ -34,8 +34,6 @@ read -ra SEEDARR <<< "${SEEDS:-0 1 2}"
 EXTRA_FLAGS=""
 [ -n "${NAIL_DRIVEN_W:-}" ] && EXTRA_FLAGS="$EXTRA_FLAGS --env.rewards.nail-driven.weight ${NAIL_DRIVEN_W}"
 [ -n "${DELIVERED_W:-}" ]   && EXTRA_FLAGS="$EXTRA_FLAGS --env.rewards.delivered-impulse.weight ${DELIVERED_W}"
-# DEPTH_GATE=True|False -> Phase-2 depth-gate sweep (False = pay delivered impulse into a seated nail).
-[ -n "${DEPTH_GATE:-}" ]    && EXTRA_FLAGS="$EXTRA_FLAGS --env.rewards.delivered-impulse.params.depth-gate ${DEPTH_GATE}"
 # IMPACT_W -> Phase-2b: strengthen the ante-impact velocity term (impact_progress).
 [ -n "${IMPACT_W:-}" ]      && EXTRA_FLAGS="$EXTRA_FLAGS --env.rewards.impact-progress.weight ${IMPACT_W}"
 ARM_TASK=(Unitree-Z1-Hammer-CaT-Impulse-Track Unitree-Z1-Hammer-CaT-Impulse)

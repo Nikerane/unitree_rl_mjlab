@@ -348,10 +348,6 @@ def z1_hammer_env_cfg(
         "i_ref": 0.6094,
         "eps": 5e-4,
         "nail_cfg": SceneEntityCfg("nail_block", joint_names=("nail_slide",)),
-        # Phase-2 maximization sweep: keep True (shipped). Flip via
-        #   --env.rewards.delivered-impulse.params.depth-gate False
-        # to pay delivered impulse into a seated nail (impulse ungated from depth progress).
-        "depth_gate": True,
       },
     )
 

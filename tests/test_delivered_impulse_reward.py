@@ -44,21 +44,26 @@ def test_normalized_by_i_ref():
 
 
 def test_depth_gate_blocks_payout_without_progress():
+  # A press with no depth advance pays nothing.
   t = _rterm(1)
   out = t(_renv(torch.tensor([0.10]), torch.tensor([0.0])), i_ref=1.0, eps=5e-4, nail_cfg=NAIL_CFG)
   assert torch.allclose(out, torch.tensor([0.0])), out  # impulse delivered but nail didn't advance
-  out2 = t(_renv(torch.tensor([0.10]), torch.tensor([0.010])), i_ref=1.0, eps=5e-4, nail_cfg=NAIL_CFG)
-  assert torch.allclose(out2, torch.tensor([0.10]), atol=1e-6), out2  # credited on the advancing step
 
 
-def test_ungated_pays_regardless_of_progress():
-  # depth_gate=False (Phase-2 maximization arm): delivered impulse into a NON-advancing (seated) nail
-  # is paid; monotone _credited still prevents any re-pay.
+def test_no_press_backlog_farm():
+  # F1 fix (2026-07-19 audit): non-progress impulse is DISCARDED, not escrowed. A press with no depth
+  # advance must NOT be collectable on a later nudge — else park+press+nudge farms the delivered reward.
+  # (The OLD escrow code held _credited on non-advancing steps and paid the whole backlog here.)
   t = _rterm(1)
-  out = t(_renv(torch.tensor([0.10]), torch.tensor([0.0])), i_ref=1.0, depth_gate=False, nail_cfg=NAIL_CFG)
-  assert torch.allclose(out, torch.tensor([0.10]), atol=1e-6), out  # pays despite zero depth advance
-  out2 = t(_renv(torch.tensor([0.10]), torch.tensor([0.0])), i_ref=1.0, depth_gate=False, nail_cfg=NAIL_CFG)
-  assert torch.allclose(out2, torch.tensor([0.0]), atol=1e-6), out2  # no NEW impulse -> no re-pay
+  # press: 0.10 accrues while the nail is static -> pays 0 AND is discarded (baseline advances to 0.10)
+  out = t(_renv(torch.tensor([0.10]), torch.tensor([0.0])), i_ref=1.0, eps=5e-4, nail_cfg=NAIL_CFG)
+  assert torch.allclose(out, torch.tensor([0.0])), out
+  # nudge with NO new impulse: the 0.10 press backlog must NOT be paid (old code paid 0.10 here)
+  out2 = t(_renv(torch.tensor([0.10]), torch.tensor([0.010])), i_ref=1.0, eps=5e-4, nail_cfg=NAIL_CFG)
+  assert torch.allclose(out2, torch.tensor([0.0]), atol=1e-6), out2
+  # advance WITH fresh impulse: pays only the new increment (0.14 - 0.10), not the discarded backlog
+  out3 = t(_renv(torch.tensor([0.14]), torch.tensor([0.020])), i_ref=1.0, eps=5e-4, nail_cfg=NAIL_CFG)
+  assert torch.allclose(out3, torch.tensor([0.04]), atol=1e-6), out3
 
 
 def test_one_payout_no_double_credit():

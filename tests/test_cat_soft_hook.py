@@ -297,6 +297,28 @@ def test_validate_params_guards():
     CatSoftHook._validate_params(
       {"use_vel": False, "use_impulse": True, "imp_limit": 1.0, "imp_max_p": 0.1, "min_p": 0.3}
     )
+  # F5 (2026-07-19 audit): full domain validation. A δ ceiling > 1 (e.g. CLI --imp-max-p 2) would
+  # make a termination probability > 1.
+  with pytest.raises(RuntimeError, match=r"in \[0, 1\]"):
+    CatSoftHook._validate_params(
+      {"use_vel": False, "use_impulse": True, "imp_limit": 1.0, "imp_max_p": 2.0}
+    )
+  # tau outside [0, 1) breaks the EMA normalizer.
+  with pytest.raises(RuntimeError, match="tau"):
+    CatSoftHook._validate_params(
+      {"use_vel": True, "use_impulse": False, "tau": 1.5}
+    )
+  # Non-positive normalizer seed collapses the per-column scale.
+  with pytest.raises(RuntimeError, match="imp_seed"):
+    CatSoftHook._validate_params(
+      {"use_vel": True, "use_impulse": False, "imp_seed": 0.0}
+    )
+  # A zero/NaN per-joint cap makes the margin Λ−limit undefined or trivially violated.
+  with pytest.raises(RuntimeError, match="finite"):
+    CatSoftHook._validate_params(
+      {"use_vel": False, "use_impulse": True, "imp_max_p": 0.5,
+       "imp_limit": [0.0, 3.28, 1.64, 1.64, 1.64, 1.64]}
+    )
   # Valid configs pass.
   CatSoftHook._validate_params({"use_vel": True, "use_impulse": False})
   CatSoftHook._validate_params(

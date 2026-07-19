@@ -343,13 +343,15 @@ def impossible_success(env: "ManagerBasedRlEnv") -> torch.Tensor:
   if acc is None:
     raise RuntimeError("impossible_success requires the SubstepImpulseAccumulator metric (cat_impulse).")
   lam_worst = acc._episode_peak_perjoint.amax(dim=1)  # (B,)
-  terminated = env.reset_terminated  # (B,) bool: non-timeout success termination
-  # NoTerm arms never set reset_terminated (only time_out remains) -- also key on depth-success
-  # directly so this dead-instrument alarm stays live under them. Identical on terminating arms: at
-  # the success step reset_terminated and depth>=threshold coincide (nail_fully_driven, same clamped
-  # predicate) and on timeouts both are False. Metric runs pre-reset (reduce="last") so depth is fresh.
+  # Key SUCCESS on the depth predicate ALONE (2026-07-19 audit F9). The old code OR'd in
+  # env.reset_terminated, but that flags ANY non-timeout termination -- so composing a velocity CaT
+  # (or vel_hard) arm with cat_impulse would false-fire this "dead instrument, kill the run" alarm on
+  # a pre-contact velocity termination (terminated=True ∧ Λ=0 ∧ depth<threshold). The depth predicate
+  # is a strict superset of a genuine success termination (nail_driven fires on depth>=threshold, so
+  # at that step depth is already over the bar) AND stays live under NoTerm arms, so dropping
+  # `terminated |` loses no real detection. Metric runs pre-reset (reduce="last") so depth is fresh.
   depth = env.scene["nail_block"].data.joint_pos[:, 0].clamp(0.0, NAIL_GOAL_DEPTH)
-  succeeded = terminated | (depth >= NAIL_SUCCESS_THRESHOLD)
+  succeeded = depth >= NAIL_SUCCESS_THRESHOLD
   return (succeeded & (lam_worst <= 0.0)).float()
 
 

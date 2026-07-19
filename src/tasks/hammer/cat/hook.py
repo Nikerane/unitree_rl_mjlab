@@ -60,6 +60,23 @@ class CatSoftHook(ManagerTermBase):
       )
     imp_max_p = float(p.get("imp_max_p", 0.0))
     min_p = float(p.get("min_p", 0.0))
+    max_p = float(p.get("max_p", 0.5))
+    tau = float(p.get("tau", 0.95))
+    imp_seed = float(p.get("imp_seed", 1e-3))
+    # Full-domain validation (2026-07-19 audit F5): the checks below only caught the imp_max_p<min_p
+    # inversion + the placeholder limit. A δ ceiling > 1 (e.g. a CLI sweep --imp-max-p 2) yields a
+    # termination probability > 1; tau outside [0,1) breaks the EMA; a non-positive/non-finite seed
+    # collapses the normalizer. All safe at the shipped values (0 / 0.5 / 0.95 / 1e-3) but a one-flag
+    # enforcement override could reach them — fail loud at construction, not silently mid-training.
+    for name, v in (("imp_max_p", imp_max_p), ("min_p", min_p), ("max_p", max_p)):
+      if not (0.0 <= v <= 1.0):
+        raise RuntimeError(f"CatSoftHook: {name}={v} out of range — a probability must be in [0, 1].")
+    if not (min_p <= max_p):
+      raise RuntimeError(f"CatSoftHook: min_p={min_p} > max_p={max_p} — the δ floor exceeds its ceiling.")
+    if not (0.0 <= tau < 1.0):
+      raise RuntimeError(f"CatSoftHook: tau={tau} out of range — the EMA factor must be in [0, 1).")
+    if not (imp_seed == imp_seed and imp_seed not in (float("inf"), float("-inf")) and imp_seed > 0.0):
+      raise RuntimeError(f"CatSoftHook: imp_seed={imp_seed} must be finite and > 0 (normalizer floor).")
     if use_impulse and 0.0 < imp_max_p < min_p:
       raise RuntimeError(
         f"CatSoftHook: imp_max_p={imp_max_p} < min_p={min_p} — δ would be INVERSELY graded "
@@ -70,6 +87,11 @@ class CatSoftHook(ManagerTermBase):
       # Covers the scalar, list, AND tensor forms (2026-07-14 audit: the original isinstance
       # (int, float) check let a per-joint [0.1]*6 slip through to enforcement silently).
       il_t = torch.as_tensor(il, dtype=torch.float32)
+      if not bool(torch.isfinite(il_t).all() and (il_t > 0.0).all()):
+        raise RuntimeError(
+          f"CatSoftHook: imp_limit={il} must be all finite and > 0 (per-joint impulse caps). "
+          "A zero/NaN cap makes the margin Λ−limit undefined or trivially violated."
+        )
       if bool((il_t == Z1_JOINT_IMPULSE_LIMIT).all()):
         raise RuntimeError(
           "CatSoftHook: enforcement (imp_max_p > 0) against the Z1_JOINT_IMPULSE_LIMIT placeholder "

@@ -77,12 +77,15 @@ def test_contact_seen_tracks_contact():
 
 
 def test_impossible_success_metric():
-    # Terminated on success with Λ == 0 -> alarm fires.
-    assert float(impossible_success(_stub_env(contact_time=0.0, lam_worst=0.0, terminated=True))) == 1.0
+    # Genuine success (depth>=0.030) with Λ == 0 -> alarm fires (dead instrument).
+    assert float(impossible_success(_stub_env(contact_time=0.0, lam_worst=0.0, terminated=True, depth=0.031))) == 1.0
     # Success with real Λ -> silent.
-    assert float(impossible_success(_stub_env(contact_time=0.004, lam_worst=0.3, terminated=True))) == 0.0
-    # Timeout (not terminated) with Λ == 0 -> silent (undertrained, not dead).
+    assert float(impossible_success(_stub_env(contact_time=0.004, lam_worst=0.3, terminated=True, depth=0.031))) == 0.0
+    # Timeout (not terminated), Λ == 0, depth<0.030 -> silent (undertrained, not dead).
     assert float(impossible_success(_stub_env(contact_time=0.0, lam_worst=0.0, terminated=False))) == 0.0
+    # F9 (2026-07-19): terminated=True but depth<0.030 (e.g. a velocity-CaT termination PRE-CONTACT
+    # composed with cat_impulse), Λ == 0 -> now SILENT. The old `terminated |` OR false-fired here.
+    assert float(impossible_success(_stub_env(contact_time=0.0, lam_worst=0.0, terminated=True, depth=0.010))) == 0.0
     # NoTerm arm: depth-success (>=0.030) but NOT terminated, Λ == 0 -> alarm STILL fires (dead qfrc).
     assert float(impossible_success(_stub_env(contact_time=0.0, lam_worst=0.0, terminated=False, depth=0.031))) == 1.0
     # NoTerm depth-success with real Λ -> silent.

@@ -246,13 +246,13 @@ class DeliveredImpulseTerm(ManagerTermBase):
     i_ref: float = 1.0,
     eps: float = 5e-4,
     nail_cfg: SceneEntityCfg = _DEFAULT_NAIL_CFG,
-    depth_gate: bool = True,
   ) -> torch.Tensor:
-    """Returns shape (B,). ``depth_gate=True`` (default, shipped) pays only on a nail-advancing step;
-    ``depth_gate=False`` (Phase-2 maximization arm) pays the monotone delivered increment regardless of
-    progress, so impulse into an already-seated nail earns reward. Press-farming stays bounded either
-    way by the ``SubstepDeliveredImpulse`` per-event ~50 ms cap + re-arm debounce, and ``_credited``
-    stays monotone so no increment is ever re-paid."""
+    """Returns shape (B,). Pays the delivered-impulse increment ONLY on a nail-advancing step, and
+    DISCARDS non-progress impulse by advancing the credit baseline EVERY step regardless of progress.
+    A press with no depth advance therefore earns nothing and — crucially — cannot be collected on a
+    later nudge, closing the escrow/press farm (2026-07-19 audit F1: the old code held ``_credited`` on
+    non-advancing steps, so a press backlog was paid in full on the next >eps advance). ``_credited``
+    is monotone (``torch.maximum``) so no increment is ever re-paid."""
     acc = getattr(env, _ENV_SUBSTEP_DELIVERED_ATTR, None)
     if acc is None:
       raise RuntimeError(
@@ -260,23 +260,16 @@ class DeliveredImpulseTerm(ManagerTermBase):
         "cfg.metrics (see env_cfgs.py cat_impulse) so it stashes itself on the env."
       )
     cur = acc.delivered  # (B,) EPISODE-CUMULATIVE delivered axial impulse (monotone)
-    delta = (cur - self._credited).clamp_min(0.0)
-    if not depth_gate:
-      # Ungated (Phase-2): pay the increment every step. _credited stays monotone (never lowered) so
-      # already-paid impulse can never re-pay; the accumulator's per-event cap bounds quasi-static press.
-      self._credited = torch.maximum(self._credited, cur)
-      return delta / i_ref
     depth = clamped_nail_depth(env, nail_cfg)
     advanced = (depth - self._prev_depth) > eps
     self._prev_depth = torch.maximum(self._prev_depth, depth)
-    # Credit (and pay) only on a depth-advancing step; otherwise hold _credited so the as-yet-unpaid
-    # impulse is paid once the nail actually moves. The accumulator is monotone BY CONTRACT, so the
-    # torch.maximum is purely defensive: credit must never lower even if that contract ever breaks
-    # (a lowered credit re-pays already-paid impulse — the farming exploit).
-    self._credited = torch.where(
-      advanced, torch.maximum(self._credited, cur), self._credited
-    )
-    return torch.where(advanced, delta, torch.zeros_like(delta)) / i_ref
+    delta = (cur - self._credited).clamp_min(0.0)
+    pay = torch.where(advanced, delta, torch.zeros_like(delta))
+    # Advance the baseline every step: non-progress impulse is DISCARDED, never banked, so press-then-
+    # nudge cannot farm it. A legitimate strike drives the nail (>eps) in the same control step it
+    # delivers impulse, so its full increment is still paid.
+    self._credited = torch.maximum(self._credited, cur)
+    return pay / i_ref
 
 
 class ImitationPriorTerm(ManagerTermBase):
