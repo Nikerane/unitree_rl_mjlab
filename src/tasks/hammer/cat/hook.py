@@ -147,8 +147,8 @@ class CatSoftHook(ManagerTermBase):
     return None
 
   def _neg_indices(self, env: "ManagerBasedRlEnv") -> list[int]:
+    rm = env.reward_manager
     if self._neg_idx is None:
-      rm = env.reward_manager
       if not hasattr(rm, "_step_reward"):
         raise RuntimeError(
           "CatSoftHook needs reward_manager._step_reward (mjlab 1.4.0 internal). Pin mjlab or adapt "
@@ -161,17 +161,19 @@ class CatSoftHook(ManagerTermBase):
         )
       if rm._step_reward.shape[1] != len(rm.active_terms):
         raise RuntimeError("CatSoftHook: reward_manager._step_reward column count != #active_terms.")
-      # MF-3 guard: any negative-weight reward term NOT in _NEG_TERMS would be silently discounted by
-      # (1-δ) under scale-positives -- the penalty-evasion exploit Decision 1 exists to prevent. The
-      # augment-not-replace workflow means new penalty terms are expected; fail loudly if one appears.
-      for n in rm.active_terms:
-        if rm.get_term_cfg(n).weight < 0 and n not in _NEG_TERMS:
-          raise RuntimeError(
-            f"CatSoftHook: reward term '{n}' has negative weight {rm.get_term_cfg(n).weight} but is "
-            f"not in _NEG_TERMS {_NEG_TERMS}; scale-positives would discount it by (1-δ) "
-            f"(penalty-evasion exploit, Decision 1). Add it to _NEG_TERMS."
-          )
       self._neg_idx = [rm.active_terms.index(n) for n in _NEG_TERMS if n in rm.active_terms]
+    # MF-3 guard, re-validated EVERY call (2026-07-19 audit F4): any negative-weight reward term NOT in
+    # _NEG_TERMS would be silently discounted by (1-δ) under scale-positives -- the penalty-evasion
+    # exploit Decision 1 exists to prevent. Originally this ran ONCE (inside the _neg_idx is None block),
+    # so a reward_curriculum that ramps a positive term's weight negative AFTER the first call would slip
+    # through with a stale _neg_idx. A ~8-term weight scan per step is negligible; fail loud if one appears.
+    for n in rm.active_terms:
+      if rm.get_term_cfg(n).weight < 0 and n not in _NEG_TERMS:
+        raise RuntimeError(
+          f"CatSoftHook: reward term '{n}' has negative weight {rm.get_term_cfg(n).weight} but is "
+          f"not in _NEG_TERMS {_NEG_TERMS}; scale-positives would discount it by (1-δ) "
+          f"(penalty-evasion exploit, Decision 1). Add it to _NEG_TERMS."
+        )
     return self._neg_idx
 
   def _compute_r_pos(self, env: "ManagerBasedRlEnv") -> torch.Tensor:

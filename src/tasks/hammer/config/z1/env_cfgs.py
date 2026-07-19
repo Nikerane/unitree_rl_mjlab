@@ -34,6 +34,16 @@ from src.tasks.hammer.nail_block import get_nail_block_entity_cfg
 # hardcoding a second copy that could drift.
 IMP_J_LIMIT: list[float] = [1.640, 3.280, 1.640, 1.640, 1.640, 1.640]  # N·m·s
 
+# Delivered-impulse reward normalizer (2026-07-19 audit F11): the reference strike's delivered axial
+# impulse, MEASURED via the C0 gate (derive_impulse_thresholds.py section [3] mean). PROVENANCE-BOUND:
+# 0.6094 is keyed to the CURRENT reference (post-2026-07-13 F3 follow-through fix -> a genuine 1.37 m/s
+# in-script strike; the endpoint-servo-era value was 0.0811, ~7.5x lower). ANY change to the scene
+# geometry, the SingleStrikeReference, the solver, the action scale, or the actuator model silently
+# shifts this baseline -- re-run derive_impulse_thresholds.py and update this ONE constant (it is the
+# single source; do not re-hardcode 0.6094 elsewhere). Module-level so tooling imports it, mirroring
+# IMP_J_LIMIT.
+I_REF_DELIVERED: float = 0.6094  # N·s
+
 
 def _wire_site(cfg, obs_keys: tuple[str, ...], param_key: str, site_name: str) -> None:
   """Set ``site_names=(site_name,)`` on the given obs terms' ``param_key`` SceneEntityCfg, across
@@ -334,18 +344,14 @@ def z1_hammer_env_cfg(
     )
     # MAXIMIZE objective: object-side delivered impact impulse (positive term; rides the (1−δ) discount
     # so an over-limit strike's delivered-impulse reward is worth less -- the two-sides interplay).
-    # i_ref contract: the reference strike's delivered impulse, MEASURED via the C0 gate
-    # (derive_impulse_thresholds.py section [3] mean). 0.0811 (2026-07-06, endpoint-servo-era
-    # reference) -> 0.6094 (2026-07-13): the F3 follow-through fix turned the scripted reference
-    # into a genuine 1.37 m/s in-script strike, so the reference-level impulse baseline rose ~7.5x.
-    # delivered_impulse SHARE (26.5% of positive) was measured at C2 against the OLD normalizer
-    # (committed record: docs/results/2026-07-10_c2_enforcement_record.md, incl. the staleness
-    # note); re-check the share on the first post-fix training run before trusting the weight.
+    # i_ref = I_REF_DELIVERED (provenance-bound module constant above). delivered_impulse SHARE (26.5%
+    # of positive) was measured at C2 against the OLD 0.0811 normalizer (committed record:
+    # docs/results/2026-07-10_c2_enforcement_record.md); re-check the share on the first post-fix run.
     cfg.rewards["delivered_impulse"] = RewardTermCfg(
       func=hammer_mdp.DeliveredImpulseTerm,
       weight=2.0,
       params={
-        "i_ref": 0.6094,
+        "i_ref": I_REF_DELIVERED,
         "eps": 5e-4,
         "nail_cfg": SceneEntityCfg("nail_block", joint_names=("nail_slide",)),
       },
