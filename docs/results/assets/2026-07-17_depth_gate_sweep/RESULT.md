@@ -57,3 +57,21 @@ lever to raise impact impulse is variable impedance (VIC)** — deferred. Keep `
 `impact_progress.weight=8` (shipped). The excess-over-i_ref bonus (Change 2) stays code-unwritten +
 enforcement-gated. TODO: fix the eval sbatch's ip-campaign exit-53 failure. Plan:
 `docs/results/2026-07-17_fixed_impedance_execution_plan.md`.
+
+---
+
+## af1 — audit-fix regression validation (2026-07-19)
+Trained the fully audit-fixed code (F1/F5/F9/F6/F4/F11), 3 seeds, imp_max_p=0. Eval git_hash=**6b447bf**
+(re-stamped on the clean HEAD after the provenance fix; the first-pass CSV carried a stale b2ed6ee from
+the pre-fix scp-on-dirty-tree deploy — content was verified identical by shasum, hash now corrected).
+
+delivered/i_ref (sampled): 1.21 / 0.87 / 0.64 (mean 0.90×); det 1.25 / 0.56 / 0.61 (mean 0.81×);
+success 1.00 all seeds; invariants clean. **Indistinguishable from the pre-fix dg1 baseline (0.82× samp)**
+— the audit fixes are behavior-neutral on the healthy policy, confirmed regression-free.
+
+The F1 fix is NOT a no-op (proven, not inferred): a locked-nail press probe accrues 7.87 N·s → the OLD
+escrow would have banked 12.9× i_ref collectable on any later nudge → the NEW discard code pays 0.0, while
+a real strike (depth advances in the same step it delivers impulse) is still paid in full. Independently
+corroborated by Gemini + Codex. The discriminating evidence is tests/test_delivered_impulse_reward.py::
+test_no_press_backlog_farm, not the flat GPU curve (af1 can't distinguish "works" from "no-op" because the
+healthy policy never presses). See docs/results/2026-07-19_reward_code_fault_audit.md + _fault_fix_plan.md.
