@@ -395,6 +395,42 @@ honest about how much of the month went into finding and fixing our own bugs, no
 
 ---
 
+## Slide 16 — Mathematical formulation (one page; full version in a companion doc)
+
+Everything above in exact notation. The full, code-line-cited version (37-D observation, DiffIK + PD,
+all reward formulas, all three impulse accumulators, the caps derivation, the CaT/GAE equations) is
+`docs/results/2026-07-20_MATH_FORMULATION.md` — every equation carries a `file:line` citation and was
+spot-checked against the code. The essentials:
+
+**The problem is a state-wise constrained MDP** (γ = 0.99, horizon ≤ 1000 control steps):
+$$\pi^\* \in \arg\max_\pi\ \mathbb E\!\Big[\textstyle\sum_t \gamma^t r_t\Big]\quad\text{s.t.}\quad \Lambda_{t,j} \le L_j\ \ \forall t,\ \forall j\in\{1..6\}\ \ \text{a.s.}$$
+The **return** rewards object-side delivered impulse (impact ↑); the **constraint** bounds the
+robot-side per-joint reaction Λ (safety). These pull in opposite directions — that tension *is* the thesis.
+
+**Reward** (dt-scaled, `r_t = 0.02·Σ w_k r_{k,t}`): 7 shipped terms — Gaussian `approach` (0.1) /
+`nail_driven` (0.5), ratcheted `nail_depth_delta` (600), gated `impact_progress` (8), `completion`
+(100), `delivered_impulse = 𝟙[progress]·ΔI_t/I_ref` (2, `I_ref=0.6094 N·s`), and penalties
+`action_rate` (−0.01) / `joint_pos_limits` (−10).
+
+**Three distinct impulse quantities** (all at the 2 ms substep, contact-masked):
+- **Λ** (constraint-read, robot-side): 50 ms sliding window of baseline-subtracted `|qfrc_constraint|` — a **press/fatigue integral**, not clean ballistic momentum (this is the Slide 7 finding, stated formally).
+- **I_t** (reward, object-side): episode-cumulative ∫F·dt with a 25-substep re-arm debounce; the maximization target.
+- **ContactRow** (log-only diagnostic): per-event Jᵀf, consumed by nothing.
+
+**Caps** (fixed at manufacturer values): `L_j = τ_j^rated · κ · Δt`, κ=2 (HD repeated-peak), Δt≈27.3 ms
+→ `L = (1.64, 3.28, 1.64, 1.64, 1.64, 1.64) N·m·s`. *(Note the honest mismatch: caps use ~27.3 ms, Λ integrates 50 ms — this is exactly Khadiv decision (e).)*
+
+**Soft-CaT** turns a violation into a termination probability and discounts only positive reward:
+$$\delta_{t,j}=\Big[p_{min}+\text{clip}\big(\tfrac{c_{t,j}}{c^{max}_{t,j}},0,1\big)(p_{max}-p_{min})\Big]_{c>0},\quad \delta_t=\max_j\delta_{t,j},\quad r_t^{CaT}=(1-\delta_t)\,r_t^{+}+r_t^{-}.$$
+**Current status: `imp_max_p = 0 ⟹ δ_t^{imp} ≡ 0`** — the impulse constraint is **log-only** (measured, not
+enforced). Flipping `imp_max_p > 0` is Khadiv decision (e)/(f); the machinery is already wired and proven on the velocity constraint.
+
+*Speaker note:* don't walk through equations live — put this up, say "the tension between the impulse
+reward and the Λ constraint is the whole thesis in one line," and point at the companion doc for anyone
+who wants every `file:line`.
+
+---
+
 ## Appendix — exact numbers + caveats
 
 **Best policy (af1), 3 seeds, `git_hash=6b447bf`, `imp_max_p=0`:**
