@@ -76,6 +76,21 @@ serves as max-on.
    the max-off / af1 / max-max dose axis (same fixed reset, apples-to-apples).
 3. Verdict: monotone swing↑ with dose ⇒ swing is a maximization maneuver; flat ⇒ kinematic.
 
+## LAUNCHED — 2026-07-20 (Vega, commit `d4dc5d8`, training code == af1 verified)
+12 jobs, all RUNNING immediately (nodes gn06/31/33/35/39/41), submitted via `ssh vega` (key-only, no OTP):
+
+| job array | arm | task | impact / deliv | runs |
+|---|---|---|---|---|
+| 39857924 | **maxoff** | CaT-Impulse (none) | 0 / 0 | seeds 0,1,2 |
+| 39857925 | **maxon** | CaT-Impulse (none) | 8 / 2 | seeds 0,1,2 |
+| 39857926 | **maxmax** | CaT-Impulse (none) | 24 / 4 | seeds 0,1,2 |
+| 39857927 | **maxofftrk** | CaT-Impulse-**Track** | 0 / 0 + imitation prior | seeds 0,1,2 |
+
+`maxon` retrained in-campaign for commit-parity (af1 is the same config at identical code). `maxofftrk`
+added as the **prior control**: if maxoff(none) strikes straight but maxofftrk swings, the swing is
+taught by the imitation prior, not maximization. Runs: `mx_<arm>_seed{0,1,2}`. Local monitor polls to
+completion + rsyncs checkpoints back, then the swing dose–response is re-plotted via the trace pipeline.
+
 ## Guardrails honored
 `imp_max_p=0` (log-only, set in the sbatch), `IMP_J_LIMIT` unchanged, caps untouched, no VIC/`set_gains`,
 no superlinear excess-over-i_ref reward (the max-max `delivered_impulse=4` is the same **linear** ΔI/I_ref
