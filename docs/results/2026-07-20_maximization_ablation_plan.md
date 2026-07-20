@@ -134,6 +134,42 @@ per-event delivered → kills "harder press" at the physics level, separates one
 into "efficacy"; plus decomposition arms (impact-only 8/0,24/0 vs delivered-only 0/2,0/4) to break the
 impact/delivered co-scaling confound.
 
+## VALIDATION — multi-reset eval, 2026-07-21 (follow-ups #1 + #2 DONE, CPU, `mx_multireset_box.png`)
+
+Re-evaluated all 12 checkpoints over **50 randomized resets each** (`play=False` → reset noise active,
+head ±14 mm; obs noise also on = real deployment conditions; 150 rollouts/arm). This closes the
+single-fixed-reset gap and directly measures peak force + contact events. Means ± sd over the reset dist:
+
+| arm | swing (cm) | % straight (<1cm) | v_touch | delivered ×i_ref | dwell (ms) | MEAN force (N) | PEAK force (N) | events |
+|---|---|---|---|---|---|---|---|---|
+| maxoff | 0.08 ± 0.69 | **90%** | 1.42 | 0.67 | 18.5 | 22.2 | 30.7 | 1.7 |
+| maxon | 3.26 ± 2.22 | 29% | 1.36 | 0.86 | 25.4 | 20.6 | 32.8 | 2.2 |
+| maxmax | 5.07 ± 2.30 | **7%** (93% swung) | 1.36 | 0.95 | 27.8 | 20.9 | 36.4 | 2.5 |
+| maxofftrk | 0.05 ± 0.70 | **90%** | 1.44 | 0.69 | 18.7 | 31.2* | — | 1.8 |
+
+**What strengthened (now robust, not a single draw):**
+- **The ON/OFF swing separation GENERALIZES across ICs.** reward-OFF arms strike straight in **90%** of
+  rollouts; maxmax swings in **93%**. The swing is a real, IC-robust learned behavior — the core causal
+  claim survives IC + obs noise. (Success stays ≥99% everywhere.)
+- **Speed stays flat** (~1.36–1.44 m/s) across the full reset distribution — the "paid 24× for speed, went
+  no faster" result is robust.
+- **maxon bimodality is a real training-seed basin, not undersampling:** maxon_s0 strikes straight in all 50
+  resets while s1/s2 swing — the 8/2 dose induces the maneuver in ~2/3 of seeds. Confirms the "graded step is
+  underpowered/bistable" hedge.
+
+**Two things the multi-reset eval CORRECTED (single-reset draw had overstated them):**
+- **Delivered gain is ~1.4×, not 1.9×** (robust mean 0.67 → 0.95). The 1.9× was a lucky single reset.
+- **"Flat force" was too strong.** MEAN force per contact IS flat (22 → 21 N — the impulse gain is *not*
+  from higher average force), **but PEAK axial force rises ~18%** (30.7 → 36.4 N): the force *profile
+  sharpens modestly*. Honest mechanism: **the ~1.4× impulse is bought by longer dwell (+50%, 18.5 → 27.8 ms)
+  + more contact events (1.7 → 2.5 taps) at flat MEAN force, with a modestly sharper peak** — dwell/taps
+  dominate, peak-force is secondary. The "press not momentum" core (dwell-driven, speed flat) holds; "purely
+  flat force" does not. (*maxofftrk mean-force N/A: its low delivered ÷ dwell is not a clean press.)
+
+Net: the **binary causal claim and the press-not-speed dissociation are now IC-robust**; the delivered
+magnitude and the "flat force" wording are corrected downward. Remaining open item for "efficacy": the VIC
+arm (follow-up #3, GPU).
+
 ## Guardrails honored
 `imp_max_p=0` (log-only, set in the sbatch), `IMP_J_LIMIT` unchanged, caps untouched, no VIC/`set_gains`,
 no superlinear excess-over-i_ref reward (the max-max `delivered_impulse=4` is the same **linear** ΔI/I_ref
