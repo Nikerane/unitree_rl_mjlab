@@ -183,12 +183,16 @@ impulse enforcement — untested because the quantity never approaches its cap.
 - **Conclusion: the enforced Λ is a press integral, not a ballistic impact quantity.** It measures
   how hard/long the arm pushes through contact, not the momentum delivered at the instant of
   impact.
-- Corroborating evidence: commanding the arm 8× harder never raises contact speed past ~1.4 m/s
-  (effort-clamped) and Λ stays non-monotonic, never exceeding 0.36 of cap — the signature of a
+- Corroborating evidence: commanding *this straight-down strike* 8× harder never raises contact speed
+  past ~1.4 m/s, and Λ stays non-monotonic, never exceeding 0.36 of cap — the signature of a
   drive-through press, not a collision (a real collision shows 5–20× peak/mean force ratio; this
   shows 1.4–1.7×, with zero rebound).
+- *(Note for consistency with Slide 10: the ~1.4 m/s clamp is specific to the straight-down trajectory,
+  NOT a torque/effort limit — that attribution was corrected this week. The press character here does
+  not depend on it; it rests on the solref −76% lockstep + the peak/mean force ratio + zero rebound.)*
 
-**PROVEN** (`2026-07-17_phase0_diagnostics.md`, diagnostics A1/A2).
+**PROVEN** (`2026-07-17_phase0_diagnostics.md`, diagnostics A1/A2). The press-vs-ballistic conclusion is
+robust; only the *cause* of the straight-down speed clamp was reattributed (Slide 10).
 
 ---
 
@@ -209,7 +213,7 @@ On a **rigid** target (nail locked, isolating the window/cap question from nail 
 - Model-uncertainty check: even inflating simulated arm inertia 30× (implausibly high), the
   realistic ballistic impulse is still only **0.50× cap**.
 
-**PROVEN.** This table is the evidence base for decision (e) on Slide 12.
+**PROVEN.** This table is the evidence base for decision (e) on Slide 13.
 
 ---
 
@@ -374,7 +378,8 @@ honest about how much of the month went into finding and fixing our own bugs, no
 - invariants: `impossible_success=0`, `lambda_dead=0` all seeds
 
 **Progress arc:**
-- nf1 (pre-fix): success 0.54, depth 28.8 mm, delivered 0.39×, Λ/cap 0.98, ep_len 168
+- nf1 (pre-fix): success 0.54, depth 28.8 mm, delivered 0.39×, Λ/cap 0.98 (range 0.91–1.12, some over
+  cap), ep_len ~168 mean (5 of 6 seeds parked at the 200-step cap)
 - af1 (post-fix + audit): success 1.00, depth 32.0 mm, delivered 0.90×, Λ/cap 0.53, ep_len 7.3
 
 **Physics (Phase 0, CPU, no GPU):**
