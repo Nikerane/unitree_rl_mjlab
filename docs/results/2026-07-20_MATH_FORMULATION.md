@@ -95,7 +95,10 @@ $$
 $$
 then $\Delta q\leftarrow\operatorname{clip}(\Delta q,-0.5,0.5)$ and $q^*=q+\Delta q$. This is
 installed mjlab 1.4.0 `mjlab/envs/mdp/actions/differential_ik.py:174-255`; repo wiring is
-`hammer_env_cfg.py:114-122`, `config/z1/env_cfgs.py:116-128`.
+`hammer_env_cfg.py:114-122`, `config/z1/env_cfgs.py:116-128`. This damped-least-squares form omits
+mjlab's optional joint-limit and posture regularization terms, which is exact here only because
+`joint_limit_weight=posture_weight=0` in this task (never overridden) — the sole configuration under
+which the equation above holds without extra $J^\top J$/$J^\top\Delta x$ contributions.
 
 The native fixed position actuator applies
 $$

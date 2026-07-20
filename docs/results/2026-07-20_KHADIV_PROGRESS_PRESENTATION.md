@@ -125,7 +125,7 @@ expect you'll want to push on this."
 - Comparable healthy arms (`ab1`/`dg`) land in the same neighborhood: success 1.00, depth 32 mm,
   delivered 0.76–0.79×, Λ/cap 0.60–0.67 — af1 is not a cherry-picked outlier.
 - **Caveat (n=3 seeds):** our own eval protocol says n=3 is under-powered (seed spread on af1 alone
-  is 0.56–1.25× on delivered). Treat the *shape* of the result as solid, the exact mean as noisy.
+  is 0.56–1.25× deterministic / 0.64–1.21× sampled on delivered). Treat the *shape* of the result as solid, the exact mean as noisy.
 
 ---
 
@@ -158,7 +158,7 @@ vacuous" language up front so the rest of the talk reads as "here's why, and her
 ## Slide 5 — How we got here: the nf1 → af1 arc
 
 - **Before (`nf1`, pre-fix):** success **0.54**, depth 28.8 mm, delivered 0.39× i_ref, Λ/cap **0.91–1.12
-  (some seeds OVER cap)**, with **5 of 6 seeds running the full 200-step episode cap** (parked). The policy
+  (some seeds OVER cap)**, with **5 of 6 seeds running the full 200-step episode cap** (parked; nf1 predates the current 1000-step / 20 s episode config). The policy
   **parked itself just below the success threshold** and farmed a dense reward loophole instead of finishing.
 - **Root cause:** `nail_driven` (a per-step Gaussian reward on depth, weight 2.0) paid *more* to
   hold the nail at ~28 mm forever than to cross 30 mm and terminate the episode — a classic
@@ -372,7 +372,7 @@ honest about how much of the month went into finding and fixing our own bugs, no
   actually reach the ~4.2 m/s kinematic opportunity in a real dynamic rollout, or does it collapse
   back down once controller dynamics are accounted for? This directly resolves the Slide 10
   reopening, cheaply, before committing to VIC.
-- **In parallel:** the harder-target frontier sweep (Slide 13, option 3) — check whether a modified
+- **In parallel:** the harder-target frontier sweep (Slide 13, the "make the task harder" bullet) — check whether a modified
   nail (mass/friction/spring) creates a *legitimately* binding constraint without touching the caps.
 - **Enforcement-readiness housekeeping** (not turning enforcement on yet): fix the two deferred
   audit findings that block it — the cap time-basis mismatch and the multi-read enforcement
@@ -407,7 +407,7 @@ $$\pi^\* \in \arg\max_\pi\ \mathbb E\!\Big[\textstyle\sum_t \gamma^t r_t\Big]\qu
 The **return** rewards object-side delivered impulse (impact ↑); the **constraint** bounds the
 robot-side per-joint reaction Λ (safety). These pull in opposite directions — that tension *is* the thesis.
 
-**Reward** (dt-scaled, `r_t = 0.02·Σ w_k r_{k,t}`): 7 shipped terms — Gaussian `approach` (0.1) /
+**Reward** (dt-scaled, `r_t = 0.02·Σ w_k r_{k,t}`): 8 terms (the 7-term base + `delivered_impulse` on the constraint arm) — Gaussian `approach` (0.1) /
 `nail_driven` (0.5), ratcheted `nail_depth_delta` (600), gated `impact_progress` (8), `completion`
 (100), `delivered_impulse = 𝟙[progress]·ΔI_t/I_ref` (2, `I_ref=0.6094 N·s`), and penalties
 `action_rate` (−0.01) / `joint_pos_limits` (−10).
@@ -423,7 +423,7 @@ robot-side per-joint reaction Λ (safety). These pull in opposite directions —
 **Soft-CaT** turns a violation into a termination probability and discounts only positive reward:
 $$\delta_{t,j}=\Big[p_{min}+\text{clip}\big(\tfrac{c_{t,j}}{c^{max}_{t,j}},0,1\big)(p_{max}-p_{min})\Big]_{c>0},\quad \delta_t=\max_j\delta_{t,j},\quad r_t^{CaT}=(1-\delta_t)\,r_t^{+}+r_t^{-}.$$
 **Current status: `imp_max_p = 0 ⟹ δ_t^{imp} ≡ 0`** — the impulse constraint is **log-only** (measured, not
-enforced). Flipping `imp_max_p > 0` is Khadiv decision (e)/(f); the machinery is already wired and proven on the velocity constraint.
+enforced). Flipping `imp_max_p > 0` is part of Khadiv decision (e); the machinery is already wired and proven on the velocity constraint.
 
 *Speaker note:* don't walk through equations live — put this up, say "the tension between the impulse
 reward and the Λ constraint is the whole thesis in one line," and point at the companion doc for anyone
