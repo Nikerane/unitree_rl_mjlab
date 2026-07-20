@@ -55,21 +55,29 @@ started yet.
 
 ## Slide 3a — Reward structure: what each term is and WHY (arguably the crux)
 
-Eight terms, in three roles. Weights are the live values from code (not any spec).
+Eight terms. Weights are the live values from code (not any spec). The **functional form** of each term
+is a deliberate choice — the middle column is the "why this shape," which is where most of the intuition lives.
 
-| term | weight | role | why it exists |
-|---|---|---|---|
-| `completion` | **100** | **task signal** | the actual objective: one-shot bonus when the nail crosses 30 mm. Not shaping. |
-| `nail_depth_delta` | **600** | progress shaping | `max(0, depth − max_so_far)` — a dense gradient from 0 mm, where the Gaussian below is ~flat. The main "drive the nail" signal (cumulative ~17 over a full drive). |
-| `nail_driven` | **0.5** | progress shaping | Gaussian on depth — extra pull once the nail moves. *(Was 2.0 → a reward-hacking farm; see next slide.)* |
-| `approach` | 0.1 | progress shaping | weak pull of the head toward the nail (std 8 cm); low so hovering is never optimal. |
-| `impact_progress` | **8** | impact objective | ante-impact *axial velocity* on a fresh, nail-advancing contact. On a position-only action space the controllable impact lever is **momentum**, not force — so we reward pre-impact speed. Literature-motivated. |
-| `delivered_impulse` | **2.0** | **impact objective** | the thesis's headline: object-side delivered impulse ∫F·dt normalized by a reference strike. The explicit "maximize impact" term. *(Only on the constraint arm.)* |
-| `action_rate` | −0.01 | regularizer | smoothness. |
-| `joint_pos_limits` | −10 | regularizer/safety | soft joint-limit penalty. |
+| term (w) | functional form | intuition — why this shape |
+|---|---|---|
+| `completion` (**100**) | **sparse one-shot** `1[depth ≥ 30 mm]` | the TRUE objective. Sparse rewards the *outcome*, not a prescribed *way* to strike — no shaping bias on the motion. |
+| `nail_depth_delta` (**600**) | **increment** `max(0, depth − max_so_far)` | reward only *new* progress → monotone, **cannot be farmed by holding**, and dense from 0 mm (where a distance-Gaussian is ~flat). The workhorse drive signal. |
+| `nail_driven` (**0.5**) | **Gaussian on depth**, centered at goal | a smooth, bounded [0,1] attractor pulling depth toward the goal. Intuitive — but a Gaussian pays near-max *while parked near the goal*, which is exactly what **farmed** at weight 2.0. |
+| `approach` (0.1) | **Gaussian on head→nail distance** (std 8 cm) | a soft, saturating "get close" guide; bounded so it can't dominate, weak so hovering-near is never a stable optimum. |
+| `impact_progress` (**8**) | **gated linear velocity** `(v_axial/v̄)·1[first-contact]·1[advanced]` | on a position-only action the impact lever is **momentum (m_eff·v)**, so reward pre-impact *speed* — but only on a real, nail-advancing strike (double-gated → unfarmable by scraping/tapping). |
+| `delivered_impulse` (**2.0**) | **normalized increment** `Δ(∫F·dt)/i_ref` | the thesis objective, measured object-side. Increment form (like nail_depth_delta) → monotone + farm-resistant; normalized by a reference strike so the weight is interpretable. *(constraint arm only)* |
+| `action_rate` (−0.01) | **quadratic penalty** `−‖Δa‖²` | standard smoothness regularizer — discourage jerky commands. |
+| `joint_pos_limits` (−10) | **barrier penalty** near travel limits | soft safety wall keeping joints off their mechanical limits. |
 
-- **Design philosophy — "augment, not replace":** we add a term only when a specific failure mode is
-  observed, rather than deriving the stack from first principles. Pragmatic, but see the honest caveats next.
+- **The core design intuition — attractors vs. increments.** Distance/goal **Gaussians** (approach,
+  nail_driven) are intuitive smooth attractors, but they pay at *non-terminal* states, so on a ratcheting /
+  irreversible quantity they can be **farmed by parking near the peak** (precisely the nail_driven bug).
+  **Increment / delta** terms (nail_depth_delta, delivered_impulse) reward only *new* progress → monotone,
+  farm-resistant, and dense from zero. **Sparse** (completion) is reserved for the true objective so we don't
+  bias *how* the strike is done. Lesson baked in: prefer increments for the drive + objective, use Gaussians
+  only as weak bounded guides.
+- **Philosophy — "augment, not replace":** add a term only when a specific failure mode appears, rather than
+  deriving the stack from first principles. Pragmatic, but see the honest caveats next.
 
 *Speaker note:* frame this as "here is the reward, and here is exactly why each piece is present — I
 expect you'll want to push on this."
