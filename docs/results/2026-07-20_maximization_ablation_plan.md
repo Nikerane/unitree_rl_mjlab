@@ -170,6 +170,32 @@ Net: the **binary causal claim and the press-not-speed dissociation are now IC-r
 magnitude and the "flat force" wording are corrected downward. Remaining open item for "efficacy": the VIC
 arm (follow-up #3, GPU).
 
+## FOLLOW-UP CAMPAIGNS — LAUNCHED 2026-07-21 (Vega, commit `7d3316f`, clean)
+
+Two more campaigns (12 jobs, `SINGLE_TASK` none arm, 3 seeds each; sbatch gained an `ITERS` env-var hook):
+
+**Decomposition (`dc`, 500 iters) — breaks the impact/delivered co-scaling confound:**
+| job | arm | impact / deliv | question |
+|---|---|---|---|
+| 39861197 | `dc_imponly` | **24 / 0** | does the *speed* reward alone drive the swing? |
+| 39861274 | `dc_delonly` | **0 / 4** | does the *impulse* reward alone drive it? |
+
+Prediction: `g2_delivoff` (July, 8/0) already swung ~4.6cm, so impact_progress alone seems to induce the swing
+*despite contact speed being capped* — completing the split (delivered-only) pins the mechanism. maxoff (0/0)
+is the existing straight baseline.
+
+**Longer training (`lg`, 1500 iters, `--time=02:30:00`) — does behavior change with 3× training?**
+| job | arm | impact / deliv | question |
+|---|---|---|---|
+| 39861277 | `lg_maxmax1500` | 24 / 4 | does more training break the ~1.4 m/s ceiling or intensify the press? |
+| 39861278 | `lg_maxoff1500` | 0 / 0 | does the straight striker stay straight with 3× training? |
+
+Analysis: trace `dc_*`/`lg_*` via `trace_mx.py` (add to ARMS) + `eval_mx_multireset.py`; compare swing / v_touch /
+delivered / dwell / peak-force vs the 500-iter mx arms. Provenance clean `7d3316f` (ITERS hook committed +
+pushed; Vega fast-forwarded). *(Note: git-from-Vega login node hangs on pull sometimes; the run still recorded
+clean `7d3316f` — a stray kill during the first submit left only `dc_imponly` from the initial batch, remaining
+3 arrays submitted separately.)*
+
 ## Guardrails honored
 `imp_max_p=0` (log-only, set in the sbatch), `IMP_J_LIMIT` unchanged, caps untouched, no VIC/`set_gains`,
 no superlinear excess-over-i_ref reward (the max-max `delivered_impulse=4` is the same **linear** ΔI/I_ref
