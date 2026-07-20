@@ -12,6 +12,8 @@ import numpy as np
 IN = "/private/tmp/claude-501/-Users-nikerane-repos-unitree-rl-mjlab/2cd822e7-752b-4070-969b-f93a7bd62f87/scratchpad/traj_mx.json"
 OUTDIR = "docs/results/assets/2026-07-20_policy_videos"
 d = json.load(open(IN)); arms = d["arms"]; nail_x, nail_z = d["nail_top"][0], d["nail_top"][2]
+for a in arms.values():  # contact dwell (ms) = #contact substeps × physics_dt — the mechanism core
+    a["dwell_ms"] = sum(p[3] for p in a["substep"]) * a.get("physics_dt", 0.002) * 1000.0
 ARM_ORDER = ["maxoff", "maxon", "maxmax", "maxofftrk"]
 DOSE = {"maxoff": 0, "maxon": 10, "maxmax": 28, "maxofftrk": 0}  # impact_progress + delivered weight
 TITLE = {"maxoff": "maxoff (0/0)", "maxon": "maxon (8/2)", "maxmax": "maxmax (24/4)",
@@ -42,11 +44,12 @@ fig.suptitle("mx ablation — head trajectory by arm (row) × seed (col), identi
 fig.tight_layout(rect=[0, 0, 1, 0.96]); fig.savefig(f"{OUTDIR}/mx_trajectory_grid.png", dpi=120)
 print(f"-> {OUTDIR}/mx_trajectory_grid.png")
 
-# ---------- Figure 2: dose-response (swing / v_touch / delivered) ----------
-fig2, axs = plt.subplots(1, 3, figsize=(15, 5))
-metrics = [("swing_pre_cm", "pre-contact forward swing (cm)", "swing RISES with dose"),
-           ("v_touch", "contact speed v_touch (m/s)", "speed FLAT (velocity ceiling)"),
-           ("delivered_x_iref", "delivered impulse (× i_ref)", "impulse RISES with dose")]
+# ---------- Figure 2: dose-response (swing / v_touch / delivered / dwell) ----------
+fig2, axs = plt.subplots(1, 4, figsize=(19, 5))
+metrics = [("swing_pre_cm", "pre-contact forward swing (cm)", "swing RISES with dose (ON/OFF solid;\ngraded 8→24 underpowered, n=3)"),
+           ("v_touch", "contact speed v_touch (m/s)", "speed FLAT ~1.4 (dose-insensitive;\nsoft effort clamp, NOT a hard wall)"),
+           ("delivered_x_iref", "delivered impulse (× i_ref)", "impulse RISES with dose\n(~1.9×)"),
+           ("dwell_ms", "contact dwell (ms)", "DWELL rises — the mechanism\n(longer contact at FLAT force)")]
 dose3 = ["maxoff", "maxon", "maxmax"]
 for ax, (key, ylab, sub) in zip(axs, metrics):
     xs = [DOSE[a] for a in dose3]; means = []
@@ -60,9 +63,9 @@ for ax, (key, ylab, sub) in zip(axs, metrics):
     ax.set_xticks([0, 10, 28]); ax.set_xticklabels(["maxoff\n0/0", "maxon\n8/2", "maxmax\n24/4"])
     ax.set_xlabel("impact-maximization reward dose (impact_progress + delivered)")
     ax.set_ylabel(ylab); ax.set_title(sub); ax.grid(alpha=0.3); ax.legend(fontsize=8)
-fig2.suptitle("mx ablation dose-response: the forward-swing is a LEARNED impact-maximization maneuver "
-              "(not kinematic, not the prior)\nit buys DELIVERED IMPULSE (a press integral), NOT contact "
-              "speed (fixed-impedance velocity ceiling ~1.4 m/s)", fontsize=12)
+fig2.suptitle("mx ablation: the forward-swing is a LEARNED impact-maximization maneuver (not kinematic, not the prior).\n"
+              "Paid up to 24× for SPEED, the policy went no faster — it bought impulse via longer DWELL at flat force "
+              "(press, not momentum). All 12 seat the nail to 32.0mm ⇒ impulse without extra work.", fontsize=11.5)
 fig2.tight_layout(rect=[0, 0, 1, 0.93]); fig2.savefig(f"{OUTDIR}/mx_dose_response.png", dpi=120)
 print(f"-> {OUTDIR}/mx_dose_response.png")
 
