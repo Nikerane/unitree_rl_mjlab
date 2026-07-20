@@ -198,6 +198,54 @@ impulse enforcement — untested because the quantity never approaches its cap.
 
 ---
 
+## Slide 6b — How we measure the impulse (the instrument, before the finding)
+
+Before any claim about the constraint, this is *how* Λ is measured — because the measurement choices are
+where the honesty lives.
+
+**What we integrate.** Per arm joint j, over a 50 ms sliding window at the 2 ms physics substep:
+$$\Lambda_j=\textstyle\sum_{\text{window}}\underbrace{\mathbf 1[\text{hammer–nail contact}]}_{\text{contact-mask}}\cdot\big|\,\underbrace{Q_{\text{qfrc},j}-B_j}_{\text{baseline-subtracted}}\,\big|\cdot\,\Delta t_{\text{phys}}$$
+
+**What `qfrc_constraint` is.** MuJoCo solves contact as a convex optimization (Gauss's principle) and returns
+`qfrc_constraint = efc_Jᵀ·efc_force` — the solved constraint reaction projected into joint space. Two facts
+make this the right instrument:
+- It gives **exact per-joint attribution *with* chain coupling** — the reaction at *every* joint from a
+  contact at the hammer face, impossible to get on hardware for free. This is why we use the simulator's
+  internal solver quantity, not an external estimate.
+- MuJoCo reports it in **force units = impulse ÷ h**, so `Σ|qfrc|·Δt` reconstructs the per-joint **impulse**
+  exactly — the quantity the solver natively works in.
+
+**The catch, and the two masks that fix it.** Raw `qfrc_constraint` is an *aggregate* over **all** constraint
+rows — contact **plus dof-friction plus joint-limits** (no per-type split in the field). On this scene the
+contaminant is **dof-friction (~41–48%, end-effector-dependent) + joint limits — NOT a weld** (the training
+env has `neq=0`, zero equality constraints; the weld exists only in the standalone viewer scene). So we (1)
+**contact-mask** (integrate only substeps where the hammer–nail contact sensor fires) and (2)
+**baseline-subtract** (freeze the pre-contact off-contact reaction and subtract it), isolating the contact-caused reaction.
+
+**Three quantities, cross-checked (defense against "your number is a solver artifact"):**
+| quantity | what it is | role |
+|---|---|---|
+| **robot-side Λ** (`qfrc_constraint`) | per-joint solved reaction, chain-coupled | **the enforced constraint** |
+| **object-side ∫F·dt** | net contact force on the *nail* — friction/weld-free *by construction* | clean cross-check (= i_ref 0.6094 N·s) |
+| **ContactRow** (`efc` rows) | isolates *only* the hammer↔nail rows (Jᵀf) | log-only cleanest per-joint attribution |
+
+**The honest caveat we state out loud** (this is the bridge to Slide 7): the contact *force profile* is a
+modeling choice (`solref`/`solimp`), so the impulse integral is momentum-pinned **only for a completed
+ballistic event released inside the window**. Our slow position-controlled reference is a *protocol-truncated
+press*, so Λ is **solref-fragile** — we report `solref`/`solimp`/`timestep` as provenance, and the object-side
+∫F·dt moving in **lockstep** (−76%) proves the shift is *physical*, not an instrument bug.
+
+**Sim-to-real:** the same per-joint reaction is recoverable on the real Z1 with a **generalized-momentum
+external-torque observer** (De Luca/Haddadin) — no joint-torque sensors needed — so the sim quantity has a
+standard hardware counterpart. Company we keep: Kang 2025 (terminate on τ_load), Ma 2025 (bound arm current),
+CaT (bound foot force).
+
+*Speaker note:* the one line to say — *"we don't bound the raw solver force (a modeling artifact); we bound the
+contact-masked, baseline-subtracted per-joint impulse, and we cross-check it against the friction-free
+object-side integral — which is exactly what an external-torque observer would measure on the real arm."*
+
+---
+
 ## Slide 7 — Physics finding: what Λ actually measures (PROVEN)
 
 - Question: is the enforced Λ a **ballistic momentum transfer** (the impact-safety quantity we
