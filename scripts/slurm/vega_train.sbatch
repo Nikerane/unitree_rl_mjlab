@@ -36,6 +36,7 @@ EXTRA_FLAGS=""
 [ -n "${DELIVERED_W:-}" ]   && EXTRA_FLAGS="$EXTRA_FLAGS --env.rewards.delivered-impulse.weight ${DELIVERED_W}"
 # IMPACT_W -> Phase-2b: strengthen the ante-impact velocity term (impact_progress).
 [ -n "${IMPACT_W:-}" ]      && EXTRA_FLAGS="$EXTRA_FLAGS --env.rewards.impact-progress.weight ${IMPACT_W}"
+# ITERS -> longer/shorter training (default 500); pair a bigger --time at submit for long runs.
 ARM_TASK=(Unitree-Z1-Hammer-CaT-Impulse-Track Unitree-Z1-Hammer-CaT-Impulse)
 ARM_SHORT=(track none)
 t=${SLURM_ARRAY_TASK_ID:?must run as an array}
@@ -55,7 +56,7 @@ echo "### TRAIN task=$t arm=$short seed=$seed run=$RUN git=$GITHASH host=$(hostn
 [ "${GITHASH%-dirty}" != "$GITHASH" ] && echo "### WARN: working tree is DIRTY — results' git_hash will not fully reproduce this run."
 $PY -c "import torch; assert torch.cuda.is_available() and 'A100' in torch.cuda.get_device_name(0), 'no A100'; print('A100 ok:', torch.cuda.get_device_name(0))" || { echo "### NO GPU/A100 on $(hostname) — requeue+exit"; scontrol requeue "${SLURM_JOB_ID}" 2>/dev/null; exit 1; }
 $PY scripts/train.py "$task" --gpu-ids [0] --agent.logger tensorboard \
-  --agent.run-name "$RUN" --agent.seed "$seed" --agent.max-iterations 500 --agent.save-interval 50 \
+  --agent.run-name "$RUN" --agent.seed "$seed" --agent.max-iterations "${ITERS:-500}" --agent.save-interval 50 \
   --env.scene.num-envs 4096 --env.metrics.cat-soft.params.imp-max-p 0 \
   --env.metrics.substep-impulse-rows.params.enabled False $EXTRA_FLAGS
 rc=$?
