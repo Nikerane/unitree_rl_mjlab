@@ -196,6 +196,38 @@ pushed; Vega fast-forwarded). *(Note: git-from-Vega login node hangs on pull som
 clean `7d3316f` — a stray kill during the first submit left only `dc_imponly` from the initial batch, remaining
 3 arrays submitted separately.)*
 
+## DECOMPOSITION RESULT — 2026-07-21 (dc arms done; 30-reset validation, `dc_decomposition_box.png`)
+
+Isolating the two rewards (30 randomized resets/policy, play=False) reveals they drive **dissociable
+strategies** — a cleaner mechanism than the co-scaled mx arms could show:
+
+| arm | reward | swing (cm) | v_touch | delivered | dwell (ms) | **PEAK F (N)** | **MEAN F (N)** | taps |
+|---|---|---|---|---|---|---|---|---|
+| maxoff | neither | 0.18 | 1.42 | 0.67 | 18.0 | 31.2 | 22.6 | 1.7 |
+| **imponly** | **speed** | **2.08 (SWING)** | 1.32 | 0.92 | 26.6 | 33.2 | 21.1 | 2.7 |
+| **delonly** | **impulse** | **0.16 (STRAIGHT)** | 1.34 | 1.00 | 24.9 | **43.1** | **24.4** | 1.9 |
+| maxmax | both | 5.14 | 1.36 | 0.96 | 27.8 | 36.9 | 21.0 | 2.4 |
+
+**The dissociation (robust):**
+- **`impact_progress` (speed reward) → the wind-up SWING** (+ longer dwell + more taps), at **flat force**.
+- **`delivered_impulse` (impulse reward) → a straight HARD PRESS** — no swing, but the **highest peak force
+  (43 N) and mean force (24.4 N)**. Force is the impulse reward's lever, not the speed reward's.
+- Both raise delivered (~0.9–1.0×) but by **different mechanisms** (swing/dwell vs force). maxmax (both) is a
+  blend where the swing dominates the *look* but suppresses the force the impulse reward alone achieves.
+
+**Two honest corrections this forced:**
+1. **Retract the single-reset "the speed reward buys speed" revision** (from the trace draft, imponly hit
+   1.62). Across 30 resets **imponly v_touch = 1.32 ≤ maxoff 1.42** — the speed reward does **NOT** raise
+   contact speed. The original synthesis claim ("paid for speed, went no faster") **stands**; the 1.62 was a
+   single-reset fluke. (The multi-reset caught it — exactly why it was run.)
+2. **Refine the mx "flat force" story:** mean force is flat *in the combined arms*, but the **impulse reward
+   ISOLATED (delonly) drives higher force** (peak 43 N, mean 24.4 N) in a straight press. "Flat force" is a
+   property of the both-reward blend, not of the impulse reward's intrinsic effect.
+
+**Constraint-relevant new angle:** delonly (pure impulse-maximization) produces the **highest joint-loading
+peak force (43 N)** — so the delivered-impulse objective, isolated, is exactly what would drive the per-joint
+reaction Λ hardest. This ties the maximization reward directly to the constraint the thesis bounds.
+
 ## Guardrails honored
 `imp_max_p=0` (log-only, set in the sbatch), `IMP_J_LIMIT` unchanged, caps untouched, no VIC/`set_gains`,
 no superlinear excess-over-i_ref reward (the max-max `delivered_impulse=4` is the same **linear** ΔI/I_ref
