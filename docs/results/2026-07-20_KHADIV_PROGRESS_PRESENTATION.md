@@ -53,6 +53,52 @@ started yet.
 
 ---
 
+## Slide 3a — Reward structure: what each term is and WHY (arguably the crux)
+
+Eight terms, in three roles. Weights are the live values from code (not any spec).
+
+| term | weight | role | why it exists |
+|---|---|---|---|
+| `completion` | **100** | **task signal** | the actual objective: one-shot bonus when the nail crosses 30 mm. Not shaping. |
+| `nail_depth_delta` | **600** | progress shaping | `max(0, depth − max_so_far)` — a dense gradient from 0 mm, where the Gaussian below is ~flat. The main "drive the nail" signal (cumulative ~17 over a full drive). |
+| `nail_driven` | **0.5** | progress shaping | Gaussian on depth — extra pull once the nail moves. *(Was 2.0 → a reward-hacking farm; see next slide.)* |
+| `approach` | 0.1 | progress shaping | weak pull of the head toward the nail (std 8 cm); low so hovering is never optimal. |
+| `impact_progress` | **8** | impact objective | ante-impact *axial velocity* on a fresh, nail-advancing contact. On a position-only action space the controllable impact lever is **momentum**, not force — so we reward pre-impact speed. Literature-motivated. |
+| `delivered_impulse` | **2.0** | **impact objective** | the thesis's headline: object-side delivered impulse ∫F·dt normalized by a reference strike. The explicit "maximize impact" term. *(Only on the constraint arm.)* |
+| `action_rate` | −0.01 | regularizer | smoothness. |
+| `joint_pos_limits` | −10 | regularizer/safety | soft joint-limit penalty. |
+
+- **Design philosophy — "augment, not replace":** we add a term only when a specific failure mode is
+  observed, rather than deriving the stack from first principles. Pragmatic, but see the honest caveats next.
+
+*Speaker note:* frame this as "here is the reward, and here is exactly why each piece is present — I
+expect you'll want to push on this."
+
+---
+
+## Slide 3b — Reward design: the honest tensions (please critique)
+
+- **The maximize-objective is out-competed by its own task signal.** `completion` (100, one-shot) dwarfs
+  `delivered_impulse` (2.0) by roughly **50:1** in per-episode return. So the policy is rewarded far more
+  for *finishing* than for *hitting hard* — it does the minimum impulse that completes. **This is a prime
+  suspect for why impulse maximization stalled** (Slide 10), and it is a reward-structure choice, not a law.
+- **Shaping terms can become exploits.** `nail_driven` at 2.0 created the parking farm (Slide 5) — a dense
+  per-step reward on a ratcheting quantity that paid more to *not* finish. Lesson baked in: dense shaping on
+  an irreversible state is dangerous; we now audit for it.
+- **The stack is progress-heavy.** Three terms (`nail_depth_delta`, `nail_driven`, `approach`) all just
+  "drive the nail." Is that over-shaped? Could the task be carried by `completion` + `impact_progress` +
+  `delivered_impulse` alone? Open to simplification.
+- **It is not derived from the formal objective.** The thesis objective is *maximize impact impulse subject
+  to a per-joint impulse bound*; the shipped reward is a hand-tuned shaping stack that approximates
+  "complete the task, gently." Whether to re-derive it around the true objective (e.g. reward delivered
+  impulse beyond reference, soften the completion cliff) is an open design decision.
+- **PROVEN:** the current stack trains a clean, successful single strike. **OPEN:** whether its *balance*
+  (completion ≫ impulse) is the right one for the thesis's actual goal.
+
+*Speaker note:* this is the slide most likely to generate the feedback you want — lead the discussion here.
+
+---
+
 ## Slide 4 — Headline result: it works, cleanly (PROVEN)
 
 **Best policy (`af1`, audit-fixed code, log-only constraint):**
@@ -271,6 +317,11 @@ honest about how much of the month went into finding and fixing our own bugs, no
   we spend time testing whether a whip-capable fixed-impedance policy closes the impulse gap before
   starting variable impedance, or is VIC's motivation (decoupling contact speed from steady-state
   joint velocity) strong enough to start now regardless?
+- **Reward re-balance (Slides 3a–3b)** — should we re-derive the reward around the formal objective
+  (maximize impulse s.t. the bound) rather than the current "complete-the-task-gently" shaping stack?
+  Concretely: soften the `completion` cliff and/or reward delivered impulse *beyond* reference so the
+  50:1 imbalance stops suppressing the maximize term — coupled carefully to avoid re-opening a farm.
+  This may matter more than any single experiment, since the reward defines what "success" even means.
 - **Hard rule I'm holding regardless of your answer:** the impulse caps stay at manufacturer/
   hardware-derived values. Whatever we decide, we don't tune the cap to make a story work.
 
