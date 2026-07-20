@@ -129,6 +129,32 @@ expect you'll want to push on this."
 
 ---
 
+## Slide 4a — Scorecard: the three thesis quantities in one view (honest)
+
+The thesis has three goals: **(1)** do the task, **(2)** maximize impact impulse, **(3)** respect the
+per-joint impulse constraint. For the best policy `af1`:
+
+| thesis quantity | target | achieved (af1) | honest status |
+|---|---|---|---|
+| **1. Task** — drive the nail | depth ≥ 30 mm | 32 mm, **100% success**, clean single strike (7 steps) | ✅ **SOLVED** |
+| **2. Impact maximization** — maximize delivered impulse | as high as possible | **0.90× i_ref** (sampled) — *matches* a scripted reference strike, does **not** exceed it | ⚠️ **MATCHED, not maximized** |
+| **3. Constraint** — Λ_j ≤ L_j ∀ joints | worst Λ/cap < 1 | worst **0.53** (sampled) / **0.17** (deployed); all 6 joints under; over-cap fraction **0** / ~13k episodes | ✅ **SATISFIED — but unforced + vacuous** |
+
+**Per-joint Λ/cap (deployed policy):** j1 (shoulder) **0.17**, j2 0.08, j3 0.11, j4 0.08, j5 0.10, j6 0.01
+— the shoulder carries the most reaction, every joint sits far under its cap.
+
+- **The honest one-liner:** *the task is solved and the constraint is satisfied with large margin — but the
+  constraint is satisfied **trivially** (it is log-only and the policy never approaches it), and the impulse
+  is **matched** to a reference strike rather than **maximized** beyond it.*
+- So of the three goals, **1 is genuinely done**, and **2 and 3 are "achieved" only in a weak sense** — which
+  is exactly why the open decisions (Slides 10, 13) matter: maximization needs a better trajectory/reward,
+  and the constraint needs to either bind legitimately or be honestly reported as non-binding.
+
+*Speaker note:* this is the single most honest slide — put the "matched not maximized" and "satisfied but
+vacuous" language up front so the rest of the talk reads as "here's why, and here's what we do about it."
+
+---
+
 ## Slide 5 — How we got here: the nf1 → af1 arc
 
 - **Before (`nf1`, pre-fix):** success **0.54**, depth 28.8 mm, delivered 0.39× i_ref, Λ/cap **0.91–1.12
