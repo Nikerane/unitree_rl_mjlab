@@ -46,7 +46,7 @@ for ax, label in zip(axes.flat, order):
     ax.axvline(nail_x, color="#bbbbbb", ls=":", lw=0.8, zorder=0)
     # swing excursion (pre-contact only)
     fwd = pre_swing(a)
-    ok = a["max_nail_mm"] >= 30.0
+    ok = a.get("success", a["max_nail_mm"] >= 30.0)  # ground-truth done flag
     tag = "★ " if label == "af1_fixed" else ""
     ax.set_title(f"{tag}{label}   depth {a['max_nail_mm']:.0f}mm"
                  f"\nfwd-swing {fwd*100:+.1f}cm", fontsize=10.5,
@@ -56,7 +56,7 @@ for ax, label in zip(axes.flat, order):
 for ax in axes.flat[len(order):]:
     ax.axis("off")
 fig.suptitle("Hammer-head trajectory (x–z side view) across July policies — identical fixed reset (seed 12345)\n"
-             "green=start · viridis=time · red=in-contact · brown ▽=nail top   "
+             "green=start · viridis=normalized time (per panel) · red=in-contact · brown ▽=nail top   "
              "(‘fwd-swing’ = how far past the nail-x the head arcs before striking)",
              fontsize=12.5)
 fig.text(0.5, 0.02, "forward  x (m) →", ha="center", fontsize=11)
