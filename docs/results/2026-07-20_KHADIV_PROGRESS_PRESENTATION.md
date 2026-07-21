@@ -345,6 +345,38 @@ quantity*, pending decision (e).
 
 ---
 
+## Slide 10c — The definitive answer: a causal dissection of the maximization reward (NEW, strongest result)
+
+We trained a **controlled ablation** (24 policies, reward weight 0→24×, GPU on Vega) and validated it over
+**1,140 rollouts** with domain-varied resets. It settles the impulse-maximization question:
+
+- **The forward-swing is a *learned* maneuver caused by the impact-max reward** — not kinematic, not the
+  imitation prior. Turn the reward off → every seed strikes straight (90% of rollouts); turn it to 24× →
+  it swings (93%). Robust across initial conditions. *(`mx_dose_response.png`, `before_after_trajectories.png`.)*
+- **The two reward terms drive DISSOCIABLE strategies** (`dc_decomposition_box.png`): `impact_progress`
+  (speed reward) → a wind-up **swing**; `delivered_impulse` (impulse reward) → a straight **hard press**
+  (highest joint force, 43 N). Different-looking, same underlying lever.
+- **The essential fact:** under fixed impedance, delivered impulse is `∫F·dt` against a nail that stays put,
+  so the reward can only buy **contact *time*, not contact *speed*.** We paid the policy **24× to strike
+  faster and it went *no faster*** (speed flat ~1.4 m/s); a regression over all 1,140 rollouts shows two
+  scalars — dwell + force — predict delivered impulse (**R²=0.84**), while speed and the dramatic swing add
+  ≈0. `corr(speed, delivered) = −0.26`.
+- **Longer training doesn't help** — 3× iterations *destabilized* (a seed collapsed to 0% success), no ceiling
+  break. *(Caveat: that's specific to our current no-DR/no-curriculum recipe — with DR + curriculum, longer
+  training returns.)*
+
+**What this means for the thesis (honest, and it tightens Slide 10):** on fixed impedance the maximization
+objective **structurally collapses onto contact duration** — RL never found the whip (fastest strike ever,
+across every config, was 1.81 m/s vs the ~4.2 m/s kinematic opportunity). **But "RL didn't find it" ≠ "it
+can't be found"** — the closed-loop whip search (same fixed gains) is the unrun prerequisite. So this is
+evidence the fixed-impedance *reward landscape* has a wide cheap "press-longer" ridge that dominates the
+narrow "strike-faster" peak — a **landscape** problem, to be resolved *within FIC* before any impedance talk.
+
+*Speaker note:* this is the slide to be proudest of — it's a clean causal experiment with an honest,
+self-correcting method (four claims were revised mid-investigation when a controlled check beat a plausible story).
+
+---
+
 ## Slide 11 — What we solved this month (timeline)
 
 1. **Root-caused and fixed a reward "parking farm"** — policy was parking below success to farm a
@@ -413,20 +445,24 @@ honest about how much of the month went into finding and fixing our own bugs, no
 
 ---
 
-## Slide 14 — Proposed next steps
+## Slide 14 — Proposed next steps: PERFECT FIXED IMPEDANCE FIRST (VIC stays deferred)
 
-- **Immediate (before touching VIC):** a CPU-only trajectory optimization test — can a
-  whip-shaped strike, under the *same* hardware constraints (30/60 N·m, 3.1415 rad/s per joint),
-  actually reach the ~4.2 m/s kinematic opportunity in a real dynamic rollout, or does it collapse
-  back down once controller dynamics are accounted for? This directly resolves the Slide 10
-  reopening, cheaply, before committing to VIC.
-- **In parallel:** the harder-target frontier sweep (Slide 13, the "make the task harder" bullet) — check whether a modified
-  nail (mass/friction/spring) creates a *legitimately* binding constraint without touching the caps.
-- **Enforcement-readiness housekeeping** (not turning enforcement on yet): fix the two deferred
-  audit findings that block it — the cap time-basis mismatch and the multi-read enforcement
-  asymmetry — so that whenever decision (e) lands, we can flip `imp_max_p` on correctly the same
-  day, rather than discovering a miscalibration after the fact.
-- **Then:** whichever of whip-maximization or VIC your decision on Slide 13 points to.
+The whole plan stays inside fixed-impedance control. The two thesis halves — *maximize impact* and *bound it
+safely* — turned out to be **coupled**: the constraint is vacuous **because** the strike is a gentle press.
+Fix the strike and the constraint becomes real. In order:
+
+1. **Closed-loop whip search (FIC, the linchpin).** Can a fixed-impedance policy, through the real DiffIK
+   action space at the *same* PD gains, reach materially past ~1.4 m/s toward the ~4.2 m/s kinematic ceiling?
+   CPU trajectory-opt first, then a training run with a wind-up curriculum. This decides whether FIC impact
+   can be maximized *at all* — and whether the constraint can be made to bind. (Not VIC: no `set_gains`.)
+2. **Make the impulse constraint bind + enforce (FIC, the thesis headline).** With an impactful strike, turn
+   on soft-CaT enforcement (`imp_max_p>0`, decision (e)) and/or a harder nail, and demonstrate it bounds
+   per-joint impulse *while* the policy maximizes impact — the actual contribution. (Deep-check: the deployed
+   reward loads **j1** hardest, so that's the joint enforcement would bind.)
+3. **Domain randomization + curriculum (FIC).** Robustness / sim2real — and where longer training iterations
+   legitimately return (our "1500 hurts" result was purely a bare-fixed-env artifact).
+4. **VIC — explicitly deferred** until FIC is perfected *and* you sign off. It's an efficiency/landscape
+   refinement, not a proven necessity (Slide 10c) — and it belongs last.
 
 ---
 
@@ -436,10 +472,12 @@ honest about how much of the month went into finding and fixing our own bugs, no
   you want the thesis to claim "impact-safe" means?
 - Are you comfortable with CaT as the enforcement mechanism, given it's proven on velocity but
   unproven on impulse (because the impulse quantity has never bound)?
-- Should I spend the next 1–2 weeks on the whip-maximization test before starting VIC, or is the
-  VIC motivation strong enough already to start now in parallel?
+- I'm committing to **perfecting fixed impedance before any VIC** (maximize the strike, then make the
+  constraint actually bind + enforce, then DR/curriculum). Are you aligned that VIC stays last?
 - Is a harder/modified nail target (to make the constraint bind legitimately) in scope, or does
   changing the task risk diluting the thesis's grounding in the real hardware target?
+- Given Slide 10c (RL never found the whip, but it's an exploration-not-physics limit), are you happy
+  with the **closed-loop whip search** as the immediate next FIC experiment?
 
 ---
 
