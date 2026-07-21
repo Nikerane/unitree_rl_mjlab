@@ -292,11 +292,16 @@ physical channels.
 **Load-bearing open experiments (ranked):**
 1. **Closed-loop whip search (fixed impedance)** — B2's specified-but-unrun decisive test: optimize/curriculum
    toward a coordinated whip through the *real* DiffIK `a_t∈[−1,1]³` interface (not velocity injection). This is
-   the prerequisite for any "VIC necessary" claim. → **NOW SPECCED:** `2026-07-21_whip_search_spec.md` (staged
-   trajopt → parametrized → RL-shaping; code-grounded plant table; decision thresholds; the speed-≠-Λ caveat).
-   Retrain `imponly` (24/0) with a wind-up curriculum
-   (anneal `delta_pos_scale` up pre-contact, or a soft whip-reference imitation prior during wind-up only);
-   if it still caps ≪4.22 m/s → necessity earned; if it reaches ~2.5–3 m/s → VIC is a refinement, not a necessity.
+   the prerequisite for any "VIC necessary" claim. → **SPECCED + RUN (Stage 1, 2026-07-21):**
+   `2026-07-21_whip_search_spec.md`. CEM open-loop shooting (RL-seeded, converged) through the real DiffIK
+   interface. **RESULT:** at the shipped δ=0.15, an exhaustive legal search beats RL by only +6% (v\*=1.928,
+   hardware-legal v\*_hw=**1.72**) → **~1.8 m/s IS the ceiling and RL already found it — no hidden whip channel.**
+   BUT it is the **action-scale** ceiling, not impedance: raising `delta_pos_scale` 0.15→0.30 (PD unchanged, still
+   FIC) lifts the legal ceiling to **2.83 m/s (+64%)** → **VIC is NOT required to exceed 1.8 m/s** (a FIC knob does
+   it). Efficiency drops 0.26→0.19 (PD-bandwidth onset); δ=0.45 pending. Caveat holds: this is SPEED, not the
+   press-integral Λ (`corr(v_touch,delivered)=−0.26`). (Superseded plan: the "retrain imponly with wind-up
+   curriculum, anneal `delta_pos_scale` up" idea below is now moot for the *speed* question — the shooter already
+   answered it.)
 2. **Swing-is-a-controller-artifact check (cheap, CPU)** — replay a maxmax rollout with the head arc smoothed
    out but dwell/approach preserved; the regression predicts delivered/reward won't change. If confirmed: the
    swing is kinematic residue of DiffIK re-servoing a compliant target, not a chosen maneuver — a clean

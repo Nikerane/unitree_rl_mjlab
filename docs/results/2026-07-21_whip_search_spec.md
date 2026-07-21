@@ -1,11 +1,67 @@
 # Closed-loop whip search — experiment spec (2026-07-21)
 
-**Status:** SPEC / design — nothing has run. Awaiting sign-off on the decision thresholds + Stage-1 go-ahead.
+**Status:** Stage 1 RUN (2026-07-21) — see **RESULT** below. δ=0.15 & 0.30 done; δ=0.45 confirmatory run pending.
+Harness: `evaluation/whip/whip_search.py`; data: `evaluation/whip/data/whip_delta*.json`.
 **Formalizes:** open-experiment **#1** of `docs/results/2026-07-20_maximization_ablation_plan.md` ("Closed-loop
 whip search (fixed impedance) — B2's specified-but-unrun decisive test"). That plan names the test and sketches a
 rough decision rule; this doc is the runnable design.
 **Scope:** pure **fixed-impedance control (FIC)**. Nothing here touches `set_gains` / per-joint stiffness — this is
 the prerequisite FIC experiment *before* any VIC discussion, per the standing priority.
+
+---
+
+## RESULT — Stage 1 (2026-07-21): the ~1.8 m/s ceiling is the ACTION SCALE, not impedance
+
+Ran the CEM open-loop shooter (`evaluation/whip/whip_search.py`; pop=96, T=30, 40 gens × 3 basins =
+`lg_maxoff1500_s2` + `af1` RL warm-starts + a downward-bias basin) from the fixed `play=True` reset, CPU. Contact
+speed uses the parity yardstick (§5, identical to `eval_mx_multireset`). Both RL basins **converged** (best flat for
+the final ~20 gens); the downward-bias basin never competed. Legality: startup self-grep proves no `..._to_sim(`
+injection; every action ∈ [−1,1]³ through the shipped DiffIK+PD pipeline.
+
+| `delta_pos_scale` | v\* (sim, m/s) | v\*_hw (hardware-legal, arm ≤3.1415 rad/s) | efficiency v·dt_ctrl/δ |
+|---|---|---|---|
+| **0.15 (shipped)** | 1.928  (peak \|q̇\| 4.96 → illegal) | **1.724**  (peak \|q̇\| 2.89) | 0.26  ·  0.23ₕ𝓌 |
+| 0.30 | 2.847 | **2.827** | 0.19  ·  0.19ₕ𝓌 |
+| 0.45 | *(pending — reproducible high-δ solver crash; see harness note)* | | |
+
+**1. At the shipped action space, ~1.8–1.9 m/s IS the ceiling — and RL already found it.** An exhaustive open-loop
+search, seeded at the two best policies and converged, beats the RL record (1.81) by only **+6 %** (1.928) — and
+that +6 % is not even hardware-legal (needs 4.96 rad/s; the legal best is **1.724**, *below* the RL max). Open-loop
+shooting upper-bounds any closed-loop policy (§2), so this is a **strong null: there is no hidden momentum/whip
+channel at δ=0.15.** The earlier honest hedge — "fixed-impedance RL never *found* the momentum channel" — resolves
+to **"there is no such channel to find at the shipped scale."** RL was not leaving speed on the table.
+
+**2. But that ceiling is the ACTION SCALE (`delta_pos_scale`), not impedance.** Raising δ 0.15→0.30 — PD gains,
+`max_dq`, armature ALL unchanged (still fixed impedance, a different action-space *parameterization*) — lifts the
+hardware-legal ceiling **1.72 → 2.83 m/s (+64 %)**. **⇒ VIC is NOT required to exceed 1.8 m/s.** A fixed-impedance
+knob (a larger action scale, with the `max_dq` recalibration `env_cfgs.py:127` already flags) recovers the speed.
+
+**3. Diminishing returns → a PD-bandwidth wall is forming.** Efficiency falls 0.26→0.19 as δ rises: the PD/`max_dq`
+servo can't fully track the larger command, so speed grows sub-proportionally. δ=0.45 locates whether it keeps
+climbing (pure δ-rail) or plateaus near ~2.8–3.0 m/s (the bandwidth wall — where a higher-bandwidth interface, or
+VIC, would be the only further lever). This is the one open point; the localization conclusion (2) does not depend
+on it.
+
+*Harness note (the δ=0.45 gap):* the δ=0.30/0.45 runs hit a **reproducible native `mujoco_warp` CPU crash** in the
+`af1`-seeded basin around gen 8 — the **same logical generation across two independent runs at different wall-clock**
+(so a deterministic solver crash on an extreme high-δ trajectory the CEM explores, NOT machine flakiness or a
+timeout; δ=0.15 never crashes). The `af1` policy was trained for δ=0.15, so at δ=0.30 its warm-start drives ~2×
+motion and the search wanders into a solver-unstable configuration. **The δ=0.30 `lg`-seed basin CONVERGED to
+2.847 / 2.827 *before* that crash, so the δ=0.30 result is valid.** Completing δ=0.45 needs a crash-hardened harness
+(subprocess-isolated rollouts so one bad sample can't kill the campaign, or velocity-guarded / NaN-rejecting
+sampling) — or Vega. That the arm becomes solver-unstable at 2× action scale is itself a mild signal that "just
+raise δ" pushes into aggressive regimes, reinforcing that the PD-bandwidth wall (finding 3) is real.
+
+**Verdict:** the contact-speed ceiling at the shipped action space is **real and RL-found (~1.8 m/s), but it is the
+δ=0.15 action-scale limit, not a fixed-impedance limit** — a legal FIC change (raise δ) already reaches ~2.8 m/s
+legal. So **a contact-speed argument does not, on its own, motivate VIC**; the FIC toolbox has the lever.
+
+**The §8 caveat is now sharper, not weaker.** Everything above is contact SPEED. The enforced Λ is a press-integral
+that selects contact DURATION, where speed is irrelevant (`corr(v_touch, delivered) = −0.26`). So "raising δ recovers
+speed" matters ONLY under the *impulsive-strike* framing (ballistic `m_eff·v`), NOT for the press-integral Λ the
+accumulator ships today. The whip search has shown contact speed is recoverable within FIC; whether speed is the
+right quantity to bound remains the separate impulsive-vs-press decision (Khadiv (e)). **Do not read "VIC unnecessary
+for speed" as "VIC unnecessary"** — that conflates the two halves of §8.
 
 ---
 
