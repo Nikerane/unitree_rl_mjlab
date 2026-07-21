@@ -306,3 +306,23 @@ physical channels.
 `imp_max_p=0` (log-only, set in the sbatch), `IMP_J_LIMIT` unchanged, caps untouched, no VIC/`set_gains`,
 no superlinear excess-over-i_ref reward (the max-max `delivered_impulse=4` is the same **linear** ΔI/I_ref
 term, just weighted). Provenance: git-based deploy, `-dirty` guard, per-run `git/unitree_rl_mjlab.diff`.
+
+## DEEP-CHECK RESULTS — 2026-07-21 (`check_deep.py`, CPU, play=False)
+
+**Check 2 (per-joint peak Λ/cap, 15 resets × 3 seeds):** every arm loads **j1 (shoulder) most**;
+`delonly` (pure impulse-max) loads it hardest (0.268× cap). Per-joint Λ/cap:
+maxoff [0.11,0.06,0.05,0.05,0.07,0.01] · imponly [0.23,0.09,0.15,0.11,0.14,0.01] ·
+delonly [0.27,0.10,0.14,0.09,0.17,0.02] · maxmax [0.23,0.09,0.14,0.10,0.14,0.01].
+→ **Confirms the deployed (press-regime) policies load j1**, not the ballistic j2–j4 the constraint framing
+emphasizes (Phase-0 A5). All < 0.27× cap (non-binding, log-only), but **enforcement would primarily bind j1**
+— a calibration note for the impulse-CaT going into VIC. The impulse-max reward (delonly) is exactly what
+drives j1 load, tying the reward to the constraint.
+
+**Check 1 (is the swing causal? — INCONCLUSIVE / confounded):** replaying maxmax's actions with the lateral
+(x,y) deltas zeroed dropped delivered **0.93 → 0.60 (−35%)** and missed the nail on 1/12 resets — so the swing
+is **NOT a pure non-causal artifact** (leans against Fable's hypothesis). BUT the counterfactual is confounded:
+zeroing x/y also changes the *approach* (Fable's test said preserve it), so this conflates "the arc" with "the
+lateral approach" and does not cleanly isolate the arc. The clean statement stays the between-policy one:
+**`delonly` (straight, trained) delivers 1.0 > maxmax (swing) 0.93** — the swing is causal within its own
+policy but a *suboptimal* delivery strategy; a straight press does better. A clean arc-isolation test remains
+open (hard to vary arc independent of approach in a closed-loop policy).
