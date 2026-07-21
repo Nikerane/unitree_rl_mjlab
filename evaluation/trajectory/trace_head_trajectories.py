@@ -18,7 +18,7 @@ from src.assets.robots.unitree_z1.z1_constants import HAMMER_HEAD_SITE_NAME
 
 TASK = "Unitree-Z1-Hammer-CaT-Impulse"
 ROOT = "logs/rsl_rl/z1_hammer"
-OUT = "/private/tmp/claude-501/-Users-nikerane-repos-unitree-rl-mjlab/2cd822e7-752b-4070-969b-f93a7bd62f87/scratchpad/traj_all.json"
+OUT = "evaluation/data/traj_all.json"
 SEED = 12345
 
 # (label, dir-prefix) — one representative seed per distinct July arm.

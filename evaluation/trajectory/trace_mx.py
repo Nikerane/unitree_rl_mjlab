@@ -20,7 +20,7 @@ I_REF = 0.6094
 
 TASK = "Unitree-Z1-Hammer-CaT-Impulse"
 ROOT = "logs/rsl_rl/z1_hammer"
-OUT = "/private/tmp/claude-501/-Users-nikerane-repos-unitree-rl-mjlab/2cd822e7-752b-4070-969b-f93a7bd62f87/scratchpad/traj_mx.json"
+OUT = "evaluation/data/traj_mx.json"
 SEED = 12345
 STAMP = "2026-07-20_22-07-49_mx_"
 ARMS = [(f"{arm}_s{s}", f"{STAMP}{arm}_seed{s}")

@@ -71,7 +71,8 @@ serves as max-on.
 
 ## Analysis (after training, local)
 1. `rsync` the `mx_maxoff_*` / `mx_maxmax_*` `model_499.pt` back into `logs/rsl_rl/z1_hammer/`.
-2. Add them to `ARMS` in `assets/2026-07-20_policy_videos/trace_head_trajectories.py`, re-run the trace +
+2. Add them to `ARMS` in `evaluation/trajectory/trace_head_trajectories.py` (all analysis scripts now live
+   under `evaluation/` — see `evaluation/README.md`), re-run the trace +
    `plot_head_trajectories.py` + `swing_vs_speed.py` → compare **pre-contact swing** and **v_touch** across
    the max-off / af1 / max-max dose axis (same fixed reset, apples-to-apples).
 3. Verdict: monotone swing↑ with dose ⇒ swing is a maximization maneuver; flat ⇒ kinematic.

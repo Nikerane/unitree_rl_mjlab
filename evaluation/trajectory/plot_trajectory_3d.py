@@ -8,7 +8,7 @@ import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # noqa
 
-SP = "/private/tmp/claude-501/-Users-nikerane-repos-unitree-rl-mjlab/2cd822e7-752b-4070-969b-f93a7bd62f87/scratchpad"
+SP = "evaluation/data"
 OUTDIR = "docs/results/assets/2026-07-20_policy_videos"
 d = json.load(open(f"{SP}/traj_dc.json")); A = d["arms"]; nx, ny, nz = d["nail_top"]
 ARMS = [("maxoff_s0", "maxoff (straight)", "#2ca02c"),

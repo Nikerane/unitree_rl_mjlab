@@ -6,7 +6,7 @@ import json, statistics as st
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-IN = "/private/tmp/claude-501/-Users-nikerane-repos-unitree-rl-mjlab/2cd822e7-752b-4070-969b-f93a7bd62f87/scratchpad/mx_multireset.json"
+IN = "evaluation/data/mx_multireset.json"
 OUTDIR = "docs/results/assets/2026-07-20_policy_videos"
 d = json.load(open(IN)); A = d["arms"]; N = d["N"]
 ARMS = ["maxoff", "maxon", "maxmax", "maxofftrk"]

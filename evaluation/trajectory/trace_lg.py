@@ -13,7 +13,7 @@ from src.assets.robots.unitree_z1.z1_constants import HAMMER_HEAD_SITE_NAME
 from src.tasks.hammer.mdp.impulse_bound import _ENV_SUBSTEP_DELIVERED_ATTR
 
 TASK = "Unitree-Z1-Hammer-CaT-Impulse"; ROOT = "logs/rsl_rl/z1_hammer"
-OUT = "/private/tmp/claude-501/-Users-nikerane-repos-unitree-rl-mjlab/2cd822e7-752b-4070-969b-f93a7bd62f87/scratchpad/traj_lg.json"
+OUT = "evaluation/data/traj_lg.json"
 SEED = 12345; I_REF = 0.6094
 # label -> dir glob (any timestamp); ordered maxoff / imponly / delonly / maxmax
 ARMS = [(f"{lab}_s{s}", f"*_{pat}_seed{s}") for lab, pat in

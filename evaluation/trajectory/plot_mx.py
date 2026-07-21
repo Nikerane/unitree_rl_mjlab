@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 import numpy as np
 
-IN = "/private/tmp/claude-501/-Users-nikerane-repos-unitree-rl-mjlab/2cd822e7-752b-4070-969b-f93a7bd62f87/scratchpad/traj_mx.json"
+IN = "evaluation/data/traj_mx.json"
 OUTDIR = "docs/results/assets/2026-07-20_policy_videos"
 d = json.load(open(IN)); arms = d["arms"]; nail_x, nail_z = d["nail_top"][0], d["nail_top"][2]
 for a in arms.values():  # contact dwell (ms) = #contact substeps × physics_dt — the mechanism core

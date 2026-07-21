@@ -17,7 +17,7 @@ from src.assets.robots.unitree_z1.z1_constants import HAMMER_HEAD_SITE_NAME
 from src.tasks.hammer.mdp.impulse_bound import _ENV_SUBSTEP_DELIVERED_ATTR
 
 TASK = "Unitree-Z1-Hammer-CaT-Impulse"; ROOT = "logs/rsl_rl/z1_hammer"
-OUT = "/private/tmp/claude-501/-Users-nikerane-repos-unitree-rl-mjlab/2cd822e7-752b-4070-969b-f93a7bd62f87/scratchpad/lg_multireset.json"
+OUT = "evaluation/data/lg_multireset.json"
 I_REF = 0.6094; N = 30; BASE = 1000
 ARMS = [(f"{lab}_s{s}", f"*_{pat}_seed{s}") for lab, pat in
         [("maxoff500","mx_maxoff"),("maxoff1500","lg_maxoff1500"),("maxmax500","mx_maxmax"),("maxmax1500","lg_maxmax1500")]

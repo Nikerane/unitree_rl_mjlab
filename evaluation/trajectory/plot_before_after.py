@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 import numpy as np
 
-SP = "/private/tmp/claude-501/-Users-nikerane-repos-unitree-rl-mjlab/2cd822e7-752b-4070-969b-f93a7bd62f87/scratchpad"
+SP = "evaluation/data"
 OUTDIR = "docs/results/assets/2026-07-20_policy_videos"
 J = json.load(open(f"{SP}/traj_all.json")); M = json.load(open(f"{SP}/traj_mx.json"))
 nail_x, nail_z = J["nail_top"][0], J["nail_top"][2]

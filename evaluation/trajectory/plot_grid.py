@@ -8,7 +8,7 @@ import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 
-SP = "/private/tmp/claude-501/-Users-nikerane-repos-unitree-rl-mjlab/2cd822e7-752b-4070-969b-f93a7bd62f87/scratchpad"
+SP = "evaluation/data"
 OUTDIR = "docs/results/assets/2026-07-20_policy_videos"
 which = sys.argv[1] if len(sys.argv) > 1 else "dc"
 if which == "dc":

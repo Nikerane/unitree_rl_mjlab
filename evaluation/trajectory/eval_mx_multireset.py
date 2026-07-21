@@ -17,7 +17,7 @@ from src.assets.robots.unitree_z1.z1_constants import HAMMER_HEAD_SITE_NAME
 from src.tasks.hammer.mdp.impulse_bound import _ENV_SUBSTEP_DELIVERED_ATTR
 
 TASK = "Unitree-Z1-Hammer-CaT-Impulse"; ROOT = "logs/rsl_rl/z1_hammer"
-OUT = "/private/tmp/claude-501/-Users-nikerane-repos-unitree-rl-mjlab/2cd822e7-752b-4070-969b-f93a7bd62f87/scratchpad/mx_multireset.json"
+OUT = "evaluation/data/mx_multireset.json"
 STAMP = "2026-07-20_22-07-49_mx_"; I_REF = 0.6094; N = 50; BASE = 1000
 ARMS = [(f"{arm}_s{s}", f"{STAMP}{arm}_seed{s}")
         for arm in ("maxoff", "maxon", "maxmax", "maxofftrk") for s in (0, 1, 2)]
