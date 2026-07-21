@@ -245,6 +245,41 @@ def cem(EVAL, dt, T, pop, gens, elite, sigma0, sigma_floor, seeds, down_bias, lo
     return best, best_hw
 
 
+def cma_search(EVAL, dt, T, pop, gens, sigma0, seeds, down_bias, log):
+    """Same search as cem() but the sample/update is CMA-ES (full covariance + step-size adaptation) instead
+    of the diagonal-Gaussian CEM. A robustness check: a stronger optimizer failing to beat CEM's v* hardens
+    the 'no faster whip' null against 'your optimizer was too weak'. rollout/fitness/seeds/EVAL are identical."""
+    import cma
+    best = dict(v=-1e9); best_hw = dict(v=-1e9)
+    for r, seed in enumerate(seeds):
+        if seed is not None:
+            mu0 = seed.clamp(-1.0, 1.0).reshape(-1).tolist()  # policy's raw actions can exceed the bounds; env clips anyway
+        else:
+            m = torch.zeros(T, 3); m[:, 2] = -down_bias; mu0 = m.reshape(-1).tolist()
+        es = cma.CMAEvolutionStrategy(mu0, sigma0, {"popsize": pop, "bounds": [-1.0, 1.0],
+                                                    "seed": 1234 + r, "maxiter": gens, "verbose": -9})
+        for g in range(gens):
+            if es.stop():
+                break
+            t0 = time.perf_counter()
+            sols = es.ask()
+            Sset = torch.tensor(sols, dtype=torch.float32).reshape(pop, T, 3).clamp(-1.0, 1.0)
+            fit, v, vlat, qvc, valid = EVAL(Sset)
+            es.tell(sols, (-fit).tolist())                    # CMA-ES minimizes -> negate fitness
+            vv = torch.where(valid, v, torch.full_like(v, -1e9))
+            gi = int(vv.argmax()); gv = float(vv[gi])
+            if gv > best["v"]:
+                best = dict(v=gv, vlat=float(vlat[gi]), qvc=float(qvc[gi]), x=Sset[gi].clone(), restart=r, gen=g)
+            vh = torch.where(valid & (qvc <= HW_RAIL), v, torch.full_like(v, -1e9))
+            hi = int(vh.argmax()); hv = float(vh[hi])
+            if hv > best_hw["v"]:
+                best_hw = dict(v=hv, qvc=float(qvc[hi]), vlat=float(vlat[hi]), x=Sset[hi].clone(), restart=r, gen=g)
+            log(f"  r{r} g{g:02d}  best_v={max(best['v'],-9.9):5.3f}  best_hw={max(best_hw['v'],-9.9):5.3f}  "
+                f"gen_v={float(v[valid].max()) if valid.any() else float('nan'):5.3f}  "
+                f"hits={int(valid.sum()):2d}/{pop}  {time.perf_counter()-t0:5.2f}s")
+    return best, best_hw
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pop", type=int, default=64)
@@ -252,6 +287,7 @@ def main():
     ap.add_argument("--gens", type=int, default=40)
     ap.add_argument("--restarts", type=int, default=3)
     ap.add_argument("--delta", type=float, default=0.15, help="delta_pos_scale (0.15 shipped; sweep for localization)")
+    ap.add_argument("--optimizer", choices=["cem", "cma"], default="cem", help="cma = CMA-ES robustness check")
     ap.add_argument("--elite", type=float, default=0.15)
     ap.add_argument("--sigma0", type=float, default=0.6)
     ap.add_argument("--sigma-floor", type=float, default=0.05)
@@ -287,8 +323,11 @@ def main():
     print(f"[whip] pop={args.pop} T={args.T} gens={args.gens} basins={len(seeds)} (rl_seed={args.rl_seed}) "
           f"delta={args.delta} hardened={hardened}{f' chunk={args.chunk}' if hardened else ''} dt={dt} device=cpu")
     t0 = time.perf_counter()
-    best, best_hw = cem(EVAL, dt, args.T, args.pop, args.gens, args.elite, args.sigma0,
-                        args.sigma_floor, seeds, args.down_bias, print)
+    if args.optimizer == "cma":
+        best, best_hw = cma_search(EVAL, dt, args.T, args.pop, args.gens, args.sigma0, seeds, args.down_bias, print)
+    else:
+        best, best_hw = cem(EVAL, dt, args.T, args.pop, args.gens, args.elite, args.sigma0,
+                            args.sigma_floor, seeds, args.down_bias, print)
     wall = time.perf_counter() - t0
     if hardened:
         EVAL.close()

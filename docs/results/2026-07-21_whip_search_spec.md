@@ -33,6 +33,11 @@ that +6 % is not even hardware-legal (needs 4.96 rad/s; the legal best is **1.72
 shooting upper-bounds any closed-loop policy (§2), so this is a **strong null: there is no hidden momentum/whip
 channel at δ=0.15.** The earlier honest hedge — "fixed-impedance RL never *found* the momentum channel" — resolves
 to **"there is no such channel to find at the shipped scale."** RL was not leaving speed on the table.
+**Robustness check (CMA-ES, `whip_delta015_cma.json`):** re-running δ=0.15 with CMA-ES — full-covariance,
+step-size-adaptive, the gold-standard black-box optimizer — from the same warm-starts, converged, reaches
+**v\*=1.896 / v\*_hw=1.708**, statistically identical to CEM (1.928 / 1.724) *despite higher hit-rates* (60–79/96 vs
+45–78, a more thorough search). Two independent optimizers cap at ~1.9 and neither nears 2.1 → the null is not a
+CEM weakness; ~1.8–1.9 m/s is genuinely the δ=0.15 ceiling.
 
 **2. But that ceiling is the ACTION SCALE (`delta_pos_scale`), not impedance.** Raising δ 0.15→0.30 — PD gains,
 `max_dq`, armature ALL unchanged (still fixed impedance, a different action-space *parameterization*) — lifts the
