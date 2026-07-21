@@ -119,12 +119,25 @@ Three findings (graded/adversarially reviewed by a 4-lens analysis, `2026-07-20`
    force·dt does *zero* additional task work: impulse without work, the press-against-a-stop signature.
 
 **Interpretation (ties to Phase-0):** on **fixed impedance** an impact-maximization objective has only one
-physically reachable outlet — **contact time** — so it structurally **degenerates to press-maximization**
-(longer dwell at flat force), reproducing the open-loop Phase-0 press-integral finding *inside a trained
-policy*. **This is causal evidence for the NECESSITY of VIC** (the momentum/speed channel is unreachable
-while stiffness is fixed) — **not** evidence that VIC *works* (no impedance arm was run; that is the next
-work package). *(Wording corrected from the original "direct causal evidence for VIC" / "harder press" /
-"velocity ceiling", which a sharp examiner would puncture.)*
+physically reachable outlet that RL found — **contact time** — so under this reward + action space it
+**degenerates to press-maximization** (longer dwell at flat force), reproducing the open-loop Phase-0
+press-integral finding *inside a trained policy*.
+
+**⚠ CAUSALITY CAVEAT (Fable deep-review, 2026-07-21) — do NOT claim "VIC is necessary" yet.** The honest
+statement is **"fixed-impedance RL never found the momentum channel," NOT "fixed-impedance forecloses it."**
+Two facts force the weaker claim: (1) B2 (`2026-07-20_B2_effort_ceiling.md`) showed a coordinated whip
+reaches **~4.22 m/s at the same fixed PD gains + 30/60 N·m limits** (kp doesn't enter M(q)), so the speed
+channel is *not* physically closed by fixed stiffness — the trained straight-down strike just uses ~45% of
+it. (2) That 4.22 m/s is a **kinematic upper bound from injecting joint velocities** (`coord_whip2.py`
+bypasses the DiffIK controller); whether it's reachable *closed-loop through the real `a_t∈[−1,1]³` action
+interface* is **B2's specified-but-UNRUN "decisive next experiment."** Across all 1,140 rollouts (0–24×
+reward, 500–1500 iters) the fastest contact ever was **1.81 m/s** — RL didn't get close. So the defensible
+VIC motivation is **landscape-shaping, not physical necessity**: *the fixed-impedance reward has a wide cheap
+dwell ridge that dominates the narrow momentum peak, and RL never stepped off it even under 24× incentive.*
+The **prerequisite** to any "necessity" claim is running the closed-loop whip search (or a whip curriculum)
+on fixed impedance first — if that still caps ≪4.22 m/s, *then* necessity is earned; until then it's
+"RL didn't find it," not "it can't be found." *(Also corrected earlier: "harder press" → dwell at flat force;
+"velocity ceiling" → dose-insensitive soft clamp.)*
 
 **Follow-ups to reach publication-solid** (ranked value-per-effort): (1) **[cheap, CPU, no GPU]** re-evaluate
 the 12 checkpoints over 50–100 randomized resets → per-policy distributions, closing the single-fixed-reset
@@ -248,6 +261,46 @@ reaction Λ hardest. This ties the maximization reward directly to the constrain
 
 Takeaway: **500 iters is the sweet spot; 1500 risks reward-hacking drift / collapse.** Both the swing and the
 speed ceiling are decided by the fixed-impedance physics + reward, not by how long you train.
+
+**⚠ SCOPE CAVEAT (user, 2026-07-21): "500 is the sweet spot" is specific to the CURRENT recipe — NO domain
+randomization, NO curriculum.** On a *fixed* environment the policy converges fast (~500) and then has nothing
+left to learn, so 1500 iters is pure over-optimization on one MDP → drift/collapse (the `maxmax1500_s0` 0/30
+collapse and `maxoff1500`'s null-space swing are overfitting-to-a-fixed-env signatures). **With DR + curriculum
+the effective task is harder and non-stationary, so more iterations would be needed and productive, not
+destabilizing** — the varied data would very likely *stabilize* longer training rather than let it wander.
+So do NOT carry "1500 hurts" into the DR/curriculum regime (or into VIC, which adds an action dimension); the
+right reading is "on this bare fixed-env recipe, extra iters only overfit." This makes Fable's canary
+early-stopping / stability-monitoring suggestion (below) the thing to build *before* DR+curriculum+VIC training,
+where longer horizons return.
+
+## DEEP-REVIEW (Fable, 2026-07-21) — the essential fact + open experiments
+
+**Essential fact (all findings are one thing):** under fixed impedance, delivered impulse is `∫F·dt` against
+a target that's still there, so the reward can only select **contact duration**. Recomputed over 1,140 unique
+rollouts (23 policies, 0–24× reward, 500–1500 iters): `delivered ≈ 0.027·dwell_ms + 0.014·peak_force − 0.28`,
+**R²=0.842**; adding v_touch → +0.0002, adding swing → +0.003. Two scalars (how long in contact, how hard)
+predict delivered impulse; **speed and the dramatic swing add ~nothing**. `corr(v_touch, delivered) = −0.26`
+(negative). `corr(dwell, delivered) = 0.84` — the strongest, most universal relation, present in every arm.
+The swing/press "dissociation" is two reward-lenses on the same lever (stay longer / push harder), not two
+physical channels.
+
+**Load-bearing open experiments (ranked):**
+1. **Closed-loop whip search (fixed impedance)** — B2's specified-but-unrun decisive test: optimize/curriculum
+   toward a coordinated whip through the *real* DiffIK `a_t∈[−1,1]³` interface (not velocity injection). This is
+   the prerequisite for any "VIC necessary" claim. Retrain `imponly` (24/0) with a wind-up curriculum
+   (anneal `delta_pos_scale` up pre-contact, or a soft whip-reference imitation prior during wind-up only);
+   if it still caps ≪4.22 m/s → necessity earned; if it reaches ~2.5–3 m/s → VIC is a refinement, not a necessity.
+2. **Swing-is-a-controller-artifact check (cheap, CPU)** — replay a maxmax rollout with the head arc smoothed
+   out but dwell/approach preserved; the regression predicts delivered/reward won't change. If confirmed: the
+   swing is kinematic residue of DiffIK re-servoing a compliant target, not a chosen maneuver — a clean
+   reward-hacking-diagnosis result (dramatic behavior, ~zero causal weight).
+3. **Per-joint load of the pure-press arm** — Phase-0 A5: press loads **j1**, ballistic loads **j2–j4**. `delonly`
+   (pure impulse-max) is a press → likely loads j1, but the constraint/ballistic framing targets j2–j4. Log
+   per-joint qfrc during a `delonly` rollout: if the deployed-reward regime loads a *different* joint than the
+   constraint is calibrated for, that's a real risk to the impulse-CaT going into VIC.
+4. **Canary early-stopping** — the `lg` collapse happened between iter 500–1500 unexamined; log peak-force /
+   delivered / return-variance every ~100 iters to find a pre-collapse precursor. Build this *before*
+   DR+curriculum+VIC (where longer horizons return — see scope caveat above).
 
 ## Guardrails honored
 `imp_max_p=0` (log-only, set in the sbatch), `IMP_J_LIMIT` unchanged, caps untouched, no VIC/`set_gains`,
