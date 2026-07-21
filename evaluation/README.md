@@ -7,8 +7,10 @@ from the **repo root** with `PYTHONPATH=.` and the `unitree_mjlab` conda env, e.
 - **Scripts** live here (`evaluation/trajectory/`).
 - **Data** (the JSON the trace scripts produce) lives in `evaluation/data/` — durable + committed, so
   figures regenerate without re-running the (slow) rollouts.
-- **Figures** are written to `docs/results/assets/2026-07-20_policy_videos/` (where the presentation &
-  the maximization-ablation doc reference them).
+- **Figures** are written to `evaluation/results/<YYYY-MM-DD_topic>/` (one folder per campaign; see
+  `evaluation/results/README.md`). Current: `evaluation/results/2026-07-20_fic_maximization/`.
+- **Policy index:** `python evaluation/list_policies.py` (re)generates `evaluation/POLICIES.md` from the run
+  dirs — always current, no hand-maintenance.
 
 ## `evaluation/trajectory/` — the trajectory analysis pipeline
 
