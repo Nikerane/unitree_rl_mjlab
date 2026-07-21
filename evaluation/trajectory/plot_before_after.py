@@ -11,7 +11,7 @@ from matplotlib.collections import LineCollection
 import numpy as np
 
 SP = "evaluation/data"
-OUTDIR = "docs/results/assets/2026-07-20_policy_videos"
+OUTDIR = "evaluation/results/2026-07-20_fic_maximization"
 J = json.load(open(f"{SP}/traj_all.json")); M = json.load(open(f"{SP}/traj_mx.json"))
 nail_x, nail_z = J["nail_top"][0], J["nail_top"][2]
 

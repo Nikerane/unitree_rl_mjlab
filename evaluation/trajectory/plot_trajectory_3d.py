@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # noqa
 
 SP = "evaluation/data"
-OUTDIR = "docs/results/assets/2026-07-20_policy_videos"
+OUTDIR = "evaluation/results/2026-07-20_fic_maximization"
 d = json.load(open(f"{SP}/traj_dc.json")); A = d["arms"]; nx, ny, nz = d["nail_top"]
 ARMS = [("maxoff_s0", "maxoff (straight)", "#2ca02c"),
         ("imponly_s0", "imponly (speed→swing)", "#1f77b4"),

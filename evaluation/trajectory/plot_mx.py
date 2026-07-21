@@ -10,7 +10,7 @@ from matplotlib.collections import LineCollection
 import numpy as np
 
 IN = "evaluation/data/traj_mx.json"
-OUTDIR = "docs/results/assets/2026-07-20_policy_videos"
+OUTDIR = "evaluation/results/2026-07-20_fic_maximization"
 d = json.load(open(IN)); arms = d["arms"]; nail_x, nail_z = d["nail_top"][0], d["nail_top"][2]
 for a in arms.values():  # contact dwell (ms) = #contact substeps × physics_dt — the mechanism core
     a["dwell_ms"] = sum(p[3] for p in a["substep"]) * a.get("physics_dt", 0.002) * 1000.0

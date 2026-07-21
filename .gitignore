@@ -17,4 +17,4 @@ __pycache__/
 .DS_Store
 graphify-out/
 .claude/settings.local.json
-docs/results/assets/2026-07-20_policy_videos/*.mp4
+evaluation/results/2026-07-20_fic_maximization/*.mp4

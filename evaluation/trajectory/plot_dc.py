@@ -7,7 +7,7 @@ import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 IN = "evaluation/data/dc_multireset.json"
-OUTDIR = "docs/results/assets/2026-07-20_policy_videos"
+OUTDIR = "evaluation/results/2026-07-20_fic_maximization"
 A = json.load(open(IN))["arms"]
 ARMS = ["maxoff", "imponly", "delonly", "maxmax"]
 LAB = {"maxoff": "maxoff\n(neither)", "imponly": "imponly\n(SPEED 24/0)",

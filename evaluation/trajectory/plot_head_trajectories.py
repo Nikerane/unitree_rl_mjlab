@@ -9,7 +9,7 @@ from matplotlib.collections import LineCollection
 import numpy as np
 
 IN = "evaluation/data/traj_all.json"
-OUTDIR = "docs/results/assets/2026-07-20_policy_videos"
+OUTDIR = "evaluation/results/2026-07-20_fic_maximization"
 d = json.load(open(IN)); arms = d["arms"]
 nail_x, nail_z = d["nail_top"][0], d["nail_top"][2]
 

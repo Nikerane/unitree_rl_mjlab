@@ -8,7 +8,7 @@ import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 IN = "evaluation/data/traj_all.json"
-OUTDIR = "docs/results/assets/2026-07-20_policy_videos"
+OUTDIR = "evaluation/results/2026-07-20_fic_maximization"
 DT = 0.002
 d = json.load(open(IN)); arms = d["arms"]; nail_x = d["nail_top"][0]
 

@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 
 SP = "evaluation/data"
-OUTDIR = "docs/results/assets/2026-07-20_policy_videos"
+OUTDIR = "evaluation/results/2026-07-20_fic_maximization"
 which = sys.argv[1] if len(sys.argv) > 1 else "dc"
 if which == "dc":
     IN, OUT = f"{SP}/traj_dc.json", f"{OUTDIR}/dc_trajectory_grid.png"

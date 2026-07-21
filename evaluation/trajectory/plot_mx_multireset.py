@@ -7,7 +7,7 @@ import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 IN = "evaluation/data/mx_multireset.json"
-OUTDIR = "docs/results/assets/2026-07-20_policy_videos"
+OUTDIR = "evaluation/results/2026-07-20_fic_maximization"
 d = json.load(open(IN)); A = d["arms"]; N = d["N"]
 ARMS = ["maxoff", "maxon", "maxmax", "maxofftrk"]
 def pool(arm, key):  # 3 seeds × N resets, drop NaN

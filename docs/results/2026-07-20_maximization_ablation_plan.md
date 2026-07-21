@@ -1,6 +1,6 @@
 # Maximization ablation — is the forward-swing caused by impact-maximization, or is it kinematic? (2026-07-20)
 
-**Question (from the trajectory analysis, `assets/2026-07-20_policy_videos/`):** every competent July
+**Question (from the trajectory analysis; scripts `evaluation/trajectory/`, figures `evaluation/results/2026-07-20_fic_maximization/`):** every competent July
 policy strikes with a **forward-swing arc** (head arcs ~4–7 cm past the nail-x, then back down). Is that
 swing a **learned impact-maximization maneuver** (a wind-up to build contact speed), or an **incidental
 kinematic reaching signature** of this arm striking from directly above?
