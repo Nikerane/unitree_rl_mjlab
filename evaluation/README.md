@@ -57,3 +57,7 @@ regenerate a figure from committed data, run the `plot_*`/`swing_vs_speed` scrip
   (press-vs-ballistic, the ~1.4 m/s effort ceiling, the ~4.2 m/s kinematic whip bound).
 
 See `docs/results/2026-07-20_maximization_ablation_plan.md` for what these produced.
+
+## Policy index
+
+`python evaluation/list_policies.py` scans `logs/rsl_rl/z1_hammer/`, reads each run 's `params/` (reward weights, iters), and (re)generates `evaluation/POLICIES.md` — always current, no hand-maintenance. One-line campaign notes live in the script's `NOTES` dict.
