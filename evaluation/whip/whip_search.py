@@ -22,8 +22,10 @@ Full:   PYTHONPATH=. python evaluation/whip/whip_search.py --pop 96 --T 30 --gen
 Sweep:  ... --delta 0.30      (localizes a ceiling: delta-rail vs PD-bandwidth)
 """
 from __future__ import annotations
-import argparse, json, time
+import argparse, json, time, queue
+import multiprocessing as mp
 from pathlib import Path
+import numpy as np
 import torch
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.managers.scene_entity_config import SceneEntityCfg
@@ -140,7 +142,78 @@ def fitness(rec, dt):
     return fit, v, vlat, qvc, valid
 
 
-def cem(env, R, dt, T, pop, gens, elite, sigma0, sigma_floor, seeds, down_bias, log):
+# --- crash-hardened evaluation --------------------------------------------------------------------
+# A native mujoco_warp CPU segfault (seen at high delta, e.g. an RL-seeded basin driving the arm into a
+# solver-unstable config at 2x scale) has no Python traceback and kills the whole process. Isolate the
+# rollout in a respawnable subprocess evaluated by CHUNKS: a crash kills only its chunk (penalized), the
+# parent respawns the worker and the campaign continues. Result-identical to the in-process path when no
+# crash occurs (envs are independent, so chunking doesn't change any per-sample fitness).
+def _worker(delta, chunk, T, task_q, result_q):
+    import torch as _t
+    env = build(chunk, delta); R = make_reader(env); dt = float(env.physics_dt)
+    while True:
+        A = task_q.get()
+        if A is None:
+            return
+        fit, v, vlat, qvc, valid = fitness(rollout(env, R, _t.as_tensor(A, dtype=_t.float32)), dt)
+        result_q.put((fit.numpy(), v.numpy(), vlat.numpy(), qvc.numpy(), valid.numpy()))
+
+
+class HardenedEval:
+    """EVAL(Sset[POP,T,3]) -> 5 torch tensors [POP], via a respawnable spawn-subprocess, chunk at a time."""
+    def __init__(self, delta, T, chunk=32, timeout=90):
+        self.delta, self.T, self.chunk, self.timeout = delta, T, chunk, timeout
+        self.ctx = mp.get_context("spawn"); self._spawn()
+    def _spawn(self):
+        self.tq, self.rq = self.ctx.Queue(), self.ctx.Queue()
+        self.p = self.ctx.Process(target=_worker, args=(self.delta, self.chunk, self.T, self.tq, self.rq),
+                                  daemon=True)
+        self.p.start()
+    def _kill(self):
+        if self.p and self.p.is_alive():
+            self.p.terminate(); self.p.join(timeout=5)
+    def _chunk(self, A):                                       # A np[n<=chunk,T,3] -> 5 np[n] or None
+        n = A.shape[0]
+        if n < self.chunk:
+            A = np.concatenate([A, np.zeros((self.chunk - n, self.T, 3), A.dtype)], 0)
+        self.tq.put(A)
+        deadline = time.time() + self.timeout
+        while time.time() < deadline:                          # poll so a SEGFAULTED worker is caught in ~1s
+            try:
+                return tuple(x[:n] for x in self.rq.get(timeout=1.0))
+            except queue.Empty:
+                if not self.p.is_alive():                      # worker died (native crash) -> stop waiting
+                    break
+        self._kill(); self._spawn(); return None               # crashed or hung past timeout -> respawn
+    def __call__(self, Sset):
+        A = Sset.detach().cpu().numpy().astype(np.float32); POP = A.shape[0]
+        cols = [np.empty(POP, np.float32) for _ in range(4)] + [np.zeros(POP, bool)]
+        for s in range(0, POP, self.chunk):
+            e = min(s + self.chunk, POP); r = None
+            for _ in range(2):                                # one respawn+retry, then penalize the chunk
+                r = self._chunk(A[s:e])
+                if r is not None:
+                    break
+            if r is None:
+                cols[0][s:e] = -1e9; cols[1][s:e] = 0; cols[2][s:e] = 0; cols[3][s:e] = 99; cols[4][s:e] = False
+                print(f"    [hardened] chunk [{s}:{e}] crashed twice -> penalized, worker respawned")
+            else:
+                for k in range(5):
+                    cols[k][s:e] = r[k]
+        return tuple(torch.as_tensor(c) for c in cols)        # fit, v, vlat, qvc, valid
+    def close(self):
+        try:
+            self.tq.put(None); self.p.join(timeout=5)
+        except Exception:
+            pass
+        self._kill()
+
+
+def eval_inprocess(env, R, dt):
+    return lambda Sset: fitness(rollout(env, R, Sset), dt)
+
+
+def cem(EVAL, dt, T, pop, gens, elite, sigma0, sigma_floor, seeds, down_bias, log):
     best = dict(v=-1e9); best_hw = dict(v=-1e9)   # best overall / best hardware-legal (|qvel|<=rail)
     for r, seed in enumerate(seeds):
         torch.manual_seed(1234 + r)
@@ -152,8 +225,7 @@ def cem(env, R, dt, T, pop, gens, elite, sigma0, sigma_floor, seeds, down_bias, 
         for g in range(gens):
             t0 = time.perf_counter()
             Sset = (mu[None] + sigma[None] * torch.randn(pop, T, 3)).clamp(-1.0, 1.0)
-            rec = rollout(env, R, Sset)
-            fit, v, vlat, qvc, valid = fitness(rec, dt)
+            fit, v, vlat, qvc, valid = EVAL(Sset)
             k = max(2, int(elite * pop))
             ei = torch.topk(fit, k).indices
             mu, sigma = Sset[ei].mean(0), Sset[ei].std(0) + sigma_floor
@@ -185,6 +257,10 @@ def main():
     ap.add_argument("--sigma-floor", type=float, default=0.05)
     ap.add_argument("--down-bias", type=float, default=0.5)
     ap.add_argument("--no-rl-seed", dest="rl_seed", action="store_false", help="skip the RL warm-start basins")
+    ap.add_argument("--hardened", action="store_true", default=None, help="force subprocess-isolated rollouts")
+    ap.add_argument("--no-hardened", dest="hardened", action="store_false", help="force in-process rollouts")
+    ap.add_argument("--chunk", type=int, default=32, help="hardened: samples per subprocess rollout")
+    ap.add_argument("--timeout", type=float, default=90, help="hardened: per-chunk seconds before respawn")
     ap.add_argument("--smoke", action="store_true", help="5 gens, no RL seed, small pop -- size wall-clock")
     ap.add_argument("--out", type=str, default="")
     args = ap.parse_args()
@@ -200,14 +276,22 @@ def main():
         seeds.append(policy_seed("*af1_fixed_seed0", args.T))       # robust 100%-success striker
     seeds.append(None)                                             # downward-bias basin (diversity)
 
-    env = build(args.pop, args.delta)
-    R = make_reader(env); dt = float(env.physics_dt); dt_ctrl = float(env.step_dt)  # 0.002 / 0.02
-    print(f"[whip] pop={args.pop} T={args.T} gens={args.gens} basins={len(seeds)} "
-          f"(rl_seed={args.rl_seed}) delta={args.delta} dt={dt} device=cpu")
+    hardened = args.hardened if args.hardened is not None else (args.delta > 0.15)  # auto: isolate high-delta
+    if hardened:
+        EVAL = HardenedEval(args.delta, args.T, chunk=args.chunk, timeout=args.timeout)
+        dt, dt_ctrl = 0.002, 0.02  # asserted in build()
+    else:
+        env = build(args.pop, args.delta); R = make_reader(env)
+        dt, dt_ctrl = float(env.physics_dt), float(env.step_dt)
+        EVAL = eval_inprocess(env, R, dt)
+    print(f"[whip] pop={args.pop} T={args.T} gens={args.gens} basins={len(seeds)} (rl_seed={args.rl_seed}) "
+          f"delta={args.delta} hardened={hardened}{f' chunk={args.chunk}' if hardened else ''} dt={dt} device=cpu")
     t0 = time.perf_counter()
-    best, best_hw = cem(env, R, dt, args.T, args.pop, args.gens, args.elite, args.sigma0,
+    best, best_hw = cem(EVAL, dt, args.T, args.pop, args.gens, args.elite, args.sigma0,
                         args.sigma_floor, seeds, args.down_bias, print)
     wall = time.perf_counter() - t0
+    if hardened:
+        EVAL.close()
 
     hw_ok = best.get("qvc", 99) <= HW_RAIL
     print(f"\n[whip] v*     = {best['v']:.3f} m/s  (lateral {best.get('vlat', float('nan')):.3f}, "
