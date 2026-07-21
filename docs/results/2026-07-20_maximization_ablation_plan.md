@@ -228,6 +228,27 @@ strategies** — a cleaner mechanism than the co-scaled mx arms could show:
 peak force (43 N)** — so the delivered-impulse objective, isolated, is exactly what would drive the per-joint
 reaction Λ hardest. This ties the maximization reward directly to the constraint the thesis bounds.
 
+## LONGER-TRAINING RESULT — 2026-07-21 (lg arms, 1500 vs 500 iters, 30-reset validation)
+
+| arm | swing (cm) | v_touch | delivered | peak F | **success** |
+|---|---|---|---|---|---|
+| maxoff @500 | 0.18 | 1.42 | 0.67 | 31.2 | 100% |
+| maxoff @1500 | 4.16 | 1.37 | 0.85 | 34.2 | 99% |
+| maxmax @500 | 5.14 | 1.36 | 0.96 | 36.9 | 99% |
+| maxmax @1500 | 0.92 | 1.33 | 0.71 | 25.6 | **67%** |
+
+**3× training does NOT help — it destabilizes, and does NOT break the ceiling:**
+- **A seed collapsed:** `maxmax1500_s0` fails on **0/30** resets (delivered 0.18, peak force 12 N) — overtraining
+  killed a working policy. maxmax @1500 success drops 99% → 67%.
+- **Trajectory drift both ways:** maxoff (no maximization reward at all) **drifted into a swing** (0.18 → 4.16 cm)
+  — unmotivated null-space wander; maxmax **lost** its swing (5.14 → 0.92) and delivered fell (0.96 → 0.71).
+- **The ~1.4 m/s ceiling held:** max v_touch over all 1500-iter rollouts = **1.81 m/s**, mean *lower* than @500.
+  More training does not find a faster strike — reinforcing that the ceiling is a fixed-impedance structural
+  limit, not a training-budget one.
+
+Takeaway: **500 iters is the sweet spot; 1500 risks reward-hacking drift / collapse.** Both the swing and the
+speed ceiling are decided by the fixed-impedance physics + reward, not by how long you train.
+
 ## Guardrails honored
 `imp_max_p=0` (log-only, set in the sbatch), `IMP_J_LIMIT` unchanged, caps untouched, no VIC/`set_gains`,
 no superlinear excess-over-i_ref reward (the max-max `delivered_impulse=4` is the same **linear** ΔI/I_ref
