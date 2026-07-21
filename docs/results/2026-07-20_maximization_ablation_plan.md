@@ -244,29 +244,33 @@ reaction Λ hardest. This ties the maximization reward directly to the constrain
 
 ## LONGER-TRAINING RESULT — 2026-07-21 (lg arms, 1500 vs 500 iters, 30-reset validation)
 
-| arm | swing (cm) | v_touch | delivered | peak F | **success** |
+> ⚠ **CONFIG BUG — caught 2026-07-21 by `evaluation/list_policies.py`.** `lg_maxoff1500` was trained with the
+> **DEFAULT reward (impact 8 / delivered 2), NOT 0/0** — I omitted the `IMPACT_W=0 DELIVERED_W=0` override at
+> submit. So the "maxoff@1500" row is really **maxon-config @1500**, and the earlier *"maxoff drifted into a
+> swing / null-space wander"* reading is **RETRACTED** (an 8/2 policy swinging is expected, not drift). The
+> `maxmax` (24/4) 500-vs-1500 comparison is same-config both ways and **stands**.
+
+| arm (actual reward) | swing (cm) | v_touch | delivered | peak F | **success** |
 |---|---|---|---|---|---|
-| maxoff @500 | 0.18 | 1.42 | 0.67 | 31.2 | 100% |
-| maxoff @1500 | 4.16 | 1.37 | 0.85 | 34.2 | 99% |
-| maxmax @500 | 5.14 | 1.36 | 0.96 | 36.9 | 99% |
-| maxmax @1500 | 0.92 | 1.33 | 0.71 | 25.6 | **67%** |
+| maxmax @500 (24/4) | 5.14 | 1.36 | 0.96 | 36.9 | 99% |
+| **maxmax @1500 (24/4)** | 0.92 | 1.33 | 0.71 | 25.6 | **67%** |
+| ~~maxoff~~ **maxon @1500 (8/2, mislabeled)** | 4.16 | 1.37 | 0.85 | 34.2 | 99% |
 
-**3× training does NOT help — it destabilizes, and does NOT break the ceiling:**
+**What stands — maxmax (24/4), a clean same-config 500→1500 comparison: 3× training DESTABILIZES, doesn't help.**
 - **A seed collapsed:** `maxmax1500_s0` fails on **0/30** resets (delivered 0.18, peak force 12 N) — overtraining
-  killed a working policy. maxmax @1500 success drops 99% → 67%.
-- **Trajectory drift both ways:** maxoff (no maximization reward at all) **drifted into a swing** (0.18 → 4.16 cm)
-  — unmotivated null-space wander; maxmax **lost** its swing (5.14 → 0.92) and delivered fell (0.96 → 0.71).
-- **The ~1.4 m/s ceiling held:** max v_touch over all 1500-iter rollouts = **1.81 m/s**, mean *lower* than @500.
-  More training does not find a faster strike — reinforcing that the ceiling is a fixed-impedance structural
-  limit, not a training-budget one.
+  killed a working policy; maxmax @1500 success drops 99% → 67%, survivors swing less and deliver less.
+- **The ~1.4 m/s ceiling held:** max v_touch over all 1500-iter rollouts = **1.81 m/s** — more training finds no
+  faster strike (a fixed-impedance structural limit, not a training-budget one).
+- **Not answered:** whether a *real* maxoff (0/0) stays straight at 1500 iters — the arm meant to test that was
+  mislabeled. A clean re-run (`IMPACT_W=0 DELIVERED_W=0 ITERS=1500`) would close it.
 
-Takeaway: **500 iters is the sweet spot; 1500 risks reward-hacking drift / collapse.** Both the swing and the
-speed ceiling are decided by the fixed-impedance physics + reward, not by how long you train.
+Takeaway: **on this bare fixed-env recipe, more iters over-optimize one MDP → the maxmax collapse; 500 is enough.**
+The swing and speed ceiling are decided by the fixed-impedance physics + reward, not by how long you train.
 
 **⚠ SCOPE CAVEAT (user, 2026-07-21): "500 is the sweet spot" is specific to the CURRENT recipe — NO domain
 randomization, NO curriculum.** On a *fixed* environment the policy converges fast (~500) and then has nothing
-left to learn, so 1500 iters is pure over-optimization on one MDP → drift/collapse (the `maxmax1500_s0` 0/30
-collapse and `maxoff1500`'s null-space swing are overfitting-to-a-fixed-env signatures). **With DR + curriculum
+left to learn, so 1500 iters is pure over-optimization on one MDP → collapse (the `maxmax1500_s0` 0/30 collapse
+is the overfitting-to-a-fixed-env signature). **With DR + curriculum
 the effective task is harder and non-stationary, so more iterations would be needed and productive, not
 destabilizing** — the varied data would very likely *stabilize* longer training rather than let it wander.
 So do NOT carry "1500 hurts" into the DR/curriculum regime (or into VIC, which adds an action dimension); the
