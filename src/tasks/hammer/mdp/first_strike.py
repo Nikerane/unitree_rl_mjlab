@@ -76,6 +76,15 @@ class FirstStrikeEventTracker(ManagerTermBase):
     return self._finalized
 
   @property
+  def started(self) -> torch.Tensor:
+    """Whether the first accepted contact event has begun.
+
+    This remains true after finalization so one-shot reward readers can share
+    the tracker's exact eligibility boundary without inspecting private state.
+    """
+    return self._state >= _STATE_ACTIVE
+
+  @property
   def productive(self) -> torch.Tensor:
     return self._productive
 

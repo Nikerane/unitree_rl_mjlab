@@ -19,7 +19,11 @@ import pytest
 import torch
 
 from src.tasks.hammer.mdp.first_strike import _ENV_FIRST_STRIKE_ATTR
-from src.tasks.hammer.mdp.rewards import FirstStrikeImpactRewardTerm, ImpactProgressTerm
+from src.tasks.hammer.mdp.rewards import (
+    FirstStrikeImpactRewardTerm,
+    FirstStrikeLegacyImpactRewardTerm,
+    ImpactProgressTerm,
+)
 
 
 # --- Stub env -------------------------------------------------------------
@@ -264,6 +268,143 @@ def test_event_reward_reset_rearms_paid_latch():
     term.reset(torch.tensor([0]))
 
     assert torch.equal(term(env, v_expected=1.0), torch.tensor([1.0, 0.0]))
+
+
+def _legacy_tracker_env(num_envs=1):
+    env = SimpleNamespace(num_envs=num_envs, device="cpu")
+    tracker = SimpleNamespace(
+        started=torch.zeros(num_envs, dtype=torch.bool),
+        finalized=torch.zeros(num_envs, dtype=torch.bool),
+        productive=torch.zeros(num_envs, dtype=torch.bool),
+    )
+    setattr(env, _ENV_FIRST_STRIKE_ATTR, tracker)
+    return env, tracker
+
+
+def _patch_impact_raw(monkeypatch, values):
+    sequence = iter(torch.as_tensor(value, dtype=torch.float32) for value in values)
+    monkeypatch.setattr(
+        ImpactProgressTerm,
+        "__call__",
+        lambda self, env, **params: next(sequence),
+    )
+
+
+def test_legacy_impact_waits_then_pays_first_positive_pulse_once(monkeypatch):
+    env, tracker = _legacy_tracker_env()
+    _patch_impact_raw(monkeypatch, [[0.0], [1.25], [1.75], [0.0]])
+    term = FirstStrikeLegacyImpactRewardTerm(cfg=None, env=env)
+    outputs = []
+    for started, finalized, productive in (
+        (False, False, False),
+        (True, False, False),
+        (True, True, True),
+        (True, True, True),
+    ):
+        tracker.started.fill_(started)
+        tracker.finalized.fill_(finalized)
+        tracker.productive.fill_(productive)
+        outputs.append(float(term(env)))
+    assert outputs == [0.0, 0.0, 1.25, 0.0]
+
+
+def test_legacy_impact_ignores_second_positive_pulse_inside_window(monkeypatch):
+    env, tracker = _legacy_tracker_env()
+    _patch_impact_raw(monkeypatch, [[1.25], [1.75], [9.0]])
+    term = FirstStrikeLegacyImpactRewardTerm(cfg=None, env=env)
+    tracker.started.fill_(True)
+    assert float(term(env)) == 0.0
+    assert float(term(env)) == 0.0
+    tracker.finalized.fill_(True)
+    tracker.productive.fill_(True)
+    assert float(term(env)) == pytest.approx(1.25)
+
+
+def test_legacy_wrappers_include_finalization_boundary_values(monkeypatch):
+    env, tracker = _legacy_tracker_env()
+    _patch_impact_raw(monkeypatch, [[0.0], [2.0]])
+    term = FirstStrikeLegacyImpactRewardTerm(cfg=None, env=env)
+    tracker.started.fill_(True)
+    assert float(term(env)) == 0.0
+    tracker.finalized.fill_(True)
+    tracker.productive.fill_(True)
+    assert float(term(env)) == pytest.approx(2.0)
+
+
+def test_legacy_wrappers_consume_unproductive_finalization_without_payout(monkeypatch):
+    env, tracker = _legacy_tracker_env()
+    _patch_impact_raw(monkeypatch, [[1.0], [5.0]])
+    term = FirstStrikeLegacyImpactRewardTerm(cfg=None, env=env)
+    tracker.started.fill_(True)
+    tracker.finalized.fill_(True)
+    assert float(term(env)) == 0.0
+    tracker.productive.fill_(True)
+    assert float(term(env)) == 0.0
+
+
+def test_legacy_wrappers_ignore_delayed_recontact(monkeypatch):
+    env, tracker = _legacy_tracker_env()
+    _patch_impact_raw(monkeypatch, [[1.0], [7.0]])
+    term = FirstStrikeLegacyImpactRewardTerm(cfg=None, env=env)
+    tracker.started.fill_(True)
+    tracker.finalized.fill_(True)
+    tracker.productive.fill_(True)
+    assert float(term(env)) == pytest.approx(1.0)
+    assert float(term(env)) == 0.0
+
+
+def test_legacy_wrappers_reset_selected_environments_only(monkeypatch):
+    env, tracker = _legacy_tracker_env(num_envs=2)
+    _patch_impact_raw(monkeypatch, [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+    term = FirstStrikeLegacyImpactRewardTerm(cfg=None, env=env)
+    tracker.started.fill_(True)
+    tracker.finalized.fill_(True)
+    tracker.productive.fill_(True)
+    assert torch.equal(term(env), torch.tensor([1.0, 2.0]))
+
+    term.reset(torch.tensor([0]))
+    tracker.finalized[:] = torch.tensor([False, True])
+    assert torch.equal(term(env), torch.zeros(2))
+    tracker.finalized[:] = True
+    assert torch.equal(term(env), torch.tensor([3.0, 0.0]))
+
+
+def test_legacy_wrapper_inner_outputs_match_standalone_legacy_terms():
+    standalone_env, robot_s, nail_s, sensor_s = _make_stub_env()
+    wrapped_env, robot_w, nail_w, sensor_w = _make_stub_env()
+    tracker = SimpleNamespace(
+        started=torch.tensor([False]),
+        finalized=torch.tensor([False]),
+        productive=torch.tensor([False]),
+    )
+    setattr(wrapped_env, _ENV_FIRST_STRIKE_ATTR, tracker)
+    standalone = ImpactProgressTerm(cfg=None, env=standalone_env)
+    wrapped = FirstStrikeLegacyImpactRewardTerm(cfg=None, env=wrapped_env)
+
+    _step(
+        standalone, standalone_env, robot_s, nail_s, sensor_s,
+        head_z=0.05, depth=0.0, first_contact=False,
+    )
+    _step(
+        wrapped, wrapped_env, robot_w, nail_w, sensor_w,
+        head_z=0.05, depth=0.0, first_contact=False,
+    )
+    tracker.started.fill_(True)
+    legacy_raw = _step(
+        standalone, standalone_env, robot_s, nail_s, sensor_s,
+        head_z=0.04, depth=0.01, first_contact=True,
+    )
+    assert float(_step(
+        wrapped, wrapped_env, robot_w, nail_w, sensor_w,
+        head_z=0.04, depth=0.01, first_contact=True,
+    )) == 0.0
+    tracker.finalized.fill_(True)
+    tracker.productive.fill_(True)
+    payout = _step(
+        wrapped, wrapped_env, robot_w, nail_w, sensor_w,
+        head_z=0.04, depth=0.01, first_contact=False,
+    )
+    assert torch.equal(payout, legacy_raw)
 
 
 def test_event_impact_requires_shared_tracker():

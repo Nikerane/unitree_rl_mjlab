@@ -8,13 +8,18 @@ delta-tracking pattern. Stateful: _credited (max delivered credited so far), _pr
 
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 
 from tests.helpers import stub
 from src.tasks.hammer.mdp.first_strike import _ENV_FIRST_STRIKE_ATTR
 from src.tasks.hammer.mdp.impulse_bound import _ENV_SUBSTEP_DELIVERED_ATTR
-from src.tasks.hammer.mdp.rewards import DeliveredImpulseTerm, FirstStrikeDeliveredRewardTerm
+from src.tasks.hammer.mdp.rewards import (
+  DeliveredImpulseTerm,
+  FirstStrikeDeliveredRewardTerm,
+  FirstStrikeLegacyDeliveredRewardTerm,
+)
 
 NAIL_CFG = SimpleNamespace(name="nail_block", joint_ids=[0])
 
@@ -149,6 +154,30 @@ def test_event_delivered_saturates_at_one_i_ref():
   assert torch.allclose(term(env, i_ref=0.50), torch.tensor([0.60, 1.00]))
 
 
+def test_event_delivered_linear_mode_preserves_excess_over_i_ref():
+  """Arm F must remain linear above the event reference instead of silently capping."""
+  env = _event_env(torch.tensor([0.30, 0.75]))
+  term = FirstStrikeDeliveredRewardTerm(cfg=None, env=env)
+
+  assert torch.allclose(
+    term(env, i_ref=0.50, saturate=False),
+    torch.tensor([0.60, 1.50]),
+  )
+
+
+@pytest.mark.parametrize(
+  "bad",
+  [None, "false", 0, 1, np.bool_(True), torch.tensor(False)],
+)
+def test_event_delivered_requires_real_bool_saturate(bad):
+  """Ambiguous config values must fail instead of silently selecting a payout branch."""
+  env = _event_env(torch.tensor([0.75]))
+  term = FirstStrikeDeliveredRewardTerm(cfg=None, env=env)
+
+  with pytest.raises(TypeError, match="saturate.*bool"):
+    term(env, i_ref=0.50, saturate=bad)
+
+
 def test_event_delivered_pays_once_only():
   env = _event_env(torch.tensor([0.25]))
   term = FirstStrikeDeliveredRewardTerm(cfg=None, env=env)
@@ -172,3 +201,32 @@ def test_event_delivered_rejects_bad_normalizer(bad):
 
   with pytest.raises(ValueError, match="i_ref"):
     term(env, i_ref=bad)
+
+
+def test_legacy_delivered_sums_positive_increments_through_finalization(monkeypatch):
+  env = SimpleNamespace(num_envs=1, device="cpu")
+  tracker = SimpleNamespace(
+    started=torch.tensor([False]),
+    finalized=torch.tensor([False]),
+    productive=torch.tensor([False]),
+  )
+  setattr(env, _ENV_FIRST_STRIKE_ATTR, tracker)
+  sequence = iter(torch.tensor([value]) for value in (0.0, 0.20, 0.30, 0.10))
+  monkeypatch.setattr(
+    DeliveredImpulseTerm,
+    "__call__",
+    lambda self, env, **params: next(sequence),
+  )
+  term = FirstStrikeLegacyDeliveredRewardTerm(cfg=None, env=env)
+  outputs = []
+  for started, finalized, productive in (
+    (False, False, False),
+    (True, False, False),
+    (True, True, True),
+    (True, True, True),
+  ):
+    tracker.started.fill_(started)
+    tracker.finalized.fill_(finalized)
+    tracker.productive.fill_(productive)
+    outputs.append(float(term(env)))
+  assert outputs == pytest.approx([0.0, 0.0, 0.50, 0.0])

@@ -277,6 +277,79 @@ class DeliveredImpulseTerm(ManagerTermBase):
     return pay / i_ref
 
 
+class FirstStrikeLegacyImpactRewardTerm(ImpactProgressTerm):
+  """Emit the first positive legacy control-rate impact pulse once.
+
+  The legacy parent still runs every control step, preserving its finite
+  difference, contact/progress gates, and internal state.  The shared
+  physics-rate tracker supplies only first-event eligibility/finalization.
+  """
+
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv):
+    super().__init__(cfg, env)
+    self._consumed = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+    self._has_pulse = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+    self._latched = torch.zeros(self.num_envs, device=self.device)
+
+  def reset(self, env_ids: torch.Tensor | slice | None) -> None:
+    super().reset(env_ids)
+    idx = slice(None) if env_ids is None else env_ids
+    self._consumed[idx] = False
+    self._has_pulse[idx] = False
+    self._latched[idx] = 0.0
+
+  def __call__(self, env: ManagerBasedRlEnv, **params) -> torch.Tensor:
+    raw = super().__call__(env, **params)
+    tracker = getattr(env, _ENV_FIRST_STRIKE_ATTR, None)
+    if tracker is None:
+      raise RuntimeError(
+        "FirstStrikeLegacyImpactRewardTerm needs the FirstStrikeEventTracker "
+        "per_substep metric wired into cfg.metrics['first_strike']."
+      )
+    open_mask = tracker.started & ~self._consumed
+    latch = open_mask & ~self._has_pulse & (raw > 0.0)
+    self._latched = torch.where(latch, raw, self._latched)
+    self._has_pulse |= latch
+    finalize = tracker.finalized & ~self._consumed
+    out = torch.where(
+      finalize & tracker.productive, self._latched, torch.zeros_like(raw)
+    )
+    self._consumed |= finalize
+    return out
+
+
+class FirstStrikeLegacyDeliveredRewardTerm(DeliveredImpulseTerm):
+  """Sum legacy delivered increments, then emit them once at first finalization."""
+
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv):
+    super().__init__(cfg, env)
+    self._consumed = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+    self._sum = torch.zeros(self.num_envs, device=self.device)
+
+  def reset(self, env_ids: torch.Tensor | slice | None) -> None:
+    super().reset(env_ids)
+    idx = slice(None) if env_ids is None else env_ids
+    self._consumed[idx] = False
+    self._sum[idx] = 0.0
+
+  def __call__(self, env: ManagerBasedRlEnv, **params) -> torch.Tensor:
+    raw = super().__call__(env, **params)
+    tracker = getattr(env, _ENV_FIRST_STRIKE_ATTR, None)
+    if tracker is None:
+      raise RuntimeError(
+        "FirstStrikeLegacyDeliveredRewardTerm needs the FirstStrikeEventTracker "
+        "per_substep metric wired into cfg.metrics['first_strike']."
+      )
+    open_mask = tracker.started & ~self._consumed
+    self._sum += torch.where(open_mask, raw.clamp_min(0.0), torch.zeros_like(raw))
+    finalize = tracker.finalized & ~self._consumed
+    out = torch.where(
+      finalize & tracker.productive, self._sum, torch.zeros_like(raw)
+    )
+    self._consumed |= finalize
+    return out
+
+
 class _FirstStrikeRewardTerm(ManagerTermBase):
   """Shared one-shot payout latch for immutable first-strike snapshots."""
 
@@ -327,22 +400,35 @@ class FirstStrikeImpactRewardTerm(_FirstStrikeRewardTerm):
 
 
 class FirstStrikeDeliveredRewardTerm(_FirstStrikeRewardTerm):
-  """Pay capped productive first-window delivered impulse exactly once."""
+  """Pay productive first-window delivered impulse exactly once.
+
+  Saturated payout is the backward-compatible default.  The linear mode is a
+  separate experimental treatment: it preserves ``delivered / i_ref`` above
+  one while keeping the same event snapshot and one-shot latch.
+  """
 
   def __call__(
     self,
     env: ManagerBasedRlEnv,
     i_ref: float = 1.0,
+    saturate: bool = True,
     **params,
   ) -> torch.Tensor:
     del params  # legacy DeliveredImpulseTerm parameters stay on the isolated config arm
+    if type(saturate) is not bool:
+      raise TypeError(
+        "FirstStrikeDeliveredRewardTerm: "
+        f"saturate={saturate!r} must be a real bool (True or False)."
+      )
     if not (i_ref > 0.0 and i_ref == i_ref and i_ref != float("inf")):
       raise ValueError(
         "FirstStrikeDeliveredRewardTerm: "
         f"i_ref={i_ref} must be finite and > 0 (reward normalizer)."
       )
     tracker, pay = self._consume(env)
-    value = (tracker.delivered / i_ref).clamp_max(1.0)
+    value = tracker.delivered / i_ref
+    if saturate:
+      value = value.clamp_max(1.0)
     return torch.where(pay, value, torch.zeros_like(value))
 
 

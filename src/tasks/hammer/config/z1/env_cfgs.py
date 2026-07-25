@@ -44,6 +44,16 @@ IMP_J_LIMIT: list[float] = [1.640, 3.280, 1.640, 1.640, 1.640, 1.640]  # N·m·s
 # IMP_J_LIMIT.
 I_REF_DELIVERED: float = 0.6094  # N·s
 
+# PROVISIONAL development normalizer for the success-censored first-strike
+# horizon, deliberately separate from the legacy full-window constant above.
+# One older default scripted-reference trace (stock_solref1x.json) observed the
+# legacy cumulative delivered signal at first success as 0.30883467197418213
+# N·s; it did NOT run the new FirstStrikeEventTracker.  The rounded 0.3088 value
+# is therefore neither reproducibly calibrated nor frozen.  Vega use is gated
+# on Task 3 deriving the event value with the production tracker across repeated
+# fresh environments and passing its provenance/reproducibility gate.
+I_REF_FIRST_STRIKE_SUCCESS: float = 0.3088  # N·s
+
 
 def _wire_site(cfg, obs_keys: tuple[str, ...], param_key: str, site_name: str) -> None:
   """Set ``site_names=(site_name,)`` on the given obs terms' ``param_key`` SceneEntityCfg, across
@@ -67,6 +77,8 @@ def z1_hammer_env_cfg(
   dcmotor: bool = False,
   no_terminate: bool = False,
   event_correct: bool = False,
+  event_linear: bool = False,
+  first_strike_legacy: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Create Z1 hammer-nail task configuration.
 
@@ -94,6 +106,21 @@ def z1_hammer_env_cfg(
     raise ValueError(
       "z1_hammer_env_cfg: event_correct requires cat_impulse=True so the shared "
       "first-strike tracker has the distinct net-force impulse sensor."
+    )
+  if event_linear and not event_correct:
+    raise ValueError(
+      "z1_hammer_env_cfg: event_linear requires event_correct=True; linear payout "
+      "is defined only for the first-strike event reward."
+    )
+  if first_strike_legacy and not cat_impulse:
+    raise ValueError(
+      "z1_hammer_env_cfg: first_strike_legacy requires cat_impulse=True so the "
+      "shared first-strike tracker and legacy impulse accumulator are available."
+    )
+  if first_strike_legacy and (event_correct or event_linear):
+    raise ValueError(
+      "z1_hammer_env_cfg: first_strike_legacy cannot compose with "
+      "event_correct or event_linear."
     )
   cfg = make_hammer_env_cfg(imitation=imitation)
 
@@ -248,7 +275,7 @@ def z1_hammer_env_cfg(
     )
     cfg.scene.sensors = (cfg.scene.sensors or ()) + (hammer_nail_impulse,)
 
-    if event_correct:
+    if event_correct or first_strike_legacy:
       cfg.metrics["first_strike"] = MetricsTermCfg(
         func=hammer_mdp.FirstStrikeEventTracker,
         per_substep=True,
@@ -379,10 +406,22 @@ def z1_hammer_env_cfg(
       },
     )
     if event_correct:
-      # Isolated treatment: retain both legacy reward keys, weights, and params;
-      # replace only their readers with one-shot consumers of the shared snapshot.
+      # Isolated treatment: retain both legacy reward keys and weights, replace
+      # their readers with one-shot consumers of the shared snapshot, and use the
+      # success-censored event normalizer rather than the legacy full-window one.
       cfg.rewards["impact_progress"].func = hammer_mdp.FirstStrikeImpactRewardTerm
       cfg.rewards["delivered_impulse"].func = hammer_mdp.FirstStrikeDeliveredRewardTerm
+      cfg.rewards["delivered_impulse"].params["i_ref"] = I_REF_FIRST_STRIKE_SUCCESS
+      cfg.rewards["delivered_impulse"].params["saturate"] = not event_linear
+    elif first_strike_legacy:
+      # D-prime: preserve the legacy 50 Hz readers, params, normalizers, and
+      # weights, but censor them to one shared first-event payout boundary.
+      cfg.rewards["impact_progress"].func = (
+        hammer_mdp.FirstStrikeLegacyImpactRewardTerm
+      )
+      cfg.rewards["delivered_impulse"].func = (
+        hammer_mdp.FirstStrikeLegacyDeliveredRewardTerm
+      )
 
   # --- Non-terminating (DAPG-style) variant: anti-parking (Option B) ---
   if no_terminate:

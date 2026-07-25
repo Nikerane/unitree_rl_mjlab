@@ -91,6 +91,25 @@ def test_first_contact_uses_onset_minus_previous_position():
   assert not tracker.finalized[0]
 
 
+def test_started_is_false_until_onset_and_stays_true_after_finalization():
+  tracker, step = _tracker(window=2)
+  assert not tracker.started[0]
+
+  _arm(step, depth=(0.0, 0.0))
+  assert not tracker.started[0]
+
+  step(head_z=0.090, depth=0.001, contact_on=True, downward_force=10.0)
+  assert tracker.started[0]
+  assert not tracker.finalized[0]
+
+  step(head_z=0.089, depth=0.002, contact_on=False)
+  assert tracker.finalized[0]
+  assert tracker.started[0]
+
+  step(head_z=0.088, depth=0.030, contact_on=True, downward_force=100.0)
+  assert tracker.started[0]
+
+
 def test_contact_depth_is_previous_substep_depth():
   tracker, step = _tracker()
   _arm(step, depth=(0.001, 0.002))

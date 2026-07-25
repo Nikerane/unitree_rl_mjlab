@@ -101,12 +101,40 @@ register_mjlab_task(
     runner_cls=HammerOnPolicyRunner,
 )
 
+# D-prime comparator: the shared first-event boundary from F/E with the
+# unchanged 50 Hz legacy maximize measurements, emitted once at finalization.
+register_mjlab_task(
+    task_id="Unitree-Z1-Hammer-CaT-Impulse-FirstStrike-Legacy",
+    env_cfg=z1_hammer_env_cfg(cat_impulse=True, first_strike_legacy=True),
+    play_env_cfg=z1_hammer_env_cfg(
+        play=True, cat_impulse=True, first_strike_legacy=True
+    ),
+    rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+    runner_cls=HammerOnPolicyRunner,
+)
+
 # Experimental first-strike event-credit arm. The shipped impulse task above remains
 # the control; this arm changes only the shared event tracker and the two maximize readers.
 register_mjlab_task(
     task_id="Unitree-Z1-Hammer-CaT-Impulse-Event",
     env_cfg=z1_hammer_env_cfg(cat_impulse=True, event_correct=True),
     play_env_cfg=z1_hammer_env_cfg(play=True, cat_impulse=True, event_correct=True),
+    rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+    runner_cls=HammerOnPolicyRunner,
+)
+
+# Arm F: the same first-strike event semantics as the saturated Event arm above,
+# but with linear delivered-impulse payout beyond the event reference.  This is
+# still fixed-impedance and log-only (imp_max_p=0); only the reward payout shape
+# differs.
+register_mjlab_task(
+    task_id="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear",
+    env_cfg=z1_hammer_env_cfg(
+        cat_impulse=True, event_correct=True, event_linear=True
+    ),
+    play_env_cfg=z1_hammer_env_cfg(
+        play=True, cat_impulse=True, event_correct=True, event_linear=True
+    ),
     rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
     runner_cls=HammerOnPolicyRunner,
 )

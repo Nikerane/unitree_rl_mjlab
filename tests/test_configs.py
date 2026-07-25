@@ -31,12 +31,18 @@ from src.tasks.hammer.nail_block import (
     NAIL_SUCCESS_THRESHOLD,
     get_nail_block_entity_cfg,
 )
-from src.tasks.hammer.config.z1.env_cfgs import z1_hammer_env_cfg
+from src.tasks.hammer.config.z1.env_cfgs import (
+    I_REF_DELIVERED,
+    I_REF_FIRST_STRIKE_SUCCESS,
+    z1_hammer_env_cfg,
+)
 from src.tasks.hammer.mdp.first_strike import FirstStrikeEventTracker
 from src.tasks.hammer.mdp.rewards import (
     DeliveredImpulseTerm,
     FirstStrikeDeliveredRewardTerm,
     FirstStrikeImpactRewardTerm,
+    FirstStrikeLegacyDeliveredRewardTerm,
+    FirstStrikeLegacyImpactRewardTerm,
     ImpactProgressTerm,
 )
 
@@ -424,6 +430,21 @@ class TestArmCompositionGuards:
         with pytest.raises(ValueError, match="event_correct.*cat_impulse"):
             z1_hammer_env_cfg(event_correct=True)
 
+    def test_event_linear_requires_event_correct_arm(self):
+        with pytest.raises(ValueError, match="event_linear.*event_correct"):
+            z1_hammer_env_cfg(cat_impulse=True, event_linear=True)
+
+    def test_first_strike_legacy_rejects_event_composition(self):
+        with pytest.raises(ValueError, match="first_strike_legacy.*event_correct"):
+            z1_hammer_env_cfg(
+                cat_impulse=True, event_correct=True, first_strike_legacy=True
+            )
+        with pytest.raises(ValueError, match="first_strike_legacy.*event_linear"):
+            z1_hammer_env_cfg(
+                cat_impulse=True, event_correct=True, event_linear=True,
+                first_strike_legacy=True,
+            )
+
     def test_event_flag_preserves_legacy_positional_dcmotor_slot(self):
         cfg = z1_hammer_env_cfg(
             False, False, False, False, False, False, False, False, True
@@ -433,6 +454,13 @@ class TestArmCompositionGuards:
             for act in cfg.scene.entities["robot"].articulation.actuators
         ]
         assert actuator_types[:2] == ["DcMotorActuatorCfg", "DcMotorActuatorCfg"]
+
+    def test_linear_flag_is_appended_after_legacy_event_positional_slot(self):
+        cfg = z1_hammer_env_cfg(
+            False, False, False, False, False, False, False, True, False, False, True
+        )
+        assert "first_strike" in cfg.metrics
+        assert cfg.rewards["delivered_impulse"].params["saturate"] is True
 
 
 class TestFirstStrikeEventArm:
@@ -453,10 +481,25 @@ class TestFirstStrikeEventArm:
         )
         assert event.rewards["impact_progress"].func is FirstStrikeImpactRewardTerm
         assert event.rewards["delivered_impulse"].func is FirstStrikeDeliveredRewardTerm
+        assert event.rewards["delivered_impulse"].params["saturate"] is True
 
         assert "first_strike" not in legacy.metrics
         assert legacy.rewards["impact_progress"].func is ImpactProgressTerm
         assert legacy.rewards["delivered_impulse"].func is DeliveredImpulseTerm
+        assert legacy.rewards["delivered_impulse"].params["i_ref"] == pytest.approx(0.6094)
+        assert legacy.rewards["delivered_impulse"].params["i_ref"] == I_REF_DELIVERED
+        assert "saturate" not in legacy.rewards["delivered_impulse"].params
+
+        # The event horizon ends inclusively at first success, before the legacy
+        # full contact-window tail. Its independently provisioned default-reference
+        # normalizer therefore must not alias the legacy 0.6094 N.s value.
+        assert I_REF_FIRST_STRIKE_SUCCESS == pytest.approx(0.3088)
+        assert event.rewards["delivered_impulse"].params["i_ref"] == pytest.approx(0.3088)
+        assert (
+            event.rewards["delivered_impulse"].params["i_ref"]
+            == I_REF_FIRST_STRIKE_SUCCESS
+        )
+        assert I_REF_FIRST_STRIKE_SUCCESS != I_REF_DELIVERED
 
         # The event treatment leaves enforcement and plant authority unchanged.
         assert event.metrics["cat_soft"].params["imp_max_p"] == 0.0
@@ -477,6 +520,82 @@ class TestFirstStrikeEventArm:
             for act in legacy.scene.entities["robot"].articulation.actuators
         ]
         assert event_gains == legacy_gains
+
+    def test_registered_linear_event_task_changes_only_delivered_payout_shape(self):
+        saturated = load_env_cfg("Unitree-Z1-Hammer-CaT-Impulse-Event")
+        task_id = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear"
+        assert task_id in list_tasks()
+        linear = load_env_cfg(task_id)
+
+        assert linear.metrics["first_strike"].func is FirstStrikeEventTracker
+        assert linear.rewards["impact_progress"].func is FirstStrikeImpactRewardTerm
+        assert linear.rewards["delivered_impulse"].func is FirstStrikeDeliveredRewardTerm
+        assert linear.rewards["delivered_impulse"].params["saturate"] is False
+        assert saturated.rewards["delivered_impulse"].params["saturate"] is True
+        assert linear.rewards["impact_progress"].weight == pytest.approx(8.0)
+        assert saturated.rewards["impact_progress"].weight == pytest.approx(8.0)
+        assert linear.rewards["delivered_impulse"].weight == pytest.approx(2.0)
+        assert saturated.rewards["delivered_impulse"].weight == pytest.approx(2.0)
+        assert (
+            linear.rewards["delivered_impulse"].params["i_ref"]
+            == saturated.rewards["delivered_impulse"].params["i_ref"]
+            == I_REF_FIRST_STRIKE_SUCCESS
+        )
+
+        # Arm F is still the fixed-impedance, log-only treatment: its constraint
+        # caps, action authority and physical gains are identical to Arm E.
+        assert set(linear.rewards) == set(saturated.rewards)
+        assert set(linear.metrics) == set(saturated.metrics)
+        assert set(linear.actions) == set(saturated.actions)
+        assert linear.metrics["cat_soft"].params["imp_max_p"] == 0.0
+        assert (
+            linear.metrics["cat_soft"].params["imp_limit"]
+            == saturated.metrics["cat_soft"].params["imp_limit"]
+        )
+        assert (
+            linear.actions["ik_hammer_head"].delta_pos_scale
+            == saturated.actions["ik_hammer_head"].delta_pos_scale
+        )
+        linear_gains = [
+            (act.stiffness, act.damping)
+            for act in linear.scene.entities["robot"].articulation.actuators
+        ]
+        saturated_gains = [
+            (act.stiffness, act.damping)
+            for act in saturated.scene.entities["robot"].articulation.actuators
+        ]
+        assert linear_gains == saturated_gains
+
+    def test_registered_first_strike_legacy_task_keeps_legacy_readout(self):
+        task_id = "Unitree-Z1-Hammer-CaT-Impulse-FirstStrike-Legacy"
+        assert task_id in list_tasks()
+        dprime = load_env_cfg(task_id)
+        control = load_env_cfg("Unitree-Z1-Hammer-CaT-Impulse")
+        saturated = load_env_cfg("Unitree-Z1-Hammer-CaT-Impulse-Event")
+        linear = load_env_cfg("Unitree-Z1-Hammer-CaT-Impulse-Event-Linear")
+
+        assert dprime.metrics["first_strike"].func is FirstStrikeEventTracker
+        assert dprime.rewards["impact_progress"].func is FirstStrikeLegacyImpactRewardTerm
+        assert (
+            dprime.rewards["delivered_impulse"].func
+            is FirstStrikeLegacyDeliveredRewardTerm
+        )
+        assert dprime.rewards["impact_progress"].weight == pytest.approx(8.0)
+        assert dprime.rewards["delivered_impulse"].weight == pytest.approx(2.0)
+        assert dprime.rewards["impact_progress"].params["v_expected"] == pytest.approx(1.0)
+        assert dprime.rewards["delivered_impulse"].params["i_ref"] == I_REF_DELIVERED
+        assert "saturate" not in dprime.rewards["delivered_impulse"].params
+
+        assert "first_strike" not in control.metrics
+        for event in (saturated, linear):
+            assert (
+                event.rewards["delivered_impulse"].params["i_ref"]
+                == I_REF_FIRST_STRIKE_SUCCESS
+            )
+            assert event.rewards["impact_progress"].weight == pytest.approx(8.0)
+            assert event.rewards["delivered_impulse"].weight == pytest.approx(2.0)
+        assert saturated.rewards["delivered_impulse"].params["saturate"] is True
+        assert linear.rewards["delivered_impulse"].params["saturate"] is False
 
 
 # ---------------------------------------------------------------------------
