@@ -12,8 +12,9 @@ import pytest
 import torch
 
 from tests.helpers import stub
+from src.tasks.hammer.mdp.first_strike import _ENV_FIRST_STRIKE_ATTR
 from src.tasks.hammer.mdp.impulse_bound import _ENV_SUBSTEP_DELIVERED_ATTR
-from src.tasks.hammer.mdp.rewards import DeliveredImpulseTerm
+from src.tasks.hammer.mdp.rewards import DeliveredImpulseTerm, FirstStrikeDeliveredRewardTerm
 
 NAIL_CFG = SimpleNamespace(name="nail_block", joint_ids=[0])
 
@@ -124,3 +125,50 @@ def test_shape_B():
   t = _rterm(3)
   out = t(_renv(torch.tensor([0.1, 0.2, 0.3]), torch.tensor([0.01, 0.01, 0.01])), i_ref=1.0, nail_cfg=NAIL_CFG)
   assert out.shape == (3,)
+
+
+def _event_env(delivered: torch.Tensor, *, productive=True, attach_tracker=True):
+  B = delivered.shape[0]
+  env = SimpleNamespace(num_envs=B, device="cpu")
+  tracker = SimpleNamespace(
+    finalized=torch.ones(B, dtype=torch.bool),
+    productive=torch.full((B,), bool(productive), dtype=torch.bool),
+    v_precontact=torch.zeros(B),
+    delivered=delivered,
+  )
+  if attach_tracker:
+    setattr(env, _ENV_FIRST_STRIKE_ATTR, tracker)
+  return env
+
+
+def test_event_delivered_saturates_at_one_i_ref():
+  """First-window impulse is reference-sufficient, not unbounded maximization."""
+  env = _event_env(torch.tensor([0.30, 0.75]))
+  term = FirstStrikeDeliveredRewardTerm(cfg=None, env=env)
+
+  assert torch.allclose(term(env, i_ref=0.50), torch.tensor([0.60, 1.00]))
+
+
+def test_event_delivered_pays_once_only():
+  env = _event_env(torch.tensor([0.25]))
+  term = FirstStrikeDeliveredRewardTerm(cfg=None, env=env)
+
+  assert torch.equal(term(env, i_ref=0.50), torch.tensor([0.50]))
+  assert torch.equal(term(env, i_ref=0.50), torch.tensor([0.0]))
+
+
+def test_event_delivered_requires_shared_tracker():
+  env = _event_env(torch.tensor([0.25]), attach_tracker=False)
+  term = FirstStrikeDeliveredRewardTerm(cfg=None, env=env)
+
+  with pytest.raises(RuntimeError, match="FirstStrikeEventTracker"):
+    term(env, i_ref=0.50)
+
+
+@pytest.mark.parametrize("bad", [0.0, -1.0, float("inf"), float("nan")])
+def test_event_delivered_rejects_bad_normalizer(bad):
+  env = _event_env(torch.tensor([0.25]))
+  term = FirstStrikeDeliveredRewardTerm(cfg=None, env=env)
+
+  with pytest.raises(ValueError, match="i_ref"):
+    term(env, i_ref=bad)

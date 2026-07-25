@@ -9,6 +9,7 @@ import pytest
 from mjlab.actuator import BuiltinPositionActuatorCfg
 from mjlab.envs.mdp.actions import DifferentialIKActionCfg
 from mjlab.managers.observation_manager import ObservationGroupCfg
+from mjlab.tasks.registry import list_tasks, load_env_cfg
 
 from src.assets.robots.unitree_z1.z1_constants import (
     ARM_ACTUATOR_NAMES,
@@ -31,6 +32,13 @@ from src.tasks.hammer.nail_block import (
     get_nail_block_entity_cfg,
 )
 from src.tasks.hammer.config.z1.env_cfgs import z1_hammer_env_cfg
+from src.tasks.hammer.mdp.first_strike import FirstStrikeEventTracker
+from src.tasks.hammer.mdp.rewards import (
+    DeliveredImpulseTerm,
+    FirstStrikeDeliveredRewardTerm,
+    FirstStrikeImpactRewardTerm,
+    ImpactProgressTerm,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -411,6 +419,64 @@ class TestArmCompositionGuards:
         # The lone arms stay constructible.
         z1_hammer_env_cfg(vel_penalty=True)
         z1_hammer_env_cfg(cat_soft=True)
+
+    def test_event_correct_requires_impulse_arm(self):
+        with pytest.raises(ValueError, match="event_correct.*cat_impulse"):
+            z1_hammer_env_cfg(event_correct=True)
+
+    def test_event_flag_preserves_legacy_positional_dcmotor_slot(self):
+        cfg = z1_hammer_env_cfg(
+            False, False, False, False, False, False, False, False, True
+        )
+        actuator_types = [
+            type(act).__name__
+            for act in cfg.scene.entities["robot"].articulation.actuators
+        ]
+        assert actuator_types[:2] == ["DcMotorActuatorCfg", "DcMotorActuatorCfg"]
+
+
+class TestFirstStrikeEventArm:
+    def test_registered_event_task_is_isolated_from_legacy_arm(self):
+        task_id = "Unitree-Z1-Hammer-CaT-Impulse-Event"
+        assert task_id in list_tasks()
+        event = load_env_cfg(task_id)
+        legacy = load_env_cfg("Unitree-Z1-Hammer-CaT-Impulse")
+
+        tracker_cfg = event.metrics["first_strike"]
+        assert tracker_cfg.func is FirstStrikeEventTracker
+        assert tracker_cfg.per_substep is True
+        assert tracker_cfg.params["contact_sensor_name"] == "hammer_nail_contact"
+        assert tracker_cfg.params["impulse_sensor_name"] == "hammer_nail_impulse"
+        assert (
+            tracker_cfg.params["contact_sensor_name"]
+            != tracker_cfg.params["impulse_sensor_name"]
+        )
+        assert event.rewards["impact_progress"].func is FirstStrikeImpactRewardTerm
+        assert event.rewards["delivered_impulse"].func is FirstStrikeDeliveredRewardTerm
+
+        assert "first_strike" not in legacy.metrics
+        assert legacy.rewards["impact_progress"].func is ImpactProgressTerm
+        assert legacy.rewards["delivered_impulse"].func is DeliveredImpulseTerm
+
+        # The event treatment leaves enforcement and plant authority unchanged.
+        assert event.metrics["cat_soft"].params["imp_max_p"] == 0.0
+        assert (
+            event.metrics["cat_soft"].params["imp_limit"]
+            == legacy.metrics["cat_soft"].params["imp_limit"]
+        )
+        assert (
+            event.actions["ik_hammer_head"].delta_pos_scale
+            == legacy.actions["ik_hammer_head"].delta_pos_scale
+        )
+        event_gains = [
+            (act.stiffness, act.damping)
+            for act in event.scene.entities["robot"].articulation.actuators
+        ]
+        legacy_gains = [
+            (act.stiffness, act.damping)
+            for act in legacy.scene.entities["robot"].articulation.actuators
+        ]
+        assert event_gains == legacy_gains
 
 
 # ---------------------------------------------------------------------------

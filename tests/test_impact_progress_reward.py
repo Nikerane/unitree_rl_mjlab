@@ -18,7 +18,8 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from src.tasks.hammer.mdp.rewards import ImpactProgressTerm
+from src.tasks.hammer.mdp.first_strike import _ENV_FIRST_STRIKE_ATTR
+from src.tasks.hammer.mdp.rewards import FirstStrikeImpactRewardTerm, ImpactProgressTerm
 
 
 # --- Stub env -------------------------------------------------------------
@@ -191,3 +192,92 @@ def test_bad_v_expected_raises():
     for bad in (0.0, -1.0, float("inf"), float("nan")):
         with pytest.raises(ValueError, match="v_expected"):
             term(env, **{**_PARAMS, "v_expected": bad})
+
+
+# --- Event-correct one-shot reward ----------------------------------------
+
+
+def _event_env(
+    *,
+    finalized=True,
+    productive=True,
+    v_precontact=1.0,
+    num_envs=1,
+    attach_tracker=True,
+):
+    env = SimpleNamespace(num_envs=num_envs, device="cpu")
+    tracker = SimpleNamespace(
+        finalized=torch.full((num_envs,), bool(finalized), dtype=torch.bool),
+        productive=torch.full((num_envs,), bool(productive), dtype=torch.bool),
+        v_precontact=torch.full((num_envs,), float(v_precontact)),
+        delivered=torch.zeros(num_envs),
+    )
+    if attach_tracker:
+        setattr(env, _ENV_FIRST_STRIKE_ATTR, tracker)
+    return env, tracker
+
+
+def test_event_reward_waits_until_tracker_finalizes():
+    """A productive snapshot is unreadable until its shared event is final."""
+    env, tracker = _event_env(finalized=False, v_precontact=2.0, attach_tracker=False)
+    term = FirstStrikeImpactRewardTerm(cfg=None, env=env)
+    # Reward terms are constructed before metrics, so tracker lookup must be lazy.
+    setattr(env, _ENV_FIRST_STRIKE_ATTR, tracker)
+
+    assert torch.equal(term(env, v_expected=1.0), torch.tensor([0.0]))
+    tracker.finalized.fill_(True)
+    assert torch.equal(term(env, v_expected=1.0), torch.tensor([2.0]))
+
+
+def test_event_reward_pays_once_only():
+    """A finalized productive snapshot cannot be collected twice."""
+    env, _ = _event_env(v_precontact=1.5)
+    term = FirstStrikeImpactRewardTerm(cfg=None, env=env)
+
+    assert torch.equal(term(env, v_expected=1.0), torch.tensor([1.5]))
+    assert torch.equal(term(env, v_expected=1.0), torch.tensor([0.0]))
+
+
+def test_event_reward_rejects_unproductive_snapshot():
+    """Fast scrape/tap snapshots with no real nail progress earn zero."""
+    env, _ = _event_env(productive=False, v_precontact=100.0)
+    term = FirstStrikeImpactRewardTerm(cfg=None, env=env)
+
+    assert torch.equal(term(env, v_expected=1.0), torch.tensor([0.0]))
+
+
+def test_event_impact_uses_latched_precontact_speed():
+    """Impact payout comes directly from the 500 Hz tracker's onset snapshot."""
+    env, _ = _event_env(v_precontact=1.25)
+    term = FirstStrikeImpactRewardTerm(cfg=None, env=env)
+
+    assert torch.equal(term(env, v_expected=0.5), torch.tensor([2.5]))
+
+
+def test_event_reward_reset_rearms_paid_latch():
+    """Resetting selected envs re-enables only those one-shot payouts."""
+    env, tracker = _event_env(num_envs=2)
+    tracker.v_precontact[:] = torch.tensor([1.0, 2.0])
+    term = FirstStrikeImpactRewardTerm(cfg=None, env=env)
+    assert torch.equal(term(env, v_expected=1.0), torch.tensor([1.0, 2.0]))
+
+    term.reset(torch.tensor([0]))
+
+    assert torch.equal(term(env, v_expected=1.0), torch.tensor([1.0, 0.0]))
+
+
+def test_event_impact_requires_shared_tracker():
+    env, _ = _event_env(attach_tracker=False)
+    term = FirstStrikeImpactRewardTerm(cfg=None, env=env)
+
+    with pytest.raises(RuntimeError, match="FirstStrikeEventTracker"):
+        term(env, v_expected=1.0)
+
+
+@pytest.mark.parametrize("bad", [0.0, -1.0, float("inf"), float("nan")])
+def test_event_impact_rejects_bad_normalizer(bad):
+    env, _ = _event_env()
+    term = FirstStrikeImpactRewardTerm(cfg=None, env=env)
+
+    with pytest.raises(ValueError, match="v_expected"):
+        term(env, v_expected=bad)

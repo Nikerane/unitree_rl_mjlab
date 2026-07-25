@@ -66,6 +66,7 @@ def z1_hammer_env_cfg(
   cat_impulse: bool = False,
   dcmotor: bool = False,
   no_terminate: bool = False,
+  event_correct: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Create Z1 hammer-nail task configuration.
 
@@ -88,6 +89,11 @@ def z1_hammer_env_cfg(
       "z1_hammer_env_cfg: vel_penalty cannot be combined with cat_soft/cat_impulse — the "
       "curriculum-ramped negative vel_excess weight bypasses CatSoftHook's one-shot _NEG_TERMS "
       "guard (penalty-evasion exploit). See the guard comment in env_cfgs.py."
+    )
+  if event_correct and not cat_impulse:
+    raise ValueError(
+      "z1_hammer_env_cfg: event_correct requires cat_impulse=True so the shared "
+      "first-strike tracker has the distinct net-force impulse sensor."
     )
   cfg = make_hammer_env_cfg(imitation=imitation)
 
@@ -242,6 +248,22 @@ def z1_hammer_env_cfg(
     )
     cfg.scene.sensors = (cfg.scene.sensors or ()) + (hammer_nail_impulse,)
 
+    if event_correct:
+      cfg.metrics["first_strike"] = MetricsTermCfg(
+        func=hammer_mdp.FirstStrikeEventTracker,
+        per_substep=True,
+        reduce="last",
+        params={
+          "contact_sensor_name": "hammer_nail_contact",
+          "impulse_sensor_name": "hammer_nail_impulse",
+          "robot_cfg": SceneEntityCfg("robot", site_names=(HAMMER_HEAD_SITE_NAME,)),
+          "nail_cfg": SceneEntityCfg("nail_block", joint_names=("nail_slide",)),
+          "axis": (0.0, 0.0, -1.0),
+          "window_substeps": 25,
+          "progress_eps": 5e-4,
+        },
+      )
+
     # Robot-side per-joint reaction impulse Λ_j = Σ|qfrc_constraint_j|·dt, contact-anchored, 500 Hz.
     cfg.metrics["substep_impulse"] = MetricsTermCfg(
       func=hammer_mdp.SubstepImpulseAccumulator,
@@ -356,6 +378,11 @@ def z1_hammer_env_cfg(
         "nail_cfg": SceneEntityCfg("nail_block", joint_names=("nail_slide",)),
       },
     )
+    if event_correct:
+      # Isolated treatment: retain both legacy reward keys, weights, and params;
+      # replace only their readers with one-shot consumers of the shared snapshot.
+      cfg.rewards["impact_progress"].func = hammer_mdp.FirstStrikeImpactRewardTerm
+      cfg.rewards["delivered_impulse"].func = hammer_mdp.FirstStrikeDeliveredRewardTerm
 
   # --- Non-terminating (DAPG-style) variant: anti-parking (Option B) ---
   if no_terminate:

@@ -101,6 +101,16 @@ register_mjlab_task(
     runner_cls=HammerOnPolicyRunner,
 )
 
+# Experimental first-strike event-credit arm. The shipped impulse task above remains
+# the control; this arm changes only the shared event tracker and the two maximize readers.
+register_mjlab_task(
+    task_id="Unitree-Z1-Hammer-CaT-Impulse-Event",
+    env_cfg=z1_hammer_env_cfg(cat_impulse=True, event_correct=True),
+    play_env_cfg=z1_hammer_env_cfg(play=True, cat_impulse=True, event_correct=True),
+    rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+    runner_cls=HammerOnPolicyRunner,
+)
+
 # C0 IMPULSE + reference-guided arm: the -CaT-Impulse measurement arm (cat_impulse=True) PLUS the
 # weak-annealed ante-impact tracking prior r_imit (imitation=True) -- i.e. "reference-guided online
 # RL". The scripted SingleStrikeReference bootstraps the approach (r_imit weight 0.1 -> 0 by iter 250,

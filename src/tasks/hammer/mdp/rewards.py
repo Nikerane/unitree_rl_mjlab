@@ -9,6 +9,7 @@ import torch
 from mjlab.entity import Entity
 from mjlab.managers.manager_base import ManagerTermBase, ManagerTermBaseCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
+from src.tasks.hammer.mdp.first_strike import _ENV_FIRST_STRIKE_ATTR
 from src.tasks.hammer.mdp.impulse_bound import _ENV_SUBSTEP_DELIVERED_ATTR
 from src.tasks.hammer.mdp.references import get_strike_reference
 from src.tasks.hammer.nail_block import NAIL_GOAL_DEPTH
@@ -274,6 +275,75 @@ class DeliveredImpulseTerm(ManagerTermBase):
     # delivers impulse, so its full increment is still paid.
     self._credited = torch.maximum(self._credited, cur)
     return pay / i_ref
+
+
+class _FirstStrikeRewardTerm(ManagerTermBase):
+  """Shared one-shot payout latch for immutable first-strike snapshots."""
+
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv):
+    super().__init__(env)
+    self._paid = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+
+  def reset(self, env_ids: torch.Tensor | slice | None) -> None:
+    if env_ids is None:
+      self._paid.fill_(False)
+    else:
+      self._paid[env_ids] = False
+
+  def _consume(self, env: ManagerBasedRlEnv):
+    tracker = getattr(env, _ENV_FIRST_STRIKE_ATTR, None)
+    if tracker is None:
+      raise RuntimeError(
+        f"{self.name} needs the FirstStrikeEventTracker per_substep metric wired into "
+        "cfg.metrics['first_strike']."
+      )
+    pay = tracker.finalized & tracker.productive & ~self._paid
+    self._paid |= pay
+    return tracker, pay
+
+
+class FirstStrikeImpactRewardTerm(_FirstStrikeRewardTerm):
+  """Pay the productive first strike's latched pre-contact speed exactly once."""
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    v_expected: float = 1.0,
+    **params,
+  ) -> torch.Tensor:
+    del params  # legacy ImpactProgressTerm parameters stay on the isolated config arm
+    if not (
+      v_expected > 0.0
+      and v_expected == v_expected
+      and v_expected != float("inf")
+    ):
+      raise ValueError(
+        "FirstStrikeImpactRewardTerm: "
+        f"v_expected={v_expected} must be finite and > 0 (normalizer)."
+      )
+    tracker, pay = self._consume(env)
+    value = tracker.v_precontact / v_expected
+    return torch.where(pay, value, torch.zeros_like(value))
+
+
+class FirstStrikeDeliveredRewardTerm(_FirstStrikeRewardTerm):
+  """Pay capped productive first-window delivered impulse exactly once."""
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    i_ref: float = 1.0,
+    **params,
+  ) -> torch.Tensor:
+    del params  # legacy DeliveredImpulseTerm parameters stay on the isolated config arm
+    if not (i_ref > 0.0 and i_ref == i_ref and i_ref != float("inf")):
+      raise ValueError(
+        "FirstStrikeDeliveredRewardTerm: "
+        f"i_ref={i_ref} must be finite and > 0 (reward normalizer)."
+      )
+    tracker, pay = self._consume(env)
+    value = (tracker.delivered / i_ref).clamp_max(1.0)
+    return torch.where(pay, value, torch.zeros_like(value))
 
 
 class ImitationPriorTerm(ManagerTermBase):
