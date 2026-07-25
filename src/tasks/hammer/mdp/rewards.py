@@ -299,7 +299,9 @@ class FirstStrikeLegacyImpactRewardTerm(ImpactProgressTerm):
     self._latched[idx] = 0.0
 
   def __call__(self, env: ManagerBasedRlEnv, **params) -> torch.Tensor:
-    raw = super().__call__(env, **params)
+    raw = torch.nan_to_num(
+      super().__call__(env, **params), nan=0.0, posinf=0.0, neginf=0.0
+    )
     tracker = getattr(env, _ENV_FIRST_STRIKE_ATTR, None)
     if tracker is None:
       raise RuntimeError(
@@ -333,7 +335,9 @@ class FirstStrikeLegacyDeliveredRewardTerm(DeliveredImpulseTerm):
     self._sum[idx] = 0.0
 
   def __call__(self, env: ManagerBasedRlEnv, **params) -> torch.Tensor:
-    raw = super().__call__(env, **params)
+    raw = torch.nan_to_num(
+      super().__call__(env, **params), nan=0.0, posinf=0.0, neginf=0.0
+    )
     tracker = getattr(env, _ENV_FIRST_STRIKE_ATTR, None)
     if tracker is None:
       raise RuntimeError(

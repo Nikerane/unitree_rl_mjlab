@@ -320,6 +320,21 @@ def test_legacy_impact_ignores_second_positive_pulse_inside_window(monkeypatch):
     assert float(term(env)) == pytest.approx(1.25)
 
 
+@pytest.mark.parametrize("nonfinite", [float("nan"), float("inf"), -float("inf")])
+def test_legacy_impact_ignores_nonfinite_then_latches_finite_positive(
+    monkeypatch, nonfinite
+):
+    env, tracker = _legacy_tracker_env()
+    _patch_impact_raw(monkeypatch, [[nonfinite], [1.25]])
+    term = FirstStrikeLegacyImpactRewardTerm(cfg=None, env=env)
+    tracker.started.fill_(True)
+
+    assert float(term(env)) == 0.0
+    tracker.finalized.fill_(True)
+    tracker.productive.fill_(True)
+    assert float(term(env)) == pytest.approx(1.25)
+
+
 def test_legacy_wrappers_include_finalization_boundary_values(monkeypatch):
     env, tracker = _legacy_tracker_env()
     _patch_impact_raw(monkeypatch, [[0.0], [2.0]])

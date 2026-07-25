@@ -230,3 +230,119 @@ def test_legacy_delivered_sums_positive_increments_through_finalization(monkeypa
     tracker.productive.fill_(productive)
     outputs.append(float(term(env)))
   assert outputs == pytest.approx([0.0, 0.0, 0.50, 0.0])
+
+
+def _legacy_delivered_tracker_env(num_envs=1):
+  env = SimpleNamespace(num_envs=num_envs, device="cpu")
+  tracker = SimpleNamespace(
+    started=torch.zeros(num_envs, dtype=torch.bool),
+    finalized=torch.zeros(num_envs, dtype=torch.bool),
+    productive=torch.zeros(num_envs, dtype=torch.bool),
+  )
+  setattr(env, _ENV_FIRST_STRIKE_ATTR, tracker)
+  return env, tracker
+
+
+def _patch_delivered_raw(monkeypatch, values):
+  sequence = iter(torch.as_tensor(value, dtype=torch.float32) for value in values)
+  monkeypatch.setattr(
+    DeliveredImpulseTerm,
+    "__call__",
+    lambda self, env, **params: next(sequence),
+  )
+
+
+@pytest.mark.parametrize("nonfinite", [float("nan"), float("inf"), -float("inf")])
+def test_legacy_delivered_ignores_nonfinite_then_sums_finite_positives(
+  monkeypatch, nonfinite
+):
+  env, tracker = _legacy_delivered_tracker_env()
+  _patch_delivered_raw(monkeypatch, [[nonfinite], [0.20], [0.30]])
+  term = FirstStrikeLegacyDeliveredRewardTerm(cfg=None, env=env)
+  tracker.started.fill_(True)
+
+  assert float(term(env)) == 0.0
+  assert float(term(env)) == 0.0
+  tracker.finalized.fill_(True)
+  tracker.productive.fill_(True)
+  assert float(term(env)) == pytest.approx(0.50)
+
+
+def test_legacy_delivered_consumes_unproductive_finalization(monkeypatch):
+  env, tracker = _legacy_delivered_tracker_env()
+  _patch_delivered_raw(monkeypatch, [[1.0], [5.0]])
+  term = FirstStrikeLegacyDeliveredRewardTerm(cfg=None, env=env)
+  tracker.started.fill_(True)
+  tracker.finalized.fill_(True)
+
+  assert float(term(env)) == 0.0
+  tracker.productive.fill_(True)
+  assert float(term(env)) == 0.0
+
+
+def test_legacy_delivered_ignores_delayed_recontact(monkeypatch):
+  env, tracker = _legacy_delivered_tracker_env()
+  _patch_delivered_raw(monkeypatch, [[1.0], [7.0]])
+  term = FirstStrikeLegacyDeliveredRewardTerm(cfg=None, env=env)
+  tracker.started.fill_(True)
+  tracker.finalized.fill_(True)
+  tracker.productive.fill_(True)
+
+  assert float(term(env)) == pytest.approx(1.0)
+  assert float(term(env)) == 0.0
+
+
+def test_legacy_delivered_reset_selected_environments_only(monkeypatch):
+  env, tracker = _legacy_delivered_tracker_env(num_envs=2)
+  _patch_delivered_raw(monkeypatch, [[1.0, 2.0], [3.0, 4.0], [0.0, 0.0]])
+  term = FirstStrikeLegacyDeliveredRewardTerm(cfg=None, env=env)
+  tracker.started.fill_(True)
+  tracker.finalized.fill_(True)
+  tracker.productive.fill_(True)
+  assert torch.equal(term(env), torch.tensor([1.0, 2.0]))
+
+  term.reset(torch.tensor([0]))
+  tracker.finalized[:] = torch.tensor([False, True])
+  assert torch.equal(term(env), torch.zeros(2))
+  tracker.finalized[:] = True
+  assert torch.equal(term(env), torch.tensor([3.0, 0.0]))
+
+
+def test_legacy_delivered_real_parent_outputs_match_standalone_term():
+  standalone_env = _renv(torch.zeros(1), torch.zeros(1))
+  wrapped_env = _renv(torch.zeros(1), torch.zeros(1))
+  tracker = SimpleNamespace(
+    started=torch.tensor([False]),
+    finalized=torch.tensor([False]),
+    productive=torch.tensor([False]),
+  )
+  setattr(wrapped_env, _ENV_FIRST_STRIKE_ATTR, tracker)
+  standalone = DeliveredImpulseTerm(cfg=None, env=standalone_env)
+  wrapped = FirstStrikeLegacyDeliveredRewardTerm(cfg=None, env=wrapped_env)
+
+  assert torch.equal(
+    standalone(standalone_env, i_ref=1.0, nail_cfg=NAIL_CFG),
+    wrapped(wrapped_env, i_ref=1.0, nail_cfg=NAIL_CFG),
+  )
+
+  tracker.started.fill_(True)
+  getattr(standalone_env, _ENV_SUBSTEP_DELIVERED_ATTR).delivered.fill_(0.20)
+  getattr(wrapped_env, _ENV_SUBSTEP_DELIVERED_ATTR).delivered.fill_(0.20)
+  standalone_env.scene["nail_block"].data.joint_pos.fill_(0.01)
+  wrapped_env.scene["nail_block"].data.joint_pos.fill_(0.01)
+  legacy_first = standalone(standalone_env, i_ref=1.0, nail_cfg=NAIL_CFG)
+  assert torch.equal(
+    wrapped(wrapped_env, i_ref=1.0, nail_cfg=NAIL_CFG), torch.zeros(1)
+  )
+
+  getattr(standalone_env, _ENV_SUBSTEP_DELIVERED_ATTR).delivered.fill_(0.50)
+  getattr(wrapped_env, _ENV_SUBSTEP_DELIVERED_ATTR).delivered.fill_(0.50)
+  standalone_env.scene["nail_block"].data.joint_pos.fill_(0.02)
+  wrapped_env.scene["nail_block"].data.joint_pos.fill_(0.02)
+  legacy_final = standalone(standalone_env, i_ref=1.0, nail_cfg=NAIL_CFG)
+  tracker.finalized.fill_(True)
+  tracker.productive.fill_(True)
+  assert torch.equal(
+    wrapped(wrapped_env, i_ref=1.0, nail_cfg=NAIL_CFG),
+    legacy_first + legacy_final,
+  )
