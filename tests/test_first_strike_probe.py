@@ -82,14 +82,10 @@ def _record(
       for arm in ("D-prime", "F", "E")
     },
     "dprime_audit": {
-      **{key: [0.0, 1.0] for key in (
+      key: [0.0, 1.0] for key in (
         "wrapper_parent_impact_raw", "c_legacy_impact_raw",
         "wrapper_parent_delivered_raw", "c_legacy_delivered_raw",
-      )},
-      **{key: 1.0 for key in (
-        "impact_latch_oracle", "impact_manager_payout_raw",
-        "delivered_sum_oracle", "delivered_manager_payout_raw",
-      )},
+      )
     },
   }
 
@@ -174,7 +170,7 @@ def _raw_fixture(tmp_path: Path) -> dict[str, object]:
       arm: trace["trace_digest"] for arm in ("C", "D-prime", "F", "E")
     }
   return {
-    "schema_version": 4,
+    "schema_version": 5,
     "manifest": manifest,
     "physical_traces": traces,
     "reward_records": records,
@@ -374,7 +370,7 @@ def test_summary_is_aggregate_only_and_binds_raw_sha256(tmp_path: Path):
   assert summary["artifact_sha256"]["raw"] == probe.sha256_path(raw_path)
   assert summary["artifact_sha256"]["manifest"] == probe.sha256_path(manifest_path)
   assert summary["raw_artifact"] == {
-    "schema_version": 4,
+    "schema_version": 5,
     "size_bytes": raw_path.stat().st_size,
     "physical_trace_count": 2,
     "reward_record_count": 2,
@@ -449,14 +445,14 @@ def test_dprime_replay_latches_first_impact_and_sums_delivered(tmp_path: Path):
   )
   record["returns"]["D-prime"] = _arm(
     impact=[0.0, 0.0, 0.16],
-    delivered=[0.0, 0.0, 0.10],
+    delivered=[0.0, 0.0, 0.20],
     finalized=2,
     productive=True,
   )
   for arm in ("F", "E"):
     record["returns"][arm] = _arm(
       impact=[0.0, 0.0, 0.16],
-      delivered=[0.0, 0.0, 0.10],
+      delivered=[0.0, 0.0, 0.20],
       finalized=2,
       productive=True,
     )
@@ -472,15 +468,81 @@ def test_dprime_replay_latches_first_impact_and_sums_delivered(tmp_path: Path):
     "c_legacy_impact_raw": [0.0, 1.0, 1.5],
     "wrapper_parent_delivered_raw": [0.0, 2.0, 3.0],
     "c_legacy_delivered_raw": [0.0, 2.0, 3.0],
-    "impact_latch_oracle": 1.0,
-    "impact_manager_payout_raw": 1.0,
-    "delivered_sum_oracle": 5.0,
-    "delivered_manager_payout_raw": 5.0,
   }
 
-  probe.validate_reward_record(record)
+  probe.validate_reward_record(record, raw["manifest"])
   assert record["returns"]["D-prime"]["impact_stream"] == [0.0, 0.0, 0.16]
-  assert record["returns"]["D-prime"]["delivered_stream"] == [0.0, 0.0, 0.10]
+  assert record["returns"]["D-prime"]["delivered_stream"] == [0.0, 0.0, 0.20]
+
+
+def test_dprime_rejects_correlated_stored_scalar_attack(tmp_path: Path):
+  raw = _raw_fixture(tmp_path)
+  raw["reward_records"][0]["dprime_audit"].update({
+    "impact_latch_oracle": 7.0,
+    "impact_manager_payout_raw": 7.0,
+    "delivered_sum_oracle": 9.0,
+    "delivered_manager_payout_raw": 9.0,
+  })
+
+  with pytest.raises(ValueError, match="dprime_audit|D-prime"):
+    _validate(raw, tmp_path)
+
+
+def test_dprime_rejects_correlated_manager_stream_attack(tmp_path: Path):
+  raw = _raw_fixture(tmp_path)
+  payout = raw["reward_records"][0]["returns"]["D-prime"]
+  payout["impact_stream"] = [0.0, 7.0 * 8.0 * 0.02]
+  payout["delivered_stream"] = [0.0, 9.0 * 2.0 * 0.02]
+  payout["undiscounted"] = 1.48
+  payout["discounted"] = 0.99 * 1.48
+
+  with pytest.raises(ValueError, match="D-prime.*manager stream"):
+    _validate(raw, tmp_path)
+
+
+def test_dprime_rejects_correlated_c_and_wrapper_parent_attack(tmp_path: Path):
+  raw = _raw_fixture(tmp_path)
+  audit = raw["reward_records"][0]["dprime_audit"]
+  for key in ("wrapper_parent_impact_raw", "c_legacy_impact_raw"):
+    audit[key] = [0.0, 7.0]
+  for key in ("wrapper_parent_delivered_raw", "c_legacy_delivered_raw"):
+    audit[key] = [0.0, 9.0]
+
+  with pytest.raises(ValueError, match="D-prime.*manager stream"):
+    _validate(raw, tmp_path)
+
+
+@pytest.mark.parametrize(
+  ("field", "value"),
+  (
+    ("impact_weight", 7.0),
+    ("step_dt_s", 0.03),
+    ("i_ref", 0.7),
+    ("v_expected", 2.0),
+  ),
+)
+def test_dprime_payout_binds_manifest_task_contract(
+  tmp_path: Path, field: str, value: float,
+):
+  raw = _raw_fixture(tmp_path)
+  raw["manifest"]["task_contract"]["D-prime"][field] = value
+
+  with pytest.raises(ValueError, match=f"D-prime.*{field}"):
+    _validate(raw, tmp_path)
+
+
+def test_dprime_unproductive_finalization_has_zero_payout(tmp_path: Path):
+  raw = _raw_fixture(tmp_path)
+  record = raw["reward_records"][0]
+  for arm in ("D-prime", "F", "E"):
+    record["returns"][arm] = _arm(
+      impact=[0.0, 0.0], delivered=[0.0, 0.0],
+      finalized=1, productive=False,
+    )
+    record["returns"][arm]["finalization_reason"] = "window"
+    record["tracker_streams"][arm]["productive"] = [False, False]
+    record["tracker_streams"][arm]["reason"] = [0, 2]
+  _validate(raw, tmp_path)
 
 
 def test_dprime_f_e_share_finalization_payout_step(tmp_path: Path):
@@ -490,7 +552,7 @@ def test_dprime_f_e_share_finalization_payout_step(tmp_path: Path):
     assert record["returns"][arm]["finalization_step"] == 1
     assert record["returns"][arm]["impact_payout_steps"] == [1]
     assert record["returns"][arm]["delivered_payout_steps"] == [1]
-  probe.validate_reward_record(record)
+  probe.validate_reward_record(record, raw["manifest"])
 
   record["returns"]["E"] = _arm(
     impact=[0.16, 0.0],
@@ -505,7 +567,7 @@ def test_dprime_f_e_share_finalization_payout_step(tmp_path: Path):
     "reason": [1, 1],
   }
   with pytest.raises(ValueError, match="shared finalization"):
-    probe.validate_reward_record(record)
+    probe.validate_reward_record(record, raw["manifest"])
 
   record = _raw_fixture(tmp_path)["reward_records"][0]
   record["tracker_streams"]["F"]["productive"][0] = True
@@ -514,7 +576,7 @@ def test_dprime_f_e_share_finalization_payout_step(tmp_path: Path):
     "D-prime", "F", "E"
   )} == {1}
   with pytest.raises(ValueError, match="tracker streams.*F.*productive|reason"):
-    probe.validate_reward_record(record)
+    probe.validate_reward_record(record, raw["manifest"])
 
 
 def test_all_arms_keep_weights_eight_and_two(tmp_path: Path):

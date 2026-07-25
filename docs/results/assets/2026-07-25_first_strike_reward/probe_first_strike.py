@@ -97,14 +97,10 @@ RETURN_SCHEMA = {
   "finalization_reason": str, "productive": bool,
 }
 DPRIME_AUDIT_SCHEMA = {
-  **{key: VEC for key in (
+  key: VEC for key in (
     "wrapper_parent_impact_raw", "c_legacy_impact_raw",
     "wrapper_parent_delivered_raw", "c_legacy_delivered_raw",
-  )},
-  **{key: float for key in (
-    "impact_latch_oracle", "impact_manager_payout_raw",
-    "delivered_sum_oracle", "delivered_manager_payout_raw",
-  )},
+  )
 }
 PHYSICAL_SCHEMA = {
   "contact": _seq(bool),
@@ -1010,41 +1006,22 @@ def _tracker_columns(rows: list[dict[str, Any]]) -> dict[str, list[Any]]:
 def _dprime_audit(
   c_parent: dict[str, list[float]],
   d_parent: dict[str, list[float]],
-  tracker: dict[str, list[Any]],
-  d_return: dict[str, Any],
 ) -> dict[str, Any]:
   if len(c_parent["impact"]) != len(d_parent["impact"]):
     raise RuntimeError("C/D-prime parent impact stream length mismatch")
   if len(c_parent["delivered"]) != len(d_parent["delivered"]):
     raise RuntimeError("C/D-prime parent delivered stream length mismatch")
-  final = d_return["finalization_step"]
-  if final is None:
-    impact_oracle = delivered_oracle = 0.0
-  else:
-    indices = [i for i in range(final + 1) if tracker["started"][i]]
-    positives = [d_parent["impact"][i] for i in indices if d_parent["impact"][i] > 0]
-    impact_oracle = positives[0] if positives else 0.0
-    delivered_oracle = sum(
-      max(0.0, d_parent["delivered"][i]) for i in indices
-    )
-    if not d_return["productive"]:
-      impact_oracle = delivered_oracle = 0.0
   return {
     "wrapper_parent_impact_raw": copy.deepcopy(d_parent["impact"]),
     "c_legacy_impact_raw": copy.deepcopy(c_parent["impact"]),
     "wrapper_parent_delivered_raw": copy.deepcopy(d_parent["delivered"]),
     "c_legacy_delivered_raw": copy.deepcopy(c_parent["delivered"]),
-    "impact_latch_oracle": impact_oracle,
-    "impact_manager_payout_raw": sum(d_return["impact_stream"]) / (8.0 * 0.02),
-    "delivered_sum_oracle": delivered_oracle,
-    "delivered_manager_payout_raw": sum(d_return["delivered_stream"])
-    / (2.0 * 0.02),
   }
 
 
 def _empty_raw(manifest: dict[str, Any]) -> dict[str, Any]:
   return {
-    "schema_version": 4,
+    "schema_version": 5,
     "manifest": manifest,
     "physical_traces": [],
     "reward_records": [],
@@ -1216,24 +1193,78 @@ def _validate_replay_semantics(record: dict[str, Any]) -> None:
       )
 
 
-def _validate_dprime_payout(record: dict[str, Any]) -> None:
+def _validate_dprime_payout(
+  record: dict[str, Any], manifest: dict[str, Any]
+) -> None:
   audit = record["dprime_audit"]
   if audit["wrapper_parent_impact_raw"] != audit["c_legacy_impact_raw"]:
     raise ValueError("D-prime impact parent differs from C legacy oracle")
   if audit["wrapper_parent_delivered_raw"] != audit["c_legacy_delivered_raw"]:
     raise ValueError("D-prime delivered parent differs from C legacy oracle")
-  if abs(audit["impact_latch_oracle"] - audit["impact_manager_payout_raw"]) > 1e-6:
-    raise ValueError("D-prime impact production payout differs from latch oracle")
-  if abs(
-    audit["delivered_sum_oracle"] - audit["delivered_manager_payout_raw"]
-  ) > 1e-6:
-    raise ValueError("D-prime delivered production payout differs from sum oracle")
+  contract = manifest["task_contract"]["D-prime"]
+  expected_contract = {
+    "impact_weight": (
+      manifest["reward_weights"]["D-prime"]["impact_progress"], 8.0
+    ),
+    "delivered_weight": (
+      manifest["reward_weights"]["D-prime"]["delivered_impulse"], 2.0
+    ),
+    "step_dt_s": (manifest["step_dt_s"], 0.02),
+    "i_ref": (manifest["normalizers_n_s"]["legacy"], 0.6094),
+    "v_expected": (
+      manifest["task_contract"]["C"]["v_expected"], 1.0
+    ),
+  }
+  for field, (bound, mandated) in expected_contract.items():
+    if contract[field] != bound or bound != mandated:
+      raise ValueError(f"D-prime {field} contract mismatch")
+
+  tracker = record["tracker_streams"]["D-prime"]
+  payout = record["returns"]["D-prime"]
+  parent_impact = audit["wrapper_parent_impact_raw"]
+  parent_delivered = audit["wrapper_parent_delivered_raw"]
+  n = len(payout["impact_stream"])
+  if {
+    len(parent_impact), len(parent_delivered),
+    *(len(tracker[key]) for key in TRACKER_SCHEMA),
+  } != {n}:
+    raise ValueError("D-prime parent/tracker/manager stream length mismatch")
+  final = next(
+    (i for i, value in enumerate(tracker["finalized"]) if value), None
+  )
+  impact_raw = delivered_raw = 0.0
+  if final is not None and tracker["productive"][final]:
+    active = [i for i in range(final + 1) if tracker["started"][i]]
+    impact_raw = next(
+      (parent_impact[i] for i in active if parent_impact[i] > 0.0), 0.0
+    )
+    delivered_raw = sum(max(0.0, parent_delivered[i]) for i in active)
+  expected_impact = [0.0] * n
+  expected_delivered = [0.0] * n
+  if final is not None:
+    expected_impact[final] = (
+      impact_raw * contract["impact_weight"] * contract["step_dt_s"]
+    )
+    expected_delivered[final] = (
+      delivered_raw * contract["delivered_weight"] * contract["step_dt_s"]
+    )
+  for name, actual, expected in (
+    ("impact", payout["impact_stream"], expected_impact),
+    ("delivered", payout["delivered_stream"], expected_delivered),
+  ):
+    if any(
+      not math.isclose(got, want, rel_tol=0.0, abs_tol=1e-6)
+      for got, want in zip(actual, expected, strict=True)
+    ):
+      raise ValueError(f"D-prime {name} manager stream differs from parent oracle")
 
 
-def validate_reward_record(record: dict[str, Any]) -> None:
+def validate_reward_record(
+  record: dict[str, Any], manifest: dict[str, Any]
+) -> None:
   _validate_schema(record, REWARD_RECORD_SCHEMA, "reward_record")
   _validate_replay_semantics(record)
-  _validate_dprime_payout(record)
+  _validate_dprime_payout(record, manifest)
 
 
 def _validate_digests(raw: dict[str, Any]) -> None:
@@ -1288,10 +1319,13 @@ def validate_raw_payload(
   verify_source_hashes: bool = True,
 ) -> None:
   _validate_schema(raw, RAW_SCHEMA, "raw")
-  if raw["schema_version"] != 4:
+  if raw["schema_version"] != 5:
     raise ValueError("raw schema version mismatch")
   _validate_rows(raw["reward_records"], _validate_replay_semantics)
-  _validate_rows(raw["reward_records"], _validate_dprime_payout)
+  _validate_rows(
+    raw["reward_records"],
+    lambda record: _validate_dprime_payout(record, raw["manifest"]),
+  )
   validate_population(
     raw,
     expected_checkpoints=expected_checkpoints,
@@ -1470,7 +1504,10 @@ def collect_gate_results(
     ("replay_semantics", "D-prime/F/E tracker and event payout semantics",
      lambda: _validate_rows(raw["reward_records"], _validate_replay_semantics)),
     ("dprime_payout", "D-prime production parent and payout fidelity",
-     lambda: _validate_rows(raw["reward_records"], _validate_dprime_payout)),
+     lambda: _validate_rows(
+       raw["reward_records"],
+       lambda record: _validate_dprime_payout(record, raw["manifest"]),
+     )),
     ("stream_lengths", "manager streams/actions/substeps",
      lambda: _validate_stream_lengths(raw, decimation=raw["manifest"]["decimation"])),
     ("weights", "equal 8/2 treatment weights",
@@ -1962,7 +1999,7 @@ def _run_bank(
             "returns": arm_returns,
             "tracker_streams": trackers,
             "dprime_audit": _dprime_audit(
-              c_parent, d_parent, trackers["D-prime"], arm_returns["D-prime"]
+              c_parent, d_parent
             ),
           }
         )
