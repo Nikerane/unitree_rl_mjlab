@@ -4,6 +4,13 @@ from .contact_row_impulse import (  # noqa: F401
   contact_row_qfrc,
   reconstruct_qfrc_from_efc,
 )
+from .first_strike import (  # noqa: F401
+  REASON_NONE,
+  REASON_SUCCESS,
+  REASON_WINDOW,
+  FirstStrikeEventTracker,
+  _ENV_FIRST_STRIKE_ATTR,
+)
 from .impulse_bound import (  # noqa: F401
   CatDeltaPeak,
   SubstepDeliveredImpulse,
