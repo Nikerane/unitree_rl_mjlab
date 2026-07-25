@@ -73,95 +73,164 @@ MANDATED_SOURCES = (
   "src/tasks/hammer/config/z1/__init__.py",
   "docs/results/assets/2026-07-25_first_strike_reward/probe_first_strike.py",
 )
+STOCHASTIC_PROOF_SEEDS = (2026072898, 2026072899)
 
-RAW_SCHEMA_KEYS = frozenset(
-  {
-    "schema_version",
-    "manifest",
-    "physical_traces",
-    "reward_records",
-    "phase_rows",
-    "normalizer_samples",
-    "runtime_s",
-    "development_replay",
-    "crash",
-  }
+
+_seq = lambda item: ("seq", item)
+_map = lambda item, keys=None: (
+  "map", item, None if keys is None else frozenset(keys)
 )
-TRACE_KEYS = frozenset(
-  {
-    "episode_id",
-    "action_tape",
-    "action_tape_digest",
-    "physical",
-    "trace_digest",
-  }
-)
-PHYSICAL_KEYS = frozenset(
-  {
-    "contact",
-    "head_position_m",
-    "clamped_depth_m",
-    "net_axial_force_n",
-    "joint_speed_rad_s",
-  }
-)
-REWARD_RECORD_KEYS = frozenset(
-  {
-    "episode_id",
-    "checkpoint_path",
-    "stratum",
-    "training_seed",
-    "split",
-    "reset_seed",
-    "action_seed",
-    "physical_trace_digests",
-    "returns",
-    "tracker_streams",
-    "dprime_audit",
-  }
-)
-RETURN_KEYS = frozenset(
-  {
-    "discounted",
-    "undiscounted",
-    "impact_stream",
-    "delivered_stream",
-    "impact_payout_steps",
-    "delivered_payout_steps",
-    "finalization_step",
-    "finalization_reason",
-    "productive",
-  }
-)
-TRACKER_KEYS = frozenset({"started", "finalized", "productive", "reason"})
-DPRIME_AUDIT_KEYS = frozenset(
-  {
-    "wrapper_parent_impact_raw",
-    "c_legacy_impact_raw",
-    "wrapper_parent_delivered_raw",
-    "c_legacy_delivered_raw",
-    "impact_latch_oracle",
-    "impact_manager_payout_raw",
-    "delivered_sum_oracle",
-    "delivered_manager_payout_raw",
-  }
-)
-SUMMARY_KEYS = frozenset(
-  {
-    "schema_version",
-    "valid",
-    "failure_reasons",
-    "gates",
-    "artifact_sha256",
-    "raw_artifact",
-    "population",
-    "normalizers",
-    "phase_invariance",
-    "development_replay",
-    "aggregates",
-    "provenance",
-  }
-)
+_one_of = lambda *types: ("one_of", *types)
+VEC = _seq(float)
+MATRIX = _seq(VEC)
+HASH_MAP = _map(str)
+ARM_HASHES = _map(str, TASKS)
+TRACKER_SCHEMA = {
+  **{key: _seq(bool) for key in ("started", "finalized", "productive")},
+  "reason": _seq(int),
+}
+RETURN_SCHEMA = {
+  "discounted": float, "undiscounted": float,
+  "impact_stream": VEC, "delivered_stream": VEC,
+  "impact_payout_steps": _seq(int), "delivered_payout_steps": _seq(int),
+  "finalization_step": _one_of(int, type(None)),
+  "finalization_reason": str, "productive": bool,
+}
+DPRIME_AUDIT_SCHEMA = {
+  **{key: VEC for key in (
+    "wrapper_parent_impact_raw", "c_legacy_impact_raw",
+    "wrapper_parent_delivered_raw", "c_legacy_delivered_raw",
+  )},
+  **{key: float for key in (
+    "impact_latch_oracle", "impact_manager_payout_raw",
+    "delivered_sum_oracle", "delivered_manager_payout_raw",
+  )},
+}
+PHYSICAL_SCHEMA = {
+  "contact": _seq(bool),
+  "head_position_m": MATRIX, "joint_speed_rad_s": MATRIX,
+  "clamped_depth_m": VEC, "net_axial_force_n": VEC,
+}
+TRACE_SCHEMA = {
+  "episode_id": str, "action_tape": MATRIX, "action_tape_digest": str,
+  "physical": PHYSICAL_SCHEMA, "trace_digest": str,
+}
+REWARD_RECORD_SCHEMA = {
+  "episode_id": str, "checkpoint_path": str, "stratum": str,
+  "training_seed": int, "split": str, "reset_seed": int, "action_seed": int,
+  "physical_trace_digests": ARM_HASHES,
+  "returns": _map(RETURN_SCHEMA, TASKS),
+  "tracker_streams": _map(TRACKER_SCHEMA, ("D-prime", "F", "E")),
+  "dprime_audit": DPRIME_AUDIT_SCHEMA,
+}
+REFERENCE_SCHEMA = {key: float for key in REFERENCE_PARAMS}
+CHECKPOINT_SCHEMA = {
+  "stratum": str, "training_seed": int, "split": str,
+  "path": str, "sha256": str,
+}
+PROOF_SCHEMA = {
+  "checkpoint_path": str, "same_seed": int, "different_seed": int,
+  "sample_a": MATRIX, "sample_b": MATRIX,
+  "sample_different": MATRIX, "deterministic_mean": MATRIX,
+}
+GIT_STATE_SCHEMA = {"head": str, "dirty": bool}
+VERSIONS_SCHEMA = {key: str for key in (
+  "python", "torch", "numpy", "mjlab", "mujoco", "mujoco_warp", "rsl_rl"
+)}
+TASK_CONTRACT_SCHEMA = {
+  "task_id": str, "impact_class": str, "delivered_class": str,
+  "tracker_class": _one_of(str, type(None)),
+  "tracker_per_substep": _one_of(bool, type(None)),
+  "impact_weight": float, "delivered_weight": float,
+  "v_expected": float, "i_ref": float,
+  "saturate": _one_of(bool, type(None)),
+  "imp_max_p": float, "physics_dt_s": float, "step_dt_s": float,
+  "decimation": int, "non_treatment_digest": str,
+}
+MANIFEST_SCHEMA = {
+  "schema_version": int, "frozen_before_payout": bool, "selection_policy": str,
+  "checkpoints": _seq(CHECKPOINT_SCHEMA),
+  "reset_seeds": _seq(int), "action_seeds": _seq(int), "action_mode": str,
+  "gamma": float, "physics_dt_s": float, "step_dt_s": float, "decimation": int,
+  "normalizers_n_s": {"legacy": float, "first_strike_success": float},
+  "tasks": _map(str, TASKS), "reference_params": REFERENCE_SCHEMA,
+  "expected_episode_count": int, "repo": GIT_STATE_SCHEMA,
+  "assets": GIT_STATE_SCHEMA, "task_config_digest": str,
+  "reward_weights": _map(
+    {"impact_progress": float, "delivered_impulse": float}, TASKS
+  ),
+  "task_contract": _map(TASK_CONTRACT_SCHEMA, TASKS),
+  "relevant_source_sha256": HASH_MAP,
+  "relevant_provenance": {
+    "repo_paths": _seq(str), "asset_paths": _seq(str),
+    "file_sha256": HASH_MAP, "tree_sha256": str, "versions": VERSIONS_SCHEMA,
+  },
+  "stochastic_policy_proof": _seq(PROOF_SCHEMA),
+}
+PHASE_SCHEMA = {
+  "phase": int, "matched_event_digest": str,
+  "contact_detected": bool, "productive": bool,
+  "v_precontact_m_s": float, "v_true_m_s": float,
+  "impact_payout_count": int, "delivered_payout_count": int,
+  "delivered_n_s": float, "depth_at_contact_m": float,
+  "peak_depth_m": float, "progress_m": float, "finalization_reason": str,
+}
+NORMALIZER_SCHEMA = {
+  "legacy_terminal_n_s": float,
+  "legacy_reference_params": REFERENCE_SCHEMA,
+  "event_values_n_s": VEC, "event_reference_params": REFERENCE_SCHEMA,
+}
+DEVELOPMENT_SCHEMA = _map({"late_payout": float}, ("D-prime", "F", "E"))
+RAW_SCHEMA = {
+  "schema_version": int, "manifest": MANIFEST_SCHEMA,
+  "physical_traces": _seq(TRACE_SCHEMA),
+  "reward_records": _seq(REWARD_RECORD_SCHEMA),
+  "phase_rows": _seq(PHASE_SCHEMA), "normalizer_samples": NORMALIZER_SCHEMA,
+  "runtime_s": float, "development_replay": DEVELOPMENT_SCHEMA,
+  "crash": _one_of(str, type(None)),
+}
+GATE_SCHEMA = {"id": str, "target": str, "passed": bool, "reason": str}
+ARM_AGGREGATE_SCHEMA = {
+  "episode_count": int, "discounted_mean": float, "undiscounted_mean": float,
+  "impact_payout_episode_count": int,
+  "delivered_payout_episode_count": int,
+}
+STRATUM_ARM_SCHEMA = {"episode_count": int, "undiscounted_mean": float}
+SUMMARY_SCHEMA = {
+  "schema_version": int, "valid": bool,
+  "failure_reasons": _seq(str), "gates": _seq(GATE_SCHEMA),
+  "artifact_sha256": {"manifest": str, "raw": str},
+  "raw_artifact": {
+    "schema_version": int, "size_bytes": int,
+    "physical_trace_count": int, "reward_record_count": int,
+  },
+  "population": {
+    "expected_episodes": int, "completed_episodes": int,
+    "checkpoint_groups": int, "paired_seed_count": int,
+  },
+  "normalizers": {
+    "legacy": {"configured_n_s": float, "observed_n_s": float},
+    "first_strike_success": {
+      "configured_n_s": float, "sample_count": int,
+      "mean_n_s": float, "sd_n_s": float, "range_n_s": float,
+    },
+  },
+  "phase_invariance": {"count": int, "passed": bool},
+  "stochastic_policy": {"checkpoint_count": int, "passed": bool},
+  "development_replay": DEVELOPMENT_SCHEMA,
+  "aggregates": {
+    "by_arm": _map(ARM_AGGREGATE_SCHEMA, TASKS),
+    "by_stratum": _map(_map(STRATUM_ARM_SCHEMA, TASKS)),
+  },
+  "provenance": {
+    "repo": GIT_STATE_SCHEMA, "assets": GIT_STATE_SCHEMA,
+    "task_config_digest": str, "relevant_tree_sha256": str,
+    "versions": VERSIONS_SCHEMA,
+  },
+}
+
+RAW_SCHEMA_KEYS = frozenset(RAW_SCHEMA)
+PHYSICAL_KEYS = frozenset(PHYSICAL_SCHEMA)
 NPZ_KEYS = frozenset({"payload_json"})
 
 
@@ -178,24 +247,41 @@ def sha256_path(path: Path) -> str:
   return digest.hexdigest()
 
 
-def _json_safe(value: Any) -> Any:
-  if isinstance(value, dict):
-    return {key: _json_safe(child) for key, child in value.items()}
-  if isinstance(value, (list, tuple)):
-    return [_json_safe(child) for child in value]
-  if isinstance(value, float) and not math.isfinite(value):
-    return None
-  return value
-
-
-def _finite(value: Any, path: str = "payload") -> None:
-  if isinstance(value, dict):
-    for key, child in value.items():
-      _finite(child, f"{path}.{key}")
-  elif isinstance(value, list):
-    for index, child in enumerate(value):
-      _finite(child, f"{path}[{index}]")
-  elif isinstance(value, float) and not math.isfinite(value):
+def _validate_schema(value: Any, schema: Any, path: str) -> None:
+  if isinstance(schema, dict):
+    if type(value) is not dict or set(value) != set(schema):
+      raise ValueError(f"schema mismatch at {path}")
+    for key, child_schema in schema.items():
+      _validate_schema(value[key], child_schema, f"{path}.{key}")
+    return
+  if isinstance(schema, tuple):
+    tag = schema[0]
+    if tag == "seq":
+      if type(value) is not list:
+        raise ValueError(f"{path} must be list")
+      for index, child in enumerate(value):
+        _validate_schema(child, schema[1], f"{path}[{index}]")
+      return
+    if tag == "map":
+      if type(value) is not dict or any(type(key) is not str for key in value):
+        raise ValueError(f"{path} must be string-keyed map")
+      expected_keys = schema[2]
+      if expected_keys is not None and set(value) != expected_keys:
+        raise ValueError(f"schema mismatch at {path}")
+      for key, child in value.items():
+        _validate_schema(child, schema[1], f"{path}.{key}")
+      return
+    if tag == "one_of":
+      if not any(type(value) is allowed for allowed in schema[1:]):
+        names = "/".join(allowed.__name__ for allowed in schema[1:])
+        raise ValueError(f"{path} must be {names}")
+      if type(value) is float and not math.isfinite(value):
+        raise ValueError(f"{path} must be finite")
+      return
+    raise RuntimeError(f"unknown schema tag: {tag}")
+  if type(value) is not schema:
+    raise ValueError(f"{path} must be {schema.__name__}")
+  if schema is float and not math.isfinite(value):
     raise ValueError(f"{path} must be finite")
 
 
@@ -455,10 +541,6 @@ def validate_task_contract(contract: dict[str, Any]) -> None:
     raise ValueError("non-treatment task configuration differs")
 
 
-def _task_digest(contract: dict[str, Any]) -> str:
-  return canonical_digest(contract)
-
-
 def frozen_manifest() -> dict[str, Any]:
   provenance = build_relevant_provenance(
     ROOT, ASSETS_ROOT, require_git_clean=True
@@ -480,7 +562,7 @@ def frozen_manifest() -> dict[str, Any]:
   }
   validate_reward_weights(weights)
   return {
-    "schema_version": 2,
+    "schema_version": 3,
     "frozen_before_payout": True,
     "selection_policy": "complete_frozen_bank_no_adaptation",
     "checkpoints": copy.deepcopy(list(CHECKPOINTS)),
@@ -497,11 +579,12 @@ def frozen_manifest() -> dict[str, Any]:
     "expected_episode_count": 384,
     "repo": _git_state(ROOT),
     "assets": _git_state(ASSETS_ROOT),
-    "task_config_digest": _task_digest(contract),
+    "task_config_digest": canonical_digest(contract),
     "reward_weights": weights,
     "task_contract": contract,
     "relevant_source_sha256": hash_relevant_sources(ROOT, MANDATED_SOURCES),
     "relevant_provenance": provenance,
+    "stochastic_policy_proof": [],
   }
 
 
@@ -509,14 +592,59 @@ def scaled_treatment_terms(
   iterable_terms: Iterable[tuple[str, Sequence[float]]], *, step_dt: float
 ) -> tuple[float, float]:
   values = {name: float(value[0]) for name, value in iterable_terms}
-  return (
-    values["impact_progress"] * step_dt,
-    values["delivered_impulse"] * step_dt,
-  )
+  return (values["impact_progress"] * step_dt,
+          values["delivered_impulse"] * step_dt)
 
 
 def sample_stochastic_action(policy: Callable[..., Any], obs: Any, *, clip: float):
   return policy(obs, stochastic_output=True).clamp(-clip, clip)
+
+
+def prove_stochastic_policy(policy, observation, *, checkpoint_path: str,
+                            same_seed: int, different_seed: int,
+                            clip: float) -> dict[str, Any]:
+  import torch
+
+  rng_state = torch.random.get_rng_state()
+  try:
+    torch.manual_seed(same_seed)
+    sample_a = sample_stochastic_action(policy, observation, clip=clip)
+    torch.manual_seed(same_seed)
+    sample_b = sample_stochastic_action(policy, observation, clip=clip)
+    torch.manual_seed(different_seed)
+    sample_different = sample_stochastic_action(policy, observation, clip=clip)
+    deterministic = policy(observation, stochastic_output=False).clamp(-clip, clip)
+  finally:
+    torch.random.set_rng_state(rng_state)
+  return {
+    "checkpoint_path": checkpoint_path, "same_seed": same_seed,
+    "different_seed": different_seed,
+    "sample_a": sample_a.detach().cpu().tolist(),
+    "sample_b": sample_b.detach().cpu().tolist(),
+    "sample_different": sample_different.detach().cpu().tolist(),
+    "deterministic_mean": deterministic.detach().cpu().tolist(),
+  }
+
+
+def validate_stochastic_policy_proof(
+  rows: list[dict[str, Any]], checkpoints: Sequence[dict[str, Any]]
+) -> None:
+  expected_paths = [row["path"] for row in checkpoints]
+  if [row["checkpoint_path"] for row in rows] != expected_paths:
+    raise ValueError("stochastic proof must cover frozen checkpoints in order")
+  failures = []
+  for row in rows:
+    checks = (
+      (row["same_seed"] == row["different_seed"], "proof seeds must differ"),
+      (row["sample_a"] != row["sample_b"], "same seed was not reproducible"),
+      (row["sample_a"] == row["sample_different"], "different seeds matched"),
+      (row["sample_a"] == row["deterministic_mean"], "stochastic sample equals mean"),
+    )
+    failures.extend(
+      f"{row['checkpoint_path']}: {message}" for failed, message in checks if failed
+    )
+  if failures:
+    raise ValueError("; ".join(failures))
 
 
 def drive_reference_episode(
@@ -916,7 +1044,7 @@ def _dprime_audit(
 
 def _empty_raw(manifest: dict[str, Any]) -> dict[str, Any]:
   return {
-    "schema_version": 3,
+    "schema_version": 4,
     "manifest": manifest,
     "physical_traces": [],
     "reward_records": [],
@@ -935,9 +1063,17 @@ def _empty_raw(manifest: dict[str, Any]) -> dict[str, Any]:
   }
 
 
-def _schema_exact(value: dict[str, Any], expected: frozenset[str], path: str) -> None:
-  if not isinstance(value, dict) or set(value) != expected:
-    raise ValueError(f"raw schema mismatch at {path}")
+def _validate_rows(
+  rows: Iterable[dict[str, Any]], check: Callable[[dict[str, Any]], None]
+) -> None:
+  failures = []
+  for row in sorted(rows, key=lambda item: item["episode_id"]):
+    try:
+      check(row)
+    except Exception as exc:
+      failures.append(f"{type(exc).__name__}: {exc}: {row['episode_id']}")
+  if failures:
+    raise ValueError("; ".join(failures))
 
 
 def validate_population(
@@ -1001,12 +1137,8 @@ def _checkpoint_binding_failures(
   return sorted(set(failures))
 
 
-def validate_reward_record(record: dict[str, Any]) -> None:
-  _schema_exact(record, REWARD_RECORD_KEYS, "reward_record")
-  if set(record["returns"]) != set(TASKS):
-    raise ValueError("four production return records are required")
+def _validate_replay_semantics(record: dict[str, Any]) -> None:
   for arm, payload in record["returns"].items():
-    _schema_exact(payload, RETURN_KEYS, f"returns.{arm}")
     n = len(payload["impact_stream"])
     if len(payload["delivered_stream"]) != n:
       raise ValueError("reward stream length mismatch")
@@ -1029,12 +1161,9 @@ def validate_reward_record(record: dict[str, Any]) -> None:
     discounted = sum((0.99**i) * value for i, value in enumerate(combined))
     if abs(payload["discounted"] - discounted) > 1e-8:
       raise ValueError("discounted return does not recompute")
-  if set(record["tracker_streams"]) != {"D-prime", "F", "E"}:
-    raise ValueError("tracker streams require D-prime/F/E")
   tracker_final = {}
   for arm, tracker in record["tracker_streams"].items():
-    _schema_exact(tracker, TRACKER_KEYS, f"tracker_streams.{arm}")
-    lengths = {len(tracker[key]) for key in TRACKER_KEYS}
+    lengths = {len(tracker[key]) for key in TRACKER_SCHEMA}
     if len(lengths) != 1:
       raise ValueError("tracker stream lengths differ")
     final = next(
@@ -1075,7 +1204,19 @@ def validate_reward_record(record: dict[str, Any]) -> None:
         raise ValueError("delayed payout after finalization")
   if len(set(tracker_final.values())) != 1:
     raise ValueError("shared finalization boundary differs for D-prime/F/E")
-  _schema_exact(record["dprime_audit"], DPRIME_AUDIT_KEYS, "dprime_audit")
+  baseline = record["tracker_streams"]["D-prime"]
+  for arm in ("F", "E"):
+    differing = [
+      key for key in TRACKER_SCHEMA
+      if record["tracker_streams"][arm][key] != baseline[key]
+    ]
+    if differing:
+      raise ValueError(
+        f"tracker streams differ for {arm}: {', '.join(differing)}"
+      )
+
+
+def _validate_dprime_payout(record: dict[str, Any]) -> None:
   audit = record["dprime_audit"]
   if audit["wrapper_parent_impact_raw"] != audit["c_legacy_impact_raw"]:
     raise ValueError("D-prime impact parent differs from C legacy oracle")
@@ -1089,58 +1230,68 @@ def validate_reward_record(record: dict[str, Any]) -> None:
     raise ValueError("D-prime delivered production payout differs from sum oracle")
 
 
+def validate_reward_record(record: dict[str, Any]) -> None:
+  _validate_schema(record, REWARD_RECORD_SCHEMA, "reward_record")
+  _validate_replay_semantics(record)
+  _validate_dprime_payout(record)
+
+
 def _validate_digests(raw: dict[str, Any]) -> None:
   record_by_id = {row["episode_id"]: row for row in raw["reward_records"]}
-  for trace in raw["physical_traces"]:
+  def check(trace: dict[str, Any]) -> None:
     episode_id = trace["episode_id"]
     if trace["action_tape_digest"] != canonical_digest(trace["action_tape"]):
-      raise ValueError(f"action digest mismatch: {episode_id}")
+      raise ValueError("action digest mismatch")
     if trace["trace_digest"] != canonical_digest(trace["physical"]):
-      raise ValueError(f"trace digest mismatch: {episode_id}")
-    if set(record_by_id[episode_id]["physical_trace_digests"]) != set(TASKS):
-      raise ValueError(f"per-arm trace digest schema mismatch: {episode_id}")
+      raise ValueError("trace digest mismatch")
+    record = record_by_id.get(episode_id)
+    if record is None:
+      raise ValueError("reward record missing")
     if any(
       digest != trace["trace_digest"]
-      for digest in record_by_id[episode_id]["physical_trace_digests"].values()
+      for digest in record["physical_trace_digests"].values()
     ):
-      raise ValueError(f"physical trace inequality: {episode_id}")
+      raise ValueError("physical trace inequality")
+
+  _validate_rows(raw["physical_traces"], check)
 
 
 def _validate_stream_lengths(raw: dict[str, Any], *, decimation: int = 10) -> None:
   trace_by_id = {row["episode_id"]: row for row in raw["physical_traces"]}
-  for record in raw["reward_records"]:
-    trace = trace_by_id[record["episode_id"]]
+  def check(record: dict[str, Any]) -> None:
+    trace = trace_by_id.get(record["episode_id"])
+    if trace is None:
+      raise ValueError("physical trace missing")
     actions = len(trace["action_tape"])
     physical_lengths = {len(trace["physical"][key]) for key in PHYSICAL_KEYS}
     if physical_lengths != {decimation * actions}:
-      raise ValueError(f"substeps must equal 10×actions: {record['episode_id']}")
+      raise ValueError("substeps must equal decimation×actions")
     for arm, payload in record["returns"].items():
       if len(payload["impact_stream"]) != actions:
-        raise ValueError(f"stream/action length mismatch: {record['episode_id']}/{arm}")
+        raise ValueError(f"stream/action length mismatch: {arm}")
     for arm, tracker in record["tracker_streams"].items():
       if len(tracker["started"]) != actions:
-        raise ValueError(f"tracker/action length mismatch: {record['episode_id']}/{arm}")
+        raise ValueError(f"tracker/action length mismatch: {arm}")
+
+  _validate_rows(raw["reward_records"], check)
 
 
 def validate_raw_payload(
   raw: dict[str, Any],
   *,
   root: Path = ROOT,
+  assets_root: Path = ASSETS_ROOT,
   expected_checkpoints: Sequence[dict[str, Any]] = CHECKPOINTS,
   expected_reset_seeds: Sequence[int] = RESET_SEEDS,
   expected_action_seeds: Sequence[int] = ACTION_SEEDS,
   verify_checkpoint_hashes: bool = True,
   verify_source_hashes: bool = True,
 ) -> None:
-  _schema_exact(raw, RAW_SCHEMA_KEYS, "raw")
-  if raw["schema_version"] != 3:
+  _validate_schema(raw, RAW_SCHEMA, "raw")
+  if raw["schema_version"] != 4:
     raise ValueError("raw schema version mismatch")
-  for trace in raw["physical_traces"]:
-    _schema_exact(trace, TRACE_KEYS, "physical_trace")
-    _schema_exact(trace["physical"], PHYSICAL_KEYS, "physical_trace.physical")
-  for record in raw["reward_records"]:
-    validate_reward_record(record)
-  _finite(raw)
+  _validate_rows(raw["reward_records"], _validate_replay_semantics)
+  _validate_rows(raw["reward_records"], _validate_dprime_payout)
   validate_population(
     raw,
     expected_checkpoints=expected_checkpoints,
@@ -1166,12 +1317,20 @@ def validate_raw_payload(
       raw["manifest"]["relevant_source_sha256"],
       label="relevant source",
     )
+    validate_relevant_provenance(
+      raw["manifest"]["relevant_provenance"],
+      root,
+      assets_root,
+      require_git_clean=True,
+    )
 
 
 def write_raw(raw: dict[str, Any], path: Path) -> None:
   import numpy as np
 
-  payload = json.dumps(_json_safe(raw), sort_keys=True, separators=(",", ":"))
+  payload = json.dumps(
+    raw, sort_keys=True, separators=(",", ":"), allow_nan=False
+  )
   np.savez_compressed(path, payload_json=np.asarray(payload))
 
 
@@ -1267,6 +1426,7 @@ def collect_gate_results(
   raw: dict[str, Any],
   *,
   root: Path = ROOT,
+  assets_root: Path = ASSETS_ROOT,
   manifest_path: Path | None = None,
   raw_path: Path | None = None,
   expected_checkpoints: Sequence[dict[str, Any]] = CHECKPOINTS,
@@ -1275,69 +1435,55 @@ def collect_gate_results(
   verify_artifact_hashes: bool = True,
   verify_source_hashes: bool = True,
 ) -> list[dict[str, Any]]:
-  gates: list[dict[str, Any]] = []
-  gates.append(
-    _gate(
-      "population",
-      "exact checkpoint×seed population",
-      lambda: (
-        validate_population(
-          raw,
-          expected_checkpoints=expected_checkpoints,
-          expected_reset_seeds=expected_reset_seeds,
-          expected_action_seeds=expected_action_seeds,
-        ),
-        (
-          None
-          if summary["population"]["completed_episodes"]
-          == len(expected_checkpoints) * len(expected_reset_seeds)
-          else (_ for _ in ()).throw(ValueError("summary completed count mismatch"))
-        ),
-      ),
+  def population_check():
+    validate_population(
+      raw,
+      expected_checkpoints=expected_checkpoints,
+      expected_reset_seeds=expected_reset_seeds,
+      expected_action_seeds=expected_action_seeds,
     )
-  )
+    expected = len(expected_checkpoints) * len(expected_reset_seeds)
+    if summary["population"]["completed_episodes"] != expected:
+      raise ValueError("summary completed count mismatch")
 
   def binding_check():
-    failures = _checkpoint_binding_failures(
-      raw["reward_records"], expected_checkpoints
-    )
+    failures = _checkpoint_binding_failures(raw["reward_records"], expected_checkpoints)
     if failures:
       raise ValueError(f"checkpoint tuple/path mismatch: {', '.join(failures)}")
 
-  gates.append(_gate("checkpoint_binding", "frozen checkpoint tuples", binding_check))
-  gates.append(_gate("digests", "action/trace/physical digests", lambda: _validate_digests(raw)))
-  gates.append(
-    _gate(
-      "replay_semantics",
-      "D-prime/F/E tracker and payout semantics",
-      lambda: [validate_reward_record(row) for row in raw["reward_records"]],
+  def stochastic_check():
+    validate_stochastic_policy_proof(
+      raw["manifest"]["stochastic_policy_proof"], expected_checkpoints
     )
+    if summary["stochastic_policy"] != {
+      "checkpoint_count": len(expected_checkpoints),
+      "passed": True,
+    }:
+      raise ValueError("stochastic proof summary mismatch")
+
+  specs = (
+    ("schema", "recursive typed raw schema",
+     lambda: _validate_schema(raw, RAW_SCHEMA, "raw")),
+    ("population", "exact checkpoint×seed population", population_check),
+    ("checkpoint_binding", "frozen checkpoint tuples", binding_check),
+    ("digests", "action/trace/physical digests", lambda: _validate_digests(raw)),
+    ("replay_semantics", "D-prime/F/E tracker and event payout semantics",
+     lambda: _validate_rows(raw["reward_records"], _validate_replay_semantics)),
+    ("dprime_payout", "D-prime production parent and payout fidelity",
+     lambda: _validate_rows(raw["reward_records"], _validate_dprime_payout)),
+    ("stream_lengths", "manager streams/actions/substeps",
+     lambda: _validate_stream_lengths(raw, decimation=raw["manifest"]["decimation"])),
+    ("weights", "equal 8/2 treatment weights",
+     lambda: validate_reward_weights(raw["manifest"]["reward_weights"])),
+    ("stochastic_policy", "live seeded stochastic-policy behavior", stochastic_check),
+    ("normalizers", "legacy/event reference gates",
+     lambda: _validate_normalizers(raw["normalizer_samples"])),
+    ("phase_invariance", "10/10 phase invariance",
+     lambda: _validate_phase(raw["phase_rows"])),
+    ("late_payout", "delayed-recontact replay",
+     lambda: _validate_development(raw["development_replay"])),
   )
-  gates.append(
-    _gate(
-      "stream_lengths",
-      "manager streams/actions/substeps",
-      lambda: _validate_stream_lengths(
-        raw, decimation=int(raw["manifest"].get("decimation", 10))
-      ),
-    )
-  )
-  gates.append(
-    _gate(
-      "weights",
-      "equal 8/2 treatment weights",
-      lambda: validate_reward_weights(raw["manifest"]["reward_weights"]),
-    )
-  )
-  gates.append(
-    _gate("normalizers", "legacy/event reference gates", lambda: _validate_normalizers(raw["normalizer_samples"]))
-  )
-  gates.append(
-    _gate("phase_invariance", "10/10 phase invariance", lambda: _validate_phase(raw["phase_rows"]))
-  )
-  gates.append(
-    _gate("late_payout", "delayed-recontact replay", lambda: _validate_development(raw["development_replay"]))
-  )
+  gates = [_gate(*spec) for spec in specs]
   if verify_source_hashes:
     gates.append(
       _gate(
@@ -1345,8 +1491,8 @@ def collect_gate_results(
         "relevant source tree unchanged",
         lambda: validate_relevant_provenance(
           raw["manifest"]["relevant_provenance"],
-          ROOT,
-          ASSETS_ROOT,
+          root,
+          assets_root,
           require_git_clean=True,
         ),
       )
@@ -1423,6 +1569,7 @@ def build_summary(
   raw_sha256: str,
   raw_size_bytes: int = 0,
   root: Path = ROOT,
+  assets_root: Path = ASSETS_ROOT,
   manifest_path: Path | None = None,
   raw_path: Path | None = None,
   expected_checkpoints: Sequence[dict[str, Any]] = CHECKPOINTS,
@@ -1433,8 +1580,14 @@ def build_summary(
 ) -> dict[str, Any]:
   legacy = float(raw["normalizer_samples"]["legacy_terminal_n_s"])
   values = list(raw["normalizer_samples"]["event_values_n_s"])
+  proof_rows = raw["manifest"].get("stochastic_policy_proof", [])
+  try:
+    validate_stochastic_policy_proof(proof_rows, expected_checkpoints)
+    stochastic_passed = True
+  except Exception:
+    stochastic_passed = False
   summary: dict[str, Any] = {
-    "schema_version": 3,
+    "schema_version": 4,
     "valid": False,
     "failure_reasons": [],
     "gates": [],
@@ -1475,6 +1628,10 @@ def build_summary(
       "count": len(raw["phase_rows"]),
       "passed": len(raw["phase_rows"]) == 10,
     },
+    "stochastic_policy": {
+      "checkpoint_count": len(proof_rows),
+      "passed": stochastic_passed,
+    },
     "development_replay": copy.deepcopy(raw["development_replay"]),
     "aggregates": _aggregate_rows(raw),
     "provenance": {
@@ -1493,6 +1650,7 @@ def build_summary(
     summary,
     raw,
     root=root,
+    assets_root=assets_root,
     manifest_path=manifest_path,
     raw_path=raw_path,
     expected_checkpoints=expected_checkpoints,
@@ -1510,12 +1668,9 @@ def build_summary(
 
 
 def _validate_summary_schema(summary: dict[str, Any]) -> None:
-  if not isinstance(summary, dict) or set(summary) != SUMMARY_KEYS:
-    raise ValueError("summary schema mismatch")
-  encoded = json.dumps(summary, sort_keys=True)
-  forbidden = ("episode_rows", "physical_traces", "action_tape", "impact_stream", "delivered_stream")
-  if any(name in encoded for name in forbidden):
-    raise ValueError("summary contains per-episode or per-substep payload")
+  _validate_schema(summary, SUMMARY_SCHEMA, "summary")
+  if summary["schema_version"] != 4:
+    raise ValueError("summary schema version mismatch")
   expected_valid = all(gate["passed"] for gate in summary["gates"])
   if summary["valid"] is not expected_valid:
     raise ValueError("summary valid flag is not gate conjunction")
@@ -1535,6 +1690,7 @@ def persist_final_artifacts(
   raw_path: Path,
   summary_path: Path,
   root: Path = ROOT,
+  assets_root: Path = ASSETS_ROOT,
   expected_checkpoints: Sequence[dict[str, Any]] = CHECKPOINTS,
   expected_reset_seeds: Sequence[int] = RESET_SEEDS,
   expected_action_seeds: Sequence[int] = ACTION_SEEDS,
@@ -1550,6 +1706,7 @@ def persist_final_artifacts(
     raw_sha256=raw_hash,
     raw_size_bytes=raw_path.stat().st_size,
     root=root,
+    assets_root=assets_root,
     manifest_path=manifest_path,
     raw_path=raw_path,
     expected_checkpoints=expected_checkpoints,
@@ -1559,13 +1716,14 @@ def persist_final_artifacts(
     verify_source_hashes=verify_source_hashes,
   )
   _validate_summary_schema(summary)
-  summary_path.write_text(json.dumps(_json_safe(summary), indent=2) + "\n")
+  summary_path.write_text(json.dumps(summary, indent=2, allow_nan=False) + "\n")
   if summary["valid"]:
     validate_persisted_artifacts(
       manifest_path=manifest_path,
       raw_path=raw_path,
       summary_path=summary_path,
       root=root,
+      assets_root=assets_root,
       expected_checkpoints=expected_checkpoints,
       expected_reset_seeds=expected_reset_seeds,
       expected_action_seeds=expected_action_seeds,
@@ -1580,6 +1738,7 @@ def validate_persisted_artifacts(
   raw_path: Path,
   summary_path: Path,
   root: Path = ROOT,
+  assets_root: Path = ASSETS_ROOT,
   expected_checkpoints: Sequence[dict[str, Any]] = CHECKPOINTS,
   expected_reset_seeds: Sequence[int] = RESET_SEEDS,
   expected_action_seeds: Sequence[int] = ACTION_SEEDS,
@@ -1588,6 +1747,7 @@ def validate_persisted_artifacts(
   raw = validate_persisted_raw(
     raw_path,
     root=root,
+    assets_root=assets_root,
     expected_checkpoints=expected_checkpoints,
     expected_reset_seeds=expected_reset_seeds,
     expected_action_seeds=expected_action_seeds,
@@ -1601,6 +1761,7 @@ def validate_persisted_artifacts(
     raw_sha256=sha256_path(raw_path),
     raw_size_bytes=raw_path.stat().st_size,
     root=root,
+    assets_root=assets_root,
     manifest_path=manifest_path,
     raw_path=raw_path,
     expected_checkpoints=expected_checkpoints,
@@ -1627,7 +1788,9 @@ def record_completed_checkpoint(
   write_raw(raw, raw_path)
 
 
-def _run_bank(raw: dict[str, Any], *, raw_path: Path, started: float) -> None:
+def _run_bank(
+  raw: dict[str, Any], *, manifest_path: Path, raw_path: Path, started: float
+) -> None:
   import torch
   from dataclasses import asdict
   from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
@@ -1645,6 +1808,33 @@ def _run_bank(raw: dict[str, Any], *, raw_path: Path, started: float) -> None:
   def reset_obs(env, seed: int):
     obs, _ = env.reset(seed=seed)
     return TensorDict(obs, batch_size=[1])
+
+  proof_rows = []
+  for checkpoint in raw["manifest"]["checkpoints"]:
+    runner.load(
+      str(ROOT / checkpoint["path"]),
+      load_cfg={"actor": True},
+      strict=True,
+      map_location="cpu",
+    )
+    policy = runner.get_inference_policy(device="cpu")
+    observation = reset_obs(envs["C"], RESET_SEEDS[0])
+    with torch.inference_mode():
+      proof_rows.append(
+        prove_stochastic_policy(
+          policy,
+          observation,
+          checkpoint_path=checkpoint["path"],
+          same_seed=STOCHASTIC_PROOF_SEEDS[0],
+          different_seed=STOCHASTIC_PROOF_SEEDS[1],
+          clip=agent_cfg.clip_actions,
+        )
+      )
+  raw["manifest"]["stochastic_policy_proof"] = proof_rows
+  manifest_path.write_text(
+    json.dumps(raw["manifest"], sort_keys=True, indent=2, allow_nan=False) + "\n"
+  )
+  validate_stochastic_policy_proof(proof_rows, raw["manifest"]["checkpoints"])
 
   with _parent_reader_audit(envs) as audit:
     def generate(policy, reset_seed: int, action_seed: int, *, stochastic: bool):
@@ -1882,7 +2072,9 @@ def main() -> int:
       REFERENCE_PARAMS
     )
     _validate_normalizers(raw["normalizer_samples"])
-    _run_bank(raw, raw_path=raw_path, started=started)
+    _run_bank(
+      raw, manifest_path=manifest_path, raw_path=raw_path, started=started
+    )
   except Exception as exc:
     crash = exc
     raw["crash"] = f"{type(exc).__name__}: {exc}"
