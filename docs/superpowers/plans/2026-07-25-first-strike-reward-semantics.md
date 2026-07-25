@@ -22,9 +22,9 @@ delivered-reward saturation.
 state and immutable final snapshot. Two one-shot reward terms consume that
 snapshot, while all legacy diagnostic accumulators and the shipped task remain
 unchanged. A separate event normalizer preserves the legacy `0.6094 N·s`
-constant. Linear and saturated event tasks support the preregistered C/D/F/E
-comparison. Evaluation exposes sampled first-strike outcomes and exact
-trajectory traces before any Vega comparison.
+constant. Linear and saturated event tasks support the preregistered
+C/D-prime/F/E comparison. Evaluation exposes sampled first-strike outcomes and
+exact trajectory traces before any Vega comparison.
 
 **Tech Stack:** Python 3.10, PyTorch, mjlab 1.4 managers, MuJoCo Warp, pytest, Plotly, Slurm.
 
@@ -194,7 +194,14 @@ Run:
 
 Expected: all pass.
 
-### Task 3: CPU phase probe and offline adversarial replay
+### Task 3: CPU phase probe and offline adversarial replay (historical; do not execute)
+
+> **Superseded record:** Every instruction in this Task 3 section, including
+> its dose-matched D calibration and transport gates, is historical and
+> non-executable. The approved D-prime replacement and completed CPU
+> qualification are in
+> `docs/superpowers/plans/2026-07-25-one-shot-legacy-comparator.md` and
+> `docs/results/2026-07-25_first_strike_reward_qualification.md`.
 
 **Files:**
 - Create: `docs/results/assets/2026-07-25_first_strike_reward/probe_first_strike.py`
@@ -304,12 +311,18 @@ and zero delayed payout. Then run the focused reward/impulse suite.
   `impact_return_discounted_mean_sampled`,
   `delivered_return_discounted_mean_sampled`,
   `first_strike_saturation_rate_sampled`,
-  `qvel_violation_rate_sampled`, `precontact_path_length_ratio_mean_sampled`,
+  `overall_success_rate_sampled`, `impossible_success_n`,
+  `lambda_dead_n`, `qvel_violation_rate_sampled`,
+  `precontact_path_length_ratio_mean_sampled`,
   `precontact_lateral_excursion_mean_sampled`, and
   `contact_approach_angle_mean_sampled`.
-- Produces seed-level exact MWU and exact label-permutation comparisons,
-  confidence intervals, multiplicity-aware mechanism tests and practical
-  threshold verdicts.
+- Produces the E-versus-D-prime primary with seed-level exact MWU, exact
+  mean-difference label permutation, the 10% relative-effect threshold and
+  both sampled-success guardrails.
+- Produces the primary-gated F-versus-D-prime and E-versus-F mechanism family
+  with Holm correction, plus descriptive C-versus-D-prime diagnostics.
+- Fails closed on dirty provenance, `impossible_success_n > 0`,
+  `lambda_dead_n > 0`, or any 500 Hz hardware-speed violation.
 - Produces Plotly HTML trajectory/contact figures and state-ground-truth path
   overlays for representative rendered videos. It does not introduce image
   tracking unless a later state/render disagreement or hardware-camera need is
@@ -321,8 +334,11 @@ Use literal episode fixtures to verify first-window success, tail fraction,
 recontact, qvel violation, useful speed, path-length ratio, lateral excursion
 and contact-approach-angle aggregation. Verify reset rollouts are nested under
 training seed, MWU/permutation inference is performed across seed summaries,
-Holm is limited to the gated mechanism family, dirty/sentinel rows fail closed,
-and the practical threshold is applied in addition to `p < 0.05`.
+the sole primary is E versus D-prime, both exact tests and the 10% effect
+threshold must pass, and both sampled-success guardrails are enforced. Verify
+Holm is limited to F versus D-prime and E versus F after a passing primary,
+C versus D-prime remains descriptive, and dirty/sentinel/hardware-speed rows
+fail closed.
 
 - [ ] **Step 2: Verify RED**
 
@@ -331,12 +347,13 @@ Run `tests/test_first_strike_campaign.py`; expect missing-module/column failures
 - [ ] **Step 3: Implement minimal collection and analysis**
 
 Extend the existing evaluator snapshot path rather than creating a parallel
-rollout engine. Run every arm through identical event instrumentation, snapshot
-the tracker before autoreset, restore training-matched reset noise and
-observation corruption with frozen unseen evaluator RNG streams, and measure
-qvel at 500 Hz. Collect exactly the first 512 completed episodes per trained
-seed, balanced as two episodes from each of 256 environments. Store the raw
-substep trace that defines first-window/recontact/tail once; distinguish
+rollout engine. Run C, D-prime, F and E through identical event
+instrumentation, record the exact registered task id and configured 8/2
+weights, snapshot the tracker before autoreset, restore training-matched reset
+noise and observation corruption with frozen unseen evaluator RNG streams, and
+measure qvel at 500 Hz. Collect exactly the first 512 completed episodes per
+trained seed, balanced as two episodes from each of 256 environments. Store the
+raw substep trace that defines first-window/recontact/tail once; distinguish
 counterfactual legacy and event payouts. Separate success-finalized and
 window-finalized delivered impulse and their denominators; never treat their
 mixed mean as a common impulse estimand. Add only the signals absent from
@@ -349,7 +366,8 @@ task outcome. Use simulator state as ground truth:
 - nail axis, contact onset and success markers;
 - pre-contact path-length ratio, lateral excursion and approach angle;
 - contact-aligned force, depth, cumulative event impulse and reward payout;
-- paired successful/failed and C/D/F/E representative traces.
+- paired successful/failed and C/D-prime/F/E representative traces, labelled
+  with both treatment name and registered task id.
 
 Render selected rollouts and overlay the recorded state path and event markers.
 Do not add a computer-vision tracker merely to re-estimate state already
@@ -370,45 +388,65 @@ expected arm labels and every overlay uses the same trace digest as its source.
 - Modify only if needed for new sampled fields: `scripts/slurm/vega_eval.sbatch`
 
 **Interfaces:**
-- Produces C/D/F/E arms with seeds `0 1 2 3 4 5 6 7` (32 jobs).
-- D preserves the legacy-semantics 8:2 reward mixture with one common
-  `alpha_D`; F preserves the event-linear 8:2 mixture with one common
-  `alpha_F`. Both are frozen from the calibration bank before any submission.
-- Combined held-out discounted maximize return must match E within 5% overall
-  and 10% per represented major stratum; exact weights and failures are
-  recorded before submission.
-- Sole primary decision: E exceeds D by at least 10% relatively in
+- Produces four equal-weight treatment packages with seeds
+  `0 1 2 3 4 5 6 7` (32 jobs):
+  - **C** — `Unitree-Z1-Hammer-CaT-Impulse`, shipped repeated-credit legacy
+    readers, weights 8/2;
+  - **D-prime** —
+    `Unitree-Z1-Hammer-CaT-Impulse-FirstStrike-Legacy`, first-event-censored
+    one-shot legacy readers, weights 8/2;
+  - **F** — `Unitree-Z1-Hammer-CaT-Impulse-Event-Linear`, 500 Hz event readers
+    with linear delivered payout, weights 8/2;
+  - **E** — `Unitree-Z1-Hammer-CaT-Impulse-Event`, the same 500 Hz event readers
+    with saturated delivered payout, weights 8/2.
+- Sole primary decision: E exceeds D-prime by at least 10% relatively in
   `first_strike_useful_speed_mean_sampled`, with two-sided exact seed-level MWU
-  and exact seed-label permutation `p<0.05`. First-window and overall success
-  must remain at least 90% and no more than five percentage points below D.
-- F-versus-D and E-versus-F are a Holm-corrected, primary-gated mechanism
-  family. C-versus-D is descriptive.
+  and exact seed-label permutation `p<0.05`. First-window and overall sampled
+  success must each remain at least 90% and no more than five percentage points
+  below D-prime.
+- Only after the primary passes, F versus D-prime and E versus F form the
+  Holm-corrected mechanism family. F must pass the same success guardrails
+  before F versus D-prime is interpreted. C versus D-prime is descriptive.
+- Any dirty hash, `impossible_success_n > 0`, `lambda_dead_n > 0`, or 500 Hz
+  hardware-speed violation invalidates the comparison.
 
 - [ ] **Step 1: Add configuration tests before script changes**
 
 Extend `tests/test_first_strike_campaign.py` to validate an explicit campaign
-matrix and reject anything other than eight unique seeds per C/D/F/E arm,
-500 iterations, 4096 environments, final `model_499.pt`, duplicate run names,
-`imp_max_p != 0`, changed impulse caps, event mode/task mismatch, or missing
-task ids.
+matrix. Reject any matrix that lacks the exact C/D-prime/F/E task-id mapping
+above, weights 8/2 in every arm, eight unique seeds per arm, 500 iterations,
+4096 environments, final `model_499.pt`, unique run names, `imp_max_p=0`,
+unchanged impulse caps, or the correct legacy/event/saturation mode for each
+task.
 
 - [ ] **Step 2: Verify RED**
 
-Run the campaign tests; expect failure because the C/D/F/E matrix does not
+Run the campaign tests; expect failure because the C/D-prime/F/E matrix does not
 exist.
 
 - [ ] **Step 3: Add the minimal task/weight hooks and pre-registration**
 
 Reuse `SINGLE_TASK`, `IMPACT_W` and `DELIVERED_W`. Add no general campaign
-framework. Bank hypotheses, exact weights, metrics, thresholds, gates, seed
-list, 500 training iterations, 4096 environments, exact balanced 512-episode
-evaluator stopping rule, frozen checkpoint/reset calibration manifest and
-held-out reset-noise evaluation. State in advance that n=8 can support a
-large-effect screen but cannot establish equivalence after a null. Enumerate
-all `C(16,8)` seed-label assignments with midranks for the exact MWU and use the
-same assignments for the exact mean-difference permutation test. Report a
-separately labelled 100,000-resample within-arm seed bootstrap interval with a
-frozen RNG seed.
+framework and do not add any payout multiplier. Bank the four task ids, equal
+8/2 weights, hypotheses, metrics, thresholds, invalidation gates, seed list,
+500 training iterations, 4096 environments, exact balanced 512-episode
+evaluator stopping rule, frozen checkpoint manifest and held-out reset-noise
+evaluation. State in advance that n=8 can support a large-effect screen but
+cannot establish equivalence after a null.
+
+For the E-versus-D-prime primary, enumerate all
+`C(16,8)=12,870` seed-label assignments with midranks for the two-sided exact
+MWU and use the same assignments for the two-sided exact mean-difference
+permutation test. Require both `p < 0.05` and the 10% relative improvement;
+invalidate the relative test when D-prime's mean is non-positive. Report
+`U`, tie-adjusted `A12=U/64` oriented as E over D-prime, absolute and relative
+effects, and a separately labelled 100,000-resample within-arm seed-bootstrap
+95% interval with a frozen RNG seed.
+
+Gate the mechanism family on a passing primary. For F versus D-prime and E
+versus F, set `p_joint=max(p_MWU,p_permutation)`, require the hypothesized
+direction, then apply Holm across the two `p_joint` values. C versus D-prime
+remains a descriptive repeated-credit/censoring/timing package contrast.
 
 - [ ] **Step 4: Run the non-GPU pre-training gate**
 
@@ -424,9 +462,9 @@ Run:
   tests/test_cat_soft_hook.py \
   tests/test_first_strike_probe.py \
   tests/test_first_strike_campaign.py
-PYTHONPATH=. ...python validate_rewards.py
-PYTHONPATH=. ...python verify_contact_sensor.py
-PYTHONPATH=. ...python verify_reward_setup.py
+PYTHONPATH=. ...python docs/research/reward-design/validate_rewards.py
+PYTHONPATH=. ...python docs/research/reward-design/verify_contact_sensor.py
+PYTHONPATH=. ...python docs/research/reward-design/verify_reward_setup.py
 ```
 
 Require pytest green, validation A-M green, contact sensor verified, and the
@@ -438,25 +476,33 @@ Stage only the named implementation, test, evaluation, plan and result files
 from Tasks 1–5. Create one clean commit without a co-author
 trailer, push it, then `ssh vega` and fast-forward pull. Verify Vega reports the
 same hash with no `-dirty`. Record the hashes and dirty states of this repository
-and the sibling Z1 asset repository. Run one short event-arm CUDA instrumentation
-smoke. Do not launch the campaign if any sampled signal is absent/dead.
+and the sibling Z1 asset repository. Run one short CUDA instrumentation smoke
+for each distinct package/task: C, D-prime, F and E. Require finite rewards and
+observations, nonzero first-strike activity for D-prime/F/E, exact task ids and
+8/2 weights, `impossible_success_n==0`, `lambda_dead_n==0`, and no 500 Hz
+hardware-speed violation. Do not launch the campaign if any provenance,
+instrumentation, safety or liveness gate fails.
 
 - [ ] **Step 6: Launch and evaluate the full comparison**
 
-Submit 32 one-GPU jobs, eight per arm. After all complete, run sampled evaluation
-on exactly the first 512 completed episodes per checkpoint, balanced as two
-episodes from each of 256 environments, with stochastic policy actions,
-held-out `±0.05 rad` reset noise and training-matched observation corruption.
-Retry only documented infrastructure failures with the identical seed/config
-and retain every attempt; never replace a completed poor or unstable seed.
-Never analyze an incomplete matrix. Stop only for provenance, instrumentation,
-safety or liveness failure.
+Submit 32 one-GPU jobs: eight each for C, D-prime, F and E. Train every job for
+500 iterations with 4096 environments and retain `model_499.pt`. After all
+complete, run sampled evaluation on exactly the first 512 completed episodes
+per checkpoint, balanced as two episodes from each of 256 environments, with
+stochastic policy actions, held-out `±0.05 rad` reset noise and
+training-matched observation corruption. Retry only documented infrastructure
+failures with the identical arm/seed/config and retain every attempt; never
+replace a completed poor or unstable seed. Never analyze an incomplete matrix.
+Stop only for provenance, instrumentation, safety or liveness failure.
 
 - [ ] **Step 7: Analyze and bank the result**
 
 Run the campaign analysis and Plotly generator. Report seed mean ± std, min/max,
-exact MWU, exact mean-difference permutation result, the separately labelled
-seed-bootstrap 95% interval, tie-adjusted `A12=U/64` oriented as treatment over
-control, Holm mechanism results, practical thresholds, sentinel gates,
-hardware-speed violations and trajectory diagnostics. State separately what is
-proven, not distinguishable, and still open.
+the E-versus-D-prime exact MWU and exact mean-difference permutation result,
+absolute and relative effects, both success guardrails, the separately
+labelled seed-bootstrap 95% interval, and tie-adjusted `A12=U/64` oriented as E
+over D-prime. If the primary passes, report Holm-adjusted F-versus-D-prime and
+E-versus-F mechanism results in their hypothesized directions; always report
+C-versus-D-prime as descriptive. Include sentinel gates, hardware-speed
+violations and trajectory diagnostics with exact C/D-prime/F/E labels. State
+separately what is proven, not distinguishable, and still open.

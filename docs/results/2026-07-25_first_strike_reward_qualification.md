@@ -39,8 +39,10 @@ The final schema-v5 replay completed 384/384 episodes across 12 complete
 checkpoint groups and 32 paired seeds. It passed all 14 ordered gates, all 12
 stochastic proofs, the 10/10 phase-invariance gate, physical equality across
 reward arms, D-prime inner-reader fidelity, shared D-prime/F/E finalization
-timing, exactly one payout and zero delayed payout. The aggregate-only summary
-reports `valid=true`.
+timing, at most one positive payout per component on the common finalization
+boundary, and zero delayed payout. Zero is allowed: D-prime impact was positive
+in 364/384 episodes and D-prime delivered was positive in 384/384. The
+aggregate-only summary reports `valid=true`.
 
 Artifact provenance:
 
