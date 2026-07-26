@@ -5,10 +5,7 @@ import torch
 
 from src.tasks.hammer.mdp.contact_quality import contact_point_quality
 from src.tasks.hammer.mdp.first_strike import _ENV_FIRST_STRIKE_ATTR
-from src.tasks.hammer.mdp.rewards import (
-  FirstStrikeQualityDeliveredRewardTerm,
-  FirstStrikeQualityImpactRewardTerm,
-)
+from src.tasks.hammer.mdp.rewards import FirstStrikeQualityImpactRewardTerm
 
 
 NAIL_RADIUS_M = 0.012
@@ -204,31 +201,21 @@ def _quality_reward_env(
   return env, tracker
 
 
-@pytest.mark.parametrize(
-  ("term_cls", "normalizer", "argument"),
-  [
-    (FirstStrikeQualityImpactRewardTerm, 1.0, "v_expected"),
-    (FirstStrikeQualityDeliveredRewardTerm, 0.3088, "i_ref"),
-  ],
-)
-def test_quality_reader_pays_bounded_contact_quality_once(
-  term_cls, normalizer, argument
-):
-  """Removing quality multiplication or saturation must fail this payout surface."""
-  env, _ = _quality_reward_env()
-  term = term_cls(cfg=None, env=env)
+def test_quality_speed_reader_pays_bounded_contact_quality_once():
+  """Removing quality multiplication, speed saturation, or one-shot credit must fail."""
+  env, _ = _quality_reward_env(
+    finalized=True,
+    productive=True,
+    quality=0.25,
+    quality_valid=True,
+    v_precontact=3.0,
+  )
+  term = FirstStrikeQualityImpactRewardTerm(cfg=None, env=env)
 
-  assert term(env, **{argument: normalizer}).item() == pytest.approx(0.25)
-  assert term(env, **{argument: normalizer}).item() == pytest.approx(0.0)
+  assert term(env, v_expected=1.4598331451416016).item() == pytest.approx(0.25)
+  assert term(env, v_expected=1.4598331451416016).item() == pytest.approx(0.0)
 
 
-@pytest.mark.parametrize(
-  ("term_cls", "normalizer", "argument"),
-  [
-    (FirstStrikeQualityImpactRewardTerm, 1.0, "v_expected"),
-    (FirstStrikeQualityDeliveredRewardTerm, 0.3088, "i_ref"),
-  ],
-)
 @pytest.mark.parametrize(
   "tracker_state",
   [
@@ -236,32 +223,29 @@ def test_quality_reader_pays_bounded_contact_quality_once(
     {"finalized": False},
     {"productive": False},
   ],
+  ids=["invalid-quality", "no-contact", "nonproductive-event"],
 )
-def test_quality_reader_rejects_invalid_unfinished_or_unproductive_event(
-  term_cls, normalizer, argument, tracker_state
-):
+def test_quality_speed_reader_rejects_ineligible_event(tracker_state):
   """A missing quality/contact/finalized productive event must pay no maximize reward."""
   env, _ = _quality_reward_env(**tracker_state)
-  term = term_cls(cfg=None, env=env)
+  term = FirstStrikeQualityImpactRewardTerm(cfg=None, env=env)
 
-  assert term(env, **{argument: normalizer}).item() == pytest.approx(0.0)
+  assert term(env, v_expected=1.4598331451416016).item() == pytest.approx(0.0)
 
 
-@pytest.mark.parametrize(
-  ("term_cls", "normalizer", "argument"),
-  [
-    (FirstStrikeQualityImpactRewardTerm, 1.0, "v_expected"),
-    (FirstStrikeQualityDeliveredRewardTerm, 0.3088, "i_ref"),
-  ],
-)
+def test_quality_speed_reader_cannot_trade_extreme_speed_for_quality():
+  """Increasing speed beyond the knee must never raise payout above contact quality."""
+  env, _ = _quality_reward_env(quality=0.25, v_precontact=300.0)
+  term = FirstStrikeQualityImpactRewardTerm(cfg=None, env=env)
+
+  assert term(env, v_expected=1.4598331451416016).item() == pytest.approx(0.25)
+
+
 @pytest.mark.parametrize("bad", [0.0, -1.0, float("inf"), float("nan")])
-def test_quality_reader_rejects_nonpositive_or_nonfinite_normalizer(
-  term_cls, normalizer, argument, bad
-):
+def test_quality_speed_reader_rejects_nonpositive_or_nonfinite_normalizer(bad):
   """A bad normalizer must fail loudly rather than bypass boundedness."""
-  del normalizer
   env, _ = _quality_reward_env()
-  term = term_cls(cfg=None, env=env)
+  term = FirstStrikeQualityImpactRewardTerm(cfg=None, env=env)
 
   with pytest.raises(ValueError):
-    term(env, **{argument: bad})
+    term(env, v_expected=bad)

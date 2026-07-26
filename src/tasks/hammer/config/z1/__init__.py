@@ -173,23 +173,28 @@ register_mjlab_task(
     runner_cls=HammerOnPolicyRunner,
 )
 
-# FQ replaces both raw linear maximize readers with bounded quality-conditioned
-# readers.  Its only added sensor is passive contact-quality instrumentation.
+# FQ-min adds one bounded quality-conditioned speed reader to D0's disabled
+# delivered treatment. Its only added sensor is passive contact-quality
+# instrumentation.
+_fq_env_cfg = z1_hammer_env_cfg(
+    cat_impulse=True,
+    event_correct=True,
+    event_quality=True,
+    quality_instrumentation=True,
+)
+_fq_env_cfg.rewards["delivered_impulse"].weight = 0.0
+_fq_play_env_cfg = z1_hammer_env_cfg(
+    play=True,
+    cat_impulse=True,
+    event_correct=True,
+    event_quality=True,
+    quality_instrumentation=True,
+)
+_fq_play_env_cfg.rewards["delivered_impulse"].weight = 0.0
 register_mjlab_task(
     task_id="Unitree-Z1-Hammer-CaT-Impulse-Event-Quality",
-    env_cfg=z1_hammer_env_cfg(
-        cat_impulse=True,
-        event_correct=True,
-        event_quality=True,
-        quality_instrumentation=True,
-    ),
-    play_env_cfg=z1_hammer_env_cfg(
-        play=True,
-        cat_impulse=True,
-        event_correct=True,
-        event_quality=True,
-        quality_instrumentation=True,
-    ),
+    env_cfg=_fq_env_cfg,
+    play_env_cfg=_fq_play_env_cfg,
     rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
     runner_cls=HammerOnPolicyRunner,
 )

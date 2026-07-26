@@ -625,27 +625,41 @@ class TestFirstStrikeEventArm:
         d0 = load_env_cfg("Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0")
         fq = load_env_cfg("Unitree-Z1-Hammer-CaT-Impulse-Event-Quality")
 
+        def params_signature(params):
+            return tuple(sorted(params.items(), key=lambda item: item[0]))
+
         def signature(cfg):
             return {
                 "rewards": {
                     name: (
                         term.func,
                         term.weight,
-                        tuple(sorted(term.params.items(), key=lambda item: item[0])),
+                        params_signature(term.params),
                     )
                     for name, term in cfg.rewards.items()
                 },
                 "actions": repr(cfg.actions),
-                "actuators": [
+                "actuators": tuple(
                     (act.stiffness, act.damping, act.effort_limit, act.armature)
                     for act in cfg.scene.entities["robot"].articulation.actuators
-                ],
-                "tracker": repr(cfg.metrics["first_strike"]),
-                "sensors": [
+                ),
+                "tracker": (
+                    cfg.metrics["first_strike"].func,
+                    cfg.metrics["first_strike"].per_substep,
+                    cfg.metrics["first_strike"].reduce,
+                    params_signature(cfg.metrics["first_strike"].params),
+                ),
+                "sensors": tuple(
                     (sensor.name, sensor.fields, sensor.reduce, sensor.num_slots)
                     for sensor in cfg.scene.sensors
-                ],
-                "cat": tuple(sorted(cfg.metrics["cat_soft"].params.items())),
+                ),
+                "caps": tuple(cfg.metrics["cat_soft"].params["imp_limit"]),
+                "cat": params_signature(cfg.metrics["cat_soft"].params),
+                "budget": (
+                    cfg.episode_length_s,
+                    cfg.decimation,
+                    cfg.sim.mujoco.timestep,
+                ),
             }
 
         assert {
@@ -657,31 +671,77 @@ class TestFirstStrikeEventArm:
         assert f0.rewards["delivered_impulse"].weight == pytest.approx(2.0)
         assert d0.rewards["impact_progress"].weight == pytest.approx(8.0)
         assert d0.rewards["delivered_impulse"].weight == pytest.approx(0.0)
-        assert fq.rewards["impact_progress"].weight == pytest.approx(8.0)
-        assert fq.rewards["delivered_impulse"].weight == pytest.approx(2.0)
+        assert fq.rewards["impact_progress"].weight == 8.0
+        assert fq.rewards["delivered_impulse"].weight == 0.0
         assert fq.rewards["impact_progress"].func is FirstStrikeQualityImpactRewardTerm
         assert (
-            fq.rewards["delivered_impulse"].func
-            is FirstStrikeQualityDeliveredRewardTerm
+            fq.rewards["impact_progress"].params["v_expected"]
+            == 1.4598331451416016
+        )
+        assert all(
+            term.func is not FirstStrikeQualityDeliveredRewardTerm
+            for term in fq.rewards.values()
         )
 
         f8_sig = signature(f8)
         f0_sig = signature(f0)
         d0_sig = signature(d0)
         fq_sig = signature(fq)
-        assert f0_sig["actions"] == d0_sig["actions"] == fq_sig["actions"] == f8_sig["actions"]
-        assert f0_sig["actuators"] == d0_sig["actuators"] == fq_sig["actuators"] == f8_sig["actuators"]
+        for key in ("actions", "actuators", "caps", "cat", "budget"):
+            assert f0_sig[key] == d0_sig[key] == fq_sig[key] == f8_sig[key]
+        assert fq_sig["caps"] == (1.64, 3.28, 1.64, 1.64, 1.64, 1.64)
+        assert all(
+            cfg.metrics["cat_soft"].params["imp_max_p"] == 0.0
+            for cfg in (f8, f0, d0, fq)
+        )
+
         assert f0_sig["tracker"] == d0_sig["tracker"] == f8_sig["tracker"]
-        assert f0_sig["cat"] == d0_sig["cat"] == fq_sig["cat"] == f8_sig["cat"]
         assert f0_sig["sensors"] == d0_sig["sensors"] == f8_sig["sensors"]
-        assert fq_sig["tracker"] != f8_sig["tracker"]
-        assert fq_sig["sensors"] != f8_sig["sensors"]
-        assert f8.metrics["cat_soft"].params["imp_max_p"] == 0.0
 
         for altered, reward_name in ((f0_sig, "impact_progress"), (d0_sig, "delivered_impulse")):
             expected = dict(f8_sig["rewards"])
             expected[reward_name] = altered["rewards"][reward_name]
             assert altered["rewards"] == expected
+
+        expected_fq_rewards = dict(d0_sig["rewards"])
+        expected_fq_rewards["impact_progress"] = fq_sig["rewards"]["impact_progress"]
+        assert fq_sig["rewards"] == expected_fq_rewards
+
+        d0_impact_params = dict(d0_sig["rewards"]["impact_progress"][2])
+        fq_impact_params = dict(fq_sig["rewards"]["impact_progress"][2])
+        assert d0_impact_params.pop("v_expected") == 1.0
+        assert fq_impact_params.pop("v_expected") == 1.4598331451416016
+        assert fq_impact_params == d0_impact_params
+
+        d0_tracker = d0.metrics["first_strike"]
+        fq_tracker = fq.metrics["first_strike"]
+        assert (
+            fq_tracker.func,
+            fq_tracker.per_substep,
+            fq_tracker.reduce,
+        ) == (
+            d0_tracker.func,
+            d0_tracker.per_substep,
+            d0_tracker.reduce,
+        )
+        fq_tracker_params = dict(fq_tracker.params)
+        assert fq_tracker_params.pop("quality_sensor_name") == "hammer_nail_quality"
+        assert fq_tracker_params == d0_tracker.params
+
+        d0_sensors = {
+            name: (fields, reduce, num_slots)
+            for name, fields, reduce, num_slots in d0_sig["sensors"]
+        }
+        fq_sensors = {
+            name: (fields, reduce, num_slots)
+            for name, fields, reduce, num_slots in fq_sig["sensors"]
+        }
+        assert fq_sensors.pop("hammer_nail_quality") == (
+            ("found", "force", "pos", "normal"),
+            "maxforce",
+            8,
+        )
+        assert fq_sensors == d0_sensors
 
     def test_registered_first_strike_legacy_task_keeps_legacy_readout(self):
         task_id = "Unitree-Z1-Hammer-CaT-Impulse-FirstStrike-Legacy"

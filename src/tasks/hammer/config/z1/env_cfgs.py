@@ -462,10 +462,11 @@ def z1_hammer_env_cfg(
         cfg.rewards["impact_progress"].func = (
           hammer_mdp.FirstStrikeQualityImpactRewardTerm
         )
-        cfg.rewards["delivered_impulse"].func = (
-          hammer_mdp.FirstStrikeQualityDeliveredRewardTerm
-        )
-        cfg.rewards["delivered_impulse"].params.pop("saturate")
+        cfg.rewards["impact_progress"].params["v_expected"] = 1.4598331451416016
+        # FQ-min disables this term at registration. Keep its inactive reader
+        # byte-for-byte aligned with D0 rather than wiring the deferred
+        # quality-conditioned delivered treatment.
+        cfg.rewards["delivered_impulse"].params["saturate"] = False
     elif first_strike_legacy:
       # D-prime: preserve the legacy 50 Hz readers, params, normalizers, and
       # weights, but censor them to one shared first-event payout boundary.
