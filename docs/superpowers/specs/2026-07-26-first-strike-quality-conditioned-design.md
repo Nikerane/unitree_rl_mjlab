@@ -197,10 +197,23 @@ and FQ; the campaign must not mix normalizers across arms.
 For a productive first event, define bounded components
 
 \[
-\phi_v = \operatorname{clip}(v_{\mathrm{pre}}/1.0\ {\rm m\,s^{-1}},0,1),
+\phi_v = \operatorname{clip}(v_{\mathrm{pre}}/V_{\mathrm{FQ}},0,1),
 \qquad
 \phi_I = \operatorname{clip}(I_{\mathrm{delivered}}/I_{\mathrm{ref}},0,1).
 \]
+
+Here `V_FQ=1.4598331451416016 m/s` is an FQ-only empirical scale/knee, not a
+retuned success target. It is derived from the raw bank SHA-256
+`ea4a82e007d95cf7ff962091ba0d6ff3e07e639f4cc1c2d0feab9fe368f47ac8`, resolved
+manifest SHA-256
+`69d5bc66f2127d0a5b29463b35763092d388bc0e71661b06fdd81b0eea8d661f`, and
+qualification SHA-256
+`641e520c0cd35932175918d0bf48c7b6df07749ff1462b3d7da7310d76338b1b`. Compute
+the q90 with NumPy `method="higher"`; reproduce 26/256 calibration saturation
+and 33/128 group-held-out validation saturation exactly. Missing provenance,
+an incompatible quantile method, or either failed reproduction fails closed.
+F8/D0 retain their existing `1.0 m/s` scale, and `I_REF=0.3088 N·s` is not
+modified.
 
 FQ pays once:
 
@@ -220,8 +233,11 @@ reward for poor contact.
 
 F8 and F0 keep the current linear delivered reader so the F8/F0 comparison
 isolates the marginal raw speed payout. D0 keeps the current linear speed
-reader so F8/D0 isolates the marginal delivered-impulse payout. FQ is a remedy
-arm, not a one-variable ablation.
+reader so F8/D0 isolates the marginal delivered-impulse payout. FQ is a
+remedy-package test, not isolated quality multiplication or a one-variable
+ablation. Only after this campaign, preregister the bounded center-blind `FB`
+follow-up (the bounded reader package without the quality factor); do not add
+that arm to this 4×8 matrix.
 
 ## 7. Offline evidence and visual audit before GPU
 
@@ -289,8 +305,8 @@ arm. Replay three nail-frame-relative recipes over the same 32 randomized reset
 states:
 
 1. **R0 — shipped centered polyline:** the current `SingleStrikeReference`;
-2. **R1 — learned impact-only arc:** the transverse template from the medoid
-   `dc_imponly` trace, with R0's axial schedule;
+2. **R1 — learned impact-only arc:** the transverse template from frozen
+   `traj_dc`, with R0's axial schedule;
 3. **R2 — terminally repaired arc:** identical to R1 until 90 mm axial
    standoff, then smoothly blend transverse offset to zero by 20 mm standoff.
 
@@ -299,11 +315,12 @@ any physical benefit and whether terminal alignment can be repaired without
 deleting the early wind-up. The template must be anchored to the live reset
 head and live nail frame; world-coordinate replay is invalid.
 
-The R1 source set is exactly the three locally banked `dc_imponly` precontact
-traces, frozen by content hash before the probe. In each source trace, the
-earliest maximum axial standoff before accepted onset separates wind-up from
-descent. Resample the two segments on 51 uniformly spaced points each, sharing
-the apex for a 101-point template. At each point, store the nail-frame
+The R1 source set is exactly `traj_dc`, frozen at SHA-256
+`b22dabb94a10a1e7f68f3fe6a4a2f9412e14916a40a3dbafc81e2f3c3cc7f89f`; no other
+trace may substitute. These source traces lack pre-apex motion, so the
+pre-apex transverse residual is identically zero and the apex is repeated at
+the wind-up/descent boundary rather than inferred. Resample the observed
+post-apex descent on 51 uniformly spaced points and store the nail-frame
 transverse residual between the realized trace and the R0 centered path built
 from that source trace's own live head and nail poses. Select the residual
 template minimizing summed pairwise transverse L2 distance; exact ties break by
@@ -318,10 +335,11 @@ offset multiplied by the quintic minimum-jerk factor
 \(1-(10u^3-15u^4+6u^5)\), making it identical to R1 through 90 mm and zero with
 continuous first and second derivatives by 20 mm.
 
-Before any recipe outcome is inspected, freeze a 32-row reset manifest using
-reset seeds `0..31`. Each row records the realized initial robot/nail state,
-live head and nail poses, nail-frame basis, code/config/asset revisions, and a
-canonical state digest. All three recipes must reproduce each row's digest.
+Before any recipe outcome is inspected, generate a fresh 32-row digested reset
+manifest using reset seeds `0..31`; do not reuse a prior manifest. Each row
+records the realized initial robot/nail state, live head and nail poses,
+nail-frame basis, code/config/asset revisions, and a canonical state digest.
+All three recipes must reproduce each row's digest.
 After the nominal script, issue no more than two final-target control steps,
 stopping earlier on success; there is no further endpoint hold. A rollout that
 has not produced both a productive first event and task success by the
@@ -340,8 +358,13 @@ additionally requires at least four more within-12-mm onsets than R1
 (`>=4/32`, i.e. 12.5 percentage points), whether or not R1 passes an absolute
 promotion gate. Replacing R0 additionally requires a positive physical reason:
 at least 5% higher precontact speed or at least 10% lower p95 prefix joint
-speed. Delivered impulse alone cannot justify replacement because it is
-dwell/force dominated.
+speed. Promotion also requires the preregistered terminal axial-speed,
+terminal lateral-speed, and approach-angle gates, measured in the live
+nail-frame from the same terminal window; freeze their exact thresholds in the
+fresh manifest before any R1/R2 outcome is inspected. Missing, nonfinite, or
+failed values fail closed. Delivered impulse alone cannot justify replacement
+because it is dwell/force dominated. Global straightness is never a promotion
+target.
 
 Before any GPU reference arm, counterfactually score each replay under all
 three references. The generating recipe must have the largest cumulative raw
@@ -354,7 +377,8 @@ success/centering fails.
 A CPU pass certifies scripted feasibility and separability under the existing
 weak prior only; it is not evidence that PPO will learn the recipe.
 
-No global-straightness reward is introduced. A GPU
+No global-straightness reward is introduced, and global straightness is never
+a CPU-recipe promotion target. A GPU
 `FQ` versus `FQ+terminal-funnel` comparison is launched only if the CPU probe
 passes and the first 4x8 result shows a remaining terminal credit-assignment
 failure.

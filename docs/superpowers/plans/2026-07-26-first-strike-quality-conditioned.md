@@ -60,6 +60,8 @@
 - `tests/test_eval_impulse_hook.py` — physical trace and snapshot serialization checks.
 - `scripts/smoke_first_strike_instrumentation.py` — F0/D0/FQ instrumentation expectations.
 - `tests/test_smoke_first_strike_instrumentation.py` — CPU/CUDA smoke predicates.
+- `evaluation/analysis/first_strike_campaign.py` — schema-v3 legacy-analysis
+  migration owned by Task 5.
 - `evaluation/analysis/plot_first_strike_campaign.py` — only shared style helpers if reuse cannot be achieved by import.
 - `scripts/slurm/vega_train.sbatch` and `scripts/slurm/vega_eval.sbatch` — add exact F0/D0/FQ task allow-list entries only if current generic arguments reject them.
 - `docs/superpowers/specs/2026-07-26-first-strike-quality-conditioned-design.md` — record replay-qualified slot/overflow semantics.
@@ -294,7 +296,11 @@ git commit -m "feat(hammer): latch physical first-contact quality"
 - Modify: `src/tasks/hammer/config/z1/env_cfgs.py:68-123`
 - Modify: `src/tasks/hammer/config/z1/env_cfgs.py:408-425`
 - Modify: `src/tasks/hammer/config/z1/__init__.py:118-143`
+- Modify: `src/tasks/hammer/mdp/first_strike.py` — optional quality
+  instrumentation wiring for the FQ task.
 - Modify: `tests/test_first_strike_quality_reward.py`
+- Modify: `tests/test_first_strike_event.py` — optional quality
+  instrumentation tracker coverage.
 - Modify: `tests/test_configs.py:433-600`
 
 **Interfaces:**
@@ -302,7 +308,7 @@ git commit -m "feat(hammer): latch physical first-contact quality"
 
 ```python
 class FirstStrikeQualityImpactRewardTerm(_FirstStrikeRewardTerm):
-    # q_contact * clip(v_precontact / v_expected, 0, 1)
+    # q_contact * clip(v_precontact / V_FQ, 0, 1)
 
 class FirstStrikeQualityDeliveredRewardTerm(_FirstStrikeRewardTerm):
     # q_contact * clip(delivered / i_ref, 0, 1)
@@ -316,6 +322,11 @@ class FirstStrikeQualityDeliveredRewardTerm(_FirstStrikeRewardTerm):
 - F0 differs from F8 only by `impact_progress.weight: 8.0 -> 0.0`.
 - D0 differs from F8 only by `delivered_impulse.weight: 2.0 -> 0.0`.
 - FQ retains weights 8/2, replaces both readers, and uses bounded components.
+  It is a remedy-package test, not an isolated quality-multiplication ablation.
+  `V_FQ=1.4598331451416016 m/s` is FQ-only; F8/D0 keep `1.0 m/s` and all arms
+  retain `I_REF=0.3088 N·s`.
+  Preregister the bounded center-blind `FB` follow-up only after this campaign;
+  it is not a fifth arm in the frozen 4×8 matrix.
 
 - [ ] **Step 1: Write failing reward-surface tests**
 
@@ -326,13 +337,21 @@ tracker.contact_quality[:] = 0.25
 tracker.contact_quality_valid[:] = True
 tracker.v_precontact[:] = 3.0
 tracker.delivered[:] = 10.0
-assert impact(env, v_expected=1.0).item() == pytest.approx(0.25)
+assert impact(env, v_fq=1.4598331451416016).item() == pytest.approx(0.25)
 assert delivered(env, i_ref=0.3088).item() == pytest.approx(0.25)
 ```
 
 Require zero for invalid quality, no contact, unproductive events, and second
 calls. Require finite positive normalizers and prove that arbitrarily large
-speed/impulse cannot exceed `q_contact` per reader.
+speed/impulse cannot exceed `q_contact` per reader. Derive `V_FQ` only from raw
+bank SHA-256 `ea4a82e007d95cf7ff962091ba0d6ff3e07e639f4cc1c2d0feab9fe368f47ac8`,
+manifest SHA-256
+`69d5bc66f2127d0a5b29463b35763092d388bc0e71661b06fdd81b0eea8d661f`, and
+qualification SHA-256
+`641e520c0cd35932175918d0bf48c7b6df07749ff1462b3d7da7310d76338b1b`. Require
+NumPy q90 `method="higher"`, exact 26/256 calibration saturation, and exact
+33/128 group-held-out validation saturation; missing provenance or any mismatch
+fails closed.
 
 - [ ] **Step 2: Run reward/config tests and confirm RED**
 
@@ -363,7 +382,9 @@ a fresh config object. D0 analogously sets only
 `delivered_impulse.weight=0.0`. FQ replaces the two reader classes, keeps
 weights 8/2, and enables `quality_instrumentation`. The evaluator has a
 separate frozen override that enables `quality_instrumentation` for all four
-task IDs without changing their treatment rewards.
+task IDs without changing their treatment rewards. Wire the optional quality
+instrumentation through `first_strike.py`; verify its tracker phase/reset
+semantics in `test_first_strike_event.py`.
 
 - [ ] **Step 4: Prove exact allowed config differences**
 
@@ -383,8 +404,10 @@ strict evaluation: quality instrumentation on for all arms; policy-facing
 
 ```bash
 git add src/tasks/hammer/mdp/rewards.py \
+        src/tasks/hammer/mdp/first_strike.py \
         src/tasks/hammer/config/z1/env_cfgs.py \
         src/tasks/hammer/config/z1/__init__.py \
+        tests/test_first_strike_event.py \
         tests/test_first_strike_quality_reward.py \
         tests/test_configs.py
 git commit -m "feat(hammer): add bounded quality-conditioned strike rewards"
@@ -398,7 +421,8 @@ git commit -m "feat(hammer): add bounded quality-conditioned strike rewards"
 - Modify: `scripts/eval_impulse.py:540-760`
 - Modify: `scripts/eval_impulse.py:984-1045`
 - Modify: `tests/test_eval_impulse_hook.py`
-- Modify: `tests/test_first_strike_campaign.py`
+- Modify: `tests/test_first_strike_campaign.py` — raw schema-v3 slot and
+  trace-digest coverage; Task 5 owns its legacy-analysis migration.
 
 **Interfaces:**
 - Raises sampled artifact schema from `2` to `3`.
@@ -466,10 +490,15 @@ git commit -m "feat(eval): bank first-contact quality in sampled traces"
 - Create: `evaluation/analysis/first_strike_quality_campaign.py`
 - Create: `evaluation/analysis/plot_first_strike_quality_campaign.py`
 - Create: `tests/test_first_strike_quality_campaign.py`
+- Modify: `evaluation/analysis/first_strike_campaign.py` — migrate the legacy
+  analysis reader to schema v3.
+- Modify: `tests/test_first_strike_campaign.py` — schema-v3 legacy-analysis
+  migration coverage.
 
 **Interfaces:**
 - Imports `exact_seed_tests`, artifact verification, and shared episode
-  summarization from `evaluation.analysis.first_strike_campaign`.
+  summarization from the schema-v3-migrated
+  `evaluation.analysis.first_strike_campaign`.
 - Produces:
 
 ```python
@@ -529,6 +558,10 @@ recontact_count = off_to_on_edges_after_onset_before_finalization
 Aggregate all three per seed over every sampled episode, including physical
 no-contact episodes as zero where defined. Instrumentation-invalid rows remain
 invalid rather than becoming zero.
+
+Also require the legacy analysis reader to accept schema v3 and preserve its
+schema-v2 behavior where legacy fields are available. Task 5 owns this legacy
+analysis migration; Task 4 owns only recorder/serialization and physical replay.
 
 - [ ] **Step 4: Implement minimal analysis**
 
@@ -590,6 +623,8 @@ reject clipped labels, unequal spatial scales, or misleading auto-ranging.
 ```bash
 git add evaluation/analysis/first_strike_quality_campaign.py \
         evaluation/analysis/plot_first_strike_quality_campaign.py \
+        evaluation/analysis/first_strike_campaign.py \
+        tests/test_first_strike_campaign.py \
         tests/test_first_strike_quality_campaign.py
 git commit -m "feat(analysis): add paired first-contact quality campaign"
 ```
@@ -685,6 +720,7 @@ MWU + paired sign-flip + Holm families
 PCG64 seed 20260726 and 100,000 paired bootstrap samples
 D0 event-window depth-gain, dwell, and recontact definitions/claim rule
 all replacement margins and invalidation gates
+FQ-only V_FQ provenance, q90 method, and calibration/validation saturation checks
 qvel results labelled simulator-only when illegal
 ```
 
@@ -714,10 +750,12 @@ git commit -m "docs(hammer): preregister first-contact quality campaign"
   `evaluation/results/2026-07-26_reference_recipe_probe/`
 
 **Interfaces:**
-- Freezes the exact three locally banked `dc_imponly` precontact source traces
-  by SHA-256. The earliest maximum axial standoff before accepted onset splits
-  each trace into wind-up and descent. Resample 51 uniform points per segment
-  with one shared apex (101 points total), and store the nail-frame transverse
+- Freezes `traj_dc` at SHA-256
+  `b22dabb94a10a1e7f68f3fe6a4a2f9412e14916a40a3dbafc81e2f3c3cc7f89f`; no other
+  trace may substitute. Because the source traces lack pre-apex motion, use an
+  identically zero pre-apex transverse residual and repeat the apex at the
+  wind-up/descent boundary rather than infer motion. Resample the observed
+  post-apex descent on 51 uniform points and store the nail-frame transverse
   residual from the R0 centered path built with that source's own live
   head/nail poses. R1 is the residual template minimizing summed pairwise
   transverse L2 distance; ties break by lexicographic trace digest. Replay adds
@@ -731,10 +769,11 @@ git commit -m "docs(hammer): preregister first-contact quality campaign"
     `1 - (10*u**3 - 15*u**4 + 6*u**5)`, where
     `u=clip((0.09-d)/0.07, 0, 1)` and `d` is axial standoff, so it reaches zero
     with continuous first and second derivatives by 20 mm.
-- Freezes, before rollout outcomes are inspected, a 32-row manifest using reset
-  seeds exactly `0..31`. Each row binds realized initial qpos/qvel, head/nail
-  poses, nail-frame basis, code/config/asset revisions, and a canonical state
-  digest. Every recipe must reproduce the row digest.
+- Generates, before rollout outcomes are inspected, a fresh 32-row digested
+  manifest using reset seeds exactly `0..31`; it must not reuse a prior
+  manifest. Each row binds realized initial qpos/qvel, head/nail poses,
+  nail-frame basis, code/config/asset revisions, and a canonical state digest.
+  Every recipe must reproduce the row digest.
 - Uses `play=False`, fixed gains/action scale/caps, `cat_impulse=True`,
   `imp_max_p=0`, and no automatic reset.
 - Executes the existing live-head feedback law
@@ -748,12 +787,12 @@ git commit -m "docs(hammer): preregister first-contact quality campaign"
 
 - [ ] **Step 1: Write failing pure-template and contract tests**
 
-Test source-trace digest binding, deterministic earliest-apex selection,
-51+51-minus-shared-apex resampling, source-R0 residual construction,
+Test `traj_dc` digest binding, zero pre-apex residual/repeated-apex handling,
+deterministic observed-descent resampling, source-R0 residual construction,
 deterministic medoid selection/tie-break, nail-frame translation/rotation
 invariance, live-head and live-nail anchoring, exact R1 preservation through
 R2's 90 mm gate, the stated quintic blend and zero transverse offset by 20 mm,
-exact reset seeds/state digests, the hard `n_script + 2` boundary with no
+fresh exact reset seeds/state digests, the hard `n_script + 2` boundary with no
 further endpoint hold, complete prefix-qvel inspection, and strict fail-closed
 sentinel behavior.
 
@@ -784,14 +823,20 @@ median v_pre >= 0.95 * R0; every accepted event >= 0.5 m/s
 median raw delivered >= 0.90 * R0
 no prefix arm qvel > 3.1415 rad/s
 no Lambda/cap > 1
+terminal axial-speed, terminal lateral-speed, and approach-angle gates pass
 no nonfinite/dead-Lambda/impossible-success/post-success/press-only failure
 ```
+
+Freeze the exact terminal-gate thresholds in the fresh reset manifest before
+any R1/R2 outcome is inspected; a missing, nonfinite, or failed value fails
+closed.
 
 The R2 repair contrast additionally requires at least four more within-12-mm
 onsets than R1 (`>=4/32`, exactly 12.5 percentage points), whether or not R1
 passes an absolute promotion gate. Replacing R0 additionally requires at least
 5% higher `v_pre` or at least 10% lower p95 prefix qvel; delivered impulse alone
 is not a replacement reason.
+Global straightness is never a promotion target.
 
 - [ ] **Step 5: Test reference identifiability and contact robustness**
 
@@ -799,7 +844,9 @@ Counterfactually score every replay under all recipes. Require the generating
 recipe to have the highest cumulative raw imitation score in at least 26/32
 resets and median self/next-best ratio at least 1.25. Re-run R0 and any winner
 at `solref_scale=2`; reject if speed, delivered impulse, or worst-joint Lambda
-changes by 20% or more, or success/centering fails.
+changes by 20% or more, if success/centering fails, or if any terminal
+axial-speed, terminal lateral-speed, or approach-angle gate is missing,
+nonfinite, or fails.
 
 State explicitly in the result that passing this probe demonstrates scripted
 feasibility and separability under the current weak imitation reader only; it
