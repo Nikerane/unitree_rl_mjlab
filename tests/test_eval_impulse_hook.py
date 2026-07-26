@@ -217,6 +217,42 @@ def test_install_episode_hook_requires_both_accumulators():
     eval_impulse._install_episode_hook(_FakeEnv())
 
 
+_QUALITY_CONTRACT_WEIGHTS = {
+  "F8": (8.0, 2.0),
+  "F0": (0.0, 2.0),
+  "D0": (8.0, 0.0),
+  "FQ": (8.0, 0.0),
+}
+
+
+@pytest.mark.parametrize(("arm", "expected_weights"), _QUALITY_CONTRACT_WEIGHTS.items())
+def test_sampled_env_contract_weights_match_the_four_arm_table(arm, expected_weights):
+  """The strict evaluator must accept each strict-quality arm's shipped weights.
+
+  F8 resolves through the LEGACY ``TASK_TO_ARM`` map (same task string as "F"),
+  not through ``QUALITY_TASK_TO_ARM`` -- ``_validate_sampled_env_contract`` must
+  still report the resolved arm as "F8" per ``QUALITY_TASK_TO_ARM`` lookup only
+  after the legacy map misses, and either way the weight contract for that task
+  must be 8/2. FQ is the actual bug: it currently falls through to the (8,2)
+  default even though its shipped weights are (8,0).
+  """
+  task = eval_impulse.QUALITY_ARM_TASKS[arm]
+  _, cfg, _ = eval_impulse.build_strict_quality_evaluation_cfg(task, play=False)
+  contract = eval_impulse._validate_sampled_env_contract(cfg, task)
+  assert (contract["impact_weight"], contract["delivered_weight"]) == expected_weights
+
+
+def test_sampled_env_contract_rejects_fq_with_legacy_delivered_weight():
+  """Mutation test: if FQ's delivered weight ever regressed to the legacy 2.0,
+  the strict evaluator must reject it, not silently accept -- this is the
+  fail-closed half of the fix (no default treatment gets a free pass)."""
+  task = eval_impulse.QUALITY_ARM_TASKS["FQ"]
+  _, cfg, _ = eval_impulse.build_strict_quality_evaluation_cfg(task, play=False)
+  cfg.rewards["delivered_impulse"].weight = 2.0
+  with pytest.raises(ValueError, match="configured maximize weights"):
+    eval_impulse._validate_sampled_env_contract(cfg, task)
+
+
 @pytest.mark.integration
 def test_fixed_action_tape_preserves_physics_across_strict_quality_arms():
   """Passive quality sensing changes no plant channel; payouts are intentionally absent."""

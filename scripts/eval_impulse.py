@@ -637,9 +637,22 @@ def _validate_sampled_env_contract(env_cfg, task: str) -> dict:
   delivered = env_cfg.rewards["delivered_impulse"]
   impact_weight = float(impact.weight)
   delivered_weight = float(delivered.weight)
-  expected_weights = {
-    "F0": (0.0, 2.0), "D0": (8.0, 0.0),
-  }.get(treatment, (8.0, 2.0))
+  # Fail-closed: every treatment this validator can see must be listed
+  # explicitly. No default -- an unlisted treatment is a bug, not an 8/2.
+  expected_weights_by_treatment = {
+    "C": (8.0, 2.0),
+    "D-prime": (8.0, 2.0),
+    "F": (8.0, 2.0),
+    "E": (8.0, 2.0),
+    "F0": (0.0, 2.0),
+    "D0": (8.0, 0.0),
+    "FQ": (8.0, 0.0),
+  }
+  if treatment not in expected_weights_by_treatment:
+    raise ValueError(
+      f"{task}: no configured maximize-weight contract for treatment {treatment!r}"
+    )
+  expected_weights = expected_weights_by_treatment[treatment]
   if (impact_weight, delivered_weight) != expected_weights:
     raise ValueError(
       f"{task}: configured maximize weights must be exactly "
