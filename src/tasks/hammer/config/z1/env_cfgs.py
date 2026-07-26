@@ -22,7 +22,10 @@ from src.assets.robots.unitree_z1.z1_constants import (
 from src.tasks.hammer import mdp as hammer_mdp
 from src.tasks.hammer.cat import CatSoftHook
 from src.tasks.hammer.hammer_env_cfg import make_hammer_env_cfg
-from src.tasks.hammer.nail_block import get_nail_block_entity_cfg
+from src.tasks.hammer.nail_block import (
+  NAIL_TOP_SITE_NAME,
+  get_nail_block_entity_cfg,
+)
 
 # Fixture-era per-joint impulse caps, MEASURED by derive_impulse_thresholds.py on 2026-07-06 (windup
 # NEAR_NAIL reset, oblique contact; committed record: docs/results/2026-07-10_c2_enforcement_record.md).
@@ -276,6 +279,25 @@ def z1_hammer_env_cfg(
     cfg.scene.sensors = (cfg.scene.sensors or ()) + (hammer_nail_impulse,)
 
     if event_correct or first_strike_legacy:
+      # Dedicated multi-slot first-contact geometry sensor. Keep the existing
+      # hammer_nail_contact at one slot: impact_progress and the impulse
+      # accumulator depend on its historical tensor shape. This sensor is
+      # diagnostic/reward instrumentation for the immutable onset snapshot.
+      hammer_nail_quality = ContactSensorCfg(
+        name="hammer_nail_quality",
+        primary=hammer_nail_contact.primary,
+        secondary=hammer_nail_contact.secondary,
+        fields=("found", "force", "pos", "normal"),
+        reduce="maxforce",
+        # CPU scripted-reference qualification (contact_quality_sensor.py):
+        # 8/16/64 produced identical centroid/error to 1e-6 m, with 0
+        # overflows and max found=1. Freeze the smallest qualified candidate.
+        num_slots=8,
+        track_air_time=False,
+        global_frame=False,
+      )
+      cfg.scene.sensors = (cfg.scene.sensors or ()) + (hammer_nail_quality,)
+
       cfg.metrics["first_strike"] = MetricsTermCfg(
         func=hammer_mdp.FirstStrikeEventTracker,
         per_substep=True,
@@ -283,8 +305,13 @@ def z1_hammer_env_cfg(
         params={
           "contact_sensor_name": "hammer_nail_contact",
           "impulse_sensor_name": "hammer_nail_impulse",
+          "quality_sensor_name": "hammer_nail_quality",
           "robot_cfg": SceneEntityCfg("robot", site_names=(HAMMER_HEAD_SITE_NAME,)),
-          "nail_cfg": SceneEntityCfg("nail_block", joint_names=("nail_slide",)),
+          "nail_cfg": SceneEntityCfg(
+            "nail_block",
+            joint_names=("nail_slide",),
+            site_names=(NAIL_TOP_SITE_NAME,),
+          ),
           "axis": (0.0, 0.0, -1.0),
           "window_substeps": 25,
           "progress_eps": 5e-4,

@@ -8,6 +8,7 @@ import torch
 
 from mjlab.managers.manager_base import ManagerTermBase, ManagerTermBaseCfg
 
+from src.tasks.hammer.mdp.contact_quality import contact_point_quality
 from src.tasks.hammer.nail_block import NAIL_GOAL_DEPTH, NAIL_SUCCESS_THRESHOLD
 
 if TYPE_CHECKING:
@@ -40,13 +41,24 @@ class FirstStrikeEventTracker(ManagerTermBase):
     params = cfg.params
     self._contact_sensor = env.scene[params["contact_sensor_name"]]
     self._impulse_sensor = env.scene[params["impulse_sensor_name"]]
+    self._quality_sensor = env.scene[params["quality_sensor_name"]]
     self._robot = env.scene[params["robot_cfg"].name]
     self._nail = env.scene[params["nail_cfg"].name]
     self._site_ids = params["robot_cfg"].site_ids
     self._joint_ids = params["nail_cfg"].joint_ids
+    self._nail_site_ids = params["nail_cfg"].site_ids
+    self._quality_num_slots = int(self._quality_sensor.cfg.num_slots)
+    nail_head = env.sim.mj_model.geom("nail_block/nail_head")
+    self._nail_radius_m = float(nail_head.size[0])
+    if not self._nail_radius_m > 0.0:
+      raise ValueError(
+        "compiled nail_block/nail_head radius must be positive, got "
+        f"{self._nail_radius_m}"
+      )
     self._axis = torch.tensor(
       params.get("axis", (0.0, 0.0, -1.0)), device=env.device, dtype=torch.float32
     )
+    self._axis = self._axis / torch.linalg.vector_norm(self._axis)
     self._window = int(params.get("window_substeps", 25))
     if self._window < 1:
       raise ValueError(f"window_substeps must be >= 1, got {self._window}")
@@ -57,6 +69,9 @@ class FirstStrikeEventTracker(ManagerTermBase):
     )
     self._off_streak = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
     self._event_age = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+    self._substep_count = torch.zeros(
+      env.num_envs, dtype=torch.long, device=env.device
+    )
     self._prev_head = torch.zeros(env.num_envs, 3, device=env.device)
     self._prev_depth = torch.zeros(env.num_envs, device=env.device)
 
@@ -64,8 +79,22 @@ class FirstStrikeEventTracker(ManagerTermBase):
     self._productive = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
     self._v_precontact = torch.zeros(env.num_envs, device=env.device)
     self._delivered = torch.zeros(env.num_envs, device=env.device)
+    self._delivered_transverse = torch.zeros(env.num_envs, device=env.device)
     self._peak_depth = torch.zeros(env.num_envs, device=env.device)
     self._depth_at_contact = torch.zeros(env.num_envs, device=env.device)
+    self._contact_point_w = torch.zeros(env.num_envs, 3, device=env.device)
+    self._contact_error_m = torch.zeros(env.num_envs, device=env.device)
+    self._contact_quality = torch.zeros(env.num_envs, device=env.device)
+    self._contact_quality_valid = torch.zeros(
+      env.num_envs, dtype=torch.bool, device=env.device
+    )
+    self._contact_quality_overflow = torch.zeros(
+      env.num_envs, dtype=torch.bool, device=env.device
+    )
+    self._first_contact_time_s = torch.zeros(env.num_envs, device=env.device)
+    self._contact_normal_axiality = torch.zeros(
+      env.num_envs, device=env.device
+    )
     self._reason = torch.full(
       (env.num_envs,), REASON_NONE, dtype=torch.long, device=env.device
     )
@@ -97,6 +126,10 @@ class FirstStrikeEventTracker(ManagerTermBase):
     return self._delivered
 
   @property
+  def delivered_transverse(self) -> torch.Tensor:
+    return self._delivered_transverse
+
+  @property
   def peak_depth(self) -> torch.Tensor:
     return self._peak_depth
 
@@ -113,27 +146,72 @@ class FirstStrikeEventTracker(ManagerTermBase):
     self._state[idx] = _STATE_UNARMED
     self._off_streak[idx] = 0
     self._event_age[idx] = 0
+    self._substep_count[idx] = 0
     self._prev_head[idx] = 0.0
     self._prev_depth[idx] = 0.0
     self._finalized[idx] = False
     self._productive[idx] = False
     self._v_precontact[idx] = 0.0
     self._delivered[idx] = 0.0
+    self._delivered_transverse[idx] = 0.0
     self._peak_depth[idx] = 0.0
     self._depth_at_contact[idx] = 0.0
+    self._contact_point_w[idx] = 0.0
+    self._contact_error_m[idx] = 0.0
+    self._contact_quality[idx] = 0.0
+    self._contact_quality_valid[idx] = False
+    self._contact_quality_overflow[idx] = False
+    self._first_contact_time_s[idx] = 0.0
+    self._contact_normal_axiality[idx] = 0.0
     self._reason[idx] = REASON_NONE
     return None
+
+  @property
+  def contact_point_w(self) -> torch.Tensor:
+    return self._contact_point_w
+
+  @property
+  def contact_error_m(self) -> torch.Tensor:
+    return self._contact_error_m
+
+  @property
+  def contact_quality(self) -> torch.Tensor:
+    return self._contact_quality
+
+  @property
+  def contact_quality_valid(self) -> torch.Tensor:
+    return self._contact_quality_valid
+
+  @property
+  def contact_quality_overflow(self) -> torch.Tensor:
+    return self._contact_quality_overflow
+
+  @property
+  def first_contact_time_s(self) -> torch.Tensor:
+    return self._first_contact_time_s
+
+  @property
+  def contact_normal_axiality(self) -> torch.Tensor:
+    return self._contact_normal_axiality
 
   def __call__(self, env: "ManagerBasedRlEnv", **params) -> torch.Tensor:
     del params
     head = self._robot.data.site_pos_w[:, self._site_ids].squeeze(1)
     depth = self._nail.data.joint_pos[:, self._joint_ids].squeeze(1)
     depth = depth.clamp(0.0, NAIL_GOAL_DEPTH)
+    nail_top = self._nail.data.site_pos_w[:, self._nail_site_ids].squeeze(1)
     in_contact = (self._contact_sensor.data.found > 0).any(dim=-1)
+    self._substep_count = self._substep_count + 1
 
     force = self._impulse_sensor.data.force
     axis = self._axis.to(dtype=force.dtype)
-    force_axial = (force * axis).sum(dim=-1).sum(dim=-1).clamp_min(0.0)
+    force_world = force.sum(dim=-2)
+    force_axis_signed = (force_world * axis).sum(dim=-1)
+    force_axial = force_axis_signed.clamp_min(0.0)
+    force_transverse = torch.linalg.vector_norm(
+      force_world - force_axis_signed.unsqueeze(-1) * axis,
+      dim=-1,
+    )
 
     unarmed = self._state == _STATE_UNARMED
     armed = self._state == _STATE_ARMED
@@ -167,6 +245,75 @@ class FirstStrikeEventTracker(ManagerTermBase):
     velocity = velocity.clamp_min(0.0)
     self._v_precontact = torch.where(onset, velocity, self._v_precontact)
     self._depth_at_contact = torch.where(onset, self._prev_depth, self._depth_at_contact)
+    self._first_contact_time_s = torch.where(
+      onset,
+      self._substep_count.to(dtype=head.dtype) * env.physics_dt,
+      self._first_contact_time_s,
+    )
+
+    quality_data = self._quality_sensor.data
+    point_w, error_m, quality, quality_valid, quality_overflow = (
+      contact_point_quality(
+        found=quality_data.found,
+        force_contact=quality_data.force,
+        position_w=quality_data.pos,
+        nail_top_w=nail_top,
+        nail_axis_w=self._axis,
+        nail_radius_m=self._nail_radius_m,
+        num_slots=self._quality_num_slots,
+      )
+    )
+    self._contact_point_w = torch.where(
+      onset.unsqueeze(-1), point_w, self._contact_point_w
+    )
+    self._contact_error_m = torch.where(
+      onset, error_m, self._contact_error_m
+    )
+    self._contact_quality = torch.where(onset, quality, self._contact_quality)
+    self._contact_quality_valid = torch.where(
+      onset, quality_valid, self._contact_quality_valid
+    )
+    self._contact_quality_overflow = torch.where(
+      onset, quality_overflow, self._contact_quality_overflow
+    )
+
+    normal_weights = torch.where(
+      quality_data.found > 0,
+      quality_data.force[..., 0].clamp_min(0.0),
+      torch.zeros_like(quality_data.found),
+    )
+    normal_finite = (
+      torch.isfinite(quality_data.normal).all(dim=(1, 2))
+      & torch.isfinite(normal_weights).all(dim=1)
+    )
+    safe_weights = torch.where(
+      torch.isfinite(normal_weights),
+      normal_weights,
+      torch.zeros_like(normal_weights),
+    )
+    safe_normals = torch.where(
+      torch.isfinite(quality_data.normal),
+      quality_data.normal,
+      torch.zeros_like(quality_data.normal),
+    )
+    weighted_normal = (
+      safe_normals * safe_weights.unsqueeze(-1)
+    ).sum(dim=1)
+    normal_norm = torch.linalg.vector_norm(
+      weighted_normal, dim=-1, keepdim=True
+    )
+    unit_normal = weighted_normal / torch.where(
+      normal_norm > 0.0, normal_norm, torch.ones_like(normal_norm)
+    )
+    axiality = (unit_normal * self._axis).sum(dim=-1).clamp(0.0, 1.0)
+    axiality_valid = quality_valid & normal_finite & (normal_norm.squeeze(-1) > 0)
+    axiality = torch.where(
+      axiality_valid, axiality, torch.zeros_like(axiality)
+    )
+    self._contact_normal_axiality = torch.where(
+      onset, axiality, self._contact_normal_axiality
+    )
+
     onset_peak = torch.maximum(self._prev_depth, depth)
     self._peak_depth = torch.where(onset, onset_peak, self._peak_depth)
     self._state = torch.where(
@@ -181,6 +328,16 @@ class FirstStrikeEventTracker(ManagerTermBase):
     contribution = force_axial * env.physics_dt
     contribution = contribution * (active_now & in_contact).to(contribution.dtype)
     self._delivered = self._delivered + contribution
+    # Transverse impulse is the time integral of each substep's net
+    # force magnitude orthogonal to the nail axis (not the magnitude of a
+    # vector-integrated impulse, whose direction could cancel over time).
+    transverse_contribution = force_transverse * env.physics_dt
+    transverse_contribution = transverse_contribution * (
+      active_now & in_contact
+    ).to(transverse_contribution.dtype)
+    self._delivered_transverse = (
+      self._delivered_transverse + transverse_contribution
+    )
     self._peak_depth = torch.where(
       active_now, torch.maximum(self._peak_depth, depth), self._peak_depth
     )

@@ -7,11 +7,14 @@ net-force sensor, matching the real task wiring.
 
 from __future__ import annotations
 
+from pathlib import Path
+import runpy
 from types import SimpleNamespace
 
 import pytest
 import torch
 
+from src.tasks.hammer.config.z1.env_cfgs import z1_hammer_env_cfg
 from src.tasks.hammer.mdp.first_strike import (
   REASON_NONE,
   REASON_SUCCESS,
@@ -22,8 +25,9 @@ from src.tasks.hammer.mdp.first_strike import (
 
 
 DT = 0.002
+QUALITY_SLOTS = 2
 _ROBOT_CFG = SimpleNamespace(name="robot", site_ids=[0])
-_NAIL_CFG = SimpleNamespace(name="nail_block", joint_ids=[0])
+_NAIL_CFG = SimpleNamespace(name="nail_block", joint_ids=[0], site_ids=[0])
 
 
 def _values(value, batch: int, *, dtype=torch.float32) -> torch.Tensor:
@@ -33,26 +37,57 @@ def _values(value, batch: int, *, dtype=torch.float32) -> torch.Tensor:
   return tensor
 
 
+def _vectors(value, batch: int, width: int) -> torch.Tensor:
+  tensor = torch.as_tensor(value, dtype=torch.float32)
+  if tensor.ndim == 1:
+    assert tensor.shape == (width,)
+    tensor = tensor.unsqueeze(0).expand(batch, -1)
+  assert tensor.shape == (batch, width)
+  return tensor
+
+
 def _tracker(batch: int = 1, *, window: int = 25, progress_eps: float = 5e-4):
   robot = SimpleNamespace(data=SimpleNamespace(site_pos_w=torch.zeros(batch, 1, 3)))
-  nail = SimpleNamespace(data=SimpleNamespace(joint_pos=torch.zeros(batch, 1)))
+  nail = SimpleNamespace(
+    data=SimpleNamespace(
+      joint_pos=torch.zeros(batch, 1),
+      site_pos_w=torch.zeros(batch, 1, 3),
+    )
+  )
   contact = SimpleNamespace(data=SimpleNamespace(found=torch.zeros(batch, 1)))
   impulse = SimpleNamespace(data=SimpleNamespace(force=torch.zeros(batch, 1, 3)))
+  quality = SimpleNamespace(
+    cfg=SimpleNamespace(num_slots=QUALITY_SLOTS),
+    data=SimpleNamespace(
+      found=torch.zeros(batch, QUALITY_SLOTS),
+      force=torch.zeros(batch, QUALITY_SLOTS, 3),
+      pos=torch.zeros(batch, QUALITY_SLOTS, 3),
+      normal=torch.zeros(batch, QUALITY_SLOTS, 3),
+    ),
+  )
+
+  def geom(name):
+    assert name == "nail_block/nail_head"
+    return SimpleNamespace(size=(0.012,))
+
   env = SimpleNamespace(
     num_envs=batch,
     device="cpu",
     physics_dt=DT,
+    sim=SimpleNamespace(mj_model=SimpleNamespace(geom=geom)),
     scene={
       "robot": robot,
       "nail_block": nail,
       "hammer_nail_contact": contact,
       "hammer_nail_impulse": impulse,
+      "hammer_nail_quality": quality,
     },
   )
   cfg = SimpleNamespace(
     params={
       "contact_sensor_name": "hammer_nail_contact",
       "impulse_sensor_name": "hammer_nail_impulse",
+      "quality_sensor_name": "hammer_nail_quality",
       "robot_cfg": _ROBOT_CFG,
       "nail_cfg": _NAIL_CFG,
       "axis": (0.0, 0.0, -1.0),
@@ -63,12 +98,42 @@ def _tracker(batch: int = 1, *, window: int = 25, progress_eps: float = 5e-4):
   tracker = FirstStrikeEventTracker(cfg=cfg, env=env)
   assert getattr(env, _ENV_FIRST_STRIKE_ATTR) is tracker
 
-  def step(*, head_z, depth, contact_on, downward_force=0.0):
+  def step(
+    *,
+    head_z,
+    depth,
+    contact_on,
+    downward_force=0.0,
+    transverse_force=(0.0, 0.0),
+    quality_pos=(0.0, 0.0, 0.1),
+    quality_normal_force=None,
+    quality_normal=(0.0, 0.0, -1.0),
+    quality_found=None,
+    nail_top=(0.0, 0.0, 0.1),
+  ):
     robot.data.site_pos_w[:, 0, 2] = _values(head_z, batch)
     nail.data.joint_pos[:, 0] = _values(depth, batch)
+    nail.data.site_pos_w[:, 0, :] = _vectors(nail_top, batch, 3)
     contact.data.found[:, 0] = _values(contact_on, batch)
+
     impulse.data.force.zero_()
+    impulse.data.force[:, 0, :2] = _vectors(transverse_force, batch, 2)
     impulse.data.force[:, 0, 2] = -_values(downward_force, batch)
+
+    quality.data.found.zero_()
+    quality.data.force.zero_()
+    quality.data.pos.zero_()
+    quality.data.normal.zero_()
+    found_value = contact_on if quality_found is None else quality_found
+    normal_force = (
+      downward_force
+      if quality_normal_force is None
+      else quality_normal_force
+    )
+    quality.data.found[:, 0] = _values(found_value, batch)
+    quality.data.force[:, 0, 0] = _values(normal_force, batch)
+    quality.data.pos[:, 0, :] = _vectors(quality_pos, batch, 3)
+    quality.data.normal[:, 0, :] = _vectors(quality_normal, batch, 3)
     return tracker(env)
 
   return tracker, step
@@ -77,6 +142,245 @@ def _tracker(batch: int = 1, *, window: int = 25, progress_eps: float = 5e-4):
 def _arm(step, *, head_z=(0.100, 0.096), depth=(0.001, 0.002)) -> None:
   step(head_z=head_z[0], depth=depth[0], contact_on=False)
   step(head_z=head_z[1], depth=depth[1], contact_on=False)
+
+
+def test_event_config_adds_dedicated_quality_sensor_without_changing_contact_shape():
+  cfg = z1_hammer_env_cfg(play=True, cat_impulse=True, event_correct=True)
+  sensors = {sensor.name: sensor for sensor in cfg.scene.sensors}
+
+  contact = sensors["hammer_nail_contact"]
+  quality = sensors["hammer_nail_quality"]
+  assert contact.fields == ("found", "force")
+  assert contact.reduce == "maxforce"
+  assert contact.num_slots == 1
+  assert contact.track_air_time is True
+  assert quality.primary == contact.primary
+  assert quality.secondary == contact.secondary
+  assert quality.fields == ("found", "force", "pos", "normal")
+  assert quality.reduce == "maxforce"
+  assert quality.num_slots == 8
+  assert quality.track_air_time is False
+  assert quality.global_frame is False
+  assert (
+    cfg.metrics["first_strike"].params["quality_sensor_name"]
+    == "hammer_nail_quality"
+  )
+
+
+def test_slot_probe_rejects_an_overflowing_next_larger_comparator():
+  probe_path = (
+    Path(__file__).resolve().parents[1]
+    / "docs/results/assets/2026-07-17_fixed_impedance_diag/probes"
+    / "contact_quality_sensor.py"
+  )
+  qualify = runpy.run_path(str(probe_path))["qualify"]
+
+  def row(slots, *, overflow):
+    return {
+      "candidate_slots": slots,
+      "contact_substeps": 1,
+      "found_finite": True,
+      "found_integral": True,
+      "found_nonnegative": True,
+      "normal_force_positive_n": 1,
+      "normal_force_negative_n": 0,
+      "contact_quality_valid": True,
+      "overflow_n": overflow,
+      "contact_point_w": [0.0, 0.0, 0.1],
+      "contact_error_m": 0.0,
+    }
+
+  chosen, _, failures = qualify(
+    [
+      row(8, overflow=0),
+      row(16, overflow=1),
+      row(64, overflow=0),
+    ]
+  )
+
+  assert chosen is None
+  assert any("no candidate" in failure for failure in failures)
+
+
+def test_slot_probe_can_fallback_when_a_smaller_candidate_overflows():
+  probe_path = (
+    Path(__file__).resolve().parents[1]
+    / "docs/results/assets/2026-07-17_fixed_impedance_diag/probes"
+    / "contact_quality_sensor.py"
+  )
+  qualify = runpy.run_path(str(probe_path))["qualify"]
+
+  def row(slots, *, overflow, valid):
+    return {
+      "candidate_slots": slots,
+      "contact_substeps": 1,
+      "found_finite": True,
+      "found_integral": True,
+      "found_nonnegative": True,
+      "normal_force_positive_n": 1,
+      "normal_force_negative_n": 0,
+      "contact_quality_valid": valid,
+      "overflow_n": overflow,
+      "contact_point_w": [0.0, 0.0, 0.1],
+      "contact_error_m": 0.0,
+    }
+
+  chosen, _, failures = qualify(
+    [
+      row(8, overflow=1, valid=False),
+      row(16, overflow=0, valid=True),
+      row(64, overflow=0, valid=True),
+    ]
+  )
+
+  assert chosen == 16
+  assert failures == []
+
+
+def test_onset_latches_contact_quality_time_and_normal_axiality():
+  tracker, step = _tracker()
+  _arm(step)
+
+  step(
+    head_z=0.090,
+    depth=0.002,
+    contact_on=True,
+    downward_force=10.0,
+    quality_pos=(0.003, 0.0, 0.1),
+    quality_normal=(0.6, 0.0, -0.8),
+  )
+
+  torch.testing.assert_close(
+    tracker.contact_point_w[0], torch.tensor([0.003, 0.0, 0.1])
+  )
+  assert tracker.contact_error_m[0].item() == pytest.approx(0.003)
+  assert tracker.contact_quality[0].item() == pytest.approx(0.9375)
+  assert tracker.contact_quality_valid[0]
+  assert not tracker.contact_quality_overflow[0]
+  assert tracker.first_contact_time_s[0].item() == pytest.approx(3 * DT)
+  assert tracker.contact_normal_axiality[0].item() == pytest.approx(0.8)
+
+
+def test_contact_geometry_is_latched_only_at_onset():
+  tracker, step = _tracker()
+  _arm(step)
+  step(
+    head_z=0.090,
+    depth=0.002,
+    contact_on=True,
+    downward_force=10.0,
+    quality_pos=(0.003, 0.0, 0.1),
+  )
+  frozen = (
+    tracker.contact_point_w.clone(),
+    tracker.contact_error_m.clone(),
+    tracker.contact_quality.clone(),
+    tracker.contact_quality_valid.clone(),
+    tracker.contact_quality_overflow.clone(),
+    tracker.first_contact_time_s.clone(),
+    tracker.contact_normal_axiality.clone(),
+  )
+
+  step(
+    head_z=0.089,
+    depth=0.003,
+    contact_on=True,
+    downward_force=20.0,
+    quality_pos=(0.020, 0.0, 0.1),
+    quality_normal=(1.0, 0.0, 0.0),
+  )
+
+  current = (
+    tracker.contact_point_w,
+    tracker.contact_error_m,
+    tracker.contact_quality,
+    tracker.contact_quality_valid,
+    tracker.contact_quality_overflow,
+    tracker.first_contact_time_s,
+    tracker.contact_normal_axiality,
+  )
+  for actual, expected in zip(current, frozen, strict=True):
+    assert torch.equal(actual, expected)
+
+
+@pytest.mark.parametrize("normal_force", [0.0, -10.0])
+def test_nonpositive_quality_force_marks_onset_geometry_invalid(normal_force):
+  tracker, step = _tracker()
+  _arm(step)
+
+  step(
+    head_z=0.090,
+    depth=0.002,
+    contact_on=True,
+    downward_force=10.0,
+    quality_normal_force=normal_force,
+    quality_pos=(0.003, 0.0, 0.1),
+  )
+
+  assert not tracker.contact_quality_valid[0]
+  assert not tracker.contact_quality_overflow[0]
+  torch.testing.assert_close(tracker.contact_point_w, torch.zeros(1, 3))
+  torch.testing.assert_close(tracker.contact_error_m, torch.zeros(1))
+  torch.testing.assert_close(tracker.contact_quality, torch.zeros(1))
+
+
+def test_quality_slot_overflow_fails_closed_at_onset():
+  tracker, step = _tracker()
+  _arm(step)
+
+  step(
+    head_z=0.090,
+    depth=0.002,
+    contact_on=True,
+    downward_force=10.0,
+    quality_found=QUALITY_SLOTS + 1,
+    quality_pos=(0.003, 0.0, 0.1),
+  )
+
+  assert tracker.contact_quality_overflow[0]
+  assert not tracker.contact_quality_valid[0]
+  torch.testing.assert_close(tracker.contact_point_w, torch.zeros(1, 3))
+  torch.testing.assert_close(tracker.contact_error_m, torch.zeros(1))
+  torch.testing.assert_close(tracker.contact_quality, torch.zeros(1))
+
+
+def test_transverse_impulse_integrates_only_during_active_raw_contact():
+  tracker, step = _tracker(window=4)
+  _arm(step, depth=(0.0, 0.0))
+
+  step(
+    head_z=0.090,
+    depth=0.001,
+    contact_on=True,
+    downward_force=10.0,
+    transverse_force=(3.0, 4.0),
+  )
+  step(
+    head_z=0.089,
+    depth=0.002,
+    contact_on=False,
+    downward_force=100.0,
+    transverse_force=(60.0, 80.0),
+  )
+  step(
+    head_z=0.088,
+    depth=0.003,
+    contact_on=True,
+    downward_force=20.0,
+    transverse_force=(0.0, 6.0),
+  )
+  step(
+    head_z=0.087,
+    depth=0.004,
+    contact_on=False,
+    downward_force=100.0,
+    transverse_force=(60.0, 80.0),
+  )
+
+  assert tracker.finalized[0]
+  assert tracker.delivered_transverse[0].item() == pytest.approx(
+    (5.0 + 6.0) * DT
+  )
 
 
 def test_first_contact_uses_onset_minus_previous_position():
@@ -151,19 +455,42 @@ def test_success_substep_is_included_and_later_samples_are_frozen():
   frozen = (
     tracker.v_precontact.clone(),
     tracker.delivered.clone(),
+    tracker.delivered_transverse.clone(),
     tracker.peak_depth.clone(),
     tracker.depth_at_contact.clone(),
+    tracker.contact_point_w.clone(),
+    tracker.contact_error_m.clone(),
+    tracker.contact_quality.clone(),
+    tracker.contact_quality_valid.clone(),
+    tracker.contact_quality_overflow.clone(),
+    tracker.first_contact_time_s.clone(),
+    tracker.contact_normal_axiality.clone(),
     tracker.productive.clone(),
     tracker.reason.clone(),
   )
 
-  step(head_z=0.070, depth=0.032, contact_on=True, downward_force=100.0)
+  step(
+    head_z=0.070,
+    depth=0.032,
+    contact_on=True,
+    downward_force=100.0,
+    transverse_force=(60.0, 80.0),
+    quality_pos=(0.020, 0.0, 0.1),
+  )
 
   current = (
     tracker.v_precontact,
     tracker.delivered,
+    tracker.delivered_transverse,
     tracker.peak_depth,
     tracker.depth_at_contact,
+    tracker.contact_point_w,
+    tracker.contact_error_m,
+    tracker.contact_quality,
+    tracker.contact_quality_valid,
+    tracker.contact_quality_overflow,
+    tracker.first_contact_time_s,
+    tracker.contact_normal_axiality,
     tracker.productive,
     tracker.reason,
   )
@@ -278,8 +605,16 @@ def test_subset_reset_does_not_change_other_environment():
     tracker.productive[1].clone(),
     tracker.v_precontact[1].clone(),
     tracker.delivered[1].clone(),
+    tracker.delivered_transverse[1].clone(),
     tracker.peak_depth[1].clone(),
     tracker.depth_at_contact[1].clone(),
+    tracker.contact_point_w[1].clone(),
+    tracker.contact_error_m[1].clone(),
+    tracker.contact_quality[1].clone(),
+    tracker.contact_quality_valid[1].clone(),
+    tracker.contact_quality_overflow[1].clone(),
+    tracker.first_contact_time_s[1].clone(),
+    tracker.contact_normal_axiality[1].clone(),
     tracker.reason[1].clone(),
   )
 
@@ -287,13 +622,29 @@ def test_subset_reset_does_not_change_other_environment():
 
   assert not tracker.finalized[0]
   assert tracker.reason[0].item() == REASON_NONE
+  torch.testing.assert_close(tracker.contact_point_w[0], torch.zeros(3))
+  assert tracker.contact_error_m[0].item() == 0.0
+  assert tracker.contact_quality[0].item() == 0.0
+  assert not tracker.contact_quality_valid[0]
+  assert not tracker.contact_quality_overflow[0]
+  assert tracker.first_contact_time_s[0].item() == 0.0
+  assert tracker.contact_normal_axiality[0].item() == 0.0
+  assert tracker.delivered_transverse[0].item() == 0.0
   current_env1 = (
     tracker.finalized[1],
     tracker.productive[1],
     tracker.v_precontact[1],
     tracker.delivered[1],
+    tracker.delivered_transverse[1],
     tracker.peak_depth[1],
     tracker.depth_at_contact[1],
+    tracker.contact_point_w[1],
+    tracker.contact_error_m[1],
+    tracker.contact_quality[1],
+    tracker.contact_quality_valid[1],
+    tracker.contact_quality_overflow[1],
+    tracker.first_contact_time_s[1],
+    tracker.contact_normal_axiality[1],
     tracker.reason[1],
   )
   for actual, expected in zip(current_env1, env1, strict=True):
