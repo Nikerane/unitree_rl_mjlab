@@ -10,6 +10,18 @@
 #   Unitree-Z1-Hammer-CaT-Impulse-FirstStrike-Legacy / dprime
 #   Unitree-Z1-Hammer-CaT-Impulse-Event-Linear       / f
 #   Unitree-Z1-Hammer-CaT-Impulse-Event              / e
+#
+# fq4x8 (first-contact quality campaign): reward weights are baked into the
+# REGISTERED TASK, not CLI overrides -- IMPACT_W/DELIVERED_W/NAIL_DRIVEN_W must
+# be unset (a leaked --export=ALL from an fsr4x8 shell must not silently
+# mis-train). Seeds 8..15, ITERS=500, one of exactly four task/short pairs:
+#   CAMPAIGN=fq4x8 SEEDS="8 9 10 11 12 13 14 15" SINGLE_TASK=Unitree-Z1-Hammer-CaT-Impulse-Event-Linear SINGLE_SHORT=f8 ITERS=500 \
+#     EXPECTED_CODE_REVISION=<40hex> EXPECTED_ASSET_REVISION=<40hex> \
+#     sbatch --array=0-7 --export=ALL,CAMPAIGN,SEEDS,SINGLE_TASK,SINGLE_SHORT,ITERS,EXPECTED_CODE_REVISION,EXPECTED_ASSET_REVISION scripts/slurm/vega_train.sbatch
+# Repeat with task/short:
+#   Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0    / f0
+#   Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0    / d0
+#   Unitree-Z1-Hammer-CaT-Impulse-Event-Quality      / fq
 #SBATCH --job-name=z1-train
 #SBATCH --account=d2026d06-166-users
 #SBATCH --partition=gpu
@@ -86,6 +98,33 @@ if [ "$CAMPAIGN" = "fsr4x8" ]; then
     *) echo "FSR4X8_FAIL: SINGLE_TASK/SINGLE_SHORT is not a frozen arm"; exit 2 ;;
   esac
 fi
+
+# fq4x8 INVERTS the fsr4x8 rule: reward weights come from the registered task,
+# not CLI overrides, so every override hook must be unset (reject inherited
+# --export=ALL leakage). Fail closed before any provenance/GPU work.
+if [ "$CAMPAIGN" = "fq4x8" ]; then
+  [ "${SEEDS:-}" = "8 9 10 11 12 13 14 15" ] \
+    || { echo "FQ4X8_FAIL: seeds must be exactly 8..15"; exit 2; }
+  [ "${ITERS:-500}" = "500" ] \
+    || { echo "FQ4X8_FAIL: ITERS must be 500"; exit 2; }
+  [ -z "${IMPACT_W:-}" ] \
+    || { echo "FQ4X8_FAIL: IMPACT_W must be unset (weights come from the registered task)"; exit 2; }
+  [ -z "${DELIVERED_W:-}" ] \
+    || { echo "FQ4X8_FAIL: DELIVERED_W must be unset (weights come from the registered task)"; exit 2; }
+  [ -z "${NAIL_DRIVEN_W:-}" ] \
+    || { echo "FQ4X8_FAIL: NAIL_DRIVEN_W must be unset (weights come from the registered task)"; exit 2; }
+  [[ "${EXPECTED_CODE_REVISION:-}" =~ ^[0-9a-f]{40}$ ]] \
+    || { echo "FQ4X8_FAIL: EXPECTED_CODE_REVISION must be a clean 40-hex revision"; exit 2; }
+  [[ "${EXPECTED_ASSET_REVISION:-}" =~ ^[0-9a-f]{40}$ ]] \
+    || { echo "FQ4X8_FAIL: EXPECTED_ASSET_REVISION must be a clean 40-hex revision"; exit 2; }
+  case "$task:$short" in
+    Unitree-Z1-Hammer-CaT-Impulse-Event-Linear:f8|\
+    Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0:f0|\
+    Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0:d0|\
+    Unitree-Z1-Hammer-CaT-Impulse-Event-Quality:fq) ;;
+    *) echo "FQ4X8_FAIL: SINGLE_TASK/SINGLE_SHORT is not a frozen fq4x8 arm"; exit 2 ;;
+  esac
+fi
 RUN="${CAMPAIGN}_${short}_seed${seed}"
 # Provenance: record the exact code state that trains (git hash + '-dirty' if the tree has uncommitted
 # tracked edits). Deploy via git pull, NOT scp, so this hash is trustworthy (2026-07-19 provenance fix).
@@ -105,6 +144,12 @@ if [ "$CAMPAIGN" = "fsr4x8" ]; then
     || { echo "### TRAIN_FAIL: code revision does not equal expected code revision"; exit 2; }
   [ "$ASSET_HASH" = "$EXPECTED_ASSET_REVISION" ] \
     || { echo "### TRAIN_FAIL: asset revision does not equal expected asset revision"; exit 2; }
+fi
+if [ "$CAMPAIGN" = "fq4x8" ]; then
+  [ "$GITHASH" = "$EXPECTED_CODE_REVISION" ] \
+    || { echo "FQ4X8_FAIL: code revision does not equal expected code revision"; exit 2; }
+  [ "$ASSET_HASH" = "$EXPECTED_ASSET_REVISION" ] \
+    || { echo "FQ4X8_FAIL: asset revision does not equal expected asset revision"; exit 2; }
 fi
 $PY -c "import torch; assert torch.cuda.is_available() and 'A100' in torch.cuda.get_device_name(0), 'no A100'; print('A100 ok:', torch.cuda.get_device_name(0))" || { echo "### NO GPU/A100 on $(hostname) — requeue+exit"; scontrol requeue "${SLURM_JOB_ID}" 2>/dev/null; exit 1; }
 $PY scripts/train.py "$task" --gpu-ids [0] --agent.logger tensorboard \

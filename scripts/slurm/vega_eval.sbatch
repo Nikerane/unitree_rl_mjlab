@@ -8,6 +8,16 @@
 #     ACCEPTED_MANIFEST="$HOME/unitree_rl_mjlab_eval/fsr4x8/accepted_attempts.tsv" \
 #     EXPECTED_CODE_REVISION=<40hex> EXPECTED_ASSET_REVISION=<40hex> \
 #     sbatch --export=ALL,CAMPAIGN,EVAL_ATTEMPT,EVAL_ROOT,ACCEPTED_MANIFEST,EXPECTED_CODE_REVISION,EXPECTED_ASSET_REVISION scripts/slurm/vega_eval.sbatch
+#
+# fq4x8 (first-contact quality campaign): consumes a hash-free but row/mapping
+# checked 32-row accepted-training manifest (short<TAB>task<TAB>training_seed<TAB>
+# run_name<TAB>checkpoint_path<TAB>checkpoint_sha256, headerless, 8 rows per
+# frozen arm). EVAL_ROOT and ACCEPTED_MANIFEST must be the exact paths below --
+# no other layout is accepted, and the fq4x8 segment is appended exactly once:
+#   CAMPAIGN=fq4x8 EVAL_ATTEMPT=attempt1 EVAL_ROOT="$HOME/unitree_rl_mjlab_eval" \
+#     ACCEPTED_MANIFEST="$HOME/unitree_rl_mjlab_eval/fq4x8/accepted_training_checkpoints.tsv" \
+#     EXPECTED_CODE_REVISION=<40hex> EXPECTED_ASSET_REVISION=<40hex> \
+#     sbatch --export=ALL,CAMPAIGN,EVAL_ATTEMPT,EVAL_ROOT,ACCEPTED_MANIFEST,EXPECTED_CODE_REVISION,EXPECTED_ASSET_REVISION scripts/slurm/vega_eval.sbatch
 #SBATCH --job-name=z1-eval
 #SBATCH --account=d2026d06-166-users
 #SBATCH --partition=gpu
@@ -50,6 +60,97 @@ CAMPAIGN="${CAMPAIGN:-ab1}"
 EVAL_OUTPUT="$PWD/eval/${CAMPAIGN}"
 # Space-separated dir globs (campaign-agnostic). Default = the A/B parking-fix campaign.
 CKGLOBS="${CKGLOBS:-${CKGLOB:-*a05_* *b1_*}}"
+
+# fq4x8 fail-closed input/manifest validation. This MUST run before the GPU guard below (no
+# GPU/sbatch/srun/network work happens here) so a bad submission never wastes a node allocation.
+# Does not touch the fsr4x8 branch below or its behavior.
+if [ "$CAMPAIGN" = "fq4x8" ]; then
+  [[ "${EXPECTED_CODE_REVISION:-}" =~ ^[0-9a-f]{40}$ ]] \
+    || { echo "EVAL_FAIL: EXPECTED_CODE_REVISION must be a clean 40-hex revision"; exit 2; }
+  [[ "${EXPECTED_ASSET_REVISION:-}" =~ ^[0-9a-f]{40}$ ]] \
+    || { echo "EVAL_FAIL: EXPECTED_ASSET_REVISION must be a clean 40-hex revision"; exit 2; }
+  case "${EVAL_ATTEMPT:-}" in
+    ""|"."|".."|*[!A-Za-z0-9._-]*)
+      echo "EVAL_FAIL: EVAL_ATTEMPT must be a nonempty path-safe attempt label"
+      exit 2
+      ;;
+  esac
+  # EVAL_ROOT is a fixed, durable, external root (not "any absolute path outside the repos" like
+  # fsr4x8) -- fixing it is what guarantees the fq4x8 segment appended below is never duplicated.
+  [ "${EVAL_ROOT:-}" = "$HOME/unitree_rl_mjlab_eval" ] \
+    || { echo "EVAL_FAIL: EVAL_ROOT must be exactly \$HOME/unitree_rl_mjlab_eval"; exit 2; }
+  case "$EVAL_ROOT" in
+    "$REPO_ROOT"|"$REPO_ROOT"/*)
+      echo "EVAL_FAIL: EVAL_ROOT must be outside the code repository"
+      exit 2
+      ;;
+  esac
+  case "$EVAL_ROOT" in
+    "$ASSET_REPO"|"$ASSET_REPO"/*)
+      echo "EVAL_FAIL: EVAL_ROOT must be outside the asset repository"
+      exit 2
+      ;;
+  esac
+  mkdir -p "$EVAL_ROOT" \
+    || { echo "EVAL_FAIL: cannot create EVAL_ROOT=$EVAL_ROOT"; exit 2; }
+  FQ_EVAL_ROOT=$(cd "$EVAL_ROOT" && pwd -P)
+  case "$FQ_EVAL_ROOT" in
+    "$REPO_ROOT"|"$REPO_ROOT"/*)
+      echo "EVAL_FAIL: resolved EVAL_ROOT must be outside the code repository"
+      exit 2
+      ;;
+  esac
+  case "$FQ_EVAL_ROOT" in
+    "$ASSET_REPO"|"$ASSET_REPO"/*)
+      echo "EVAL_FAIL: resolved EVAL_ROOT must be outside the asset repository"
+      exit 2
+      ;;
+  esac
+  [ "${ACCEPTED_MANIFEST:-}" = "$HOME/unitree_rl_mjlab_eval/fq4x8/accepted_training_checkpoints.tsv" ] \
+    || { echo "EVAL_FAIL: ACCEPTED_MANIFEST must be exactly \$EVAL_ROOT/fq4x8/accepted_training_checkpoints.tsv"; exit 2; }
+  [ -f "$ACCEPTED_MANIFEST" ] \
+    || { echo "EVAL_FAIL: accepted-training manifest is missing"; exit 2; }
+  [ ! -L "$ACCEPTED_MANIFEST" ] \
+    || { echo "EVAL_FAIL: accepted-training manifest may not be a symlink"; exit 2; }
+
+  FQ_CODE_HASH=$(git rev-parse HEAD 2>/dev/null || echo unknown)
+  FQ_CODE_STATUS=$(git status --porcelain=v1 --untracked-files=all 2>/dev/null || echo provenance-unavailable)
+  FQ_ASSET_HASH=$(git -C "$ASSET_REPO" rev-parse HEAD 2>/dev/null || echo unknown)
+  FQ_ASSET_STATUS=$(git -C "$ASSET_REPO" status --porcelain=v1 --untracked-files=all 2>/dev/null || echo provenance-unavailable)
+  [ "$FQ_CODE_HASH" != "unknown" ] && [ -z "$FQ_CODE_STATUS" ] \
+    || { echo "EVAL_FAIL: code provenance is unknown or dirty"; exit 2; }
+  [ "$FQ_ASSET_HASH" != "unknown" ] && [ -z "$FQ_ASSET_STATUS" ] \
+    || { echo "EVAL_FAIL: asset provenance is unknown or dirty"; exit 2; }
+  [ "$FQ_CODE_HASH" = "$EXPECTED_CODE_REVISION" ] \
+    || { echo "EVAL_FAIL: code revision does not equal expected code revision"; exit 2; }
+  [ "$FQ_ASSET_HASH" = "$EXPECTED_ASSET_REVISION" ] \
+    || { echo "EVAL_FAIL: asset revision does not equal expected asset revision"; exit 2; }
+  echo "### EVAL_PROVENANCE code=$FQ_CODE_HASH asset=$FQ_ASSET_HASH"
+
+  # FQ4X8 ACCEPTED-MANIFEST CONTRACT: headerless TSV, exactly 32 rows, one row per accepted
+  # checkpoint, columns: short  task  training_seed  run_name  checkpoint_path  checkpoint_sha256.
+  FQ_ROW_COUNT=$(awk 'NF{n++} END{print n+0}' "$ACCEPTED_MANIFEST")
+  [ "$FQ_ROW_COUNT" -eq 32 ] \
+    || { echo "EVAL_FAIL: accepted-training manifest must contain exactly 32 rows, found $FQ_ROW_COUNT"; exit 2; }
+  FQ_BAD_ROWS=$(awk -F'\t' '
+    !(($1=="f8" && $2=="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear") ||
+      ($1=="f0" && $2=="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0") ||
+      ($1=="d0" && $2=="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0") ||
+      ($1=="fq" && $2=="Unitree-Z1-Hammer-CaT-Impulse-Event-Quality")) {n++}
+    END{print n+0}' "$ACCEPTED_MANIFEST")
+  [ "$FQ_BAD_ROWS" -eq 0 ] \
+    || { echo "EVAL_FAIL: accepted-training manifest has $FQ_BAD_ROWS row(s) outside the frozen fq4x8 task/short mapping"; exit 2; }
+  fq_check_arm_count() {
+    local short=$1 task=$2 n
+    n=$(awk -F'\t' -v s="$short" -v t="$task" '$1==s && $2==t {n++} END{print n+0}' "$ACCEPTED_MANIFEST")
+    [ "$n" -eq 8 ] \
+      || { echo "EVAL_FAIL: accepted-training manifest must have exactly 8 rows for $short/$task, found $n"; exit 2; }
+  }
+  fq_check_arm_count f8 Unitree-Z1-Hammer-CaT-Impulse-Event-Linear
+  fq_check_arm_count f0 Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0
+  fq_check_arm_count d0 Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0
+  fq_check_arm_count fq Unitree-Z1-Hammer-CaT-Impulse-Event-Quality
+fi
 
 # GPU guard (some Vega nodes, e.g. gn03, expose no allocatable GPU -> fail-fast + requeue instead of
 # a confusing COMPLETED-but-crashed run).
@@ -198,6 +299,48 @@ if [ "$CAMPAIGN" = "fsr4x8" ]; then
     eval_fsr_arm dprime Unitree-Z1-Hammer-CaT-Impulse-FirstStrike-Legacy 0 &&
     eval_fsr_arm f Unitree-Z1-Hammer-CaT-Impulse-Event-Linear 0 &&
     eval_fsr_arm e Unitree-Z1-Hammer-CaT-Impulse-Event 0
+    rc=$?
+  fi
+elif [ "$CAMPAIGN" = "fq4x8" ]; then
+  # All argument/manifest validation already happened above, before the GPU guard.
+  EVAL_ROOT="$FQ_EVAL_ROOT"
+  EVAL_OUTPUT="$EVAL_ROOT/${CAMPAIGN}/${EVAL_ATTEMPT}"
+  mkdir -p "$EVAL_ROOT/${CAMPAIGN}" \
+    || { echo "EVAL_FAIL: cannot create campaign output root"; exit 2; }
+  mkdir "$EVAL_OUTPUT" \
+    || { echo "EVAL_FAIL: attempt output already exists or cannot be claimed: $EVAL_OUTPUT"; exit 2; }
+  CODE_HASH="$FQ_CODE_HASH"
+  ASSET_HASH="$FQ_ASSET_HASH"
+  MANIFEST_SOURCE="$ACCEPTED_MANIFEST"
+  ACCEPTED_MANIFEST="$EVAL_OUTPUT/accepted_training_checkpoints.tsv"
+  cp "$MANIFEST_SOURCE" "$ACCEPTED_MANIFEST" \
+    || { echo "EVAL_FAIL: cannot snapshot accepted-training manifest"; exit 2; }
+  chmod a-w "$ACCEPTED_MANIFEST" \
+    || { echo "EVAL_FAIL: cannot make accepted manifest snapshot read-only"; exit 2; }
+
+  eval_fq_arm() {
+    short=$1
+    task=$2
+    arm_ckpts=""
+    while IFS=$'\t' read -r row_short row_task seed run_name checkpoint checkpoint_sha; do
+      [ "$row_short" = "$short" ] || continue
+      arm_ckpts="${arm_ckpts}${run_name}:${checkpoint}:${checkpoint_sha}"$'\n'
+    done < "$ACCEPTED_MANIFEST"
+    [ "$(printf '%s' "$arm_ckpts" | awk 'NF{n++} END{print n+0}')" -eq 8 ] \
+      || { echo "EVAL_FAIL: accepted manifest did not yield 8 rows for $short"; return 2; }
+    echo "### EVAL arm=$short task=$task checkpoints:"
+    printf '%s' "$arm_ckpts"
+    FRESH=0 DEV=cuda:0 PY="$PY" NENVS=256 NSTEPS=400 EPLEN=4.0 \
+      SEED=2026072900 TASK="$task" OUT="$EVAL_OUTPUT" RUN_LEGACY_DIAG=0 \
+      CKPTS="$arm_ckpts" scripts/eval_impulse.sh
+  }
+
+  eval_fq_arm f8 Unitree-Z1-Hammer-CaT-Impulse-Event-Linear
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    eval_fq_arm f0 Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0 &&
+    eval_fq_arm d0 Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0 &&
+    eval_fq_arm fq Unitree-Z1-Hammer-CaT-Impulse-Event-Quality
     rc=$?
   fi
 else
