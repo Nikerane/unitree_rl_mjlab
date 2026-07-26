@@ -1,509 +1,387 @@
-# First-Strike Quality-Conditioned Reward Implementation Plan
+# Lean First-Strike Quality Reward Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: use
+> superpowers:subagent-driven-development or superpowers:executing-plans.
+> Execute only the active sequence below. The deferred appendix is
+> non-executable.
 
-**Goal:** Build and evaluate a fixed-impedance, physics-rate first-contact-quality reward in a matched F8/F0/D0/FQ 4×8 campaign, while separately qualifying three reference recipes on CPU.
+**Goal:** Finish and evaluate a fixed-impedance FQ-min reward in a matched
+F8/F0/D0/FQ-min 4×8 campaign while preserving the completed physics-rate
+contact-quality tracker and schema-v3 provenance work.
 
-**Architecture:** Add one dedicated multi-slot contact sensor and a small pure Torch quality kernel. The existing first-strike tracker latches the resulting contact point and quality at the accepted onset; two new bounded one-shot readers implement FQ without changing F8/F0/D0 physics. Extend the existing sampled evaluator, but keep the new campaign matrix/statistics and plotting in focused quality-campaign modules. A separate CPU probe compares R0/R1/R2 reference recipes before any reference-guided GPU arm.
+**Architecture:** A dedicated passive multi-slot contact sensor feeds a pure
+Torch contact-quality kernel. The shared first-strike tracker latches one
+immutable onset/finalization record. F8/F0/D0 retain raw one-shot readers.
+FQ-min uses only one bounded quality-gated speed reader and disables delivered
+reward. A focused offline module verifies schema-v3 artifacts, performs
+seed-level inference, and generates two static figures.
 
-**Tech Stack:** Python 3.10, PyTorch, mjlab 1.4.0, MuJoCo/mujoco_warp 3.8.1, NumPy, SciPy-compatible exact inference implemented in-tree, Plotly plus static PNG export, pytest, Slurm/Vega.
+**Tech stack:** Python 3.10, PyTorch, mjlab 1.4.0, MuJoCo/mujoco_warp 3.8.1,
+NumPy, the repository's exact Mann–Whitney implementation, Matplotlib, pytest,
+Slurm/Vega.
 
-## Global Constraints
+## Execution status and exact active sequence
 
-- Work from a clean isolated branch/worktree created from commit `3286a45`; never overwrite the user's dirty working tree.
+Completed foundations:
+
+1. **Task 1 — Pure contact-quality kernel:** complete at `7a55244`.
+2. **Task 2 — Dedicated sensor and immutable tracker snapshot:** complete at
+   `d891bbe`.
+3. **Task 3 — Quality-reader/task foundation:** complete at `ccf8bde`; its
+   broad delivered-reader registration is superseded by Task 3A.
+4. **Task 4 — Schema-v3 sampled traces and physical-identity replay:** complete
+   at `e2fbf2b`, with passive-diagnostic and raw-slot corrections at `b63ea38`
+   and `ce40525`.
+
+Execute next, in this order:
+
+1. **Task 3A — Narrow the registered quality arm to FQ-min.**
+2. **Task 5 — Implement lean schema-v3 offline analysis and two figures.**
+3. **Task 6 — Complete CPU qualification and freeze the preregistration.**
+4. **Task 7 — Pass clean Vega CUDA and throughput gates.**
+5. **Task 8 — Run matched 4×8 training and strict sampled evaluation.**
+6. **Task 9 — Analyze, bank two figures, and render four explanatory videos.**
+
+R0/R1/R2 reference recipes are not in the active sequence.
+
+## Global constraints
+
+- Continue in the isolated `first-strike-quality` worktree; never overwrite the
+  user's main working tree.
 - Fixed impedance only. Never call `set_gains` or command stiffness.
-- `IMP_J_LIMIT` stays `[1.640, 3.280, 1.640, 1.640, 1.640, 1.640]`.
-- `imp_max_p` stays `0.0`; the impulse constraint remains log-only.
-- Do not add a superlinear excess-over-`i_ref` reward.
+- Keep arm `Kp/Kd=1000/100`, except joint 2 at `1500/150`, and gripper
+  `Kp/Kd=100/20`.
+- Keep `IMP_J_LIMIT=[1.640, 3.280, 1.640, 1.640, 1.640, 1.640]`.
+- Keep `imp_max_p=0.0`; the impulse constraint remains log-only.
+- Do not add a superlinear excess-over-reference reward.
 - Do not edit installed `mjlab`, `rsl_rl`, `mujoco`, or `mujoco_warp`.
-- Use named-file staging only; never `git add -A`; no co-author trailer.
-- CPU-first. Vega is allowed only after the quality-reader CPU probe and required tests pass.
-- Deploy tracked code through commit, push, and clean Vega pull; never `scp` tracked files.
-- Any `-dirty` evaluation row, `impossible_success_n > 0`, or `lambda_dead_n > 0` is invalid.
-- Use one GPU per run.
-- Use training seeds `8..15` in every arm and only `*_sampled` evaluation fields.
-- Freeze campaign ID `fq4x8` and run shorts `f8`, `f0`, `d0`, `fq`.
+- Use named-file staging only; never use `git add -A`; add no co-author trailer.
+- CPU-first. Vega is authorized only after Task 6 passes on the launch commit.
+- Deploy tracked files through commit, push, and clean Vega pull; never `scp`
+  tracked source.
+- Any dirty evaluation row, `impossible_success_n>0`, `lambda_dead_n>0`,
+  quality overflow, nonfinite quality geometry, or incomplete quota invalidates
+  the complete campaign analysis.
+- Use one GPU per training run.
+- Use training seeds 8–15 in every arm and only `*_sampled` decision fields.
+- Keep evaluator RNG identities `reset=2036072919`,
+  `observation=2046072933`, and `action=2056072941`.
+- Keep campaign ID `fq4x8`, shorts `f8/f0/d0/fq`, and the existing registered
+  task IDs. Human-facing reports map `fq` to treatment label `FQ-min`.
+- Freeze all analysis code and decision rules before training outcomes exist.
+- Retry only documented infrastructure failures with identical configuration.
+  Retain all attempts and never replace a completed weak or unstable seed.
 
----
+## Frozen active treatment map
+
+| Label | Registered task | Short | Impact reader/weight | Delivered reader/weight |
+|---|---|---|---|---|
+| F8 | `Unitree-Z1-Hammer-CaT-Impulse-Event-Linear` | `f8` | raw linear / 8 | raw linear / 2 |
+| F0 | `Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0` | `f0` | raw linear / 0 | raw linear / 2 |
+| D0 | `Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0` | `d0` | raw linear / 8 | disabled / 0 |
+| FQ-min | `Unitree-Z1-Hammer-CaT-Impulse-Event-Quality` | `fq` | quality-bounded / 8 | disabled / 0 |
+
+FQ-min pays only:
+
+\[
+8\,q_{\mathrm{contact}}\,
+\operatorname{clip}
+\left(v_{\mathrm{pre}}/1.4598331451416016,0,1\right).
+\]
+
+Raw delivered impulse remains a recorded diagnostic. It is not an FQ-min
+reward component or acceptance gate.
 
 ## File map
 
-### New files
+### Completed Tasks 1–4
 
-- `src/tasks/hammer/mdp/contact_quality.py` — pure batched contact-centroid and quality math.
-- `tests/test_first_strike_quality_reward.py` — kernel, tracker, and FQ reader unit tests.
-- `docs/results/assets/2026-07-17_fixed_impedance_diag/probes/contact_quality_sensor.py` — cheap CPU sensor/slot-count probe.
-- `evaluation/analysis/first_strike_quality_campaign.py` — frozen 4×8 contract, quality metrics, paired inference, and decision rules.
-- `evaluation/analysis/plot_first_strike_quality_campaign.py` — fixed-scale static evidence and optional HTML.
-- `evaluation/analysis/build_first_strike_review_gallery.py` — provenance-bound video/graph review library.
-- `tests/test_first_strike_quality_campaign.py` — trace schema, aggregation, paired inference, and plotting tests.
-- `tests/test_first_strike_review_gallery.py` — video timing, digest, medoid, and annotation isolation tests.
-- `evaluation/trajectory/reference_recipe_probe.py` — matched R0/R1/R2 CPU
-  replay and promotion-gate analysis.
-- `tests/test_reference_recipe_probe.py` — recipe, reset-manifest, and
-  promotion-contract tests.
-- `docs/results/2026-07-26_reference_recipe_probe.md` — provenance-bound CPU
-  recipe result.
-- `docs/results/2026-07-26_first_strike_quality_prereg.md` — frozen experiment protocol before training.
-- `docs/results/2026-07-27_first_strike_quality_result.md` — result record created only after the campaign.
+- `src/tasks/hammer/mdp/contact_quality.py` — pure batched contact centroid,
+  error, validity, overflow, and quality.
+- `src/tasks/hammer/mdp/first_strike.py` — immutable onset/finalization record
+  and optional passive quality instrumentation.
+- `src/tasks/hammer/mdp/rewards.py` — one-shot event readers and quality-speed
+  reader foundation.
+- `src/tasks/hammer/mdp/__init__.py` — exports.
+- `src/tasks/hammer/config/z1/env_cfgs.py` — quality sensor/config switches.
+- `src/tasks/hammer/config/z1/__init__.py` — F8/F0/D0/quality task
+  registrations.
+- `scripts/eval_impulse.py` — sampled artifact schema v3 and quality channels.
+- `docs/results/assets/2026-07-17_fixed_impedance_diag/probes/contact_quality_sensor.py`
+  — CPU slot-count probe.
+- `tests/test_first_strike_quality_reward.py`,
+  `tests/test_first_strike_event.py`, `tests/test_configs.py`,
+  `tests/test_eval_impulse_hook.py`, and `tests/test_first_strike_campaign.py`
+  — completed kernel/tracker/config/recorder tests.
 
-### Existing files modified
+### Remaining active source and test files
 
-- `src/tasks/hammer/mdp/__init__.py` — export the quality kernel/readers.
-- `src/tasks/hammer/mdp/first_strike.py` — latch immutable quality/contact diagnostics.
-- `src/tasks/hammer/mdp/rewards.py` — two bounded quality-conditioned one-shot readers.
-- `src/tasks/hammer/config/z1/env_cfgs.py` — dedicated contact-quality sensor and F0/D0/FQ config switches.
-- `src/tasks/hammer/config/z1/__init__.py` — register F0, D0, and FQ task IDs.
-- `tests/test_first_strike_event.py` — tracker phase/reset/overflow tests.
-- `tests/test_configs.py` — exact task/reward/sensor signatures.
-- `scripts/eval_impulse.py` — sampled schema v3 contact-quality channels.
-- `tests/test_eval_impulse_hook.py` — physical trace and snapshot serialization checks.
-- `scripts/smoke_first_strike_instrumentation.py` — F0/D0/FQ instrumentation expectations.
-- `tests/test_smoke_first_strike_instrumentation.py` — CPU/CUDA smoke predicates.
-- `evaluation/analysis/first_strike_campaign.py` — schema-v3 legacy-analysis
-  migration owned by Task 5.
-- `evaluation/analysis/plot_first_strike_campaign.py` — only shared style helpers if reuse cannot be achieved by import.
-- `scripts/slurm/vega_train.sbatch` and `scripts/slurm/vega_eval.sbatch` — add exact F0/D0/FQ task allow-list entries only if current generic arguments reject them.
-- `docs/superpowers/specs/2026-07-26-first-strike-quality-conditioned-design.md` — record replay-qualified slot/overflow semantics.
+- `src/tasks/hammer/mdp/rewards.py` — remove the quality-delivered class only if
+  safe, otherwise leave it unregistered and explicitly deferred.
+- `src/tasks/hammer/mdp/__init__.py` — remove an export only if the class is
+  removed.
+- `src/tasks/hammer/config/z1/env_cfgs.py` — FQ-min impact-only wiring.
+- `src/tasks/hammer/config/z1/__init__.py` — FQ-min delivered weight zero while
+  retaining the existing task ID.
+- `tests/test_first_strike_quality_reward.py` — lean reward-surface tests.
+- `tests/test_configs.py` — exact FQ-min config and D0/FQ-min difference tests.
+- `evaluation/analysis/first_strike_campaign.py` — schema-v3 legacy reader
+  compatibility.
+- `evaluation/analysis/first_strike_quality_campaign.py` — frozen 4×8 contract,
+  episode/seed summaries, inference, and decisions.
+- `evaluation/analysis/plot_first_strike_quality_campaign.py` — exactly two
+  static figures.
+- `tests/test_first_strike_quality_campaign.py` — schema, aggregation,
+  inference, decision, and plotting tests.
+- `scripts/smoke_first_strike_instrumentation.py` and
+  `tests/test_smoke_first_strike_instrumentation.py` — FQ-min CPU/CUDA
+  predicates.
+- `scripts/slurm/vega_train.sbatch` and `scripts/slurm/vega_eval.sbatch` —
+  mandatory fail-closed `fq4x8` matrix, treatment, manifest, and routing
+  checks.
+
+### Remaining active records and result artifacts
+
+- `docs/results/2026-07-26_first_strike_quality_prereg.md` — frozen protocol
+  created before training.
+- `docs/results/2026-07-27_first_strike_quality_result.md` — final result.
+- `docs/results/assets/2026-07-27_first_strike_quality/summary.csv` — 32
+  seed-summary rows.
+- `docs/results/assets/2026-07-27_first_strike_quality/analysis.json` —
+  recomputable statistics, gates, and identities.
+- `docs/results/assets/2026-07-27_first_strike_quality/paired_seed_effects.png`.
+- `docs/results/assets/2026-07-27_first_strike_quality/aggregate_nail_plane_contact_map.png`.
+- `docs/results/assets/2026-07-27_first_strike_quality/explanatory_videos.tsv`
+  — four provenance-bound video records; large MP4 bytes remain outside Git.
+
+There is no active HTML report, gallery builder, reference-recipe probe,
+trajectory grid, medoid grid, quality/speed frontier, or force/impulse grid.
 
 ---
 
-### Task 1: Pure contact-quality kernel
+### Task 1: Pure contact-quality kernel — complete
 
-**Files:**
-- Create: `src/tasks/hammer/mdp/contact_quality.py`
-- Create: `tests/test_first_strike_quality_reward.py`
-- Modify: `src/tasks/hammer/mdp/__init__.py`
+**Commit:** `7a55244 feat(hammer): add batched first-contact quality kernel`
 
-**Interfaces:**
-- Produces:
+**Completed contract:**
 
 ```python
 def contact_point_quality(
     *,
-    found: torch.Tensor,           # [B, N], total-match count per retained slot
-    force_contact: torch.Tensor,   # [B, N, 3], MuJoCo contact frame
-    position_w: torch.Tensor,      # [B, N, 3]
-    nail_top_w: torch.Tensor,      # [B, 3]
-    nail_axis_w: torch.Tensor,     # [3] or [B, 3]
+    found: torch.Tensor,
+    force_contact: torch.Tensor,
+    position_w: torch.Tensor,
+    nail_top_w: torch.Tensor,
+    nail_axis_w: torch.Tensor,
     nail_radius_m: float,
     num_slots: int,
     eps: float = 1e-9,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Return centroid_w[B,3], radial_error[B], quality[B], valid[B], overflow[B]."""
+    """Return centroid_w, radial_error, quality, valid, overflow."""
 ```
 
-- `valid=False`, zero centroid/error/quality when no positive normal force,
-  nonfinite input, or `overflow=True`.
-- `overflow = found.amax(dim=1) > num_slots`.
-- Overflow/nonfinite contact geometry fails closed to zero online payout but
-  increments a sentinel; strict evaluation invalidates the complete row rather
-  than treating instrumentation failure as a legitimate zero-quality episode.
-- The normal-force weight is
-  `where(found > 0, force_contact[..., 0].clamp_min(0), 0)`.
-- Quality is exactly
-  `clip(1 - (radial_error / nail_radius_m)**2, 0, 1)`.
+- [x] Weight retained contacts by nonnegative contact-frame normal force.
+- [x] Set `overflow=found.amax(dim=1)>num_slots`.
+- [x] Return invalid zero outputs for no positive normal force, nonfinite
+  inputs, or overflow.
+- [x] Compute quality exactly as
+  `clip(1-(radial_error/nail_radius_m)**2,0,1)`.
+- [x] Cover centered/edge/outside, multiple contacts, frame invariance,
+  degeneracy, nonfinite input, and overflow in CPU tests.
 
-- [ ] **Step 1: Write failing shape, value, and guard tests**
-
-Add tests covering one centered contact, one edge contact, one outside contact,
-two weighted contacts, world-frame translation, nail-axis rotation, no contact,
-zero/negative normal force, NaN input, and overflow. The central assertion is:
-
-```python
-centroid, error, quality, valid, overflow = contact_point_quality(
-    found=torch.tensor([[1.0, 1.0]]),
-    force_contact=torch.tensor([[[3.0, 0.0, 0.0], [1.0, 0.0, 0.0]]]),
-    position_w=torch.tensor([[[0.0, 0.0, 0.1], [0.008, 0.0, 0.1]]]),
-    nail_top_w=torch.tensor([[0.0, 0.0, 0.1]]),
-    nail_axis_w=torch.tensor([0.0, 0.0, -1.0]),
-    nail_radius_m=0.012,
-    num_slots=2,
-)
-assert centroid[0, 0].item() == pytest.approx(0.002)
-assert error[0].item() == pytest.approx(0.002)
-assert quality[0].item() == pytest.approx(1.0 - (0.002 / 0.012) ** 2)
-assert valid.tolist() == [True]
-assert overflow.tolist() == [False]
-```
-
-- [ ] **Step 2: Run the kernel tests and confirm RED**
-
-```bash
-PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python \
-  -m pytest tests/test_first_strike_quality_reward.py -q
-```
-
-Expected: import failure for `contact_point_quality`.
-
-- [ ] **Step 3: Implement the minimal vectorized kernel**
-
-Use only Torch tensor operations. Normalize `nail_axis_w`, project
-`centroid-nail_top` with
-`offset - (offset*axis).sum(-1, keepdim=True)*axis`, and apply validity with
-`torch.where`. Do not loop over environments or slots and do not synchronize
-device tensors to the host.
-
-- [ ] **Step 4: Run tests and confirm GREEN**
-
-Run the Task 1 test file. Require every case to pass on CPU.
-
-- [ ] **Step 5: Commit Task 1**
-
-```bash
-git add src/tasks/hammer/mdp/contact_quality.py \
-        src/tasks/hammer/mdp/__init__.py \
-        tests/test_first_strike_quality_reward.py
-git commit -m "feat(hammer): add batched first-contact quality kernel"
-```
+Do not replace this kernel with a site-center threshold.
 
 ---
 
-### Task 2: Dedicated sensor and immutable tracker snapshot
+### Task 2: Dedicated sensor and immutable tracker snapshot — complete
+
+**Commit:** `d891bbe feat(hammer): latch physical first-contact quality`
+
+- [x] Add the dedicated `hammer_nail_quality` sensor with `found`, `force`,
+  `pos`, and `normal`, leaving the task contact sensor shape unchanged.
+- [x] Add passive `quality_instrumentation` that does not alter policy-facing
+  tensors or physics.
+- [x] Latch contact point/error/quality/validity/overflow, axiality,
+  precontact axial speed, and first-contact time at accepted onset.
+- [x] Latch productivity/reason, axial/transverse delivered impulse,
+  depth-at-contact, and peak event depth at finalization.
+- [x] Preserve raw trajectory, qvel, and Lambda channels in schema v3 so
+  Task 5 can derive lateral speed, approach angle, depth gain, dwell,
+  recontact, and safety summaries offline.
+- [x] Prove onset immutability, finalization immutability, subset reset,
+  no-force invalidity, and overflow invalidity.
+- [x] Add the `8 -> 16 -> 64` CPU slot-count probe with the `1e-6 m`
+  adjacent-qualified-count agreement gate.
+
+If the frozen slot evidence cannot be reproduced, stop before Task 7.
+
+---
+
+### Task 3: Quality-reader/task foundation — complete but superseded in one respect
+
+**Commit:** `ccf8bde feat(hammer): add bounded quality-conditioned strike rewards`
+
+- [x] Add the bounded quality-speed reader using the shared one-shot
+  `_consume` latch.
+- [x] Register explicit F0, D0, and quality task IDs on fresh config objects.
+- [x] Add exact action/actuator/gain/cap/config-signature tests.
+- [x] Require F0 to differ from F8 only by impact weight and D0 only by
+  delivered weight.
+- [x] Require quality instrumentation for the registered quality treatment.
+
+That commit also registered a quality-conditioned delivered reader. The lean
+design supersedes that registration. Preserve the completed kernel, tracker,
+task IDs, tests, and config-provenance work; execute Task 3A before treating the
+quality task as launchable.
+
+---
+
+### Task 4: Schema-v3 sampled traces and physical-identity replay — complete
+
+**Commits:**
+
+- `e2fbf2b feat(eval): bank first-contact quality in sampled traces`
+- `b63ea38 fix(eval): separate passive replay diagnostics`
+- `ce40525 fix(eval): preserve raw quality slots`
+
+- [x] Raise new sampled artifacts to schema version 3.
+- [x] Record raw slot-level found counts, normal force, contact positions, and
+  normals.
+- [x] Record tracker quality/error/validity/overflow, first-contact time,
+  axiality, transverse impulse, and frozen first-strike snapshot fields.
+- [x] Include every new physical/event channel in canonical digests.
+- [x] Bank separate training/evaluation config identities for the passive
+  instrumentation override.
+- [x] Prove fixed-action-tape physical identity across treatments and between
+  instrumented/uninstrumented F8, excluding reward payout streams.
+- [x] Preserve raw slots rather than max-force-only diagnostic projections.
+- [x] Keep schema-v2 legacy behavior where its fields remain available; Task 5
+  completes the schema-v3 analysis-reader migration.
+
+Do not downgrade, reshape, or omit schema-v3 physical channels in later tasks.
+
+---
+
+### Task 3A: Narrow the registered quality arm to FQ-min
 
 **Files:**
-- Modify: `src/tasks/hammer/config/z1/env_cfgs.py:134-147`
-- Modify: `src/tasks/hammer/config/z1/env_cfgs.py:278-294`
-- Modify: `src/tasks/hammer/mdp/first_strike.py:29-206`
-- Modify: `tests/test_first_strike_event.py`
-- Create: `docs/results/assets/2026-07-17_fixed_impedance_diag/probes/contact_quality_sensor.py`
 
-**Interfaces:**
-- Produces a dedicated `hammer_nail_quality` `ContactSensorCfg` with:
-  - the same hammer-face/nail-body match as `hammer_nail_contact`;
-  - fields `("found", "force", "pos", "normal")`;
-  - `reduce="maxforce"`;
-  - replay-qualified `num_slots` chosen from `8`, `16`, then `64`;
-  - `track_air_time=False`;
-  - contact-frame force (`global_frame=False`).
-- Adds an orthogonal `quality_instrumentation: bool=False` configuration mode
-  that wires only this passive sensor and its diagnostic tracker fields. It
-  must not change policy observations, actions, rewards, terminations, or
-  physics. FQ training requires it; all F8/F0/D0/FQ action-tape audits and
-  strict sampled evaluations enable it.
-- Extends `FirstStrikeEventTracker` with public tensors:
+- Modify: `src/tasks/hammer/config/z1/env_cfgs.py`
+- Modify: `src/tasks/hammer/config/z1/__init__.py`
+- Modify: `src/tasks/hammer/mdp/rewards.py` only if removing dead code
+- Modify: `src/tasks/hammer/mdp/__init__.py` only if removing its export
+- Modify: `tests/test_first_strike_quality_reward.py`
+- Modify: `tests/test_configs.py`
 
-```python
-contact_point_w: torch.Tensor       # [B, 3]
-contact_error_m: torch.Tensor       # [B]
-contact_quality: torch.Tensor       # [B]
-contact_quality_valid: torch.Tensor # [B] bool
-contact_quality_overflow: torch.Tensor # [B] bool
-first_contact_time_s: torch.Tensor  # [B]
-contact_normal_axiality: torch.Tensor # [B]
-delivered_transverse: torch.Tensor  # [B]
-event_impulse_per_joint: torch.Tensor # [B, J]
-event_peak_abs_qvel: torch.Tensor    # [B, J]
-```
+**Required final contract:**
 
-- Preserves a two-stage immutable record:
-  - onset latches contact point/error/quality, contact normal/axiality,
-    precontact speed, signed offsets, and first-contact time;
-  - finalization latches productivity/reason, delivered axial/transverse
-    impulse, per-joint event impulse, and peak event qvel;
-  - onset fields cannot change at finalization, and no finalized field can
-    change afterward.
+- Registered task ID remains
+  `Unitree-Z1-Hammer-CaT-Impulse-Event-Quality`.
+- Manifest short remains `fq`; analysis label is `FQ-min`.
+- `impact_progress.weight=8.0`.
+- `impact_progress.func=FirstStrikeQualityImpactRewardTerm`.
+- Its speed normalizer is exactly `1.4598331451416016`.
+- `delivered_impulse.weight=0.0`.
+- No registered FQ-min reward term calls a quality-conditioned delivered
+  reader.
+- The quality-delivered class may be removed, or may remain exported as
+  unregistered deferred code. Minimal safe diff wins.
+- D0 and FQ-min have the same disabled delivered treatment. They differ only in
+  the speed reader/normalizer and the passive quality instrumentation needed by
+  FQ-min.
 
-- [ ] **Step 1: Extend the fake tracker fixture and write failing tests**
+- [ ] **Step 1: Write RED reward/config tests**
 
-Give the fixture a separate quality sensor with mutable `found`, `force`,
-`pos`, and `normal`; give the nail entity `site_pos_w`; give the fake simulator
-a compiled `nail_block/nail_head` radius of `0.012`.
-
-Test that:
+Require, for a productive finalized event:
 
 ```python
-step(..., quality_pos=(0.003, 0.0, 0.1), quality_normal_force=10.0)
-assert tracker.contact_error_m[0].item() == pytest.approx(0.003)
-assert tracker.contact_quality[0].item() == pytest.approx(0.9375)
-assert tracker.contact_quality_valid[0]
+q_contact = 0.25
+v_precontact = 3.0
+expected_unweighted = 0.25
 ```
 
-Also test onset-only latching, the two-stage onset/finalization boundary,
-finalization freeze, subset reset, no-force invalidity, overflow invalidity,
-first-contact time, axiality, and transverse event-impulse integration.
+The quality-speed reader must return `0.25`, because speed saturates at one
+before multiplication by quality. Require zero for invalid quality, no
+contact, nonproductive event, and a second call. Prove a larger speed cannot
+exceed `q_contact`.
 
-- [ ] **Step 2: Run tracker tests and confirm RED**
-
-```bash
-PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python \
-  -m pytest tests/test_first_strike_event.py \
-  tests/test_first_strike_quality_reward.py -q
-```
-
-Expected: missing quality sensor/config/properties.
-
-- [ ] **Step 3: Wire the dedicated sensor and tracker fields**
-
-Keep the existing `hammer_nail_contact` tensor shape unchanged. Cache the
-compiled nail radius once in tracker construction from
-`env.sim.mj_model.geom("nail_block/nail_head").size[0]`. At `onset`, call
-`contact_point_quality` and latch only the onset-phase outputs with
-`torch.where`; never inspect tensor truth values in Python. Latch accumulated
-delivered/transverse/per-joint impulse and peak-qvel fields only when the event
-finalizes.
-
-Increment a per-environment substep counter before onset testing and latch
-`first_contact_time_s = counter * env.physics_dt`. Integrate transverse
-object-side impulse only while the event is active and raw contact is present.
-
-- [ ] **Step 4: Add and run the CPU slot-count probe**
-
-The probe builds one `play=True` environment for each candidate slot count
-`8`, `16`, `64`, executes the existing scripted reference, and emits JSON with:
+Config tests must fail the current broad registration by requiring:
 
 ```text
-candidate_slots
-contact_substeps
-max_reported_found
-overflow_n
-quality_valid_n
-contact_error_m
-contact_quality
-normal_force_sum
-wall_seconds
+FQ-min impact weight = 8
+FQ-min delivered weight = 0
+FQ-min impact reader = FirstStrikeQualityImpactRewardTerm
+FQ-min delivered reader is not FirstStrikeQualityDeliveredRewardTerm
+FQ-min speed normalizer = 1.4598331451416016
 ```
 
-Freeze the smallest candidate with `overflow_n==0` whose centroid/error agrees
-with the next larger candidate to `atol=1e-6 m`. If `64` overflows or the
-agreement gate fails, stop the experiment rather than approximating.
-
-Run:
-
-```bash
-PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python \
-  docs/results/assets/2026-07-17_fixed_impedance_diag/probes/contact_quality_sensor.py \
-  --out /tmp/contact_quality_sensor_cpu.json
-```
-
-- [ ] **Step 5: Run Task 2 tests and commit**
-
-```bash
-git add src/tasks/hammer/config/z1/env_cfgs.py \
-        src/tasks/hammer/mdp/first_strike.py \
-        tests/test_first_strike_event.py \
-        tests/test_first_strike_quality_reward.py \
-        docs/results/assets/2026-07-17_fixed_impedance_diag/probes/contact_quality_sensor.py
-git commit -m "feat(hammer): latch physical first-contact quality"
-```
-
----
-
-### Task 3: FQ reward readers and explicit F0/D0/FQ tasks
-
-**Files:**
-- Modify: `src/tasks/hammer/mdp/rewards.py:357-437`
-- Modify: `src/tasks/hammer/config/z1/env_cfgs.py:68-123`
-- Modify: `src/tasks/hammer/config/z1/env_cfgs.py:408-425`
-- Modify: `src/tasks/hammer/config/z1/__init__.py:118-143`
-- Modify: `src/tasks/hammer/mdp/first_strike.py` — optional quality
-  instrumentation wiring for the FQ task.
-- Modify: `tests/test_first_strike_quality_reward.py`
-- Modify: `tests/test_first_strike_event.py` — optional quality
-  instrumentation tracker coverage.
-- Modify: `tests/test_configs.py:433-600`
-
-**Interfaces:**
-- Produces:
-
-```python
-class FirstStrikeQualityImpactRewardTerm(_FirstStrikeRewardTerm):
-    # q_contact * clip(v_precontact / V_FQ, 0, 1)
-
-class FirstStrikeQualityDeliveredRewardTerm(_FirstStrikeRewardTerm):
-    # q_contact * clip(delivered / i_ref, 0, 1)
-```
-
-- Registers:
-  - F8: existing `Unitree-Z1-Hammer-CaT-Impulse-Event-Linear`;
-  - F0: `Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0`;
-  - D0: `Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0`;
-  - FQ: `Unitree-Z1-Hammer-CaT-Impulse-Event-Quality`.
-- F0 differs from F8 only by `impact_progress.weight: 8.0 -> 0.0`.
-- D0 differs from F8 only by `delivered_impulse.weight: 2.0 -> 0.0`.
-- FQ retains weights 8/2, replaces both readers, and uses bounded components.
-  It is a remedy-package test, not an isolated quality-multiplication ablation.
-  `V_FQ=1.4598331451416016 m/s` is FQ-only; F8/D0 keep `1.0 m/s` and all arms
-  retain `I_REF=0.3088 N·s`.
-  Preregister the bounded center-blind `FB` follow-up only after this campaign;
-  it is not a fifth arm in the frozen 4×8 matrix.
-
-- [ ] **Step 1: Write failing reward-surface tests**
-
-For a productive finalized tracker:
-
-```python
-tracker.contact_quality[:] = 0.25
-tracker.contact_quality_valid[:] = True
-tracker.v_precontact[:] = 3.0
-tracker.delivered[:] = 10.0
-assert impact(env, v_fq=1.4598331451416016).item() == pytest.approx(0.25)
-assert delivered(env, i_ref=0.3088).item() == pytest.approx(0.25)
-```
-
-Require zero for invalid quality, no contact, unproductive events, and second
-calls. Require finite positive normalizers and prove that arbitrarily large
-speed/impulse cannot exceed `q_contact` per reader. Derive `V_FQ` only from raw
-bank SHA-256 `ea4a82e007d95cf7ff962091ba0d6ff3e07e639f4cc1c2d0feab9fe368f47ac8`,
-manifest SHA-256
-`69d5bc66f2127d0a5b29463b35763092d388bc0e71661b06fdd81b0eea8d661f`, and
-qualification SHA-256
-`641e520c0cd35932175918d0bf48c7b6df07749ff1462b3d7da7310d76338b1b`. Require
-NumPy q90 `method="higher"`, exact 26/256 calibration saturation, and exact
-33/128 group-held-out validation saturation; missing provenance or any mismatch
-fails closed.
-
-- [ ] **Step 2: Run reward/config tests and confirm RED**
-
-Run:
+- [ ] **Step 2: Run the focused tests and confirm RED**
 
 ```bash
 PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python \
   -m pytest tests/test_first_strike_quality_reward.py tests/test_configs.py -q
 ```
 
-- [ ] **Step 3: Implement readers and task registrations**
+- [ ] **Step 3: Apply the minimal wiring change**
 
-Reuse `_FirstStrikeRewardTerm._consume`; do not duplicate latch/reset logic.
-Add explicit `event_quality: bool=False` and
-`quality_instrumentation: bool=False` config switches. Enforce:
+Keep the existing task ID and `event_quality` instrumentation path. Replace
+only the active treatment wiring needed to disable delivered reward and set
+the FQ-min speed scale. Do not change tracker timing, event productivity,
+actions, gains, caps, CaT, or evaluation instrumentation.
 
-```python
-if event_quality and not event_correct:
-    raise ValueError("event_quality requires event_correct=True")
-if event_quality and not quality_instrumentation:
-    raise ValueError("event_quality requires quality_instrumentation=True")
-if event_quality and event_linear:
-    raise ValueError("event_quality and event_linear are separate treatments")
-```
+- [ ] **Step 4: Prove exact allowed differences**
 
-F0 is created by setting the existing F task's `impact_progress.weight=0.0` on
-a fresh config object. D0 analogously sets only
-`delivered_impulse.weight=0.0`. FQ replaces the two reader classes, keeps
-weights 8/2, and enables `quality_instrumentation`. The evaluator has a
-separate frozen override that enables `quality_instrumentation` for all four
-task IDs without changing their treatment rewards. Wire the optional quality
-instrumentation through `first_strike.py`; verify its tracker phase/reset
-semantics in `test_first_strike_event.py`.
-
-- [ ] **Step 4: Prove exact allowed config differences**
-
-Serialize F8/F0/D0/FQ reward, action, actuator, tracker, sensor, caps, and CaT
-signatures. Require:
+Serialize reward, tracker, sensor, action, actuator, cap, and CaT signatures:
 
 ```text
 F8 vs F0: impact weight only
-F8 vs D0: delivered-impulse weight only
-F8 vs FQ: reader classes, boundedness mode, and dedicated quality sensor use
-all arms: identical actions, actuators, gains, caps, imp_max_p=0, budgets
-strict evaluation: quality instrumentation on for all arms; policy-facing
-                   tensors and treatment rewards unchanged
+F8 vs D0: delivered weight only
+D0 vs FQ-min: impact reader, its normalizer, and required passive quality sensor
+D0 and FQ-min: delivered weight 0 and no active quality-delivered reader
+all arms: identical actions, actuators, gains, caps, imp_max_p, and budgets
+strict evaluation: passive quality instrumentation enabled for every arm
 ```
 
-- [ ] **Step 5: Run tests and commit**
-
-```bash
-git add src/tasks/hammer/mdp/rewards.py \
-        src/tasks/hammer/mdp/first_strike.py \
-        src/tasks/hammer/config/z1/env_cfgs.py \
-        src/tasks/hammer/config/z1/__init__.py \
-        tests/test_first_strike_event.py \
-        tests/test_first_strike_quality_reward.py \
-        tests/test_configs.py
-git commit -m "feat(hammer): add bounded quality-conditioned strike rewards"
-```
-
----
-
-### Task 4: Sampled trace schema and physical-identity replay
-
-**Files:**
-- Modify: `scripts/eval_impulse.py:540-760`
-- Modify: `scripts/eval_impulse.py:984-1045`
-- Modify: `tests/test_eval_impulse_hook.py`
-- Modify: `tests/test_first_strike_campaign.py` — raw schema-v3 slot and
-  trace-digest coverage; Task 5 owns its legacy-analysis migration.
-
-**Interfaces:**
-- Raises sampled artifact schema from `2` to `3`.
-- Adds raw substep channels:
-  - quality-sensor found count, normal force, contact position, contact normal;
-  - tracker contact point/error/quality/valid/overflow;
-  - contact time, axiality, transverse impulse.
-- Adds frozen `first_strike` snapshot fields with the same names.
-- Builds every strict F8/F0/D0/FQ evaluation config with the passive
-  `quality_instrumentation` override, banks separate training/evaluation config
-  hashes, and rejects any policy-observation or treatment-reward drift caused
-  by the override.
-- Produces:
-
-```python
-def compare_action_tape_physics(
-    traces: Mapping[str, Mapping],
-) -> dict[str, object]:
-    """Require byte-identical physical/event channels for F8/F0/D0/FQ replay."""
-```
-
-- [ ] **Step 1: Write failing schema and digest tests**
-
-Require schema v3, exact new channel shapes, no NaN/Inf, snapshot/stream
-agreement, and digest sensitivity to every new physical channel. Reject
-overflowed quality as valid.
-
-- [ ] **Step 2: Run evaluator tests and confirm RED**
+- [ ] **Step 5: Run focused tests and commit named files**
 
 ```bash
 PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python \
-  -m pytest tests/test_eval_impulse_hook.py tests/test_first_strike_campaign.py -q
+  -m pytest tests/test_first_strike_quality_reward.py tests/test_configs.py -q
+git add src/tasks/hammer/config/z1/env_cfgs.py \
+        src/tasks/hammer/config/z1/__init__.py \
+        src/tasks/hammer/mdp/rewards.py \
+        src/tasks/hammer/mdp/__init__.py \
+        tests/test_first_strike_quality_reward.py \
+        tests/test_configs.py
+git commit -m "fix(hammer): narrow FQ to quality-gated speed"
 ```
 
-- [ ] **Step 3: Extend the recorder without duplicating physics**
-
-Capture sensor/tracker tensors in the existing post-`scene.update`,
-pre-integration substep callback. Continue evaluating each reward reader exactly
-once through the reward manager. Include the new channels in the canonical
-trace digest and content-addressed NPZ payload.
-
-- [ ] **Step 4: Add deterministic action-tape identity test**
-
-Replay one fixed action tape in single-environment play configs for F8, F0, D0,
-and FQ with `quality_instrumentation=True` in every arm. Compare head/nail
-positions, contact, qvel, force, tracker event boundaries, delivered impulse,
-and Lambda channels. Also compare instrumented versus uninstrumented F8.
-Reward payout streams are expected to differ and are excluded from the physical
-digest comparison.
-
-- [ ] **Step 5: Run tests and commit**
-
-```bash
-git add scripts/eval_impulse.py \
-        tests/test_eval_impulse_hook.py \
-        tests/test_first_strike_campaign.py
-git commit -m "feat(eval): bank first-contact quality in sampled traces"
-```
+Before staging, omit any listed source file that did not actually change.
 
 ---
 
-### Task 5: Quality campaign analysis, paired inference, and figures
+### Task 5: Lean schema-v3 analysis, inference, and two figures
 
 **Files:**
+
 - Create: `evaluation/analysis/first_strike_quality_campaign.py`
 - Create: `evaluation/analysis/plot_first_strike_quality_campaign.py`
 - Create: `tests/test_first_strike_quality_campaign.py`
-- Modify: `evaluation/analysis/first_strike_campaign.py` — migrate the legacy
-  analysis reader to schema v3.
-- Modify: `tests/test_first_strike_campaign.py` — schema-v3 legacy-analysis
-  migration coverage.
+- Modify: `evaluation/analysis/first_strike_campaign.py`
+- Modify: `tests/test_first_strike_campaign.py`
 
-**Interfaces:**
-- Imports `exact_seed_tests`, artifact verification, and shared episode
-  summarization from the schema-v3-migrated
-  `evaluation.analysis.first_strike_campaign`.
-- Produces:
+**Required interfaces:**
 
 ```python
-def exact_paired_sign_flip(treatment: np.ndarray, control: np.ndarray) -> dict: ...
-def holm_adjust(p_values: Mapping[str, float]) -> dict[str, float]: ...
+def exact_paired_sign_flip(
+    treatment: np.ndarray,
+    control: np.ndarray,
+) -> dict: ...
+
+def holm_adjust(
+    p_values: Mapping[str, float],
+) -> dict[str, float]: ...
+
 def paired_bootstrap_ratio(
     treatment: np.ndarray,
     control: np.ndarray,
@@ -511,150 +389,190 @@ def paired_bootstrap_ratio(
     samples: int = 100_000,
     seed: int = 20260726,
 ) -> dict: ...
+
 def analyze_quality_campaign(
     rows: Sequence[Mapping],
     accepted_evaluation_manifest: Sequence[Mapping],
 ) -> dict: ...
 ```
 
-- Frozen matrix: campaign `fq4x8`, F8/F0/D0/FQ × seeds 8–15, 500 iterations, 4096 training
-  environments, `model_499.pt`, 256×2 sampled evaluation.
-- Static outputs:
-  - `quality_xz_medoid_grid.png`;
-  - `quality_xy_contact_grid.png`;
-  - `quality_speed_frontier.png`;
-  - `quality_force_impulse_grid.png`;
-  - `quality_campaign.html`.
+Freeze:
 
-- [ ] **Step 1: Write failing paired-inference tests**
+- campaign `fq4x8`;
+- treatments `F8/F0/D0/FQ-min`, mapped to shorts `f8/f0/d0/fq`;
+- seeds 8–15;
+- 500 iterations, 4096 training environments, `model_499.pt`;
+- 256×2 strict sampled evaluation;
+- FQ-min impact weight 8, delivered weight 0, and only the quality-speed
+  reader active.
 
-Use eight known positive paired differences. Require two-sided sign-flip
-`p=2/256=0.0078125`. Test ties/zeros, mismatched seed identities, Holm ordering,
-strict ratio boundaries, nonpositive denominator failure, and reproducibility
-of the 100,000-resample PCG64 bootstrap.
+- [ ] **Step 1: Write RED matrix, manifest, and schema tests**
 
-- [ ] **Step 2: Write failing campaign-contract tests**
+Reject:
 
-Reject missing/duplicate seeds, wrong task IDs, wrong weights/readers, dirty
-hashes, missing 512-episode artifacts, any sentinel failure, changed caps,
-`imp_max_p != 0`, or non-`*_sampled` decision fields.
+- missing or duplicate treatment/seed identities;
+- the wrong task ID or `fq` compatibility mapping;
+- FQ-min delivered weight above zero or a registered quality-delivered reader;
+- wrong weights, readers, speed normalizer, gains, caps, `imp_max_p`, training
+  budget, checkpoint name, or evaluation quota;
+- dirty/unknown code or asset provenance;
+- missing or mismatched checkpoint, config, manifest, payload, trace, or asset
+  hashes;
+- a non-schema-v3 quality artifact;
+- any non-`*_sampled` decision field;
+- any quality, liveness, impossible-success, nonfinite, or quota sentinel;
+- analysis before all 32 accepted-evaluation rows verify.
 
-- [ ] **Step 3: Write failing episode-quality aggregation tests**
+The legacy reader must accept schema v3 using the schema-v3 digest projection
+while preserving schema-v2 behavior where legacy fields exist.
 
-For no physical contact or zero positive normal force, require
-`first_contact_quality_sampled=0`. Overflow, nonfinite geometry, or a missing
-quality snapshot is an instrumentation failure that invalidates the complete
-evaluation row. Require all-episode and contact-conditional means,
-central-half/full-head rates, signed onset offsets, contact time, axiality,
-transverse impulse, useful speed, delivered impulse, success, and qvel
-legality. For D0-versus-F8 also require:
+- [ ] **Step 2: Write RED episode/seed aggregation tests**
+
+Aggregate, per episode and then per training seed:
 
 ```text
-event_window_depth_gain = max(peak_depth - depth_at_contact, 0)
-contact_dwell_ms = contact_substeps_inside_event * physics_dt * 1000
+all-episode contact quality and radial error
+nail-plane contact coordinates
+onset axial speed, lateral speed, contact-normal axiality, approach angle
+useful first-window speed
+first-window and overall success
+event-window nail-depth gain
+contact dwell in milliseconds
+recontact count
+raw delivered impulse
+peak qvel, rail exceedance, per-joint Lambda, worst Lambda/cap
+```
+
+Definitions:
+
+```text
+event_window_depth_gain = max(peak_depth_inside_event - depth_at_contact, 0)
+contact_dwell_ms = raw_contact_substeps_inside_event * physics_dt * 1000
 recontact_count = off_to_on_edges_after_onset_before_finalization
 ```
 
-Aggregate all three per seed over every sampled episode, including physical
-no-contact episodes as zero where defined. Instrumentation-invalid rows remain
-invalid rather than becoming zero.
+No-contact and zero-positive-normal-force physical episodes have all-episode
+quality zero. Overflow, nonfinite geometry, or a missing required snapshot
+invalidates the complete evaluation row.
 
-Also require the legacy analysis reader to accept schema v3 and preserve its
-schema-v2 behavior where legacy fields are available. Task 5 owns this legacy
-analysis migration; Task 4 owns only recorder/serialization and physical replay.
+- [ ] **Step 3: Write RED inference and decision tests**
 
-- [ ] **Step 4: Implement minimal analysis**
-
-Keep the required exact Mann–Whitney tests from `exact_seed_tests`. Apply Holm
-separately to the three MWU p-values and three paired sign-flip p-values.
-Bootstrap matched seed blocks, never arms independently.
-
-For the D0 mechanism analysis, emit all eight paired seed differences and
-paired-bootstrap intervals for event-window depth gain, dwell, recontacts, raw
-delivered impulse, and first-window/overall success. These are secondary
-mechanism endpoints and do not enlarge either three-test Holm family. Permit
-the phrase “mainly selected dwell/recontact” only when the one-sided 95%
-paired-bootstrap upper bound for the D0-minus-F8 delivered-impulse difference
-is below zero, the corresponding upper bound is below zero for either dwell or
-recontact count, the lower bound for its event-window-depth-gain ratio is
-greater than `0.90`, and the existing success guardrails pass. A nonpositive or
-nonfinite F8 depth-gain denominator makes that mechanism claim not
-distinguishable.
-
-Implement the replacement gate verbatim from the approved design:
+Primary quality contrasts are:
 
 ```text
-quality gain >= 0.10
-Holm MWU p < 0.05
-Holm paired sign-flip p < 0.05
+F0 - F8
+D0 - F8
+FQ-min - D0
+```
+
+Require the repository exact two-sided Mann–Whitney test on seed summaries and
+one Holm correction across exactly those three p-values. With eight strictly
+positive paired differences, require the exact two-sided sign-flip sensitivity
+`p=2/256=0.0078125`, but prove that changing this sensitivity p-value cannot
+pass or fail a causal decision or the FQ-min practical rule.
+
+Test tied/zero differences, mismatched seed identities, Holm ordering,
+100,000-resample PCG64 reproducibility, strict ratio boundaries, and
+nonpositive/nonfinite denominator failure.
+
+FQ-min practical acceptance versus F8 requires:
+
+```text
+mean all-episode contact-quality gain >= 0.10
 one-sided useful-speed ratio lower bound > 0.95
-first-window and overall success >= 0.90 and no worse than F8 by >0.05
-delivered-impulse ratio lower bound > 0.90
-all provenance/sentinel/numerical gates pass
+first-window and overall success >= 0.90
+first-window and overall success no more than 0.05 below F8
+one-sided event-window-depth-gain ratio lower bound > 0.90
+all safety/provenance/quota/liveness/numerical/sentinel gates pass
 ```
 
-- [ ] **Step 5: Implement deterministic medoid/static plots**
+Raw delivered impulse must not appear in that gate.
 
-Choose each seed's representative episode by minimum standardized Euclidean
-distance to that seed's median vector:
+- [ ] **Step 4: Implement the minimal analysis**
 
-```text
-(quality, useful_speed, contact_time, delivered_impulse, signed_x, signed_y)
-```
+Reuse artifact verification, `exact_seed_tests`, and shared episode helpers
+from `evaluation.analysis.first_strike_campaign`. Bootstrap matched seed blocks,
+never arms independently. Emit all eight paired differences for every primary
+contrast and every practical margin.
 
-Break exact ties by `(env_id, episode_ordinal)`. Use identical axes across
-panels; show the nail axis/outline, start, accepted contact, and time color.
-Do not label examples “representative” unless selected by this rule.
-Replace a zero or nonfinite within-seed standard deviation by `1.0` before
-standardization.
+For F8 versus D0, emit paired intervals for depth gain, dwell, recontact, raw
+delivered impulse, and both success endpoints. Permit the phrase “mainly
+selected dwell/recontact” only under the four mechanism conditions frozen in
+the design spec. These endpoints do not enlarge the Holm family.
 
-- [ ] **Step 6: Run tests and inspect PNGs**
+- [ ] **Step 5: Implement exactly two static figures**
+
+1. `paired_seed_effects.png`: paired seed points/lines or compact intervals for
+   the three causal contrasts plus the supporting FQ-min/F8 practical margins.
+2. `aggregate_nail_plane_contact_map.png`: all valid accepted contacts by arm
+   in the common nail-plane basis, identical axes, compiled nail outline, and
+   no site-center substitution.
+
+Do not implement HTML, trajectory plots, representative-episode grids,
+quality/speed frontiers, force/impulse grids, or video selection in Task 5.
+
+- [ ] **Step 6: Run tests and inspect synthetic figures**
 
 ```bash
 PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python \
-  -m pytest tests/test_first_strike_quality_campaign.py -q
+  -m pytest tests/test_first_strike_campaign.py \
+            tests/test_first_strike_quality_campaign.py -q
 ```
 
-Render synthetic fixture plots, open every PNG with the local image viewer, and
-reject clipped labels, unequal spatial scales, or misleading auto-ranging.
+Render synthetic fixtures and inspect both PNGs. Require unclipped labels,
+identical nail-plane scales, correct arm mapping, and no hidden invalid rows.
 
 - [ ] **Step 7: Commit Task 5**
 
 ```bash
-git add evaluation/analysis/first_strike_quality_campaign.py \
+git add evaluation/analysis/first_strike_campaign.py \
+        evaluation/analysis/first_strike_quality_campaign.py \
         evaluation/analysis/plot_first_strike_quality_campaign.py \
-        evaluation/analysis/first_strike_campaign.py \
         tests/test_first_strike_campaign.py \
         tests/test_first_strike_quality_campaign.py
-git commit -m "feat(analysis): add paired first-contact quality campaign"
+git commit -m "feat(analysis): add lean first-contact quality campaign"
 ```
 
 ---
 
-### Task 6: CPU qualification, archived-zoo rescoring, and preregistration
+### Task 6: CPU qualification and preregistration
 
 **Files:**
+
 - Modify: `scripts/smoke_first_strike_instrumentation.py`
 - Modify: `tests/test_smoke_first_strike_instrumentation.py`
 - Create: `docs/results/2026-07-26_first_strike_quality_prereg.md`
-- Modify: `docs/superpowers/specs/2026-07-26-first-strike-quality-conditioned-design.md`
 
-**Interfaces:**
-- Produces a frozen replay-qualified `CONTACT_QUALITY_NUM_SLOTS`.
-- Requalifies `I_REF_FIRST_STRIKE_SUCCESS=0.3088 N·s` using eight production
-  tracker reference derivations.
-- Produces a counterfactual C/D′/F/E quality audit without fitting the quality
-  function to those arms.
-- Freezes exact comparison rules before new-policy results exist.
+- [ ] **Step 1: Reproduce the frozen FQ-min scale**
 
-- [ ] **Step 1: Extend smoke tests for F0/D0/FQ**
+Using the locally banked bytes, require:
 
-Require finite observations/rewards, one productive event, one quality
-snapshot, no overflow, nonzero quality payout for FQ, zero impact payout for
-F0, zero delivered payout for D0, normalizer reproduction within 1%, and
-unchanged physical channels.
+```text
+raw bank SHA-256 =
+ea4a82e007d95cf7ff962091ba0d6ff3e07e639f4cc1c2d0feab9fe368f47ac8
+resolved manifest SHA-256 =
+69d5bc66f2127d0a5b29463b35763092d388bc0e71661b06fdd81b0eea8d661f
+qualification SHA-256 =
+641e520c0cd35932175918d0bf48c7b6df07749ff1462b3d7da7310d76338b1b
+NumPy quantile method = higher
+q90 = 1.4598331451416016
+calibration saturations = 26/256
+group-held-out validation saturations = 33/128
+```
 
-- [ ] **Step 2: Run the full CPU qualification**
+Any mismatch fails closed. F8/F0/D0 keep the `1.0` raw speed normalizer.
+Also verify the existing production-tracker provenance for
+`I_REF_FIRST_STRIKE_SUCCESS=0.3088 N·s` and exact F8/F0 delivered-reader config
+identity; do not recalibrate that normalizer.
+
+- [ ] **Step 2: Extend smoke predicates for FQ-min**
+
+Require finite observations/rewards, one immutable quality snapshot, no
+overflow, one productive event, one quality-speed payout for FQ-min, zero
+delivered payout for D0 and FQ-min, raw-reader behavior for F8/F0/D0, exact
+registered task/config identities, and unchanged physical channels.
+
+- [ ] **Step 3: Run the strict CPU suite**
 
 ```bash
 PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python \
@@ -671,201 +589,66 @@ PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python \
   tests/test_first_strike_quality_campaign.py \
   tests/test_smoke_first_strike_instrumentation.py \
   tests/test_configs.py
+
 PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python \
   docs/research/reward-design/validate_rewards.py
+
 PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python \
   docs/research/reward-design/verify_contact_sensor.py
+
 PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python \
   docs/research/reward-design/verify_reward_setup.py
+
 PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python \
   docs/research/reward-design/playback_reference.py
 ```
 
-Require pytest green, reward phases A–M green, contact sensor verified, random
-policy sweep green, and reference playback feasible.
+Require pytest green, `validate_rewards.py` phases A–M green, contact sensor
+verified, random-policy sweep green, reference playback feasible, the frozen
+slot-count evidence reproduced, and no quality sentinel.
 
-- [ ] **Step 3: Re-evaluate the archived policy zoo with quality traces**
+- [ ] **Step 4: Do not re-evaluate the archived policy zoo**
 
-After the one-environment CPU probe passes, first bank the existing 32 C/D′/F/E
-NPZ bytes and accepted manifest from Vega locally with SHA-256. Then use one
-Vega GPU to re-evaluate those checkpoints with the new trace schema and
-identical frozen evaluation streams. Call the quality results
-“counterfactual” only if action-tape digests and all original physical channels
-match; otherwise label them a fresh augmented re-evaluation. Bank every new
-content-addressed artifact and accepted-attempt manifest locally with SHA-256.
+There is no archived C/D-prime/F/E GPU re-evaluation, counterfactual policy-zoo
+ranking, medoid audit, or archived force-grid gate. Qualification uses the
+frozen local provenance bank, pure geometry tests, schema-v3 fixtures, CPU
+reference playback, and fixed-action-tape identity.
 
-Reject `q_contact` if counterfactual reward is nonfinite, dominated by speed,
-or systematically ranks worse contact-point quality higher. Apply the frozen
-falsification checks from the design: reject if any archived arm's top FQ
-quartile has lower mean physical quality than its bottom quartile, or if the
-absolute seed-level Spearman `corr(FQ, quality) < 0.50` while
-`abs(corr(FQ, useful_speed))` exceeds the quality correlation.
-
-- [ ] **Step 4: Produce and inspect the pretraining figures**
-
-Generate the four fixed-scale static figures from Task 5. Inspect every image
-locally and obtain one independent visual/code review.
-
-- [ ] **Step 5: Write the preregistration**
+- [ ] **Step 5: Freeze the preregistration**
 
 Record:
 
 ```text
-task IDs and exact config hashes
+compatibility mapping: fq -> FQ-min
+task IDs, reader classes, weights, and exact config hashes
 seeds 8..15
 500 iterations, 4096 environments, model_499.pt
-256 environments × 2 sampled episodes
-quality endpoint and zero denominator rules
-MWU + paired sign-flip + Holm families
-PCG64 seed 20260726 and 100,000 paired bootstrap samples
-D0 event-window depth-gain, dwell, and recontact definitions/claim rule
-all replacement margins and invalidation gates
-FQ-only V_FQ provenance, q90 method, and calibration/validation saturation checks
-qvel results labelled simulator-only when illegal
+256 environments x 2 sampled episodes
+schema-v3 artifact and invalidation contract
+three primary causal contrasts
+MWU as the sole Holm-adjusted decision family
+exact paired sign-flip as sensitivity only
+PCG64 seed 20260726 and 100,000 matched-seed bootstrap samples
+contact-quality endpoint and zero/invalid semantics
+D0 depth/dwell/recontact/raw-delivered/success mechanism definitions
+FQ-min practical margins, excluding delivered impulse
+V_FQ hashes, higher-q90 method, and both saturation counts
+qvel/Lambda interpretation and simulator-only label
+accepted-training and accepted-evaluation manifest contracts
+exactly two static figures and four post-statistics explanatory videos
 ```
 
 - [ ] **Step 6: Independent review and commit**
 
-Have one reviewer inspect sensor/phase/reward code and a second reviewer inspect
-statistics/provenance/plots. Resolve findings by evidence, rerun affected tests,
-then:
+Have one reviewer inspect reward/config/tracker semantics and one inspect
+statistics/provenance/figures. Resolve findings with evidence, rerun affected
+tests, then:
 
 ```bash
 git add scripts/smoke_first_strike_instrumentation.py \
         tests/test_smoke_first_strike_instrumentation.py \
-        docs/results/2026-07-26_first_strike_quality_prereg.md \
-        docs/superpowers/specs/2026-07-26-first-strike-quality-conditioned-design.md
-git commit -m "docs(hammer): preregister first-contact quality campaign"
-```
-
----
-
-### Task 6A: Paired CPU reference-recipe qualification
-
-**Files:**
-- Create: `evaluation/trajectory/reference_recipe_probe.py`
-- Create: `tests/test_reference_recipe_probe.py`
-- Create: `docs/results/2026-07-26_reference_recipe_probe.md`
-- Create: static recipe grids under
-  `evaluation/results/2026-07-26_reference_recipe_probe/`
-
-**Interfaces:**
-- Freezes `traj_dc` at SHA-256
-  `b22dabb94a10a1e7f68f3fe6a4a2f9412e14916a40a3dbafc81e2f3c3cc7f89f`; no other
-  trace may substitute. Because the source traces lack pre-apex motion, use an
-  identically zero pre-apex transverse residual and repeat the apex at the
-  wind-up/descent boundary rather than infer motion. Resample the observed
-  post-apex descent on 51 uniform points and store the nail-frame transverse
-  residual from the R0 centered path built with that source's own live
-  head/nail poses. R1 is the residual template minimizing summed pairwise
-  transverse L2 distance; ties break by lexicographic trace digest. Replay adds
-  the residual, rotated through the signed-offset diagnostic's nail-frame
-  basis, to the live R0 target at corresponding segment progress.
-- Replays 32 matched randomized reset states under:
-  - R0: current `SingleStrikeReference`;
-  - R1: that nail-frame-relative transverse medoid template, with R0's axial
-    schedule and pacing unchanged;
-  - R2: R1 until 90 mm axial standoff, then multiply its transverse offset by
-    `1 - (10*u**3 - 15*u**4 + 6*u**5)`, where
-    `u=clip((0.09-d)/0.07, 0, 1)` and `d` is axial standoff, so it reaches zero
-    with continuous first and second derivatives by 20 mm.
-- Generates, before rollout outcomes are inspected, a fresh 32-row digested
-  manifest using reset seeds exactly `0..31`; it must not reuse a prior
-  manifest. Each row binds realized initial qpos/qvel, head/nail poses,
-  nail-frame basis, code/config/asset revisions, and a canonical state digest.
-  Every recipe must reproduce the row digest.
-- Uses `play=False`, fixed gains/action scale/caps, `cat_impulse=True`,
-  `imp_max_p=0`, and no automatic reset.
-- Executes the existing live-head feedback law
-  `clip((p_next-head)/0.15, -1, 1)`.
-- After the nominal script, issues no more than two final-target control steps
-  and stops earlier on success. There is no further endpoint hold; a rollout
-  without both a productive first event and task success by `n_script + 2` is a
-  press-through failure.
-- Records complete 500 Hz first-event, contact, force/impulse, prefix-qvel, and
-  realized-path channels.
-
-- [ ] **Step 1: Write failing pure-template and contract tests**
-
-Test `traj_dc` digest binding, zero pre-apex residual/repeated-apex handling,
-deterministic observed-descent resampling, source-R0 residual construction,
-deterministic medoid selection/tie-break, nail-frame translation/rotation
-invariance, live-head and live-nail anchoring, exact R1 preservation through
-R2's 90 mm gate, the stated quintic blend and zero transverse offset by 20 mm,
-fresh exact reset seeds/state digests, the hard `n_script + 2` boundary with no
-further endpoint hold, complete prefix-qvel inspection, and strict fail-closed
-sentinel behavior.
-
-- [ ] **Step 2: Run tests and confirm RED**
-
-```bash
-PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python \
-  -m pytest tests/test_reference_recipe_probe.py -q
-```
-
-- [ ] **Step 3: Implement the minimal replay probe**
-
-Reuse `SingleStrikeReference`, the existing first-strike tracker, and existing
-trace/digest helpers. Do not add a production reward or change the live
-reference. Compare realized head paths rather than commanded knots.
-
-- [ ] **Step 4: Run 96 matched CPU rollouts**
-
-First require R0 to reproduce the Phase M productive in-script contact,
-`>=0.5 m/s` speed, and task-success contract, then bank its complete 32-reset
-baseline. Apply the following absolute gates only to an R1 or R2 recipe
-proposed for promotion; R1 may remain a diagnostic comparator:
-
-```text
-productive in-script first-event successes >= 30/32
-accepted onsets inside provisional 12 mm proxy >= 29/32
-median v_pre >= 0.95 * R0; every accepted event >= 0.5 m/s
-median raw delivered >= 0.90 * R0
-no prefix arm qvel > 3.1415 rad/s
-no Lambda/cap > 1
-terminal axial-speed, terminal lateral-speed, and approach-angle gates pass
-no nonfinite/dead-Lambda/impossible-success/post-success/press-only failure
-```
-
-Freeze the exact terminal-gate thresholds in the fresh reset manifest before
-any R1/R2 outcome is inspected; a missing, nonfinite, or failed value fails
-closed.
-
-The R2 repair contrast additionally requires at least four more within-12-mm
-onsets than R1 (`>=4/32`, exactly 12.5 percentage points), whether or not R1
-passes an absolute promotion gate. Replacing R0 additionally requires at least
-5% higher `v_pre` or at least 10% lower p95 prefix qvel; delivered impulse alone
-is not a replacement reason.
-Global straightness is never a promotion target.
-
-- [ ] **Step 5: Test reference identifiability and contact robustness**
-
-Counterfactually score every replay under all recipes. Require the generating
-recipe to have the highest cumulative raw imitation score in at least 26/32
-resets and median self/next-best ratio at least 1.25. Re-run R0 and any winner
-at `solref_scale=2`; reject if speed, delivered impulse, or worst-joint Lambda
-changes by 20% or more, if success/centering fails, or if any terminal
-axial-speed, terminal lateral-speed, or approach-angle gate is missing,
-nonfinite, or fails.
-
-State explicitly in the result that passing this probe demonstrates scripted
-feasibility and separability under the current weak imitation reader only; it
-does not show that PPO can learn the recipe.
-
-- [ ] **Step 6: Plot, review, and bank**
-
-Create identical-scale R0/R1/R2 x-z and x-y grids, contact-aligned force and
-impulse plots, a metrics table, and a small video montage. Obtain independent
-code and scientific review. State explicitly that the 12 mm measure is a
-provisional site-center proxy until the new contact-point sensor is qualified.
-
-- [ ] **Step 7: Commit named files**
-
-```bash
-git add evaluation/trajectory/reference_recipe_probe.py \
-        tests/test_reference_recipe_probe.py \
-        docs/results/2026-07-26_reference_recipe_probe.md
-git commit -m "feat(hammer): qualify terminal reference recipes on CPU"
+        docs/results/2026-07-26_first_strike_quality_prereg.md
+git commit -m "docs(hammer): preregister lean first-contact quality campaign"
 ```
 
 ---
@@ -873,222 +656,275 @@ git commit -m "feat(hammer): qualify terminal reference recipes on CPU"
 ### Task 7: Clean Vega CUDA and throughput gate
 
 **Files:**
+
 - Modify: `scripts/slurm/vega_train.sbatch`
 - Modify: `scripts/slurm/vega_eval.sbatch`
 
-**Interfaces:**
-- Produces clean CPU-vs-CUDA quality-reader agreement and a measured throughput
-  ratio with/without the dedicated sensor.
-- Adds a new fail-closed `fq4x8` launcher contract; it does not reuse or relax
-  the old `fsr4x8` C/D-prime/F/E contract.
-- Requires seeds exactly `8..15`, shorts exactly `f8/f0/d0/fq`, exact task IDs,
-  500 iterations, and unset `IMPACT_W`, `DELIVERED_W`, and `NAIL_DRIVEN_W`
-  because the registered tasks encode the treatments.
-
 - [ ] **Step 1: Push and deploy by provenance**
 
-Push the named commits. On Vega, create a fresh checkout, pull the exact commit,
-and verify both main and asset repositories are clean at the recorded hashes.
+Push named commits. On Vega, use a fresh clean checkout at the exact commit and
+verify both this repository and the sibling asset repository are clean at the
+recorded 40-hex revisions.
 
-- [ ] **Step 2: Run one F8/F0/D0/FQ CUDA smoke each**
+- [ ] **Step 2: Run one CUDA smoke per arm**
 
-Use 256 environments. Require finite rewards/observations, productive first
-events, no quality overflow for FQ, `impossible_success_n==0`,
-`lambda_dead_n==0`, exact task IDs/weights/readers, and the expected payout
-semantics for all four arms.
-
-- [ ] **Step 3: Run the sensor throughput comparison**
-
-Measure at least 1,000 post-warmup control steps at 4096 environments for:
+Use 256 environments for F8, F0, D0, and FQ-min. Require finite
+observations/rewards, productive first events, no quality overflow,
+`impossible_success_n==0`, `lambda_dead_n==0`, exact task IDs/readers/weights,
+and these payout predicates:
 
 ```text
-F8 without dedicated quality sensor
-F8 with dedicated quality sensor
-FQ with dedicated quality sensor and readers
+F8: raw speed and raw delivered active
+F0: speed zero, raw delivered active
+D0: raw speed active, delivered zero
+FQ-min: bounded quality-speed active, delivered zero
 ```
 
-Record steps/s, GPU memory, and sensor overflow. The gate passes only if FQ
-throughput is at least 80% of F8 without the sensor and no overflow occurs. If
-the gate fails, stop and profile; do not launch 32 jobs.
+- [ ] **Step 3: Measure passive-sensor throughput**
 
-- [ ] **Step 4: Bank smoke evidence**
+Measure at least 1,000 post-warmup control steps at 4096 environments:
 
-Save JSON logs with commit hashes, asset hashes, configs, predicate counts,
-throughput, memory, and dirty states. Commit only the small summary/manifest,
-not transient caches.
+```text
+F8 without quality sensor
+F8 with passive quality sensor
+FQ-min with passive quality sensor and quality-speed reader
+```
+
+Record steps/s, GPU memory, overflow, and config hashes. FQ-min must reach at
+least 80% of uninstrumented F8 throughput with no overflow. If it fails, stop
+and profile; do not launch 32 jobs.
+
+- [ ] **Step 4: Freeze launcher and smoke evidence**
+
+The launcher contract requires:
+
+```text
+campaign = fq4x8
+seeds = 8 9 10 11 12 13 14 15
+shorts = f8 f0 d0 fq
+iterations = 500
+IMPACT_W unset
+DELIVERED_W unset
+NAIL_DRIVEN_W unset
+one GPU per run
+```
+
+Both Slurm scripts currently have campaign-specific fail-closed handling only
+for the earlier `fsr4x8` campaign. Add an explicit `fq4x8` branch; generic
+argument acceptance is not sufficient. The training branch must reject wrong
+task/short/seed/iteration mappings and any inherited `IMPACT_W`,
+`DELIVERED_W`, or `NAIL_DRIVEN_W`. The evaluation branch must require the
+32-row accepted-training manifest, route attempts beneath the external
+evaluation root exactly once, and reject any treatment/config mismatch.
+
+Bank JSON evidence with code/asset/config hashes, predicate counts, throughput,
+memory, and clean states. Commit only the small summary/manifest and any
+necessary launcher checks.
 
 ---
 
 ### Task 8: Matched 4×8 training and strict evaluation
 
 **Files:**
-- No source changes permitted after launch.
+
+- No source changes after launch.
 - Create result artifacts under
   `docs/results/assets/2026-07-27_first_strike_quality/`.
 
-**Interfaces:**
-- Produces 32 accepted checkpoints and 32 strict sampled evaluations.
+**Output:** 32 accepted training checkpoints, 32 accepted strict sampled
+evaluations, and 16,384 verified sampled episodes.
 
-- [ ] **Step 1: Submit the 32 training jobs**
+- [ ] **Step 1: Submit 32 training jobs**
 
-Submit seeds 8–15 for F8, F0, D0, and FQ. Each job uses one GPU, 4096
-environments, 500 PPO iterations, a unique run name, and retains
-`model_499.pt`.
-
-From the clean Vega checkout, with exact 40-hex revisions:
+From the clean Vega checkout:
 
 ```bash
-CODE_REV=$(git rev-parse HEAD)
-ASSET_REV=$(git -C ../safe_impact_manipulation rev-parse HEAD)
+campaign_code_rev=$(git rev-parse HEAD)
+campaign_asset_rev=$(git -C ../safe_impact_manipulation rev-parse HEAD)
+unset IMPACT_W DELIVERED_W NAIL_DRIVEN_W
 
 CAMPAIGN=fq4x8 SEEDS="8 9 10 11 12 13 14 15" \
-  SINGLE_TASK=Unitree-Z1-Hammer-CaT-Impulse-Event-Linear SINGLE_SHORT=f8 ITERS=500 \
-  EXPECTED_CODE_REVISION="$CODE_REV" EXPECTED_ASSET_REVISION="$ASSET_REV" \
+  SINGLE_TASK=Unitree-Z1-Hammer-CaT-Impulse-Event-Linear \
+  SINGLE_SHORT=f8 ITERS=500 \
+  EXPECTED_CODE_REVISION="$campaign_code_rev" \
+  EXPECTED_ASSET_REVISION="$campaign_asset_rev" \
   sbatch --array=0-7 \
   --export=ALL,CAMPAIGN,SEEDS,SINGLE_TASK,SINGLE_SHORT,ITERS,EXPECTED_CODE_REVISION,EXPECTED_ASSET_REVISION \
   scripts/slurm/vega_train.sbatch
 
 CAMPAIGN=fq4x8 SEEDS="8 9 10 11 12 13 14 15" \
-  SINGLE_TASK=Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0 SINGLE_SHORT=f0 ITERS=500 \
-  EXPECTED_CODE_REVISION="$CODE_REV" EXPECTED_ASSET_REVISION="$ASSET_REV" \
+  SINGLE_TASK=Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0 \
+  SINGLE_SHORT=f0 ITERS=500 \
+  EXPECTED_CODE_REVISION="$campaign_code_rev" \
+  EXPECTED_ASSET_REVISION="$campaign_asset_rev" \
   sbatch --array=0-7 \
   --export=ALL,CAMPAIGN,SEEDS,SINGLE_TASK,SINGLE_SHORT,ITERS,EXPECTED_CODE_REVISION,EXPECTED_ASSET_REVISION \
   scripts/slurm/vega_train.sbatch
 
 CAMPAIGN=fq4x8 SEEDS="8 9 10 11 12 13 14 15" \
-  SINGLE_TASK=Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0 SINGLE_SHORT=d0 ITERS=500 \
-  EXPECTED_CODE_REVISION="$CODE_REV" EXPECTED_ASSET_REVISION="$ASSET_REV" \
+  SINGLE_TASK=Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0 \
+  SINGLE_SHORT=d0 ITERS=500 \
+  EXPECTED_CODE_REVISION="$campaign_code_rev" \
+  EXPECTED_ASSET_REVISION="$campaign_asset_rev" \
   sbatch --array=0-7 \
   --export=ALL,CAMPAIGN,SEEDS,SINGLE_TASK,SINGLE_SHORT,ITERS,EXPECTED_CODE_REVISION,EXPECTED_ASSET_REVISION \
   scripts/slurm/vega_train.sbatch
 
 CAMPAIGN=fq4x8 SEEDS="8 9 10 11 12 13 14 15" \
-  SINGLE_TASK=Unitree-Z1-Hammer-CaT-Impulse-Event-Quality SINGLE_SHORT=fq ITERS=500 \
-  EXPECTED_CODE_REVISION="$CODE_REV" EXPECTED_ASSET_REVISION="$ASSET_REV" \
+  SINGLE_TASK=Unitree-Z1-Hammer-CaT-Impulse-Event-Quality \
+  SINGLE_SHORT=fq ITERS=500 \
+  EXPECTED_CODE_REVISION="$campaign_code_rev" \
+  EXPECTED_ASSET_REVISION="$campaign_asset_rev" \
   sbatch --array=0-7 \
   --export=ALL,CAMPAIGN,SEEDS,SINGLE_TASK,SINGLE_SHORT,ITERS,EXPECTED_CODE_REVISION,EXPECTED_ASSET_REVISION \
   scripts/slurm/vega_train.sbatch
 ```
 
-The launcher must fail if `IMPACT_W`, `DELIVERED_W`, or `NAIL_DRIVEN_W` is
-present in the environment.
+The task ID remains `...Event-Quality`, but the frozen config hash must prove
+that `fq` is FQ-min: impact weight 8, quality-speed reader at
+`1.4598331451416016`, and delivered weight zero.
 
 - [ ] **Step 2: Monitor without selecting on performance**
 
-Retry only documented infrastructure failures with identical config and seed.
-Retain all attempts. Never replace a completed weak/unstable seed. Send periodic
-status updates with counts by arm: pending/running/completed/failed/retried.
+Report pending/running/completed/failed/retried counts by treatment. Retry only
+documented infrastructure failure with identical config and seed. Retain all
+attempts. Never replace a completed weak or unstable seed.
 
-- [ ] **Step 3: Freeze the accepted-training/checkpoint manifest**
+- [ ] **Step 3: Freeze `accepted_training_checkpoints.tsv`**
 
-After infrastructure-only training retries are resolved, freeze exactly 32
-rows in `accepted_training_checkpoints.tsv`. Each row binds arm/seed, retained
-`model_499.pt`, training attempt and retry history, code/config/asset revisions,
-checkpoint/artifact hash, and dirty state. Never replace a completed
-weak/unstable seed, and do not include evaluation-attempt fields in this
-manifest.
+Freeze exactly 32 rows. Each binds:
+
+```text
+treatment label and compatibility short
+registered task and training seed
+model_499.pt path and SHA-256
+training attempt plus full retry history
+code, asset, campaign-config, and treatment-config identities
+fixed action/impedance/cap signatures
+clean state and disposition
+```
+
+Do not include evaluation-attempt fields in this manifest.
 
 - [ ] **Step 4: Run strict sampled evaluation**
 
-For every accepted checkpoint, collect exactly the first two completed episodes
-from each of 256 environments under stochastic actions, matched evaluation RNG
-streams, ±0.05 rad reset noise, and the existing observation-corruption
-contract. Enable the passive `quality_instrumentation` evaluation override for
-all four arms, bank its separate config hash, and reject
-dirty/incomplete/sentinel-failing rows.
+For each accepted checkpoint, collect exactly the first two completed
+stochastic episodes from each of 256 environments under matched evaluator RNG
+streams, ±0.05 rad reset noise, and the frozen observation-corruption contract.
+Enable passive `quality_instrumentation` for all arms and bank its separate
+evaluation config hash.
 
-Use only the frozen accepted-training/checkpoint manifest:
+The evaluator must use:
+
+```text
+reset RNG = 2036072919
+observation RNG = 2046072933
+action RNG = 2056072941
+```
 
 ```bash
+campaign_eval_root="$HOME/unitree_rl_mjlab_eval"
+
 CAMPAIGN=fq4x8 EVAL_ATTEMPT=attempt1 \
-  EVAL_ROOT="$HOME/unitree_rl_mjlab_eval" \
-  ACCEPTED_MANIFEST="$HOME/unitree_rl_mjlab_eval/fq4x8/accepted_training_checkpoints.tsv" \
-  EXPECTED_CODE_REVISION="$CODE_REV" EXPECTED_ASSET_REVISION="$ASSET_REV" \
+  EVAL_ROOT="$campaign_eval_root" \
+  ACCEPTED_MANIFEST="$campaign_eval_root/fq4x8/accepted_training_checkpoints.tsv" \
+  EXPECTED_CODE_REVISION="$campaign_code_rev" \
+  EXPECTED_ASSET_REVISION="$campaign_asset_rev" \
   sbatch \
   --export=ALL,CAMPAIGN,EVAL_ATTEMPT,EVAL_ROOT,ACCEPTED_MANIFEST,EXPECTED_CODE_REVISION,EXPECTED_ASSET_REVISION \
   scripts/slurm/vega_eval.sbatch
 ```
 
-- [ ] **Step 5: Freeze the accepted-evaluation manifest**
+- [ ] **Step 5: Freeze `accepted_evaluations.tsv`**
 
-After infrastructure-only evaluation retries are resolved, freeze exactly 32
-rows in `accepted_evaluations.tsv`. Each row binds its accepted-training row to
-the evaluation attempt, training and evaluation commits/config hashes, asset
-commit, RNG stream, payload hash, retry history, dirty state, quotas, and every
-sentinel predicate. Do not analyze until all 32 evaluation identities are
-present and verified.
+After infrastructure-only retries, freeze exactly 32 accepted rows. Bind each
+training row to its evaluation attempt, code/asset/config identities, RNG
+streams, schema-v3 payload digest and byte hash, retry history, dirty state,
+512-episode quota, and every sentinel predicate. Do not run Task 9 until all 32
+identities and all 16,384 episode records verify.
 
 ---
 
-### Task 9: Analyze, visualize, and bank the result
+### Task 9: Analyze, bank the result, and render four explanatory videos
 
 **Files:**
+
 - Create: `docs/results/2026-07-27_first_strike_quality_result.md`
 - Create: `docs/results/assets/2026-07-27_first_strike_quality/summary.csv`
 - Create: `docs/results/assets/2026-07-27_first_strike_quality/analysis.json`
-- Create: `evaluation/analysis/build_first_strike_review_gallery.py`
-- Create: `tests/test_first_strike_review_gallery.py`
-- Create: static PNGs and optional HTML defined in Task 5.
+- Create:
+  `docs/results/assets/2026-07-27_first_strike_quality/paired_seed_effects.png`
+- Create:
+  `docs/results/assets/2026-07-27_first_strike_quality/aggregate_nail_plane_contact_map.png`
+- Create:
+  `docs/results/assets/2026-07-27_first_strike_quality/explanatory_videos.tsv`
 
-**Interfaces:**
-- Produces the preregistered F0-vs-F8, D0-vs-F8, and FQ-vs-F8 decisions, plus
-  descriptive FQ-vs-F0 and FQ-vs-D0.
+- [ ] **Step 1: Verify manifests and freeze the statistical result**
 
-- [ ] **Step 1: Run analysis against the frozen manifest**
+Recompute every artifact hash and schema-v3 episode summary from the frozen
+accepted-evaluation manifest. Emit:
 
-Require the frozen accepted-evaluation manifest, all artifact hashes, and
-episode aggregates to recompute. Emit seed tables, exact MWU, paired sign-flip,
-Holm-adjusted values, paired-bootstrap bounds, guardrails, all eight paired
-differences, qvel legality, contact-time, axiality, transverse impulse, D0
-event-window depth gain/dwell/recontact endpoints, and failure/sentinel counts.
+```text
+32 seed-summary rows
+three exact MWU tests and one Holm-adjusted decision family
+exact paired sign-flip sensitivity for each contrast
+all eight matched-seed differences
+100,000-sample paired-bootstrap intervals and one-sided ratio bounds
+F8/D0 depth, dwell, recontact, raw delivered, and success mechanism results
+FQ-min/F8 practical acceptance margins
+onset axial/lateral/angle diagnostics
+qvel and Lambda legality/transport diagnostics
+all quota, provenance, liveness, numerical, and sentinel predicates
+```
 
-- [ ] **Step 2: Generate and visually inspect figures**
+Freeze `analysis.json` and the pass/fail decisions before rendering any video.
+Delivered impulse remains descriptive for FQ-min acceptance.
 
-Render the x–z medoid grid, x–y contact grid, quality-speed frontier, and
-force/impulse grid. Open all PNGs locally; verify identical spatial scales and
-that plotted medoids match the analysis JSON identities.
+- [ ] **Step 2: Generate and inspect exactly two figures**
+
+Render `paired_seed_effects.png` and
+`aggregate_nail_plane_contact_map.png`. Open both locally and verify scales,
+labels, arm mapping, episode counts, and correspondence with `analysis.json`.
+Do not create HTML or additional decision figures.
 
 - [ ] **Step 3: Independent result review**
 
-One reviewer recomputes statistics from CSV/NPZ; another reviews trace/figure
-selection and physical interpretation. Neither reviewer edits the result
-before reporting findings.
+One reviewer recomputes statistics from CSV/schema-v3 artifacts. Another
+reviews the contact map, treatment identities, and physical interpretation.
+Neither reviewer edits the result before reporting findings.
 
-- [ ] **Step 4: Build the provenance-bound policy video library**
+- [ ] **Step 4: Render exactly one predeclared medoid video per arm**
 
-Render the exact medoid episode used by the trajectory grid for every accepted
-arm/seed by replaying its stored `action_tape` in the same reset/config, plus
-one clearly labelled deterministic mean-policy rollout per checkpoint. Extend
-`scripts/render_policy.py` with an action-tape replay input only if the existing
-playback path cannot accept it; keep a single renderer. Reuse
-`plot_first_strike_campaign.write_video_overlay_html` and do not infer
-quantitative trajectories from pixels.
-
-Each gallery entry contains:
+Only after Step 1 decisions are frozen, select one episode per treatment over
+that arm's complete verified sampled set. Use minimum standardized Euclidean
+distance to the arm median over:
 
 ```text
-video
-x-z and x-y path
-contact close-up
-contact-aligned force / cumulative impulse
-quality, useful speed, contact time, delivered impulse, peak qvel, legality
+contact quality
+useful speed
+first-contact time
+raw delivered impulse
+nail-plane axial contact coordinate
+nail-plane lateral contact coordinate
 ```
 
-Bind each MP4 to the source trace with episode identity, trace digest, explicit
-frame-to-substep timing, and SHA-256. Tests must reject a mismatched episode,
-digest, frame count, nonmonotone timing map, or a non-medoid clip presented as
-the representative.
+Replace a zero/nonfinite scale by `1.0`. Break exact ties by
+`(training_seed, env_id, episode_ordinal)`. Freeze the four selected identities
+before rendering.
 
-Create a separate annotation export with enum
-`good|questionable|bad`, reason tags, and free text. Human annotations are
-qualitative diagnostics only: they cannot alter the frozen statistical
-decision or trigger replacement of the medoid after results are visible.
-Large MP4s stay git-ignored; bank manifests, checksums, montages, overlays, and
-the blank/user-filled annotation file.
+Replay each stored action tape under its bound reset/config. Record treatment,
+seed, episode identity, source trace digest, action-tape digest,
+frame-to-substep timing, MP4 SHA-256, and selection distance in
+`explanatory_videos.tsv`. The videos explain observed behavior; they cannot
+change a decision, replace an episode, or supply quantitative measurements.
+
+Render exactly four MP4s: one F8, one F0, one D0, and one FQ-min. Large MP4
+bytes stay outside Git. There is no all-seed gallery, deterministic-checkpoint
+gallery, annotation UI, montage requirement, or HTML wrapper.
 
 - [ ] **Step 5: Write the result**
 
-Use the four-question structure:
+Use:
 
 ```text
 What was supposed to happen?
@@ -1097,11 +933,92 @@ Why was there a difference?
 What can we learn from this?
 ```
 
-Separate proven, supported, not distinguishable, simulator-only, and open.
-Do not call a null equivalence or call an illegal-qvel policy hardware-ready.
+Separate proven, supported, not distinguishable, simulator-only, and open
+claims. A null is not equivalence. A policy with finite qvel-rail exceedance is
+not hardware-speed-qualified. A log-only impulse result is not impulse
+enforcement.
 
-- [ ] **Step 6: Run final verification and commit named files**
+- [ ] **Step 6: Final verification and named-file commit**
 
-Re-run the targeted/full test suite appropriate to changed files, validate
-every checksum, then stage only the result doc, summary, analysis, figures,
-manifest, gallery code/tests/metadata, and final reviewed source/test files.
+Re-run tests appropriate to every changed source file, recompute every hash,
+and verify the two figure bytes and four video-manifest rows. Stage only the
+reviewed result doc, CSV, JSON, two PNGs, video manifest, and any final reviewed
+source/tests:
+
+```bash
+git diff --check
+git status --short
+```
+
+Never stage large MP4s, transient caches, or unrelated worktree changes.
+
+## Deferred appendix: R0/R1/R2 reference recipes
+
+This appendix is deliberately not a numbered task. Do not create its files,
+run its 96 CPU rollouts, add it to qualification, or launch a reference-guided
+GPU arm. Revisit it only after Task 9 identifies a residual terminal
+credit-assignment problem that the lean reward comparison did not resolve and
+a separate protocol is approved.
+
+Preserved calibrated design:
+
+- R0 is the current `SingleStrikeReference`.
+- R1 uses the `traj_dc` transverse residual, bound to SHA-256
+  `b22dabb94a10a1e7f68f3fe6a4a2f9412e14916a40a3dbafc81e2f3c3cc7f89f`, with
+  R0 axial schedule and pacing.
+- Source traces lack pre-apex motion, so pre-apex residual is exactly zero and
+  the apex repeats at the segment boundary.
+- Resample post-apex descent on 51 uniform points in the live nail frame.
+  Choose the residual minimizing summed pairwise transverse L2 distance; ties
+  break by trace digest.
+- R2 equals R1 through 90 mm axial standoff and multiplies its transverse
+  residual by
+  `1-(10*u**3-15*u**4+6*u**5)`, with
+  `u=clip((0.09-d)/0.07,0,1)`, reaching zero by 20 mm with continuous first and
+  second derivatives.
+- Generate a fresh 32-row reset manifest for exact seeds `0..31` before any
+  outcome. Bind realized qpos/qvel, live head/nail poses, nail-frame basis,
+  code/config/asset revisions, and canonical state digest. Every recipe must
+  reproduce every row.
+
+Corrected deadline contract:
+
+```text
+accepted productive onset no later than the final nominal script step
+at most two post-script final-target control steps
+normal task success no later than the end of n_script + 2
+stop earlier on success
+no endpoint hold
+late onset, late success, press-only contact, or missing productive event fails
+```
+
+Candidate promotion gates:
+
+```text
+productive in-script first events >= 30/32
+accepted onsets inside provisional 12 mm proxy >= 29/32
+median v_pre >= 0.95 * R0
+every accepted event v_pre > 0.5 m/s
+median raw delivered >= 0.90 * R0
+no prefix arm qvel > 3.1415 rad/s
+no Lambda/cap > 1
+no numerical or sentinel failure
+```
+
+Freeze terminal axial-speed, terminal lateral-speed, and approach-angle
+thresholds in the fresh manifest before inspecting R1/R2 outcomes. Measure all
+three in the same live-nail-frame window ending immediately before accepted
+onset. Missing, nonfinite, wrong-window, or failed values fail promotion.
+
+R2 additionally needs at least four more within-12-mm onsets than R1.
+Replacing R0 additionally needs at least 5% higher precontact speed or at least
+10% lower p95 prefix qvel. Delivered impulse alone and global straightness
+cannot justify replacement.
+
+Before a separately authorized GPU reference arm, require the generating
+recipe to have the largest cumulative raw imitation score in at least 26/32
+resets and median self/next-best ratio at least 1.25. Re-run R0 and any candidate
+at `solref_scale=2`; reject on a 20% or larger change in speed, raw delivered
+impulse, or worst-joint impulse, or on any success, centering, deadline, or
+terminal-gate failure. A CPU pass would prove scripted feasibility and weak
+prior separability only, not PPO learnability.
