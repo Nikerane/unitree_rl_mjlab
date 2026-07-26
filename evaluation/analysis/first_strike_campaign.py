@@ -1317,6 +1317,34 @@ _SCHEMA_V3_EPISODE_FINAL_KEYS = (
 )
 
 
+def _schema_v3_strict_identity_reasons(payload: Mapping) -> list[str]:
+    strict = payload.get("evaluation_contract", {}).get(
+        "strict_config_identities"
+    )
+    keys = {
+        "training_config_sha256",
+        "evaluation_config_sha256",
+        "training_policy_observation_sha256",
+        "evaluation_policy_observation_sha256",
+        "training_treatment_reward_sha256",
+        "evaluation_treatment_reward_sha256",
+    }
+    if not isinstance(strict, Mapping) or set(strict) != keys:
+        return ["schema-v3 evaluation contract needs all six strict identities"]
+    reasons = []
+    if not all(_is_hex_digest(strict[key], 64) for key in keys):
+        reasons.append("schema-v3 strict identities must be SHA-256 hashes")
+    if strict["training_policy_observation_sha256"] != strict[
+        "evaluation_policy_observation_sha256"
+    ]:
+        reasons.append("schema-v3 policy observation identities differ")
+    if strict["training_treatment_reward_sha256"] != strict[
+        "evaluation_treatment_reward_sha256"
+    ]:
+        reasons.append("schema-v3 treatment reward identities differ")
+    return reasons
+
+
 def _episode_trace_digest(trace: Mapping, *, schema_version: int = 2) -> str:
     if schema_version == 2:
         digest_payload = {
@@ -1544,6 +1572,8 @@ def _load_and_recompute_sampled_artifact(
     schema_version = payload.get("schema_version")
     if schema_version not in (2, 3):
         semantic_reasons.append("raw schema version is not supported (expected 2 or 3)")
+    elif schema_version == 3:
+        semantic_reasons.extend(_schema_v3_strict_identity_reasons(payload))
     episodes = payload.get("episodes")
     expected_count = int(payload.get("expected_episode_count", -1))
     if expected_count != EXPECTED_EPISODES_PER_SEED:
@@ -1841,10 +1871,6 @@ def _sampled_artifact_reasons(
             strict_identities = payload.get("evaluation_contract", {}).get(
                 "strict_config_identities"
             )
-            if not isinstance(strict_identities, Mapping):
-                raise ValueError(
-                    "schema-v3 evaluation contract needs strict_config_identities"
-                )
             expected_evaluation_contract[
                 "strict_config_identities"
             ] = strict_identities

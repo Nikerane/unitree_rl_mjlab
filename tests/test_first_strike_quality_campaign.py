@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 import evaluation.analysis.first_strike_campaign as legacy
+import evaluation.analysis.first_strike_quality_campaign as quality_analysis
 from evaluation.analysis.first_strike_quality_campaign import (
     FROZEN_QUALITY_CAMPAIGN_MATRIX,
     _d0_mechanism,
@@ -69,6 +70,7 @@ def _trace(
     point = [0.5 + error, 0.0, 0.1]
     contact = [False, True, dwell_two_substeps]
     force = [0.0, 10.0, 8.0 if dwell_two_substeps else 0.0]
+    quality_normal = [float(np.sqrt(1.0 - 0.9**2)), 0.0, -0.9]
     start = [point[0] + 0.002, -0.001, 0.104]
     qvel = [[3.0] * 6 for _ in contact]
     trace = {
@@ -102,9 +104,9 @@ def _trace(
             ],
             "quality_contact_normal": [
                 [[0.0, 0.0, 0.0]],
-                [[0.0, 0.0, -1.0]],
+                [quality_normal],
                 [
-                    [0.0, 0.0, -1.0]
+                    quality_normal
                     if dwell_two_substeps
                     else [0.0, 0.0, 0.0]
                 ],
@@ -302,6 +304,7 @@ def _campaign_rows(tmp_path: Path) -> tuple[list[dict], list[dict]]:
         evaluation_config = hashlib.sha256(f"eval-{label}".encode()).hexdigest()
         accepted = {
             **frozen,
+            "campaign": "fq4x8",
             "evaluation_attempt": "attempt1",
             "disposition": "accepted",
             "checkpoint_sha256": checkpoint_sha,
@@ -315,6 +318,14 @@ def _campaign_rows(tmp_path: Path) -> tuple[list[dict], list[dict]]:
             "asset_git_dirty": False,
             "training_config_sha256": training_config,
             "evaluation_config_sha256": evaluation_config,
+            "training_policy_observation_sha256": "1" * 64,
+            "evaluation_policy_observation_sha256": "1" * 64,
+            "training_treatment_reward_sha256": hashlib.sha256(
+                f"reward-{label}".encode()
+            ).hexdigest(),
+            "evaluation_treatment_reward_sha256": hashlib.sha256(
+                f"reward-{label}".encode()
+            ).hexdigest(),
             "action_rng_seed": row["action_rng_seed"],
             "reset_rng_seed": row["reset_rng_seed"],
             "observation_rng_seed": row["observation_rng_seed"],
@@ -591,11 +602,13 @@ def test_no_contact_and_zero_force_are_zero_but_instrumentation_failures_reject(
     zero_force["first_strike"]["contact_quality"] = 0.0
     zero_force["first_strike"]["contact_error_m"] = 0.0
     zero_force["first_strike"]["contact_point_w"] = [0.0, 0.0, 0.0]
+    zero_force["first_strike"]["contact_normal_axiality"] = 0.0
     for key, value in {
         "tracker_contact_quality_valid": False,
         "tracker_contact_quality": 0.0,
         "tracker_contact_error_m": 0.0,
         "tracker_contact_point_w": [0.0, 0.0, 0.0],
+        "tracker_contact_normal_axiality": 0.0,
     }.items():
         zero_force["event_trace"][key][1:] = [copy.deepcopy(value)] * 2
     assert (
@@ -624,6 +637,63 @@ def test_no_contact_and_zero_force_are_zero_but_instrumentation_failures_reject(
             analyze_quality_episode(invalid, nail_geometry=GEOMETRY)
 
 
+def test_quality_recomputes_from_positive_contact_normal_force_not_axial_force() -> None:
+    trace = _trace()
+    trace["physical"]["net_axial_force_n"][1] = 0.0
+    metrics = analyze_quality_episode(trace, nail_geometry=GEOMETRY)
+    assert metrics["first_contact_quality_sampled"] == pytest.approx(0.55)
+    assert metrics["first_contact_quality_valid_sampled"] is True
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (
+            lambda trace: trace["physical"].__setitem__(
+                "quality_found_count", [0, 1, 1]
+            ),
+            "shape",
+        ),
+        (
+            lambda trace: trace["physical"]["quality_found_count"][1].__setitem__(
+                0, 2
+            ),
+            "overflow",
+        ),
+        (
+            lambda trace: trace["first_strike"].__setitem__(
+                "contact_quality", 0.25
+            ),
+            "recomputed",
+        ),
+        (
+            lambda trace: trace["event_trace"][
+                "tracker_contact_quality"
+            ].__setitem__(1, 0.25),
+            "event/snapshot",
+        ),
+        (
+            lambda trace: trace["event_trace"][
+                "tracker_contact_quality_overflow"
+            ].__setitem__(1, True),
+            "overflow",
+        ),
+    ],
+)
+def test_raw_quality_slots_and_latches_fail_closed(mutation, message) -> None:
+    trace = _trace()
+    mutation(trace)
+    with pytest.raises(ValueError, match=message):
+        analyze_quality_episode(trace, nail_geometry=GEOMETRY)
+
+
+def test_mechanism_delivered_endpoint_excludes_post_window_tail_contact() -> None:
+    trace = _trace(delivered=0.10)
+    trace["episode_delivered_accumulator_n_s"] = 0.45
+    metrics = analyze_quality_episode(trace, nail_geometry=GEOMETRY)
+    assert metrics["raw_delivered_impulse_n_s_sampled"] == pytest.approx(0.10)
+
+
 def test_seed_aggregate_keeps_episode_denominators_and_safety_channels() -> None:
     contact = analyze_quality_episode(_trace(), nail_geometry=GEOMETRY)
     no_contact = analyze_quality_episode(_no_contact_trace(), nail_geometry=GEOMETRY)
@@ -639,6 +709,15 @@ def test_seed_aggregate_keeps_episode_denominators_and_safety_channels() -> None
     assert result["lambda_joint2_max_n_m_s_sampled"] == pytest.approx(0.2)
     assert result["worst_lambda_cap_ratio_max_sampled"] == pytest.approx(
         0.2 / 3.28
+    )
+    assert len(result["valid_contact_coordinates_sampled"]) == 1
+    coordinate = result["valid_contact_coordinates_sampled"][0]
+    assert coordinate["episode_id"] == "F8-env0-episode0"
+    assert coordinate["env_id"] == 0
+    assert coordinate["episode_ordinal"] == 0
+    assert coordinate["nail_asset_sha256"] == "c" * 64
+    assert coordinate["x_m"] == pytest.approx(
+        contact["contact_plane_x_m_sampled"]
     )
 
 
@@ -672,6 +751,128 @@ def test_frozen_contract_maps_fq_to_fq_min_and_accepts_complete_manifest(tmp_pat
     }
     assert tasks["F0"].endswith("-Event-Linear-F0")
     assert tasks["D0"].endswith("-Event-Linear-D0")
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (
+            lambda rows, manifest: manifest[0].__setitem__(
+                "campaign", "wrong-campaign"
+            ),
+            "campaign",
+        ),
+        (
+            lambda rows, manifest: rows[0].__setitem__(
+                "fixed_impedance_signature_sha256", "f" * 64
+            ),
+            "gains",
+        ),
+        (
+            lambda rows, manifest: rows[0].__setitem__(
+                "fixed_action_signature_sha256", "f" * 64
+            ),
+            "action",
+        ),
+        (
+            lambda rows, manifest: rows[0].__setitem__(
+                "accepted_checkpoint_sha256", "f" * 64
+            ),
+            "checkpoint",
+        ),
+        (
+            lambda rows, manifest: (
+                rows[0].__setitem__("accepted_manifest_sha256", None),
+                manifest[0].__setitem__(
+                    "accepted_training_manifest_sha256", None
+                ),
+            ),
+            "manifest",
+        ),
+        (
+            lambda rows, manifest: rows[0].__setitem__(
+                "git_revision", "unknown"
+            ),
+            "revision",
+        ),
+        (
+            lambda rows, manifest: manifest[0].__setitem__(
+                "asset_git_revision", "f" * 40
+            ),
+            "revision",
+        ),
+        (
+            lambda rows, manifest: (
+                manifest[1].__setitem__(
+                    "training_policy_observation_sha256", "f" * 64
+                ),
+                manifest[1].__setitem__(
+                    "evaluation_policy_observation_sha256", "f" * 64
+                ),
+            ),
+            "treatment-shared",
+        ),
+        (
+            lambda rows, manifest: manifest[1].__setitem__(
+                "training_config_sha256", "f" * 64
+            ),
+            "per-treatment",
+        ),
+    ],
+)
+def test_contract_rejects_mutant_campaign_identity_bindings(
+    tmp_path, mutation, message
+) -> None:
+    rows, manifest = _campaign_rows(tmp_path)
+    for row, accepted in zip(rows, manifest, strict=True):
+        path = tmp_path / f"{row['name']}.npz"
+        path.write_bytes(row["name"].encode())
+        row["sampled_trace_path"] = str(path)
+        row["sampled_trace_digest"] = hashlib.sha256(
+            f"payload-{row['name']}".encode()
+        ).hexdigest()
+        row["sampled_trace_artifact_sha256"] = hashlib.sha256(
+            path.read_bytes()
+        ).hexdigest()
+        accepted["sampled_trace_digest"] = row["sampled_trace_digest"]
+        accepted["sampled_trace_artifact_sha256"] = row[
+            "sampled_trace_artifact_sha256"
+        ]
+    mutation(rows, manifest)
+    with pytest.raises(ValueError, match=message):
+        validate_quality_campaign_contract(rows, manifest)
+
+
+def test_schema_v3_payload_identities_are_manifest_bound(complete_campaign) -> None:
+    rows, manifest = complete_campaign
+    row, accepted = rows[0], manifest[0]
+    payload = legacy._sampled_payload_from_bytes(
+        Path(row["sampled_trace_path"]).read_bytes()
+    )
+    assert quality_analysis._quality_payload_identity_reasons(
+        row, accepted, payload
+    ) == []
+
+    missing = copy.deepcopy(payload)
+    missing["evaluation_contract"]["strict_config_identities"].pop(
+        "evaluation_config_sha256"
+    )
+    assert any(
+        "six strict" in reason
+        for reason in quality_analysis._quality_payload_identity_reasons(
+            row, accepted, missing
+        )
+    )
+    drifted = copy.deepcopy(payload)
+    drifted["evaluation_contract"][
+        "fixed_impedance_signature_sha256"
+    ] = "f" * 64
+    assert any(
+        "gains" in reason
+        for reason in quality_analysis._quality_payload_identity_reasons(
+            row, accepted, drifted
+        )
+    )
 
 
 @pytest.mark.parametrize(
@@ -768,6 +969,8 @@ def test_analysis_uses_one_mwu_holm_family_and_sign_flip_is_sensitivity(
     assert len(analysis["holm_mann_whitney_family"]) == 3
     for contrast in analysis["primary_contrasts"].values():
         assert len(contrast["paired_differences"]) == 8
+        assert set(contrast["arm_means"]) == {"treatment", "control"}
+        assert contrast["paired_bootstrap_difference"]["samples"] == 100_000
         assert contrast["decision_basis"] == "holm_mann_whitney_only"
         assert "paired_sign_flip" in contrast
         assert "paired_sign_flip" not in contrast["decision_gates"]
@@ -804,6 +1007,39 @@ def test_fq_min_practical_gate_is_strict_and_excludes_delivered_and_sensitivity(
     assert "raw_delivered_impulse" not in json.dumps(result)
     assert "paired_sign_flip" not in json.dumps(result)
     assert result["passed"] is False
+    for endpoint in ("first_window_success", "overall_success"):
+        assert result[endpoint]["paired_bootstrap_difference"]["samples"] == 100_000
+        assert set(result[endpoint]["arm_means"]) == {
+            "treatment",
+            "control",
+        }
+
+
+def test_practical_ratio_denominator_failure_returns_failed_gates() -> None:
+    rows = {
+        label: [
+            {
+                "training_seed": seed,
+                "first_contact_quality_sampled": 0.7,
+                "first_window_useful_speed_mean_sampled": (
+                    0.9 if label == "FQ-min" else 0.0
+                ),
+                "first_window_success_rate_sampled": 1.0,
+                "overall_success_rate_sampled": 1.0,
+                "event_window_depth_gain_mean_sampled": (
+                    0.01 if label == "FQ-min" else 0.0
+                ),
+            }
+            for seed in range(8, 16)
+        ]
+        for label in ("F8", "FQ-min")
+    }
+    result = _fq_min_practical_acceptance(rows, safety_gates_pass=True)
+    assert result["useful_speed_ratio"]["valid"] is False
+    assert result["depth_gain_ratio"]["valid"] is False
+    assert result["gates"]["useful_speed_ratio_lower_gt_0_95"] is False
+    assert result["gates"]["depth_gain_ratio_lower_gt_0_90"] is False
+    assert result["passed"] is False
 
 
 def test_analysis_emits_d0_mechanism_without_enlarging_holm(analysis) -> None:
@@ -823,6 +1059,46 @@ def test_analysis_emits_d0_mechanism_without_enlarging_holm(analysis) -> None:
         for endpoint in mechanism["endpoints"].values()
     )
     assert len(analysis["holm_mann_whitney_family"]) == 3
+
+
+def test_analysis_retains_provenance_linked_valid_contact_coordinates(
+    analysis,
+) -> None:
+    coordinates = analysis["valid_contact_coordinates"]
+    assert len(coordinates) == 32 * 512
+    assert {
+        "treatment",
+        "raw_treatment",
+        "training_seed",
+        "episode_id",
+        "env_id",
+        "episode_ordinal",
+        "nail_asset_sha256",
+        "x_m",
+        "y_m",
+    } <= set(coordinates[0])
+    assert all(
+        coordinate["nail_asset_sha256"] == "c" * 64
+        for coordinate in coordinates
+    )
+
+
+def test_common_nail_geometry_requires_identical_provenance_frame_and_radius() -> None:
+    assert quality_analysis._validate_common_nail_geometry(
+        [GEOMETRY, copy.deepcopy(GEOMETRY)]
+    ) == GEOMETRY
+    radius_drift = copy.deepcopy(GEOMETRY)
+    radius_drift["nail_radius_m"] = 0.02
+    with pytest.raises(ValueError, match="common nail"):
+        quality_analysis._validate_common_nail_geometry(
+            [GEOMETRY, radius_drift]
+        )
+    frame_drift = copy.deepcopy(GEOMETRY)
+    frame_drift["nail_axis"] = [0.0, 1.0, 0.0]
+    with pytest.raises(ValueError, match="common nail"):
+        quality_analysis._validate_common_nail_geometry(
+            [GEOMETRY, frame_drift]
+        )
 
 
 def test_d0_mechanism_phrase_requires_all_four_registered_conditions(analysis) -> None:

@@ -65,6 +65,14 @@ SENTINELS = (
     "lambda_dead_n",
     "quota_failure_n",
 )
+STRICT_CONFIG_IDENTITY_KEYS = (
+    "training_config_sha256",
+    "evaluation_config_sha256",
+    "training_policy_observation_sha256",
+    "evaluation_policy_observation_sha256",
+    "training_treatment_reward_sha256",
+    "evaluation_treatment_reward_sha256",
+)
 PAYOUT_SEMANTICS = {
     "F8": "actual_event_linear",
     "F0": "actual_event_linear_speed_disabled",
@@ -298,6 +306,12 @@ def validate_quality_campaign_contract(
         row = row_index[(raw, seed)]
         accepted = manifest_index[(label, seed)]
         prefix = f"{label}/seed{seed}"
+        if accepted.get("campaign") != CAMPAIGN_NAME:
+            raise ValueError(f"{prefix}: campaign must be {CAMPAIGN_NAME}")
+        if accepted.get("disposition") != "accepted":
+            raise ValueError(f"{prefix}: disposition must be accepted")
+        if not str(accepted.get("evaluation_attempt", "")).strip():
+            raise ValueError(f"{prefix}: accepted evaluation attempt is missing")
         for key in (
             "treatment",
             "raw_treatment",
@@ -341,6 +355,16 @@ def validate_quality_campaign_contract(
 
         _require_equal(row.get("task"), frozen["task"], f"{prefix}: task mismatch")
         _require_equal(
+            row.get("fixed_impedance_signature_sha256"),
+            frozen["fixed_impedance_signature_sha256"],
+            f"{prefix}: frozen gains mismatch",
+        )
+        _require_equal(
+            row.get("fixed_action_signature_sha256"),
+            frozen["fixed_action_signature_sha256"],
+            f"{prefix}: frozen action mismatch",
+        )
+        _require_equal(
             float(row.get("impact_weight", np.nan)),
             frozen["impact_weight"],
             f"{prefix}: weights mismatch",
@@ -362,7 +386,12 @@ def validate_quality_campaign_contract(
         if Path(str(row.get("checkpoint_path", ""))).name != "model_499.pt":
             raise ValueError(f"{prefix}: checkpoint mismatch")
         for dirty_key in ("git_dirty", "asset_git_dirty"):
-            if bool(row.get(dirty_key, True)) or bool(accepted.get(dirty_key, True)):
+            try:
+                row_dirty = legacy._parse_bool(row.get(dirty_key))
+                accepted_dirty = legacy._parse_bool(accepted.get(dirty_key))
+            except ValueError as error:
+                raise ValueError(f"{prefix}: invalid dirty provenance") from error
+            if row_dirty or accepted_dirty:
                 raise ValueError(f"{prefix}: dirty provenance is forbidden")
         for sentinel in SENTINELS:
             if int(accepted.get(sentinel, -1)) != 0:
@@ -376,20 +405,63 @@ def validate_quality_campaign_contract(
                 raise ValueError(f"{prefix}: frozen evaluator RNG mismatch")
         for key in (
             "checkpoint_sha256",
+            "accepted_checkpoint_sha256",
+            "accepted_manifest_sha256",
             "campaign_config_sha256",
             "treatment_config_sha256",
             "nail_asset_sha256",
             "sampled_trace_digest",
             "sampled_trace_artifact_sha256",
         ):
-            if not isinstance(row.get(key), str) or len(row[key]) != 64:
+            if not legacy._is_hex_digest(row.get(key), 64):
                 raise ValueError(f"{prefix}: invalid hash binding for {key}")
-            if accepted.get(key) != row[key]:
-                raise ValueError(f"{prefix}: manifest binding mismatch for {key}")
-        if accepted.get("accepted_training_manifest_sha256") != row.get(
-            "accepted_manifest_sha256"
+        if row["accepted_checkpoint_sha256"] != row["checkpoint_sha256"]:
+            raise ValueError(f"{prefix}: accepted checkpoint binding mismatch")
+        for key in (
+            "checkpoint_sha256",
+            "campaign_config_sha256",
+            "treatment_config_sha256",
+            "nail_asset_sha256",
+            "sampled_trace_digest",
+            "sampled_trace_artifact_sha256",
         ):
+            if not legacy._is_hex_digest(accepted.get(key), 64):
+                raise ValueError(f"{prefix}: invalid manifest hash for {key}")
+            if accepted[key] != row[key]:
+                raise ValueError(f"{prefix}: manifest binding mismatch for {key}")
+        if not legacy._is_hex_digest(
+            accepted.get("accepted_training_manifest_sha256"), 64
+        ) or accepted["accepted_training_manifest_sha256"] != row[
+            "accepted_manifest_sha256"
+        ]:
             raise ValueError(f"{prefix}: accepted manifest binding mismatch")
+        for key in STRICT_CONFIG_IDENTITY_KEYS:
+            if not legacy._is_hex_digest(accepted.get(key), 64):
+                raise ValueError(
+                    f"{prefix}: invalid strict configuration hash for {key}"
+                )
+        if accepted["training_policy_observation_sha256"] != accepted[
+            "evaluation_policy_observation_sha256"
+        ]:
+            raise ValueError(f"{prefix}: observation identity mismatch")
+        if accepted["training_treatment_reward_sha256"] != accepted[
+            "evaluation_treatment_reward_sha256"
+        ]:
+            raise ValueError(f"{prefix}: reward identity mismatch")
+        for prefix_key, training_key in (
+            ("git", "training_code_revision"),
+            ("asset_git", "training_asset_revision"),
+        ):
+            revision = row.get(f"{prefix_key}_revision")
+            training_revision = row.get(training_key)
+            accepted_revision = accepted.get(f"{prefix_key}_revision")
+            if not all(
+                legacy._is_hex_digest(value, 40)
+                for value in (revision, training_revision, accepted_revision)
+            ):
+                raise ValueError(f"{prefix}: invalid {prefix_key} revision")
+            if revision != training_revision or revision != accepted_revision:
+                raise ValueError(f"{prefix}: {prefix_key} revision binding mismatch")
         if row["treatment_config_sha256"] != _treatment_digest(frozen):
             raise ValueError(f"{prefix}: treatment configuration binding mismatch")
         artifact = Path(str(row.get("sampled_trace_path", "")))
@@ -399,6 +471,163 @@ def validate_quality_campaign_contract(
             "sampled_trace_artifact_sha256"
         ]:
             raise ValueError(f"{prefix}: sampled artifact binding mismatch")
+
+    common_row_fields = (
+        "git_revision",
+        "asset_git_revision",
+        "training_code_revision",
+        "training_asset_revision",
+        "accepted_manifest_sha256",
+        "nail_asset_sha256",
+        "fixed_impedance_signature_sha256",
+        "fixed_action_signature_sha256",
+        "action_rng_seed",
+        "reset_rng_seed",
+        "observation_rng_seed",
+    )
+    for key in common_row_fields:
+        if len({str(row.get(key)) for row in rows}) != 1:
+            raise ValueError(f"campaign: treatment-shared {key} mismatch")
+    for key in (
+        "training_policy_observation_sha256",
+        "evaluation_policy_observation_sha256",
+    ):
+        if len({str(item.get(key)) for item in manifest}) != 1:
+            raise ValueError(f"campaign: treatment-shared {key} mismatch")
+    for label in LABELS:
+        accepted_arm = [
+            item for item in manifest if item.get("treatment") == label
+        ]
+        raw_arm = [
+            row for row in rows if row.get("treatment") == RAW_TREATMENT[label]
+        ]
+        for key in (
+            "training_config_sha256",
+            "evaluation_config_sha256",
+            "training_treatment_reward_sha256",
+            "evaluation_treatment_reward_sha256",
+            "campaign_config_sha256",
+            "treatment_config_sha256",
+        ):
+            source = (
+                raw_arm
+                if key in {"campaign_config_sha256", "treatment_config_sha256"}
+                else accepted_arm
+            )
+            if len({str(item.get(key)) for item in source}) != 1:
+                raise ValueError(
+                    f"{label}: per-treatment {key} identity mismatch"
+                )
+
+
+def _quality_payload_identity_reasons(
+    row: Mapping, accepted: Mapping, payload: Mapping
+) -> list[str]:
+    """Cross-bind schema-v3 payload identities to row and accepted manifest."""
+
+    prefix = f"{accepted.get('treatment')}/seed{accepted.get('training_seed')}"
+    reasons: list[str] = []
+    evaluation = payload.get("evaluation_contract", {})
+    strict = evaluation.get("strict_config_identities", {})
+    if not isinstance(strict, Mapping) or set(strict) != set(
+        STRICT_CONFIG_IDENTITY_KEYS
+    ):
+        reasons.append(f"{prefix}: payload must contain all six strict identities")
+    else:
+        for key in STRICT_CONFIG_IDENTITY_KEYS:
+            if (
+                not legacy._is_hex_digest(strict.get(key), 64)
+                or strict[key] != accepted.get(key)
+            ):
+                reasons.append(f"{prefix}: strict {key} manifest binding mismatch")
+        if strict["training_policy_observation_sha256"] != strict[
+            "evaluation_policy_observation_sha256"
+        ]:
+            reasons.append(f"{prefix}: observation identity mismatch")
+        if strict["training_treatment_reward_sha256"] != strict[
+            "evaluation_treatment_reward_sha256"
+        ]:
+            reasons.append(f"{prefix}: reward identity mismatch")
+    expected_payload = {
+        "treatment": row.get("treatment"),
+        "task": row.get("task"),
+        "training_seed": int(row.get("training_seed", -1)),
+        "event_i_ref_n_s": float(row.get("event_i_ref_n_s", np.nan)),
+        "imp_max_p": 0.0,
+    }
+    for key, expected in expected_payload.items():
+        if payload.get(key) != expected:
+            reasons.append(f"{prefix}: payload {key} binding mismatch")
+    if payload.get("weights") != {
+        "impact_progress": float(row.get("impact_weight", np.nan)),
+        "delivered_impulse": float(row.get("delivered_weight", np.nan)),
+    }:
+        reasons.append(f"{prefix}: payload weight binding mismatch")
+    if evaluation.get("fixed_impedance_signature_sha256") != row.get(
+        "fixed_impedance_signature_sha256"
+    ):
+        reasons.append(f"{prefix}: payload gains binding mismatch")
+    if evaluation.get("fixed_action_signature_sha256") != row.get(
+        "fixed_action_signature_sha256"
+    ):
+        reasons.append(f"{prefix}: payload action binding mismatch")
+    if payload.get("rng_streams") != {
+        "reset": row.get("reset_rng_seed"),
+        "observation": row.get("observation_rng_seed"),
+        "action": row.get("action_rng_seed"),
+    }:
+        reasons.append(f"{prefix}: payload RNG binding mismatch")
+    provenance = payload.get("provenance", {})
+    provenance_bindings = {
+        "checkpoint_sha256": row.get("checkpoint_sha256"),
+        "accepted_checkpoint_sha256": row.get("accepted_checkpoint_sha256"),
+        "campaign_config_sha256": row.get("campaign_config_sha256"),
+        "treatment_config_sha256": row.get("treatment_config_sha256"),
+        "nail_asset_sha256": row.get("nail_asset_sha256"),
+        "accepted_manifest_sha256": row.get("accepted_manifest_sha256"),
+        "training_code_revision": row.get("training_code_revision"),
+        "training_asset_revision": row.get("training_asset_revision"),
+    }
+    for key, expected in provenance_bindings.items():
+        if provenance.get(key) != expected:
+            reasons.append(f"{prefix}: payload provenance {key} mismatch")
+    for payload_key, row_prefix in (("code_git", "git"), ("asset_git", "asset_git")):
+        binding = provenance.get(payload_key, {})
+        if (
+            binding.get("revision") != row.get(f"{row_prefix}_revision")
+            or binding.get("dirty") is not False
+        ):
+            reasons.append(f"{prefix}: payload {payload_key} revision mismatch")
+    return reasons
+
+
+def _validate_common_nail_geometry(geometries: Sequence[Mapping]) -> dict:
+    geometries = [dict(geometry) for geometry in geometries]
+    if not geometries:
+        raise ValueError("common nail geometry is missing")
+    expected = geometries[0]
+    required = {"nail_axis", "nail_xy_m", "nail_radius_m", "source_sha256"}
+    if set(expected) != required:
+        raise ValueError("common nail geometry fields are malformed")
+    try:
+        axis = np.asarray(expected["nail_axis"], dtype=float)
+        xy = np.asarray(expected["nail_xy_m"], dtype=float)
+        radius = float(expected["nail_radius_m"])
+    except (TypeError, ValueError) as error:
+        raise ValueError("common nail geometry is malformed") from error
+    if (
+        axis.shape != (3,)
+        or xy.shape != (2,)
+        or not np.isfinite(axis).all()
+        or not np.isfinite(xy).all()
+        or not np.isfinite(radius)
+        or radius <= 0.0
+        or not legacy._is_hex_digest(expected["source_sha256"], 64)
+    ):
+        raise ValueError("common nail geometry is malformed")
+    if any(geometry != expected for geometry in geometries[1:]):
+        raise ValueError("common nail frame/radius/provenance mismatch")
+    return expected
 
 
 def _nail_plane(
@@ -428,6 +657,171 @@ def _nail_plane(
     return x, y, float(np.hypot(x, y))
 
 
+def _quality_snapshot_from_raw_slots(
+    physical: Mapping,
+    event: Mapping,
+    first: Mapping,
+    *,
+    onset: int | None,
+    sample_count: int,
+    nail_geometry: Mapping,
+) -> dict:
+    """Validate raw slots and recompute the immutable onset-quality snapshot."""
+
+    try:
+        found = np.asarray(physical["quality_found_count"], dtype=float)
+        forces = np.asarray(physical["quality_normal_force_n"], dtype=float)
+        positions = np.asarray(
+            physical["quality_contact_position_m"], dtype=float
+        )
+        normals = np.asarray(physical["quality_contact_normal"], dtype=float)
+    except KeyError as error:
+        raise ValueError(f"missing raw quality slot: {error.args[0]}") from error
+    if (
+        found.ndim != 2
+        or found.shape[0] != sample_count
+        or forces.shape != found.shape
+        or positions.shape != (*found.shape, 3)
+        or normals.shape != (*found.shape, 3)
+    ):
+        raise ValueError("raw quality slot shape mismatch")
+    if (
+        not np.isfinite(found).all()
+        or not np.isfinite(forces).all()
+        or not np.isfinite(positions).all()
+        or not np.isfinite(normals).all()
+        or np.any(found < 0.0)
+        or not np.equal(found, np.floor(found)).all()
+    ):
+        raise ValueError("raw quality slots contain nonfinite or invalid values")
+    slot_count = found.shape[1]
+    try:
+        event_overflow = np.asarray(
+            event["tracker_contact_quality_overflow"], dtype=bool
+        )
+    except KeyError as error:
+        raise ValueError("missing event quality overflow stream") from error
+    overflow = (
+        bool(np.any(found > slot_count))
+        or event_overflow.shape != (sample_count,)
+        or bool(np.any(event_overflow))
+        or bool(first.get("contact_quality_overflow", False))
+    )
+    if overflow:
+        raise ValueError("quality instrumentation overflow")
+    empty = {
+        "valid": False,
+        "point": np.zeros(3),
+        "error": 0.0,
+        "quality": 0.0,
+        "normal_axiality": 0.0,
+    }
+    if onset is None:
+        return empty
+
+    weights = np.where(
+        found[onset] > 0.0, np.maximum(forces[onset], 0.0), 0.0
+    )
+    total_weight = float(weights.sum())
+    if total_weight <= 0.0:
+        recomputed = empty
+    else:
+        point = np.sum(positions[onset] * weights[:, None], axis=0) / total_weight
+        _, _, error = _nail_plane(point, nail_geometry)
+        radius = float(nail_geometry["nail_radius_m"])
+        quality = float(np.clip(1.0 - (error / radius) ** 2, 0.0, 1.0))
+        weighted_normal = np.sum(
+            normals[onset] * weights[:, None], axis=0
+        )
+        normal_norm = float(np.linalg.norm(weighted_normal))
+        axis = np.asarray(nail_geometry["nail_axis"], dtype=float)
+        axis /= np.linalg.norm(axis)
+        axiality = (
+            float(np.clip(np.dot(weighted_normal / normal_norm, axis), 0.0, 1.0))
+            if normal_norm > 0.0
+            else 0.0
+        )
+        recomputed = {
+            "valid": True,
+            "point": point,
+            "error": error,
+            "quality": quality,
+            "normal_axiality": axiality,
+        }
+
+    scalar_streams = {
+        "contact_error_m": "tracker_contact_error_m",
+        "contact_quality": "tracker_contact_quality",
+        "contact_normal_axiality": "tracker_contact_normal_axiality",
+    }
+    event_values: dict[str, object] = {}
+    for first_key, event_key in scalar_streams.items():
+        values = np.asarray(event.get(event_key), dtype=float)
+        if values.shape != (sample_count,) or not np.isfinite(values).all():
+            raise ValueError(f"event quality stream shape mismatch: {event_key}")
+        event_values[first_key] = float(values[onset])
+    event_points = np.asarray(event.get("tracker_contact_point_w"), dtype=float)
+    event_valid = np.asarray(
+        event.get("tracker_contact_quality_valid"), dtype=bool
+    )
+    if (
+        event_points.shape != (sample_count, 3)
+        or not np.isfinite(event_points).all()
+        or event_valid.shape != (sample_count,)
+    ):
+        raise ValueError("event quality stream shape mismatch")
+    event_values["contact_point_w"] = event_points[onset]
+    event_values["contact_quality_valid"] = bool(event_valid[onset])
+    event_time = np.asarray(
+        event.get("tracker_first_contact_time_s"), dtype=float
+    )
+    if event_time.shape != (sample_count,) or not np.isfinite(event_time).all():
+        raise ValueError("event quality stream shape mismatch")
+    first_time = float(first.get("first_contact_time_s", np.nan))
+    if not np.isfinite(first_time) or not np.isclose(
+        event_time[onset], first_time, rtol=0.0, atol=1e-12
+    ):
+        raise ValueError("quality event/snapshot mismatch for first_contact_time_s")
+    expected = {
+        "contact_point_w": recomputed["point"],
+        "contact_error_m": recomputed["error"],
+        "contact_quality": recomputed["quality"],
+        "contact_quality_valid": recomputed["valid"],
+        "contact_normal_axiality": recomputed["normal_axiality"],
+    }
+    for key, expected_value in expected.items():
+        first_value = first.get(key)
+        event_value = event_values[key]
+        if isinstance(expected_value, np.ndarray):
+            matches_recomputed = np.allclose(
+                np.asarray(first_value, dtype=float),
+                expected_value,
+                rtol=0.0,
+                atol=1e-9,
+            )
+            matches_event = np.allclose(
+                np.asarray(event_value, dtype=float),
+                np.asarray(first_value, dtype=float),
+                rtol=0.0,
+                atol=1e-9,
+            )
+        elif isinstance(expected_value, bool):
+            matches_recomputed = first_value is expected_value
+            matches_event = event_value is first_value
+        else:
+            matches_recomputed = np.isclose(
+                float(first_value), expected_value, rtol=0.0, atol=1e-9
+            )
+            matches_event = np.isclose(
+                float(event_value), float(first_value), rtol=0.0, atol=1e-9
+            )
+        if not matches_recomputed:
+            raise ValueError(f"quality snapshot differs from recomputed {key}")
+        if not matches_event:
+            raise ValueError(f"quality event/snapshot mismatch for {key}")
+    return recomputed
+
+
 def analyze_quality_episode(
     trace: Mapping,
     *,
@@ -446,10 +840,12 @@ def analyze_quality_episode(
     first = trace.get("first_strike", {})
     event = trace.get("event_trace", {})
     required = (
+        "contact_error_m",
         "contact_quality",
         "contact_quality_valid",
         "contact_quality_overflow",
         "contact_point_w",
+        "first_contact_time_s",
         "contact_normal_axiality",
     )
     missing = [key for key in required if key not in first]
@@ -474,36 +870,28 @@ def analyze_quality_episode(
     dt_s = float(trace.get("physics_dt_s", 0.0))
     onset_raw = first.get("accepted_onset_index")
     onset = None if onset_raw is None else int(onset_raw)
-    quality = 0.0
+    if onset is not None and (onset < 0 or onset >= contact.size):
+        raise ValueError("quality onset index is malformed")
+    snapshot = _quality_snapshot_from_raw_slots(
+        physical,
+        event,
+        first,
+        onset=onset,
+        sample_count=contact.size,
+        nail_geometry=nail_geometry,
+    )
+    quality = float(snapshot["quality"])
     plane_x = plane_y = radial = 0.0
+    if snapshot["valid"]:
+        plane_x, plane_y, radial = _nail_plane(
+            np.asarray(snapshot["point"], dtype=float), nail_geometry
+        )
     axial_speed = lateral_speed = angle = 0.0
-    normal_axiality = 0.0
+    normal_axiality = float(snapshot["normal_axiality"])
     dwell_ms = 0.0
     recontacts = 0
     depth_gain = 0.0
     if onset is not None:
-        if onset < 0 or onset >= contact.size:
-            raise ValueError("quality onset index is malformed")
-        if bool(first["contact_quality_overflow"]):
-            raise ValueError("quality contact snapshot overflow")
-        point = np.asarray(first["contact_point_w"], dtype=float)
-        first_scalars = np.asarray(
-            [first["contact_quality"], first["contact_normal_axiality"]],
-            dtype=float,
-        )
-        if point.shape != (3,) or not np.isfinite(point).all() or not np.isfinite(
-            first_scalars
-        ).all():
-            raise ValueError("quality snapshot contains nonfinite values")
-        valid = bool(first["contact_quality_valid"])
-        if force[onset] > 0.0 and valid:
-            quality = float(first["contact_quality"])
-            if not 0.0 <= quality <= 1.0:
-                raise ValueError("quality value is outside [0, 1]")
-            plane_x, plane_y, radial = _nail_plane(point, nail_geometry)
-            normal_axiality = float(first["contact_normal_axiality"])
-        elif valid:
-            raise ValueError("quality snapshot is valid with zero normal force")
         if onset > 0:
             velocity = (position[onset] - position[onset - 1]) / dt_s
             axis = np.asarray(nail_geometry["nail_axis"], dtype=float)
@@ -540,6 +928,7 @@ def analyze_quality_episode(
         raise ValueError("lambda/cap values are nonfinite or malformed")
     return {
         "first_contact_quality_sampled": quality,
+        "first_contact_quality_valid_sampled": bool(snapshot["valid"]),
         "first_contact_radial_error_m_sampled": radial,
         "contact_plane_x_m_sampled": plane_x,
         "contact_plane_y_m_sampled": plane_y,
@@ -558,8 +947,12 @@ def analyze_quality_episode(
         "contact_dwell_ms_sampled": dwell_ms,
         "recontact_count_sampled": recontacts,
         "raw_delivered_impulse_n_s_sampled": float(
-            trace.get("episode_delivered_accumulator_n_s", 0.0)
+            first.get("delivered_n_s", 0.0)
         ),
+        "episode_id": str(trace.get("episode_id", "")),
+        "env_id": int(trace.get("env_id", -1)),
+        "episode_ordinal": int(trace.get("episode_ordinal", -1)),
+        "nail_asset_sha256": str(nail_geometry.get("source_sha256", "")),
         "peak_qvel_rad_s_sampled": float(base["qvel_max_abs_rad_s"]),
         "qvel_rail_exceeded_sampled": bool(base["qvel_violation"]),
         "qvel_nonfinite_sampled": bool(base["qvel_nonfinite"]),
@@ -631,6 +1024,18 @@ def aggregate_quality_episode_metrics(
         "worst_lambda_cap_ratio_max_sampled": max(
             float(row["worst_lambda_cap_ratio_sampled"]) for row in episodes
         ),
+        "valid_contact_coordinates_sampled": [
+            {
+                "episode_id": str(row["episode_id"]),
+                "env_id": int(row["env_id"]),
+                "episode_ordinal": int(row["episode_ordinal"]),
+                "nail_asset_sha256": str(row["nail_asset_sha256"]),
+                "x_m": float(row["contact_plane_x_m_sampled"]),
+                "y_m": float(row["contact_plane_y_m_sampled"]),
+            }
+            for row in episodes
+            if bool(row["first_contact_quality_valid_sampled"])
+        ],
     }
     lambdas = np.asarray(
         [row["lambda_per_joint_n_m_s_sampled"] for row in episodes], dtype=float
@@ -668,11 +1073,40 @@ def _endpoint(
     treatment_values = _values(by_arm, treatment, key)
     control_values = _values(by_arm, control, key)
     return {
+        "arm_means": {
+            "treatment": float(treatment_values.mean()),
+            "control": float(control_values.mean()),
+        },
         "paired_differences": (treatment_values - control_values).tolist(),
         "paired_bootstrap_difference": _paired_bootstrap_difference(
             treatment_values, control_values
         ),
     }
+
+
+def _practical_ratio(
+    treatment_values: np.ndarray, control_values: np.ndarray
+) -> dict:
+    common = {
+        "arm_means": {
+            "treatment": float(treatment_values.mean()),
+            "control": float(control_values.mean()),
+        },
+        "paired_differences": (treatment_values - control_values).tolist(),
+    }
+    try:
+        return {
+            "valid": True,
+            **paired_bootstrap_ratio(treatment_values, control_values),
+            **common,
+        }
+    except ValueError as error:
+        return {
+            "valid": False,
+            "reason": str(error),
+            "one_sided_95_lower": None,
+            **common,
+        }
 
 
 def _fq_min_practical_acceptance(
@@ -685,26 +1119,34 @@ def _fq_min_practical_acceptance(
         by_arm, "FQ-min", "first_window_useful_speed_mean_sampled"
     )
     f8_speed = _values(by_arm, "F8", "first_window_useful_speed_mean_sampled")
-    speed = paired_bootstrap_ratio(fq_speed, f8_speed)
+    speed = _practical_ratio(fq_speed, f8_speed)
     fq_depth = _values(
         by_arm, "FQ-min", "event_window_depth_gain_mean_sampled"
     )
     f8_depth = _values(
         by_arm, "F8", "event_window_depth_gain_mean_sampled"
     )
-    depth = paired_bootstrap_ratio(fq_depth, f8_depth)
+    depth = _practical_ratio(fq_depth, f8_depth)
     fq_first = _values(
         by_arm, "FQ-min", "first_window_success_rate_sampled"
     )
     f8_first = _values(by_arm, "F8", "first_window_success_rate_sampled")
     fq_overall = _values(by_arm, "FQ-min", "overall_success_rate_sampled")
     f8_overall = _values(by_arm, "F8", "overall_success_rate_sampled")
+    first_success = _endpoint(
+        by_arm, "FQ-min", "F8", "first_window_success_rate_sampled"
+    )
+    overall_success = _endpoint(
+        by_arm, "FQ-min", "F8", "overall_success_rate_sampled"
+    )
     quality_gain = float(np.mean(quality["paired_differences"]))
     inclusive_tolerance = 1e-12
     gates = {
         "quality_gain_at_least_0_10":
             quality_gain >= 0.10 - inclusive_tolerance,
-        "useful_speed_ratio_lower_gt_0_95": speed["one_sided_95_lower"] > 0.95,
+        "useful_speed_ratio_lower_gt_0_95": bool(
+            speed["valid"] and speed["one_sided_95_lower"] > 0.95
+        ),
         "first_window_success_at_least_0_90":
             float(fq_first.mean()) >= 0.90 - inclusive_tolerance,
         "first_window_success_drop_at_most_0_05":
@@ -715,27 +1157,23 @@ def _fq_min_practical_acceptance(
         "overall_success_drop_at_most_0_05":
             float((fq_overall - f8_overall).mean())
             >= -0.05 - inclusive_tolerance,
-        "depth_gain_ratio_lower_gt_0_90": depth["one_sided_95_lower"] > 0.90,
+        "depth_gain_ratio_lower_gt_0_90": bool(
+            depth["valid"] and depth["one_sided_95_lower"] > 0.90
+        ),
         "all_provenance_safety_sentinel_gates": bool(safety_gates_pass),
     }
     return {
         "quality_gain": quality,
-        "useful_speed_ratio": {
-            **speed,
-            "paired_differences": (fq_speed - f8_speed).tolist(),
-        },
+        "useful_speed_ratio": speed,
         "first_window_success": {
+            **first_success,
             "fq_min_mean": float(fq_first.mean()),
-            "paired_differences": (fq_first - f8_first).tolist(),
         },
         "overall_success": {
+            **overall_success,
             "fq_min_mean": float(fq_overall.mean()),
-            "paired_differences": (fq_overall - f8_overall).tolist(),
         },
-        "depth_gain_ratio": {
-            **depth,
-            "paired_differences": (fq_depth - f8_depth).tolist(),
-        },
+        "depth_gain_ratio": depth,
         "gates": gates,
         "passed": all(gates.values()),
     }
@@ -837,12 +1275,27 @@ def analyze_quality_campaign(
         for item in manifest
     }
     try:
+        raw_payloads = []
         for row in rows:
             payload = legacy._sampled_payload_from_bytes(
                 Path(row["sampled_trace_path"]).read_bytes()
             )
             if payload.get("schema_version") != 3:
                 return _invalid("quality campaign artifacts require schema v3")
+            raw_payloads.append(payload)
+        common_nail_geometry = _validate_common_nail_geometry(
+            [payload["nail_geometry"] for payload in raw_payloads]
+        )
+        identity_reasons = []
+        for row, payload in zip(rows, raw_payloads, strict=True):
+            raw = str(row["treatment"])
+            label = "FQ-min" if raw == "FQ" else raw
+            accepted = manifest_index[(label, int(row["training_seed"]))]
+            identity_reasons.extend(
+                _quality_payload_identity_reasons(row, accepted, payload)
+            )
+        if identity_reasons:
+            return _invalid(*identity_reasons)
         payloads = list(legacy._verified_sampled_artifact_payloads(rows))
     except Exception as error:
         return _invalid(str(error))
@@ -853,26 +1306,6 @@ def analyze_quality_campaign(
         raw = str(row["treatment"])
         label = "FQ-min" if raw == "FQ" else raw
         accepted = manifest_index[(label, int(row["training_seed"]))]
-        strict = payload.get("evaluation_contract", {}).get(
-            "strict_config_identities", {}
-        )
-        for key in ("training_config_sha256", "evaluation_config_sha256"):
-            if strict.get(key) != accepted.get(key):
-                invalid_reasons.append(
-                    f"{label}/seed{row['training_seed']}: strict {key} mismatch"
-                )
-        if strict.get("training_policy_observation_sha256") != strict.get(
-            "evaluation_policy_observation_sha256"
-        ):
-            invalid_reasons.append(
-                f"{label}/seed{row['training_seed']}: observation identity mismatch"
-            )
-        if strict.get("training_treatment_reward_sha256") != strict.get(
-            "evaluation_treatment_reward_sha256"
-        ):
-            invalid_reasons.append(
-                f"{label}/seed{row['training_seed']}: reward identity mismatch"
-            )
         if tuple(payload.get("impulse_limits_n_m_s", ())) != tuple(IMPULSE_LIMITS):
             invalid_reasons.append(
                 f"{label}/seed{row['training_seed']}: impulse cap mismatch"
@@ -897,6 +1330,15 @@ def analyze_quality_campaign(
         aggregate = aggregate_quality_episode_metrics(
             metrics, expected_episode_count=512
         )
+        aggregate["valid_contact_coordinates_sampled"] = [
+            {
+                "treatment": label,
+                "raw_treatment": raw,
+                "training_seed": int(row["training_seed"]),
+                **coordinate,
+            }
+            for coordinate in aggregate["valid_contact_coordinates_sampled"]
+        ]
         if aggregate["qvel_nonfinite_rate_sampled"] != 0.0:
             invalid_reasons.append(
                 f"{label}/seed{row['training_seed']}: nonfinite qvel"
@@ -923,12 +1365,20 @@ def analyze_quality_campaign(
         )
         control_values = _values(by_arm, control, "first_contact_quality_sampled")
         exact = legacy.exact_seed_tests(treatment_values, control_values)
+        interval = _paired_bootstrap_difference(
+            treatment_values, control_values
+        )
         raw_mwu[name] = exact["mwu_two_sided_exact_p"]
         primary[name] = {
             "treatment": treatment,
             "control": control,
             "endpoint": "first_contact_quality_sampled",
+            "arm_means": {
+                "treatment": float(treatment_values.mean()),
+                "control": float(control_values.mean()),
+            },
             "paired_differences": (treatment_values - control_values).tolist(),
+            "paired_bootstrap_difference": interval,
             "mann_whitney": exact,
             "paired_sign_flip": exact_paired_sign_flip(
                 treatment_values, control_values
@@ -946,10 +1396,17 @@ def analyze_quality_campaign(
         for item in manifest
         for sentinel in SENTINELS
     )
+    valid_contact_coordinates = [
+        coordinate
+        for aggregate in seed_aggregates
+        for coordinate in aggregate["valid_contact_coordinates_sampled"]
+    ]
     return {
         "valid": True,
         "campaign": CAMPAIGN_NAME,
         "seed_aggregates": seed_aggregates,
+        "valid_contact_coordinates": valid_contact_coordinates,
+        "nail_geometry": common_nail_geometry,
         "primary_contrasts": primary,
         "holm_mann_whitney_family": holm,
         "fq_min_practical_acceptance": _fq_min_practical_acceptance(

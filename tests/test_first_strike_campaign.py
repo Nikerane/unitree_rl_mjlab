@@ -509,7 +509,14 @@ def test_legacy_artifact_reader_accepts_schema_v3_physical_digest(tmp_path):
     with np.load(source, allow_pickle=False) as saved:
         payload = json.loads(str(saved["payload_json"]))
     payload["schema_version"] = 3
-    payload["evaluation_contract"]["strict_config_identities"] = {}
+    payload["evaluation_contract"]["strict_config_identities"] = {
+        "training_config_sha256": "1" * 64,
+        "evaluation_config_sha256": "2" * 64,
+        "training_policy_observation_sha256": "3" * 64,
+        "evaluation_policy_observation_sha256": "3" * 64,
+        "training_treatment_reward_sha256": "4" * 64,
+        "evaluation_treatment_reward_sha256": "4" * 64,
+    }
     for trace in payload["episodes"]:
         started = bool(trace["first_strike"]["started"])
         contact_point = [0.5, 0.0, 0.032] if started else [0.0, 0.0, 0.0]
@@ -569,6 +576,22 @@ def test_legacy_artifact_reader_accepts_schema_v3_physical_digest(tmp_path):
     assert first_strike_campaign._sampled_artifact_reasons(
         row, "schema-v3"
     ) == []
+
+    payload["evaluation_contract"]["strict_config_identities"] = {}
+    bad_payload = dict(payload)
+    bad_payload.pop("payload_digest")
+    payload["payload_digest"] = _literal_digest(bad_payload)
+    bad_path = tmp_path / "schema-v3-missing-strict.npz"
+    np.savez_compressed(
+        bad_path,
+        payload_json=np.asarray(
+            json.dumps(payload, sort_keys=True, allow_nan=False), dtype=np.str_
+        ),
+    )
+    loaded = first_strike_campaign._load_and_recompute_sampled_artifact(
+        bad_path.read_bytes(), hashlib.sha256(bad_path.read_bytes()).hexdigest()
+    )
+    assert any("six strict" in reason for reason in loaded[-1])
 
 
 def test_persistence_rejects_nonfinite_quality_geometry(tmp_path):

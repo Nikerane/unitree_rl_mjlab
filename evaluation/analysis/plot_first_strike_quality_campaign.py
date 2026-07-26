@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -13,11 +12,9 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 import numpy as np
 
-from evaluation.analysis import first_strike_campaign as legacy
 from evaluation.analysis.first_strike_quality_campaign import (
     LABELS,
     analyze_quality_campaign,
-    analyze_quality_episode,
 )
 
 
@@ -190,30 +187,18 @@ def render_quality_figures(
             "cannot render invalid quality campaign: "
             + "; ".join(analysis["invalidation_reasons"])
         )
-    contacts: dict[str, list[list[float]]] = defaultdict(list)
-    nail_radius = None
-    for row in rows:
-        payload = legacy._sampled_payload_from_bytes(
-            Path(str(row["sampled_trace_path"])).read_bytes()
-        )
-        label = "FQ-min" if row["treatment"] == "FQ" else str(row["treatment"])
-        geometry = payload["nail_geometry"]
-        nail_radius = float(geometry["nail_radius_m"])
-        for trace in payload["episodes"]:
-            metrics = analyze_quality_episode(
-                trace,
-                nail_geometry=geometry,
-                impulse_limits_n_m_s=payload["impulse_limits_n_m_s"],
-            )
-            if trace["first_strike"]["accepted_onset_index"] is not None:
-                contacts[label].append(
-                    [
-                        metrics["contact_plane_x_m_sampled"],
-                        metrics["contact_plane_y_m_sampled"],
-                    ]
-                )
-    if nail_radius is None:
-        raise ValueError("campaign contains no nail geometry")
+    contacts = {
+        label: np.asarray(
+            [
+                [coordinate["x_m"], coordinate["y_m"]]
+                for coordinate in analysis["valid_contact_coordinates"]
+                if coordinate["treatment"] == label
+            ],
+            dtype=float,
+        ).reshape(-1, 2)
+        for label in LABELS
+    }
+    nail_radius = float(analysis["nail_geometry"]["nail_radius_m"])
 
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
@@ -221,7 +206,7 @@ def render_quality_figures(
     contact_path = output / "aggregate_nail_plane_contact_map.png"
     paired = _build_paired_seed_effects(analysis)
     contact = build_aggregate_nail_plane_contact_map(
-        {label: np.asarray(values) for label, values in contacts.items()},
+        contacts,
         nail_radius_m=nail_radius,
     )
     paired.savefig(paired_path, dpi=180, bbox_inches="tight")
