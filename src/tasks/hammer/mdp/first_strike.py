@@ -41,20 +41,27 @@ class FirstStrikeEventTracker(ManagerTermBase):
     params = cfg.params
     self._contact_sensor = env.scene[params["contact_sensor_name"]]
     self._impulse_sensor = env.scene[params["impulse_sensor_name"]]
-    self._quality_sensor = env.scene[params["quality_sensor_name"]]
+    quality_sensor_name = params.get("quality_sensor_name")
+    self._quality_sensor = (
+      None if quality_sensor_name is None else env.scene[quality_sensor_name]
+    )
     self._robot = env.scene[params["robot_cfg"].name]
     self._nail = env.scene[params["nail_cfg"].name]
     self._site_ids = params["robot_cfg"].site_ids
     self._joint_ids = params["nail_cfg"].joint_ids
     self._nail_site_ids = params["nail_cfg"].site_ids
-    self._quality_num_slots = int(self._quality_sensor.cfg.num_slots)
-    nail_head = env.sim.mj_model.geom("nail_block/nail_head")
-    self._nail_radius_m = float(nail_head.size[0])
-    if not self._nail_radius_m > 0.0:
-      raise ValueError(
-        "compiled nail_block/nail_head radius must be positive, got "
-        f"{self._nail_radius_m}"
-      )
+    if self._quality_sensor is not None:
+      self._quality_num_slots = int(self._quality_sensor.cfg.num_slots)
+      nail_head = env.sim.mj_model.geom("nail_block/nail_head")
+      self._nail_radius_m = float(nail_head.size[0])
+      if not self._nail_radius_m > 0.0:
+        raise ValueError(
+          "compiled nail_block/nail_head radius must be positive, got "
+          f"{self._nail_radius_m}"
+        )
+    else:
+      self._quality_num_slots = 0
+      self._nail_radius_m = 0.0
     self._axis = torch.tensor(
       params.get("axis", (0.0, 0.0, -1.0)), device=env.device, dtype=torch.float32
     )
@@ -251,68 +258,69 @@ class FirstStrikeEventTracker(ManagerTermBase):
       self._first_contact_time_s,
     )
 
-    quality_data = self._quality_sensor.data
-    point_w, error_m, quality, quality_valid, quality_overflow = (
-      contact_point_quality(
-        found=quality_data.found,
-        force_contact=quality_data.force,
-        position_w=quality_data.pos,
-        nail_top_w=nail_top,
-        nail_axis_w=self._axis,
-        nail_radius_m=self._nail_radius_m,
-        num_slots=self._quality_num_slots,
+    if self._quality_sensor is not None:
+      quality_data = self._quality_sensor.data
+      point_w, error_m, quality, quality_valid, quality_overflow = (
+        contact_point_quality(
+          found=quality_data.found,
+          force_contact=quality_data.force,
+          position_w=quality_data.pos,
+          nail_top_w=nail_top,
+          nail_axis_w=self._axis,
+          nail_radius_m=self._nail_radius_m,
+          num_slots=self._quality_num_slots,
+        )
       )
-    )
-    self._contact_point_w = torch.where(
-      onset.unsqueeze(-1), point_w, self._contact_point_w
-    )
-    self._contact_error_m = torch.where(
-      onset, error_m, self._contact_error_m
-    )
-    self._contact_quality = torch.where(onset, quality, self._contact_quality)
-    self._contact_quality_valid = torch.where(
-      onset, quality_valid, self._contact_quality_valid
-    )
-    self._contact_quality_overflow = torch.where(
-      onset, quality_overflow, self._contact_quality_overflow
-    )
+      self._contact_point_w = torch.where(
+        onset.unsqueeze(-1), point_w, self._contact_point_w
+      )
+      self._contact_error_m = torch.where(
+        onset, error_m, self._contact_error_m
+      )
+      self._contact_quality = torch.where(onset, quality, self._contact_quality)
+      self._contact_quality_valid = torch.where(
+        onset, quality_valid, self._contact_quality_valid
+      )
+      self._contact_quality_overflow = torch.where(
+        onset, quality_overflow, self._contact_quality_overflow
+      )
 
-    normal_weights = torch.where(
-      quality_data.found > 0,
-      quality_data.force[..., 0].clamp_min(0.0),
-      torch.zeros_like(quality_data.found),
-    )
-    normal_finite = (
-      torch.isfinite(quality_data.normal).all(dim=(1, 2))
-      & torch.isfinite(normal_weights).all(dim=1)
-    )
-    safe_weights = torch.where(
-      torch.isfinite(normal_weights),
-      normal_weights,
-      torch.zeros_like(normal_weights),
-    )
-    safe_normals = torch.where(
-      torch.isfinite(quality_data.normal),
-      quality_data.normal,
-      torch.zeros_like(quality_data.normal),
-    )
-    weighted_normal = (
-      safe_normals * safe_weights.unsqueeze(-1)
-    ).sum(dim=1)
-    normal_norm = torch.linalg.vector_norm(
-      weighted_normal, dim=-1, keepdim=True
-    )
-    unit_normal = weighted_normal / torch.where(
-      normal_norm > 0.0, normal_norm, torch.ones_like(normal_norm)
-    )
-    axiality = (unit_normal * self._axis).sum(dim=-1).clamp(0.0, 1.0)
-    axiality_valid = quality_valid & normal_finite & (normal_norm.squeeze(-1) > 0)
-    axiality = torch.where(
-      axiality_valid, axiality, torch.zeros_like(axiality)
-    )
-    self._contact_normal_axiality = torch.where(
-      onset, axiality, self._contact_normal_axiality
-    )
+      normal_weights = torch.where(
+        quality_data.found > 0,
+        quality_data.force[..., 0].clamp_min(0.0),
+        torch.zeros_like(quality_data.found),
+      )
+      normal_finite = (
+        torch.isfinite(quality_data.normal).all(dim=(1, 2))
+        & torch.isfinite(normal_weights).all(dim=1)
+      )
+      safe_weights = torch.where(
+        torch.isfinite(normal_weights),
+        normal_weights,
+        torch.zeros_like(normal_weights),
+      )
+      safe_normals = torch.where(
+        torch.isfinite(quality_data.normal),
+        quality_data.normal,
+        torch.zeros_like(quality_data.normal),
+      )
+      weighted_normal = (
+        safe_normals * safe_weights.unsqueeze(-1)
+      ).sum(dim=1)
+      normal_norm = torch.linalg.vector_norm(
+        weighted_normal, dim=-1, keepdim=True
+      )
+      unit_normal = weighted_normal / torch.where(
+        normal_norm > 0.0, normal_norm, torch.ones_like(normal_norm)
+      )
+      axiality = (unit_normal * self._axis).sum(dim=-1).clamp(0.0, 1.0)
+      axiality_valid = quality_valid & normal_finite & (normal_norm.squeeze(-1) > 0)
+      axiality = torch.where(
+        axiality_valid, axiality, torch.zeros_like(axiality)
+      )
+      self._contact_normal_axiality = torch.where(
+        onset, axiality, self._contact_normal_axiality
+      )
 
     onset_peak = torch.maximum(self._prev_depth, depth)
     self._peak_depth = torch.where(onset, onset_peak, self._peak_depth)

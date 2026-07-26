@@ -41,6 +41,8 @@ from src.tasks.hammer.mdp.rewards import (
     DeliveredImpulseTerm,
     FirstStrikeDeliveredRewardTerm,
     FirstStrikeImpactRewardTerm,
+    FirstStrikeQualityDeliveredRewardTerm,
+    FirstStrikeQualityImpactRewardTerm,
     FirstStrikeLegacyDeliveredRewardTerm,
     FirstStrikeLegacyImpactRewardTerm,
     ImpactProgressTerm,
@@ -434,6 +436,26 @@ class TestArmCompositionGuards:
         with pytest.raises(ValueError, match="event_linear.*event_correct"):
             z1_hammer_env_cfg(cat_impulse=True, event_linear=True)
 
+    def test_event_quality_requires_event_correct_and_instrumentation(self):
+        with pytest.raises(ValueError, match="event_quality.*event_correct"):
+            z1_hammer_env_cfg(
+                cat_impulse=True,
+                event_quality=True,
+                quality_instrumentation=True,
+            )
+        with pytest.raises(ValueError, match="event_quality.*quality_instrumentation"):
+            z1_hammer_env_cfg(cat_impulse=True, event_correct=True, event_quality=True)
+
+    def test_event_quality_and_linear_are_separate_treatments(self):
+        with pytest.raises(ValueError, match="event_quality.*event_linear"):
+            z1_hammer_env_cfg(
+                cat_impulse=True,
+                event_correct=True,
+                event_linear=True,
+                event_quality=True,
+                quality_instrumentation=True,
+            )
+
     def test_first_strike_legacy_rejects_event_composition(self):
         with pytest.raises(ValueError, match="first_strike_legacy.*event_correct"):
             z1_hammer_env_cfg(
@@ -521,6 +543,37 @@ class TestFirstStrikeEventArm:
         ]
         assert event_gains == legacy_gains
 
+    def test_quality_instrumentation_is_passive_for_event_reward_and_policy_config(self):
+        base = z1_hammer_env_cfg(
+            cat_impulse=True, event_correct=True, event_linear=True
+        )
+        instrumented = z1_hammer_env_cfg(
+            cat_impulse=True,
+            event_correct=True,
+            event_linear=True,
+            quality_instrumentation=True,
+        )
+
+        assert "hammer_nail_quality" not in {sensor.name for sensor in base.scene.sensors}
+        assert "quality_sensor_name" not in base.metrics["first_strike"].params
+        assert "hammer_nail_quality" in {sensor.name for sensor in instrumented.scene.sensors}
+        assert (
+            instrumented.metrics["first_strike"].params["quality_sensor_name"]
+            == "hammer_nail_quality"
+        )
+        assert repr(base.actions) == repr(instrumented.actions)
+        assert [
+            (act.stiffness, act.damping, act.effort_limit, act.armature)
+            for act in base.scene.entities["robot"].articulation.actuators
+        ] == [
+            (act.stiffness, act.damping, act.effort_limit, act.armature)
+            for act in instrumented.scene.entities["robot"].articulation.actuators
+        ]
+        for reward_name in base.rewards:
+            assert base.rewards[reward_name].func is instrumented.rewards[reward_name].func
+            assert base.rewards[reward_name].weight == instrumented.rewards[reward_name].weight
+            assert base.rewards[reward_name].params == instrumented.rewards[reward_name].params
+
     def test_registered_linear_event_task_changes_only_delivered_payout_shape(self):
         saturated = load_env_cfg("Unitree-Z1-Hammer-CaT-Impulse-Event")
         task_id = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear"
@@ -565,6 +618,70 @@ class TestFirstStrikeEventArm:
             for act in saturated.scene.entities["robot"].articulation.actuators
         ]
         assert linear_gains == saturated_gains
+
+    def test_quality_treatments_change_only_the_preregistered_reward_surface(self):
+        f8 = load_env_cfg("Unitree-Z1-Hammer-CaT-Impulse-Event-Linear")
+        f0 = load_env_cfg("Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0")
+        d0 = load_env_cfg("Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0")
+        fq = load_env_cfg("Unitree-Z1-Hammer-CaT-Impulse-Event-Quality")
+
+        def signature(cfg):
+            return {
+                "rewards": {
+                    name: (
+                        term.func,
+                        term.weight,
+                        tuple(sorted(term.params.items(), key=lambda item: item[0])),
+                    )
+                    for name, term in cfg.rewards.items()
+                },
+                "actions": repr(cfg.actions),
+                "actuators": [
+                    (act.stiffness, act.damping, act.effort_limit, act.armature)
+                    for act in cfg.scene.entities["robot"].articulation.actuators
+                ],
+                "tracker": repr(cfg.metrics["first_strike"]),
+                "sensors": [
+                    (sensor.name, sensor.fields, sensor.reduce, sensor.num_slots)
+                    for sensor in cfg.scene.sensors
+                ],
+                "cat": tuple(sorted(cfg.metrics["cat_soft"].params.items())),
+            }
+
+        assert {
+            "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0",
+            "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0",
+            "Unitree-Z1-Hammer-CaT-Impulse-Event-Quality",
+        }.issubset(set(list_tasks()))
+        assert f0.rewards["impact_progress"].weight == pytest.approx(0.0)
+        assert f0.rewards["delivered_impulse"].weight == pytest.approx(2.0)
+        assert d0.rewards["impact_progress"].weight == pytest.approx(8.0)
+        assert d0.rewards["delivered_impulse"].weight == pytest.approx(0.0)
+        assert fq.rewards["impact_progress"].weight == pytest.approx(8.0)
+        assert fq.rewards["delivered_impulse"].weight == pytest.approx(2.0)
+        assert fq.rewards["impact_progress"].func is FirstStrikeQualityImpactRewardTerm
+        assert (
+            fq.rewards["delivered_impulse"].func
+            is FirstStrikeQualityDeliveredRewardTerm
+        )
+
+        f8_sig = signature(f8)
+        f0_sig = signature(f0)
+        d0_sig = signature(d0)
+        fq_sig = signature(fq)
+        assert f0_sig["actions"] == d0_sig["actions"] == fq_sig["actions"] == f8_sig["actions"]
+        assert f0_sig["actuators"] == d0_sig["actuators"] == fq_sig["actuators"] == f8_sig["actuators"]
+        assert f0_sig["tracker"] == d0_sig["tracker"] == f8_sig["tracker"]
+        assert f0_sig["cat"] == d0_sig["cat"] == fq_sig["cat"] == f8_sig["cat"]
+        assert f0_sig["sensors"] == d0_sig["sensors"] == f8_sig["sensors"]
+        assert fq_sig["tracker"] != f8_sig["tracker"]
+        assert fq_sig["sensors"] != f8_sig["sensors"]
+        assert f8.metrics["cat_soft"].params["imp_max_p"] == 0.0
+
+        for altered, reward_name in ((f0_sig, "impact_progress"), (d0_sig, "delivered_impulse")):
+            expected = dict(f8_sig["rewards"])
+            expected[reward_name] = altered["rewards"][reward_name]
+            assert altered["rewards"] == expected
 
     def test_registered_first_strike_legacy_task_keeps_legacy_readout(self):
         task_id = "Unitree-Z1-Hammer-CaT-Impulse-FirstStrike-Legacy"

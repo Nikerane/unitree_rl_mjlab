@@ -436,6 +436,54 @@ class FirstStrikeDeliveredRewardTerm(_FirstStrikeRewardTerm):
     return torch.where(pay, value, torch.zeros_like(value))
 
 
+class FirstStrikeQualityImpactRewardTerm(_FirstStrikeRewardTerm):
+  """Pay bounded first-strike speed only when its contact quality is valid."""
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    v_expected: float = 1.0,
+    **params,
+  ) -> torch.Tensor:
+    del params
+    if not (
+      v_expected > 0.0
+      and v_expected == v_expected
+      and v_expected != float("inf")
+    ):
+      raise ValueError(
+        "FirstStrikeQualityImpactRewardTerm: "
+        f"v_expected={v_expected} must be finite and > 0 (normalizer)."
+      )
+    tracker, pay = self._consume(env)
+    quality = tracker.contact_quality.clamp(0.0, 1.0)
+    value = quality * (tracker.v_precontact / v_expected).clamp(0.0, 1.0)
+    eligible = pay & tracker.contact_quality_valid
+    return torch.where(eligible, value, torch.zeros_like(value))
+
+
+class FirstStrikeQualityDeliveredRewardTerm(_FirstStrikeRewardTerm):
+  """Pay bounded first-window impulse only when its contact quality is valid."""
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    i_ref: float = 1.0,
+    **params,
+  ) -> torch.Tensor:
+    del params
+    if not (i_ref > 0.0 and i_ref == i_ref and i_ref != float("inf")):
+      raise ValueError(
+        "FirstStrikeQualityDeliveredRewardTerm: "
+        f"i_ref={i_ref} must be finite and > 0 (reward normalizer)."
+      )
+    tracker, pay = self._consume(env)
+    quality = tracker.contact_quality.clamp(0.0, 1.0)
+    value = quality * (tracker.delivered / i_ref).clamp(0.0, 1.0)
+    eligible = pay & tracker.contact_quality_valid
+    return torch.where(eligible, value, torch.zeros_like(value))
+
+
 class ImitationPriorTerm(ManagerTermBase):
   """Weak ante-impact tracking prior (plan T2): exp(-||p_head - p*(phi)||^2 / sigma^2) * 1[pre-contact].
 

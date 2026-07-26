@@ -4,6 +4,11 @@ import pytest
 import torch
 
 from src.tasks.hammer.mdp.contact_quality import contact_point_quality
+from src.tasks.hammer.mdp.first_strike import _ENV_FIRST_STRIKE_ATTR
+from src.tasks.hammer.mdp.rewards import (
+  FirstStrikeQualityDeliveredRewardTerm,
+  FirstStrikeQualityImpactRewardTerm,
+)
 
 
 NAIL_RADIUS_M = 0.012
@@ -171,3 +176,92 @@ def test_contact_slot_overflow_returns_zero_outputs_and_is_invalid():
   torch.testing.assert_close(quality, torch.zeros(1))
   assert valid.tolist() == [False]
   assert overflow.tolist() == [True]
+
+
+def _quality_reward_env(
+  *,
+  finalized: bool = True,
+  productive: bool = True,
+  quality: float = 0.25,
+  quality_valid: bool = True,
+  v_precontact: float = 3.0,
+  delivered: float = 10.0,
+):
+  env = type("QualityRewardEnv", (), {"num_envs": 1, "device": "cpu"})()
+  tracker = type(
+    "QualityRewardTracker",
+    (),
+    {
+      "finalized": torch.tensor([finalized]),
+      "productive": torch.tensor([productive]),
+      "contact_quality": torch.tensor([quality]),
+      "contact_quality_valid": torch.tensor([quality_valid]),
+      "v_precontact": torch.tensor([v_precontact]),
+      "delivered": torch.tensor([delivered]),
+    },
+  )()
+  setattr(env, _ENV_FIRST_STRIKE_ATTR, tracker)
+  return env, tracker
+
+
+@pytest.mark.parametrize(
+  ("term_cls", "normalizer", "argument"),
+  [
+    (FirstStrikeQualityImpactRewardTerm, 1.0, "v_expected"),
+    (FirstStrikeQualityDeliveredRewardTerm, 0.3088, "i_ref"),
+  ],
+)
+def test_quality_reader_pays_bounded_contact_quality_once(
+  term_cls, normalizer, argument
+):
+  """Removing quality multiplication or saturation must fail this payout surface."""
+  env, _ = _quality_reward_env()
+  term = term_cls(cfg=None, env=env)
+
+  assert term(env, **{argument: normalizer}).item() == pytest.approx(0.25)
+  assert term(env, **{argument: normalizer}).item() == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize(
+  ("term_cls", "normalizer", "argument"),
+  [
+    (FirstStrikeQualityImpactRewardTerm, 1.0, "v_expected"),
+    (FirstStrikeQualityDeliveredRewardTerm, 0.3088, "i_ref"),
+  ],
+)
+@pytest.mark.parametrize(
+  "tracker_state",
+  [
+    {"quality_valid": False},
+    {"finalized": False},
+    {"productive": False},
+  ],
+)
+def test_quality_reader_rejects_invalid_unfinished_or_unproductive_event(
+  term_cls, normalizer, argument, tracker_state
+):
+  """A missing quality/contact/finalized productive event must pay no maximize reward."""
+  env, _ = _quality_reward_env(**tracker_state)
+  term = term_cls(cfg=None, env=env)
+
+  assert term(env, **{argument: normalizer}).item() == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize(
+  ("term_cls", "normalizer", "argument"),
+  [
+    (FirstStrikeQualityImpactRewardTerm, 1.0, "v_expected"),
+    (FirstStrikeQualityDeliveredRewardTerm, 0.3088, "i_ref"),
+  ],
+)
+@pytest.mark.parametrize("bad", [0.0, -1.0, float("inf"), float("nan")])
+def test_quality_reader_rejects_nonpositive_or_nonfinite_normalizer(
+  term_cls, normalizer, argument, bad
+):
+  """A bad normalizer must fail loudly rather than bypass boundedness."""
+  del normalizer
+  env, _ = _quality_reward_env()
+  term = term_cls(cfg=None, env=env)
+
+  with pytest.raises(ValueError):
+    term(env, **{argument: bad})

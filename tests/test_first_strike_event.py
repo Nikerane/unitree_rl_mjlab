@@ -46,7 +46,13 @@ def _vectors(value, batch: int, width: int) -> torch.Tensor:
   return tensor
 
 
-def _tracker(batch: int = 1, *, window: int = 25, progress_eps: float = 5e-4):
+def _tracker(
+  batch: int = 1,
+  *,
+  window: int = 25,
+  progress_eps: float = 5e-4,
+  quality_instrumentation: bool = True,
+):
   robot = SimpleNamespace(data=SimpleNamespace(site_pos_w=torch.zeros(batch, 1, 3)))
   nail = SimpleNamespace(
     data=SimpleNamespace(
@@ -70,24 +76,25 @@ def _tracker(batch: int = 1, *, window: int = 25, progress_eps: float = 5e-4):
     assert name == "nail_block/nail_head"
     return SimpleNamespace(size=(0.012,))
 
+  scene = {
+    "robot": robot,
+    "nail_block": nail,
+    "hammer_nail_contact": contact,
+    "hammer_nail_impulse": impulse,
+  }
+  if quality_instrumentation:
+    scene["hammer_nail_quality"] = quality
   env = SimpleNamespace(
     num_envs=batch,
     device="cpu",
     physics_dt=DT,
     sim=SimpleNamespace(mj_model=SimpleNamespace(geom=geom)),
-    scene={
-      "robot": robot,
-      "nail_block": nail,
-      "hammer_nail_contact": contact,
-      "hammer_nail_impulse": impulse,
-      "hammer_nail_quality": quality,
-    },
+    scene=scene,
   )
   cfg = SimpleNamespace(
     params={
       "contact_sensor_name": "hammer_nail_contact",
       "impulse_sensor_name": "hammer_nail_impulse",
-      "quality_sensor_name": "hammer_nail_quality",
       "robot_cfg": _ROBOT_CFG,
       "nail_cfg": _NAIL_CFG,
       "axis": (0.0, 0.0, -1.0),
@@ -95,6 +102,8 @@ def _tracker(batch: int = 1, *, window: int = 25, progress_eps: float = 5e-4):
       "progress_eps": progress_eps,
     }
   )
+  if quality_instrumentation:
+    cfg.params["quality_sensor_name"] = "hammer_nail_quality"
   tracker = FirstStrikeEventTracker(cfg=cfg, env=env)
   assert getattr(env, _ENV_FIRST_STRIKE_ATTR) is tracker
 
@@ -145,7 +154,12 @@ def _arm(step, *, head_z=(0.100, 0.096), depth=(0.001, 0.002)) -> None:
 
 
 def test_event_config_adds_dedicated_quality_sensor_without_changing_contact_shape():
-  cfg = z1_hammer_env_cfg(play=True, cat_impulse=True, event_correct=True)
+  cfg = z1_hammer_env_cfg(
+    play=True,
+    cat_impulse=True,
+    event_correct=True,
+    quality_instrumentation=True,
+  )
   sensors = {sensor.name: sensor for sensor in cfg.scene.sensors}
 
   contact = sensors["hammer_nail_contact"]
@@ -165,6 +179,22 @@ def test_event_config_adds_dedicated_quality_sensor_without_changing_contact_sha
     cfg.metrics["first_strike"].params["quality_sensor_name"]
     == "hammer_nail_quality"
   )
+
+
+def test_uninstrumented_tracker_preserves_event_semantics_without_quality_sensor():
+  """Removing passive geometry instrumentation must not disturb event credit."""
+  tracker, step = _tracker(window=1, quality_instrumentation=False)
+  _arm(step)
+  step(head_z=0.090, depth=0.003, contact_on=True, downward_force=10.0)
+
+  assert tracker.finalized[0]
+  assert tracker.productive[0]
+  assert tracker.v_precontact[0].item() > 0.0
+  assert tracker.delivered[0].item() > 0.0
+  torch.testing.assert_close(tracker.contact_quality, torch.zeros(1))
+  assert not tracker.contact_quality_valid[0]
+  assert not tracker.contact_quality_overflow[0]
+  torch.testing.assert_close(tracker.contact_normal_axiality, torch.zeros(1))
 
 
 def test_slot_probe_rejects_an_overflowing_next_larger_comparator():

@@ -139,6 +139,61 @@ register_mjlab_task(
     runner_cls=HammerOnPolicyRunner,
 )
 
+# F0 and D0 are fresh copies of F8 with exactly one maximize-term weight
+# removed.  They retain the linear event readers and fixed-impedance plant.
+_f0_env_cfg = z1_hammer_env_cfg(
+    cat_impulse=True, event_correct=True, event_linear=True
+)
+_f0_env_cfg.rewards["impact_progress"].weight = 0.0
+_f0_play_env_cfg = z1_hammer_env_cfg(
+    play=True, cat_impulse=True, event_correct=True, event_linear=True
+)
+_f0_play_env_cfg.rewards["impact_progress"].weight = 0.0
+register_mjlab_task(
+    task_id="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0",
+    env_cfg=_f0_env_cfg,
+    play_env_cfg=_f0_play_env_cfg,
+    rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+    runner_cls=HammerOnPolicyRunner,
+)
+
+_d0_env_cfg = z1_hammer_env_cfg(
+    cat_impulse=True, event_correct=True, event_linear=True
+)
+_d0_env_cfg.rewards["delivered_impulse"].weight = 0.0
+_d0_play_env_cfg = z1_hammer_env_cfg(
+    play=True, cat_impulse=True, event_correct=True, event_linear=True
+)
+_d0_play_env_cfg.rewards["delivered_impulse"].weight = 0.0
+register_mjlab_task(
+    task_id="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0",
+    env_cfg=_d0_env_cfg,
+    play_env_cfg=_d0_play_env_cfg,
+    rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+    runner_cls=HammerOnPolicyRunner,
+)
+
+# FQ replaces both raw linear maximize readers with bounded quality-conditioned
+# readers.  Its only added sensor is passive contact-quality instrumentation.
+register_mjlab_task(
+    task_id="Unitree-Z1-Hammer-CaT-Impulse-Event-Quality",
+    env_cfg=z1_hammer_env_cfg(
+        cat_impulse=True,
+        event_correct=True,
+        event_quality=True,
+        quality_instrumentation=True,
+    ),
+    play_env_cfg=z1_hammer_env_cfg(
+        play=True,
+        cat_impulse=True,
+        event_correct=True,
+        event_quality=True,
+        quality_instrumentation=True,
+    ),
+    rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+    runner_cls=HammerOnPolicyRunner,
+)
+
 # C0 IMPULSE + reference-guided arm: the -CaT-Impulse measurement arm (cat_impulse=True) PLUS the
 # weak-annealed ante-impact tracking prior r_imit (imitation=True) -- i.e. "reference-guided online
 # RL". The scripted SingleStrikeReference bootstraps the approach (r_imit weight 0.1 -> 0 by iter 250,

@@ -82,6 +82,8 @@ def z1_hammer_env_cfg(
   event_correct: bool = False,
   event_linear: bool = False,
   first_strike_legacy: bool = False,
+  event_quality: bool = False,
+  quality_instrumentation: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Create Z1 hammer-nail task configuration.
 
@@ -114,6 +116,18 @@ def z1_hammer_env_cfg(
     raise ValueError(
       "z1_hammer_env_cfg: event_linear requires event_correct=True; linear payout "
       "is defined only for the first-strike event reward."
+    )
+  if event_quality and not event_correct:
+    raise ValueError(
+      "z1_hammer_env_cfg: event_quality requires event_correct=True"
+    )
+  if event_quality and not quality_instrumentation:
+    raise ValueError(
+      "z1_hammer_env_cfg: event_quality requires quality_instrumentation=True"
+    )
+  if event_quality and event_linear:
+    raise ValueError(
+      "z1_hammer_env_cfg: event_quality and event_linear are separate treatments"
     )
   if first_strike_legacy and not cat_impulse:
     raise ValueError(
@@ -279,43 +293,47 @@ def z1_hammer_env_cfg(
     cfg.scene.sensors = (cfg.scene.sensors or ()) + (hammer_nail_impulse,)
 
     if event_correct or first_strike_legacy:
-      # Dedicated multi-slot first-contact geometry sensor. Keep the existing
-      # hammer_nail_contact at one slot: impact_progress and the impulse
-      # accumulator depend on its historical tensor shape. This sensor is
-      # diagnostic/reward instrumentation for the immutable onset snapshot.
-      hammer_nail_quality = ContactSensorCfg(
-        name="hammer_nail_quality",
-        primary=hammer_nail_contact.primary,
-        secondary=hammer_nail_contact.secondary,
-        fields=("found", "force", "pos", "normal"),
-        reduce="maxforce",
-        # CPU scripted-reference qualification (contact_quality_sensor.py):
-        # 8/16/64 produced identical centroid/error to 1e-6 m, with 0
-        # overflows and max found=1. Freeze the smallest qualified candidate.
-        num_slots=8,
-        track_air_time=False,
-        global_frame=False,
-      )
-      cfg.scene.sensors = (cfg.scene.sensors or ()) + (hammer_nail_quality,)
+      if quality_instrumentation:
+        # Dedicated multi-slot first-contact geometry sensor. Keep the existing
+        # hammer_nail_contact at one slot: impact_progress and the impulse
+        # accumulator depend on its historical tensor shape. This sensor is
+        # passive diagnostic/reward instrumentation for the immutable onset
+        # snapshot; it is absent from F8/F0/D0 training configurations.
+        hammer_nail_quality = ContactSensorCfg(
+          name="hammer_nail_quality",
+          primary=hammer_nail_contact.primary,
+          secondary=hammer_nail_contact.secondary,
+          fields=("found", "force", "pos", "normal"),
+          reduce="maxforce",
+          # CPU scripted-reference qualification (contact_quality_sensor.py):
+          # 8/16/64 produced identical centroid/error to 1e-6 m, with 0
+          # overflows and max found=1. Freeze the smallest qualified candidate.
+          num_slots=8,
+          track_air_time=False,
+          global_frame=False,
+        )
+        cfg.scene.sensors = (cfg.scene.sensors or ()) + (hammer_nail_quality,)
 
+      first_strike_params = {
+        "contact_sensor_name": "hammer_nail_contact",
+        "impulse_sensor_name": "hammer_nail_impulse",
+        "robot_cfg": SceneEntityCfg("robot", site_names=(HAMMER_HEAD_SITE_NAME,)),
+        "nail_cfg": SceneEntityCfg(
+          "nail_block",
+          joint_names=("nail_slide",),
+          site_names=(NAIL_TOP_SITE_NAME,),
+        ),
+        "axis": (0.0, 0.0, -1.0),
+        "window_substeps": 25,
+        "progress_eps": 5e-4,
+      }
+      if quality_instrumentation:
+        first_strike_params["quality_sensor_name"] = "hammer_nail_quality"
       cfg.metrics["first_strike"] = MetricsTermCfg(
         func=hammer_mdp.FirstStrikeEventTracker,
         per_substep=True,
         reduce="last",
-        params={
-          "contact_sensor_name": "hammer_nail_contact",
-          "impulse_sensor_name": "hammer_nail_impulse",
-          "quality_sensor_name": "hammer_nail_quality",
-          "robot_cfg": SceneEntityCfg("robot", site_names=(HAMMER_HEAD_SITE_NAME,)),
-          "nail_cfg": SceneEntityCfg(
-            "nail_block",
-            joint_names=("nail_slide",),
-            site_names=(NAIL_TOP_SITE_NAME,),
-          ),
-          "axis": (0.0, 0.0, -1.0),
-          "window_substeps": 25,
-          "progress_eps": 5e-4,
-        },
+        params=first_strike_params,
       )
 
     # Robot-side per-joint reaction impulse Λ_j = Σ|qfrc_constraint_j|·dt, contact-anchored, 500 Hz.
@@ -440,6 +458,14 @@ def z1_hammer_env_cfg(
       cfg.rewards["delivered_impulse"].func = hammer_mdp.FirstStrikeDeliveredRewardTerm
       cfg.rewards["delivered_impulse"].params["i_ref"] = I_REF_FIRST_STRIKE_SUCCESS
       cfg.rewards["delivered_impulse"].params["saturate"] = not event_linear
+      if event_quality:
+        cfg.rewards["impact_progress"].func = (
+          hammer_mdp.FirstStrikeQualityImpactRewardTerm
+        )
+        cfg.rewards["delivered_impulse"].func = (
+          hammer_mdp.FirstStrikeQualityDeliveredRewardTerm
+        )
+        cfg.rewards["delivered_impulse"].params.pop("saturate")
     elif first_strike_legacy:
       # D-prime: preserve the legacy 50 Hz readers, params, normalizers, and
       # weights, but censor them to one shared first-event payout boundary.
