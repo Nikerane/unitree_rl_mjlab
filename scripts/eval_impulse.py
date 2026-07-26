@@ -121,6 +121,22 @@ _TRACE_EPISODE_PHYSICAL_KEYS = (
   "overall_success", "episode_peak_lambda",
   "episode_delivered_accumulator_n_s", "episode_depth_m",
 )
+_INSTRUMENTATION_ONLY_TRACE_KEYS = {
+  "physical": {
+    "quality_found_count", "quality_normal_force_n",
+    "quality_contact_position_m", "quality_contact_normal",
+  },
+  "event_trace": {
+    "tracker_contact_point_w", "tracker_contact_error_m",
+    "tracker_contact_quality", "tracker_contact_quality_valid",
+    "tracker_contact_quality_overflow", "tracker_contact_normal_axiality",
+  },
+  "first_strike": {
+    "contact_point_w", "contact_error_m", "contact_quality",
+    "contact_quality_valid", "contact_quality_overflow",
+    "contact_normal_axiality",
+  },
+}
 
 FIELDNAMES = [
   "name", "ckpt_path", "checkpoint_path", "checkpoint_sha256",
@@ -220,6 +236,25 @@ def _physical_trace_payload(trace: Mapping) -> dict:
 
 def _physical_trace_digest(trace: Mapping) -> str:
   return _canonical_digest(_physical_trace_payload(trace))
+
+
+def _plant_replay_payload(trace: Mapping) -> dict:
+  """Physical replay projection when one trace lacks passive quality sensing.
+
+  Strict F8/F0/D0/FQ comparison must use the full physical digest. This
+  narrower projection exists only for the instrumentation on/off control: its
+  removed fields cannot exist in an uninstrumented tracker and therefore say
+  nothing about whether the action tape changed MuJoCo state.
+  """
+  payload = _physical_trace_payload(trace)
+  return {
+    section: {
+      key: value
+      for key, value in values.items()
+      if key not in _INSTRUMENTATION_ONLY_TRACE_KEYS.get(section, set())
+    }
+    for section, values in payload.items()
+  }
 
 
 def _require_finite_trace_value(value, *, path: str) -> None:

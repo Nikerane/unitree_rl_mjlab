@@ -123,15 +123,26 @@ def _single_control_trace(
     env.close()
 
 
-def _without_raw_quality_sensor_channels(trace: dict) -> dict:
-  payload = eval_impulse._physical_trace_payload(trace)
-  payload = copy.deepcopy(payload)
-  for key in (
-    "quality_found_count", "quality_normal_force_n",
-    "quality_contact_position_m", "quality_contact_normal",
-  ):
-    del payload["physical"][key]
-  return payload
+def _first_payload_difference(left, right, path="payload"):
+  if type(left) is not type(right):
+    return path, type(left).__name__, type(right).__name__
+  if isinstance(left, dict):
+    for key in sorted(set(left) | set(right)):
+      if key not in left or key not in right:
+        return f"{path}.{key}", left.get(key, "<missing>"), right.get(key, "<missing>")
+      difference = _first_payload_difference(left[key], right[key], f"{path}.{key}")
+      if difference is not None:
+        return difference
+    return None
+  if isinstance(left, list):
+    if len(left) != len(right):
+      return f"{path}.length", len(left), len(right)
+    for index, (left_item, right_item) in enumerate(zip(left, right)):
+      difference = _first_payload_difference(left_item, right_item, f"{path}[{index}]")
+      if difference is not None:
+        return difference
+    return None
+  return None if left == right else (path, left, right)
 
 
 def test_episode_hook_snapshots_pre_reset_buffers_on_the_terminal_step():
@@ -226,8 +237,8 @@ def test_fixed_action_tape_preserves_physics_across_strict_quality_arms():
     strict_quality=False,
     action_tape=action_tape,
   )
-  assert eval_impulse._canonical_digest(
-    _without_raw_quality_sensor_channels(traces["F8"])
-  ) == eval_impulse._canonical_digest(
-    _without_raw_quality_sensor_channels(uninstrumented_f8)
-  )
+  instrumented_payload = eval_impulse._plant_replay_payload(traces["F8"])
+  uninstrumented_payload = eval_impulse._plant_replay_payload(uninstrumented_f8)
+  assert _first_payload_difference(
+    instrumented_payload, uninstrumented_payload
+  ) is None
