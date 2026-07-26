@@ -2370,6 +2370,7 @@ def test_fixed_reset_xz_grid_uses_one_common_coordinate_and_spatial_window():
     assert len(figure.axes) == 32
     assert len({axis.get_xlim() for axis in figure.axes}) == 1
     assert len({axis.get_ylim() for axis in figure.axes}) == 1
+    assert all(axis.get_aspect() == 1.0 for axis in figure.axes)
     assert [axis.get_title().splitlines()[0] for axis in figure.axes[:8]] == [
         f"C · seed {seed}" for seed in range(8)
     ]

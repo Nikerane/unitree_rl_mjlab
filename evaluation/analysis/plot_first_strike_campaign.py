@@ -815,6 +815,7 @@ def build_fixed_reset_xz_grid(
             )
             axis.set_xlim(*x_limits)
             axis.set_ylim(*z_limits)
+            axis.set_aspect("equal", adjustable="box")
             axis.grid(alpha=0.18)
             outside = (
                 np.any(position[:, 0] < x_limits[0])
