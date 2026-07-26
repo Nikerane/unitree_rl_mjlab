@@ -1,31 +1,36 @@
 #!/usr/bin/env bash
-# C3 checkpoint eval -- per-joint impulse Λ peaks/p95 + delivered impulse summary (the C4 analogue).
-# Thin driver: pins the protocol below, loops checkpoints, and calls scripts/eval_impulse.py once per
-# checkpoint (rollout + one summary.csv row appended). Protocol lineage: the June joint-velocity
-# eval (same-env cross-arm convention) is preserved at docs/archive/tooling/eval_peak_qv.sh
-# (frozen historical record, archived 2026-07-14). `diag_impulse_trace.py --ckpt` produces one
-# force-propagation figure per seed-0 checkpoint.
+# Checkpoint-evaluation driver for per-joint impulse and first-strike diagnostics.
+# It loops over explicit or discovered checkpoints and calls scripts/eval_impulse.py once per
+# checkpoint. Keep this header and that evaluator's module docstring aligned.
 #
-# PINNED PROTOCOL (task-11-brief.md Step 2; keep this header AND scripts/eval_impulse.py's docstring
-# in sync -- do not drift without updating both AND the eventual results record):
-#   - eval env:        Unitree-Z1-Hammer-CaT-Impulse, PLAY cfg (deterministic reset, no obs noise)
-#   - instrumentation: imp_max_p FORCED to 0 at eval time regardless of the checkpoint's training-time
-#     value (log-only hook = pure instrumentation; the obs/action space is IDENTICAL across all four
-#     hammer arms, so the SAME env scores any arm's checkpoint -- the archived eval_peak_qv.sh
-#     same-env cross-arm protocol, extended to the impulse metrics). Equivalent train.py override:
-#         --env.metrics.cat-soft.params.imp-max-p 0
-#   - checkpoint:      final model_4999.pt per run (production default below)
-#   - envs/steps:      256 envs x >=2 episodes/env (>=512 episodes/policy) -- eval_impulse.py's
-#     --episode-len-s finitizes the play-cfg horizon so this holds even for a 0%-success checkpoint
-#   - action mode:     mean-action rollout (primary, the CSV row) + one sampled-action repeat
-#     (robustness check, condensed "_sampled" columns on the SAME row)
-#   - eval seed:       42 (fixed; the sampled-action repeat uses seed+1). Bit-reproducible on CPU
-#     only; on CUDA, mujoco_warp is non-deterministic run-to-run (atomic-reduction ordering), so the
-#     seeds pin the PROTOCOL -- CUDA results are statistical, not bitwise.
-#   - provenance:      host + UTC timestamp + checkpoint path + repo git hash recorded per CSV row
-#   - invariants:      every row carries impossible_success_n / lambda_dead_n (Tier-1 safety
-#     net, 2026-07-14: success-with-zero-impulse and cross-path disagreement are dead-instrument
-#     states, never physics); a nonzero count exits 2 and this driver counts the row as a FAIL
+# HISTORICAL / AD-HOC DRIVER DEFAULTS (preserved for older campaigns):
+#   - TASK defaults to Unitree-Z1-Hammer-CaT-Impulse;
+#   - without CKPTS, discover the 12 C3 model_4999.pt checkpoints;
+#   - SEED defaults to 42;
+#   - retain the legacy seed-0 diag_impulse_trace.py Matplotlib/play figure
+#     (RUN_LEGACY_DIAG=1). Set RUN_LEGACY_DIAG=0 to suppress those figures.
+#
+# FROZEN fsr4x8 CALLER CONTRACT (supplied by scripts/slurm/vega_eval.sbatch; these are deliberately
+# NOT the historical defaults above):
+#   - exact task per arm:
+#       C       Unitree-Z1-Hammer-CaT-Impulse
+#       D-prime Unitree-Z1-Hammer-CaT-Impulse-FirstStrike-Legacy
+#       F       Unitree-Z1-Hammer-CaT-Impulse-Event-Linear
+#       E       Unitree-Z1-Hammer-CaT-Impulse-Event
+#   - sampled rollout is primary: stochastic actions in the TRAINING cfg, reset noise
+#     [-0.05,+0.05] rad, actor observation corruption on, critic corruption off;
+#   - 256 envs and exactly the first two completed episodes per env (512/checkpoint);
+#   - unseen base RNG 2026072900, with isolated reset/observation/action streams
+#     2036072919 / 2046072933 / 2056072941;
+#   - 4.0 s episode cutoff; the separate mean-action diagnostic uses 400 control steps;
+#   - exactly one accepted model_499.pt for each of 4 arms x 8 training seeds;
+#   - log-only imp_max_p=0 and the exact task's unchanged fixed-impedance configuration;
+#   - provenance binds the accepted-attempt manifest, checkpoint/hash, code + asset revisions,
+#     task/treatment config, raw sampled trace, host, and UTC timestamp;
+#   - RUN_LEGACY_DIAG=0: the old seed-0 Matplotlib/play figures are not campaign evidence.
+#
+# Every row carries impossible_success_n / lambda_dead_n. A nonzero count exits 2 and this driver
+# counts the row as a failure.
 #
 # Checkpoints must already be under logs/rsl_rl/ (on Lightning they are written in place by
 # scripts/lightning_pair.sh; for a remote box, rsync them back manually first).
@@ -64,6 +69,21 @@ OUT="${OUT:-/tmp/eval_impulse}"
 # was the retired Vega layout and silently pointed at a nonexistent file everywhere else.
 PY="${PY:-$(command -v python)}"
 FRESH="${FRESH:-0}"            # FRESH=1: wipe $OUT first. Default: keep output, skip existing rows.
+RUN_LEGACY_DIAG="${RUN_LEGACY_DIAG:-1}"  # 1 preserves historical seed-0 trace figures; fsr4x8 uses 0.
+IDENTITY_FLAGS=()
+if [ -n "${ACCEPTED_MANIFEST_SHA256:-}${TRAINING_CODE_REVISION:-}${TRAINING_ASSET_REVISION:-}" ]; then
+  if [ -z "${ACCEPTED_MANIFEST_SHA256:-}" ] \
+    || [ -z "${TRAINING_CODE_REVISION:-}" ] \
+    || [ -z "${TRAINING_ASSET_REVISION:-}" ]; then
+    echo "eval_impulse.sh: accepted manifest and both training revisions must be supplied together"
+    exit 2
+  fi
+  IDENTITY_FLAGS=(
+    --accepted-manifest-sha256 "$ACCEPTED_MANIFEST_SHA256"
+    --training-code-revision "$TRAINING_CODE_REVISION"
+    --training-asset-revision "$TRAINING_ASSET_REVISION"
+  )
+fi
 
 if [ "$FRESH" = "1" ]; then rm -rf "$OUT"; fi
 mkdir -p "$OUT/traces"
@@ -111,7 +131,15 @@ for pair in "${PAIRS[@]}"; do
     *) echo "MALFORMED ENTRY '$pair' (expected name:path)"; FAILS=$((FAILS + 1)); echo; continue ;;
   esac
   name="${pair%%:*}"
-  ckpt="${pair#*:}"
+  checkpoint_spec="${pair#*:}"
+  expected_checkpoint_sha256=""
+  case "$checkpoint_spec" in
+    *:*)
+      ckpt="${checkpoint_spec%:*}"
+      expected_checkpoint_sha256="${checkpoint_spec##*:}"
+      ;;
+    *) ckpt="$checkpoint_spec" ;;
+  esac
   echo "########## $name :: $ckpt ##########"
   # Non-destructive re-run default: a name that already has a summary.csv row is done -- skip it
   # (FRESH=1 wipes $OUT up front, so every name re-runs).
@@ -120,21 +148,31 @@ for pair in "${PAIRS[@]}"; do
   fi
   if [ ! -f "$ckpt" ]; then echo "MISSING CHECKPOINT"; FAILS=$((FAILS + 1)); echo; continue; fi
 
+  CHECKPOINT_IDENTITY_FLAGS=()
+  if [ -n "$expected_checkpoint_sha256" ]; then
+    CHECKPOINT_IDENTITY_FLAGS=(
+      --expected-checkpoint-sha256 "$expected_checkpoint_sha256"
+    )
+  fi
   "$PY" scripts/eval_impulse.py \
     --task "$TASK" --ckpt "$ckpt" --name "$name" \
     --num-envs "$NENVS" --nsteps "$NSTEPS" --episode-len-s "$EPLEN" \
     --device "$DEV" --seed "$SEED" --out "$OUT" \
+    "${IDENTITY_FLAGS[@]}" "${CHECKPOINT_IDENTITY_FLAGS[@]}" \
     || { echo "EVAL FAILED: $name"; FAILS=$((FAILS + 1)); }
 
-  # One force-propagation trace figure per ARM (seed0 checkpoint only) -- brief Step 3.
-  case "$name" in
-    *seed0)
-      "$PY" scripts/diag_impulse_trace.py --ckpt "$ckpt" --task "$TASK" --play \
-        --num-envs 1 --nsteps 60 --device "$DEV" \
-        --j-limit "$J_LIMIT_CSV" --out "$OUT/traces/$name" \
-        || { echo "TRACE FAILED: $name"; FAILS=$((FAILS + 1)); }
-      ;;
-  esac
+  # Historical seed-0 Matplotlib/play figure. The fsr4x8 caller sets RUN_LEGACY_DIAG=0 because
+  # sampled-trace campaign artifacts, not this mean/play diagnostic, are the registered evidence.
+  if [ "$RUN_LEGACY_DIAG" = "1" ]; then
+    case "$name" in
+      *seed0)
+        "$PY" scripts/diag_impulse_trace.py --ckpt "$ckpt" --task "$TASK" --play \
+          --num-envs 1 --nsteps 60 --device "$DEV" \
+          --j-limit "$J_LIMIT_CSV" --out "$OUT/traces/$name" \
+          || { echo "TRACE FAILED: $name"; FAILS=$((FAILS + 1)); }
+        ;;
+    esac
+  fi
   echo
 done
 echo "EVAL_IMPULSE_DONE (failures: $FAILS)"

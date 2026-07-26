@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
-# Staged prior-vs-none training array on Vega (Codex's 1-GPU-per-task pattern).
-# One array task = one (arm, seed), interleaved track/none. 500 iters (post-anneal treatment,
-# per Codex), 4096 envs, log-only (imp_max_p=0), substep_rows OFF, unique campaign run names.
-# Submit:
-#   validity : CAMPAIGN=nf1 SEEDS="0 1 2"       sbatch --array=0-5  --export=ALL,CAMPAIGN,SEEDS scripts/slurm/vega_train.sbatch
-#   expansion: CAMPAIGN=nf1 SEEDS="3 4 5 6 7"   sbatch --array=0-9  --export=ALL,CAMPAIGN,SEEDS scripts/slurm/vega_train.sbatch
+# One GPU per (arm, seed). The preregistered fsr4x8 campaign deliberately uses
+# the existing SINGLE_TASK/IMPACT_W/DELIVERED_W hooks; there is no campaign
+# framework hidden in this launcher. Prepare (do not submit before the clean
+# provenance + four-task CUDA smoke gates):
+#   CAMPAIGN=fsr4x8 SEEDS="0 1 2 3 4 5 6 7" SINGLE_TASK=Unitree-Z1-Hammer-CaT-Impulse SINGLE_SHORT=c IMPACT_W=8 DELIVERED_W=2 ITERS=500 \
+#     EXPECTED_CODE_REVISION=<40hex> EXPECTED_ASSET_REVISION=<40hex> \
+#     sbatch --array=0-7 --export=ALL,CAMPAIGN,SEEDS,SINGLE_TASK,SINGLE_SHORT,IMPACT_W,DELIVERED_W,ITERS,EXPECTED_CODE_REVISION,EXPECTED_ASSET_REVISION scripts/slurm/vega_train.sbatch
+# Repeat with task/short:
+#   Unitree-Z1-Hammer-CaT-Impulse-FirstStrike-Legacy / dprime
+#   Unitree-Z1-Hammer-CaT-Impulse-Event-Linear       / f
+#   Unitree-Z1-Hammer-CaT-Impulse-Event              / e
 #SBATCH --job-name=z1-train
 #SBATCH --account=d2026d06-166-users
 #SBATCH --partition=gpu
@@ -20,11 +25,24 @@
 #SBATCH --output=logs/%x-%A_%a.out
 set -uo pipefail
 cd "${SLURM_SUBMIT_DIR:-$HOME/repos/unitree_rl_mjlab}"
+REPO_ROOT=$(pwd -P)
+CANONICAL_ASSET_REPO=$(
+  cd "$REPO_ROOT/../safe_impact_manipulation" 2>/dev/null && pwd -P
+) || { echo "### TRAIN_FAIL: canonical sibling asset repository is missing"; exit 2; }
+if [ -n "${ASSET_REPO:-}" ]; then
+  RESOLVED_ASSET_REPO=$(
+    cd "$ASSET_REPO" 2>/dev/null && pwd -P
+  ) || { echo "### TRAIN_FAIL: ASSET_REPO cannot be resolved"; exit 2; }
+  [ "$RESOLVED_ASSET_REPO" = "$CANONICAL_ASSET_REPO" ] \
+    || { echo "### TRAIN_FAIL: ASSET_REPO must be the canonical sibling repository"; exit 2; }
+fi
+ASSET_REPO="$CANONICAL_ASSET_REPO"
 mkdir -p logs
 module load git 2>/dev/null || true       # git on compute node (for provenance logging)
 export GIT_PYTHON_REFRESH=quiet            # don't crash if GitPython can't validate git
 export PYTHONPATH=.
-export WARP_CACHE_PATH="$PWD/.warp_cache"
+export WARP_CACHE_PATH="$HOME/.cache/unitree_rl_mjlab/warp"
+mkdir -p "$WARP_CACHE_PATH"
 PY=.venv/bin/python
 CAMPAIGN="${CAMPAIGN:-nf}"
 read -ra SEEDARR <<< "${SEEDS:-0 1 2}"
@@ -47,13 +65,47 @@ if [ -n "${SINGLE_TASK:-}" ]; then
 else
   seed=${SEEDARR[$((t/2))]}; ai=$((t%2)); task=${ARM_TASK[$ai]}; short=${ARM_SHORT[$ai]}
 fi
+
+# Fail closed on any drift from the frozen 4x8 matrix. Other historical
+# campaigns retain the launcher's existing behavior.
+if [ "$CAMPAIGN" = "fsr4x8" ]; then
+  [ "${SEEDS:-}" = "0 1 2 3 4 5 6 7" ] || { echo "FSR4X8_FAIL: seeds must be exactly 0..7"; exit 2; }
+  [ "${IMPACT_W:-}" = "8" ] || { echo "FSR4X8_FAIL: IMPACT_W must be 8"; exit 2; }
+  [ "${DELIVERED_W:-}" = "2" ] || { echo "FSR4X8_FAIL: DELIVERED_W must be 2"; exit 2; }
+  [ "${ITERS:-500}" = "500" ] || { echo "FSR4X8_FAIL: ITERS must be 500"; exit 2; }
+  [ -z "${NAIL_DRIVEN_W:-}" ] || { echo "FSR4X8_FAIL: NAIL_DRIVEN_W must be unset"; exit 2; }
+  [ -n "${EXPECTED_CODE_REVISION:-}" ] \
+    || { echo "FSR4X8_FAIL: EXPECTED_CODE_REVISION is required"; exit 2; }
+  [ -n "${EXPECTED_ASSET_REVISION:-}" ] \
+    || { echo "FSR4X8_FAIL: EXPECTED_ASSET_REVISION is required"; exit 2; }
+  case "$task:$short" in
+    Unitree-Z1-Hammer-CaT-Impulse:c|\
+    Unitree-Z1-Hammer-CaT-Impulse-FirstStrike-Legacy:dprime|\
+    Unitree-Z1-Hammer-CaT-Impulse-Event-Linear:f|\
+    Unitree-Z1-Hammer-CaT-Impulse-Event:e) ;;
+    *) echo "FSR4X8_FAIL: SINGLE_TASK/SINGLE_SHORT is not a frozen arm"; exit 2 ;;
+  esac
+fi
 RUN="${CAMPAIGN}_${short}_seed${seed}"
 # Provenance: record the exact code state that trains (git hash + '-dirty' if the tree has uncommitted
 # tracked edits). Deploy via git pull, NOT scp, so this hash is trustworthy (2026-07-19 provenance fix).
-GITHASH=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
-[ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ] && GITHASH="${GITHASH}-dirty"
+GITHASH=$(git rev-parse HEAD 2>/dev/null || echo unknown)
+GITSTATUS=$(git status --porcelain=v1 --untracked-files=all 2>/dev/null || echo provenance-unavailable)
+[ -n "$GITSTATUS" ] && GITHASH="${GITHASH}-dirty"
 echo "### TRAIN task=$t arm=$short seed=$seed run=$RUN git=$GITHASH host=$(hostname) $(date '+%F %T')"
-[ "${GITHASH%-dirty}" != "$GITHASH" ] && echo "### WARN: working tree is DIRTY — results' git_hash will not fully reproduce this run."
+[ "$GITHASH" != "unknown" ] && [ "${GITHASH%-dirty}" = "$GITHASH" ] \
+  || { echo "### TRAIN_FAIL: code provenance is unknown or dirty"; exit 2; }
+ASSET_HASH=$(git -C "$ASSET_REPO" rev-parse HEAD 2>/dev/null || echo unknown)
+ASSET_STATUS=$(git -C "$ASSET_REPO" status --porcelain=v1 --untracked-files=all 2>/dev/null || echo provenance-unavailable)
+[ "$ASSET_HASH" != "unknown" ] && [ -z "$ASSET_STATUS" ] \
+  || { echo "### TRAIN_FAIL: asset provenance is unknown or dirty"; exit 2; }
+echo "### TRAIN_ASSET git=$ASSET_HASH repo=$ASSET_REPO"
+if [ "$CAMPAIGN" = "fsr4x8" ]; then
+  [ "$GITHASH" = "$EXPECTED_CODE_REVISION" ] \
+    || { echo "### TRAIN_FAIL: code revision does not equal expected code revision"; exit 2; }
+  [ "$ASSET_HASH" = "$EXPECTED_ASSET_REVISION" ] \
+    || { echo "### TRAIN_FAIL: asset revision does not equal expected asset revision"; exit 2; }
+fi
 $PY -c "import torch; assert torch.cuda.is_available() and 'A100' in torch.cuda.get_device_name(0), 'no A100'; print('A100 ok:', torch.cuda.get_device_name(0))" || { echo "### NO GPU/A100 on $(hostname) — requeue+exit"; scontrol requeue "${SLURM_JOB_ID}" 2>/dev/null; exit 1; }
 $PY scripts/train.py "$task" --gpu-ids [0] --agent.logger tensorboard \
   --agent.run-name "$RUN" --agent.seed "$seed" --agent.max-iterations "${ITERS:-500}" --agent.save-interval 50 \
