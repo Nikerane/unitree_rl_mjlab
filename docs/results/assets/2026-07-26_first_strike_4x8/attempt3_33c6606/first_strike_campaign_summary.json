@@ -1,0 +1,378 @@
+{
+  "analysis": {
+    "valid": true,
+    "invalidation_reasons": [],
+    "comparison_identity_contract": {
+      "identical_across_rows": [
+        "git_revision",
+        "asset_git_revision",
+        "nail_asset_sha256",
+        "campaign_config_sha256",
+        "accepted_manifest_sha256",
+        "training_code_revision",
+        "training_asset_revision",
+        "action_rng_seed",
+        "reset_rng_seed",
+        "observation_rng_seed"
+      ],
+      "bound_per_row_but_expected_to_vary": [
+        "checkpoint_sha256",
+        "accepted_checkpoint_sha256",
+        "sampled_trace_digest",
+        "sampled_trace_artifact_sha256"
+      ],
+      "bound_per_arm": [
+        "treatment_config_sha256",
+        "event_i_ref_n_s"
+      ],
+      "treatment_identity": "exact ARM_TASKS task id plus configured 8/2 weights"
+    },
+    "inferential_unit": "independently trained policy seed",
+    "primary": {
+      "contrast": [
+        "E",
+        "D-prime"
+      ],
+      "metric": "first_strike_useful_speed_mean_sampled",
+      "treatment": {
+        "n_seeds": 8,
+        "mean": 1.582079837215133,
+        "sd": 0.038271772522957596,
+        "min": 1.5250191113445908,
+        "max": 1.6189840554725379
+      },
+      "control": {
+        "n_seeds": 8,
+        "mean": 1.1459692059797817,
+        "sd": 0.5442465564238658,
+        "min": 0.0,
+        "max": 1.4591687803622335
+      },
+      "absolute_mean_effect": 0.4361106312353513,
+      "relative_mean_effect": 0.38056051502927174,
+      "n_treatment": 8,
+      "n_control": 8,
+      "assignment_count": 12870,
+      "u_treatment": 64.0,
+      "a12_treatment_over_control": 1.0,
+      "mwu_two_sided_exact_p": 0.0001554001554001554,
+      "mean_difference": 0.4361106312353513,
+      "mean_difference_two_sided_exact_p": 0.0001554001554001554,
+      "hardware_speed_qualification": {
+        "arms": [
+          "E",
+          "D-prime"
+        ],
+        "finite_rail_exceedance_observed": true,
+        "violating_seed_rows": 16,
+        "max_abs_rad_s": 7.80845308303833,
+        "max_excess_rad_s": 4.6669530830383295,
+        "samples_over_rail": 469996,
+        "seconds_over_rail": 939.992,
+        "simulation_reward_comparison_valid": true,
+        "hardware_safe_claim_allowed": false,
+        "interpretation": "simulation reward comparison retained; finite speed-rail exceedance observed, so no hardware-safe claim"
+      },
+      "relative_effect_denominator_valid": true,
+      "success_guardrails": {
+        "first_window": {
+          "treatment_mean": 0.98681640625,
+          "control_mean": 0.803466796875,
+          "difference": 0.183349609375,
+          "absolute_90": true,
+          "within_five_percentage_points": true,
+          "passed": true
+        },
+        "overall": {
+          "treatment_mean": 1.0,
+          "control_mean": 0.835205078125,
+          "difference": 0.164794921875,
+          "absolute_90": true,
+          "within_five_percentage_points": true,
+          "passed": true
+        }
+      },
+      "gates": {
+        "valid_provenance_and_sentinels": true,
+        "mwu_p_lt_0_05": true,
+        "permutation_p_lt_0_05": true,
+        "relative_effect_at_least_10_percent": true,
+        "first_window_success_guardrail": true,
+        "overall_success_guardrail": true
+      },
+      "passed": true,
+      "seed_bootstrap": {
+        "samples": 100000,
+        "rng_seed": 2026072504,
+        "absolute_effect_95_interval": [
+          0.14311751423520036,
+          0.8206097426875202
+        ],
+        "success_difference_one_sided_95_lower": {
+          "first_window": -0.007568359375,
+          "overall": 0.0
+        },
+        "success_noninferiority_intersection_union": true,
+        "inference_label": "seed-level within-arm bootstrap; not exact permutation inference"
+      }
+    },
+    "mechanism_family": {
+      "evaluated": true,
+      "contrasts": [
+        {
+          "contrast": [
+            "F",
+            "D-prime"
+          ],
+          "metric": "first_strike_useful_speed_mean_sampled",
+          "treatment": {
+            "n_seeds": 8,
+            "mean": 1.590308977465611,
+            "sd": 0.02352994309161782,
+            "min": 1.548363565467298,
+            "max": 1.625941594131291
+          },
+          "control": {
+            "n_seeds": 8,
+            "mean": 1.1459692059797817,
+            "sd": 0.5442465564238658,
+            "min": 0.0,
+            "max": 1.4591687803622335
+          },
+          "absolute_mean_effect": 0.44433977148582926,
+          "relative_mean_effect": 0.3877414586423614,
+          "n_treatment": 8,
+          "n_control": 8,
+          "assignment_count": 12870,
+          "u_treatment": 64.0,
+          "a12_treatment_over_control": 1.0,
+          "mwu_two_sided_exact_p": 0.0001554001554001554,
+          "mean_difference": 0.44433977148582926,
+          "mean_difference_two_sided_exact_p": 0.0001554001554001554,
+          "p_joint": 0.0001554001554001554,
+          "holm_adjusted_p": 0.0003108003108003108,
+          "holm_rejected_at_0_05": true,
+          "hypothesized_direction_passed": true,
+          "success_guardrails": {
+            "first_window": {
+              "treatment_mean": 0.989013671875,
+              "control_mean": 0.803466796875,
+              "difference": 0.185546875,
+              "absolute_90": true,
+              "within_five_percentage_points": true,
+              "passed": true
+            },
+            "overall": {
+              "treatment_mean": 1.0,
+              "control_mean": 0.835205078125,
+              "difference": 0.164794921875,
+              "absolute_90": true,
+              "within_five_percentage_points": true,
+              "passed": true
+            }
+          },
+          "success_guardrails_passed": true,
+          "interpretable": true,
+          "hardware_speed_qualification": {
+            "arms": [
+              "F",
+              "D-prime"
+            ],
+            "finite_rail_exceedance_observed": true,
+            "violating_seed_rows": 16,
+            "max_abs_rad_s": 7.80845308303833,
+            "max_excess_rad_s": 4.6669530830383295,
+            "samples_over_rail": 470017,
+            "seconds_over_rail": 940.034,
+            "simulation_reward_comparison_valid": true,
+            "hardware_safe_claim_allowed": false,
+            "interpretation": "simulation reward comparison retained; finite speed-rail exceedance observed, so no hardware-safe claim"
+          }
+        },
+        {
+          "contrast": [
+            "E",
+            "F"
+          ],
+          "metric": "first_strike_useful_speed_mean_sampled",
+          "treatment": {
+            "n_seeds": 8,
+            "mean": 1.582079837215133,
+            "sd": 0.038271772522957596,
+            "min": 1.5250191113445908,
+            "max": 1.6189840554725379
+          },
+          "control": {
+            "n_seeds": 8,
+            "mean": 1.590308977465611,
+            "sd": 0.02352994309161782,
+            "min": 1.548363565467298,
+            "max": 1.625941594131291
+          },
+          "absolute_mean_effect": -0.00822914025047794,
+          "relative_mean_effect": -0.00517455435835637,
+          "n_treatment": 8,
+          "n_control": 8,
+          "assignment_count": 12870,
+          "u_treatment": 33.0,
+          "a12_treatment_over_control": 0.515625,
+          "mwu_two_sided_exact_p": 0.9591297591297592,
+          "mean_difference": -0.00822914025047794,
+          "mean_difference_two_sided_exact_p": 0.6059052059052059,
+          "p_joint": 0.9591297591297592,
+          "holm_adjusted_p": 0.9591297591297592,
+          "holm_rejected_at_0_05": false,
+          "hypothesized_direction_passed": false,
+          "success_guardrails": null,
+          "success_guardrails_passed": true,
+          "interpretable": false,
+          "hardware_speed_qualification": {
+            "arms": [
+              "E",
+              "F"
+            ],
+            "finite_rail_exceedance_observed": true,
+            "violating_seed_rows": 16,
+            "max_abs_rad_s": 5.648006916046143,
+            "max_excess_rad_s": 2.5065069160461424,
+            "samples_over_rail": 291069,
+            "seconds_over_rail": 582.138,
+            "simulation_reward_comparison_valid": true,
+            "hardware_safe_claim_allowed": false,
+            "interpretation": "simulation reward comparison retained; finite speed-rail exceedance observed, so no hardware-safe claim"
+          }
+        }
+      ]
+    },
+    "descriptive": {
+      "contrast": [
+        "C",
+        "D-prime"
+      ],
+      "metric": "first_strike_useful_speed_mean_sampled",
+      "treatment": {
+        "n_seeds": 8,
+        "mean": 1.346944302538759,
+        "sd": 0.02519760467350008,
+        "min": 1.3099736102158204,
+        "max": 1.3856372989248484
+      },
+      "control": {
+        "n_seeds": 8,
+        "mean": 1.1459692059797817,
+        "sd": 0.5442465564238658,
+        "min": 0.0,
+        "max": 1.4591687803622335
+      },
+      "absolute_mean_effect": 0.20097509655897738,
+      "relative_mean_effect": 0.17537565190257232,
+      "n_treatment": 8,
+      "n_control": 8,
+      "mean_difference": 0.20097509655897738,
+      "interpretation": "descriptive repeated-credit/censoring/timing package diagnostic only",
+      "hardware_speed_qualification": {
+        "arms": [
+          "C",
+          "D-prime"
+        ],
+        "finite_rail_exceedance_observed": true,
+        "violating_seed_rows": 16,
+        "max_abs_rad_s": 7.80845308303833,
+        "max_excess_rad_s": 4.6669530830383295,
+        "samples_over_rail": 459100,
+        "seconds_over_rail": 918.2,
+        "simulation_reward_comparison_valid": true,
+        "hardware_safe_claim_allowed": false,
+        "interpretation": "simulation reward comparison retained; finite speed-rail exceedance observed, so no hardware-safe claim"
+      }
+    }
+  },
+  "representative_trajectories": {
+    "selection_rule": "lexicographically_smallest_training_seed_env_id_episode_ordinal",
+    "selected": [
+      {
+        "episode_id": "C-seed0-env0-episode0",
+        "source_episode_id": "C-env0-episode0",
+        "arm": "C",
+        "outcome": "success",
+        "overall_success": true,
+        "training_seed": 0,
+        "env_id": 0,
+        "episode_ordinal": 0,
+        "trace_digest": "2cbf8268d3a08a7aa963c6f20758c2070ced06822c2b94eb6c8f33c180446ff3"
+      },
+      {
+        "episode_id": "D-prime-seed0-env0-episode0",
+        "source_episode_id": "D-prime-env0-episode0",
+        "arm": "D-prime",
+        "outcome": "success",
+        "overall_success": true,
+        "training_seed": 0,
+        "env_id": 0,
+        "episode_ordinal": 0,
+        "trace_digest": "3fdaed7f9c23cb0d8dfbd84f0012a9c1b396da90fcc3373ffae7f89a228a5cb3"
+      },
+      {
+        "episode_id": "D-prime-seed3-env0-episode0",
+        "source_episode_id": "D-prime-env0-episode0",
+        "arm": "D-prime",
+        "outcome": "failure",
+        "overall_success": false,
+        "training_seed": 3,
+        "env_id": 0,
+        "episode_ordinal": 0,
+        "trace_digest": "9c28ebf809fb8c2ee2dd5624818c3d7a151b894a18e1a245f9fe41187d175f54"
+      },
+      {
+        "episode_id": "F-seed0-env0-episode0",
+        "source_episode_id": "F-env0-episode0",
+        "arm": "F",
+        "outcome": "success",
+        "overall_success": true,
+        "training_seed": 0,
+        "env_id": 0,
+        "episode_ordinal": 0,
+        "trace_digest": "7260b25a1a101b9b700998e0ffd7bbcd1bae8f4b14e112a04302cf7fdd1d7315"
+      },
+      {
+        "episode_id": "E-seed0-env0-episode0",
+        "source_episode_id": "E-env0-episode0",
+        "arm": "E",
+        "outcome": "success",
+        "overall_success": true,
+        "training_seed": 0,
+        "env_id": 0,
+        "episode_ordinal": 0,
+        "trace_digest": "57ea525bbc69c4ce3992f5505b96bfe5c0676ffe3ed40efa15791a57f8ce6415"
+      }
+    ],
+    "omitted_strata": [
+      {
+        "arm": "C",
+        "outcome": "failure",
+        "overall_success": false,
+        "reason": "no sampled episodes in outcome stratum"
+      },
+      {
+        "arm": "F",
+        "outcome": "failure",
+        "overall_success": false,
+        "reason": "no sampled episodes in outcome stratum"
+      },
+      {
+        "arm": "E",
+        "outcome": "failure",
+        "overall_success": false,
+        "reason": "no sampled episodes in outcome stratum"
+      }
+    ]
+  },
+  "artifacts": {
+    "campaign_html": "/cephhome/eunikhilr/unitree_rl_mjlab_eval/fsr4x8/attempt1/analysis_attempt3_33c6606/first_strike_campaign.html",
+    "trajectory_html": "/cephhome/eunikhilr/unitree_rl_mjlab_eval/fsr4x8/attempt1/analysis_attempt3_33c6606/first_strike_trajectories.html",
+    "fixed_reset_xz_grid_png": "/cephhome/eunikhilr/unitree_rl_mjlab_eval/fsr4x8/attempt1/analysis_attempt3_33c6606/first_strike_fixed_reset_xz_grid.png",
+    "video_overlays": []
+  },
+  "state_is_ground_truth": true,
+  "computer_vision_tracking": false
+}
