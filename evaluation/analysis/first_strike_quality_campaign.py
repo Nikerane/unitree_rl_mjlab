@@ -50,6 +50,12 @@ SPEED_NORMALIZER = {
     "D0": 1.0,
     "FQ-min": 1.4598331451416016,
 }
+EXPECTED_TREATMENT_REWARD_SHA256 = {
+    "F8": "47d993698852dc939c753d978e41c9124e24c470e0595439f004d2b561d76fb9",
+    "F0": "a8fdd61dc521a6a4294945d94e52dde8fde6560ee963976c08251e0996d42f9c",
+    "D0": "c2c8f069f5f744eb063514b0c4a20e75ed9b271b382f2397281c04e7ac12f325",
+    "FQ-min": "5bdd740a32cb730e1e63392422387dff5df2c8812d52587060249fe2b54a09a7",
+}
 DECISION_FIELDS = (
     "first_contact_quality_sampled",
     "first_window_useful_speed_mean_sampled",
@@ -448,6 +454,10 @@ def validate_quality_campaign_contract(
             "evaluation_treatment_reward_sha256"
         ]:
             raise ValueError(f"{prefix}: reward identity mismatch")
+        if accepted["training_treatment_reward_sha256"] != (
+            EXPECTED_TREATMENT_REWARD_SHA256[label]
+        ):
+            raise ValueError(f"{prefix}: frozen reward semantics mismatch")
         for prefix_key, training_key in (
             ("git", "training_code_revision"),
             ("asset_git", "training_asset_revision"),
@@ -548,6 +558,11 @@ def _quality_payload_identity_reasons(
             "evaluation_treatment_reward_sha256"
         ]:
             reasons.append(f"{prefix}: reward identity mismatch")
+        expected_reward = EXPECTED_TREATMENT_REWARD_SHA256.get(
+            str(accepted.get("treatment"))
+        )
+        if strict["training_treatment_reward_sha256"] != expected_reward:
+            reasons.append(f"{prefix}: frozen reward semantics mismatch")
     expected_payload = {
         "treatment": row.get("treatment"),
         "task": row.get("task"),
@@ -605,10 +620,10 @@ def _validate_common_nail_geometry(geometries: Sequence[Mapping]) -> dict:
     geometries = [dict(geometry) for geometry in geometries]
     if not geometries:
         raise ValueError("common nail geometry is missing")
-    expected = geometries[0]
     required = {"nail_axis", "nail_xy_m", "nail_radius_m", "source_sha256"}
-    if set(expected) != required:
+    if not required <= set(geometries[0]):
         raise ValueError("common nail geometry fields are malformed")
+    expected = {key: geometries[0][key] for key in required}
     try:
         axis = np.asarray(expected["nail_axis"], dtype=float)
         xy = np.asarray(expected["nail_xy_m"], dtype=float)
@@ -625,7 +640,12 @@ def _validate_common_nail_geometry(geometries: Sequence[Mapping]) -> dict:
         or not legacy._is_hex_digest(expected["source_sha256"], 64)
     ):
         raise ValueError("common nail geometry is malformed")
-    if any(geometry != expected for geometry in geometries[1:]):
+    projections = []
+    for geometry in geometries[1:]:
+        if not required <= set(geometry):
+            raise ValueError("common nail geometry fields are malformed")
+        projections.append({key: geometry[key] for key in required})
+    if any(projection != expected for projection in projections):
         raise ValueError("common nail frame/radius/provenance mismatch")
     return expected
 

@@ -10,6 +10,7 @@ import pytest
 
 import evaluation.analysis.first_strike_campaign as legacy
 import evaluation.analysis.first_strike_quality_campaign as quality_analysis
+import evaluation.analysis.plot_first_strike_quality_campaign as quality_plot
 from evaluation.analysis.first_strike_quality_campaign import (
     FROZEN_QUALITY_CAMPAIGN_MATRIX,
     _d0_mechanism,
@@ -41,6 +42,21 @@ SENTINELS = (
     "impossible_success_n",
     "lambda_dead_n",
     "quota_failure_n",
+)
+EXPECTED_REWARD_HASHES = {
+    "F8": "47d993698852dc939c753d978e41c9124e24c470e0595439f004d2b561d76fb9",
+    "F0": "a8fdd61dc521a6a4294945d94e52dde8fde6560ee963976c08251e0996d42f9c",
+    "D0": "c2c8f069f5f744eb063514b0c4a20e75ed9b271b382f2397281c04e7ac12f325",
+    "FQ-min": "5bdd740a32cb730e1e63392422387dff5df2c8812d52587060249fe2b54a09a7",
+}
+WRONG_READER_HASHES = {
+    "F8": "48fb66eba010c011a5c701a2e81d901a3ed4e201635c48ad18cede9d3de28deb",
+    "F0": "4902ea7e7b56ea1dc1765a29939db4b08f27c5f8f6d07af155604a05c826a474",
+    "D0": "35985aeb3420b7c58a38fcf850be655690564703478427b603645d50505d46ac",
+    "FQ-min": "9a482d9729b59e99d85b6dccd8c3aa9d909a28c4bf19eec64e5138625b024b37",
+}
+FQ_WRONG_NORMALIZER_HASH = (
+    "35985aeb3420b7c58a38fcf850be655690564703478427b603645d50505d46ac"
 )
 
 
@@ -320,12 +336,8 @@ def _campaign_rows(tmp_path: Path) -> tuple[list[dict], list[dict]]:
             "evaluation_config_sha256": evaluation_config,
             "training_policy_observation_sha256": "1" * 64,
             "evaluation_policy_observation_sha256": "1" * 64,
-            "training_treatment_reward_sha256": hashlib.sha256(
-                f"reward-{label}".encode()
-            ).hexdigest(),
-            "evaluation_treatment_reward_sha256": hashlib.sha256(
-                f"reward-{label}".encode()
-            ).hexdigest(),
+            "training_treatment_reward_sha256": EXPECTED_REWARD_HASHES[label],
+            "evaluation_treatment_reward_sha256": EXPECTED_REWARD_HASHES[label],
             "action_rng_seed": row["action_rng_seed"],
             "reset_rng_seed": row["reset_rng_seed"],
             "observation_rng_seed": row["observation_rng_seed"],
@@ -384,7 +396,7 @@ def _write_artifact(path: Path, row: dict, accepted: dict) -> None:
         }
     )
     observation_sha = "1" * 64
-    reward_sha = hashlib.sha256(f"reward-{label}".encode()).hexdigest()
+    reward_sha = EXPECTED_REWARD_HASHES[label]
     payload = {
         "schema_version": 3,
         "selection": "first two completed episodes from each of 256 environments",
@@ -875,6 +887,64 @@ def test_schema_v3_payload_identities_are_manifest_bound(complete_campaign) -> N
     )
 
 
+@pytest.mark.parametrize("label", ("F8", "F0", "D0", "FQ-min"))
+def test_self_consistent_wrong_reader_reward_hash_is_rejected(
+    complete_campaign, label
+) -> None:
+    rows, manifest = complete_campaign
+    accepted = copy.deepcopy(
+        next(item for item in manifest if item["treatment"] == label)
+    )
+    row = next(
+        item
+        for item in rows
+        if item["treatment"] == accepted["raw_treatment"]
+        and item["training_seed"] == accepted["training_seed"]
+    )
+    payload = legacy._sampled_payload_from_bytes(
+        Path(row["sampled_trace_path"]).read_bytes()
+    )
+    payload = copy.deepcopy(payload)
+    mutant_hash = WRONG_READER_HASHES[label]
+    accepted["training_treatment_reward_sha256"] = mutant_hash
+    accepted["evaluation_treatment_reward_sha256"] = mutant_hash
+    strict = payload["evaluation_contract"]["strict_config_identities"]
+    strict["training_treatment_reward_sha256"] = mutant_hash
+    strict["evaluation_treatment_reward_sha256"] = mutant_hash
+    reasons = quality_analysis._quality_payload_identity_reasons(
+        row, accepted, payload
+    )
+    assert any("frozen reward semantics" in reason for reason in reasons)
+
+
+def test_self_consistent_fq_wrong_speed_normalizer_hash_is_rejected(
+    complete_campaign,
+) -> None:
+    rows, manifest = complete_campaign
+    accepted = copy.deepcopy(
+        next(item for item in manifest if item["treatment"] == "FQ-min")
+    )
+    row = next(
+        item
+        for item in rows
+        if item["treatment"] == "FQ"
+        and item["training_seed"] == accepted["training_seed"]
+    )
+    payload = legacy._sampled_payload_from_bytes(
+        Path(row["sampled_trace_path"]).read_bytes()
+    )
+    payload = copy.deepcopy(payload)
+    accepted["training_treatment_reward_sha256"] = FQ_WRONG_NORMALIZER_HASH
+    accepted["evaluation_treatment_reward_sha256"] = FQ_WRONG_NORMALIZER_HASH
+    strict = payload["evaluation_contract"]["strict_config_identities"]
+    strict["training_treatment_reward_sha256"] = FQ_WRONG_NORMALIZER_HASH
+    strict["evaluation_treatment_reward_sha256"] = FQ_WRONG_NORMALIZER_HASH
+    reasons = quality_analysis._quality_payload_identity_reasons(
+        row, accepted, payload
+    )
+    assert any("frozen reward semantics" in reason for reason in reasons)
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
@@ -1101,6 +1171,26 @@ def test_common_nail_geometry_requires_identical_provenance_frame_and_radius() -
         )
 
 
+def test_production_geometry_extras_use_canonical_required_projection() -> None:
+    production_geometry = {
+        **copy.deepcopy(GEOMETRY),
+        "source_path": "/accepted/assets/hammer_scene.xml",
+        "basis": {
+            "x": [1.0, 0.0, 0.0],
+            "y": [0.0, 1.0, 0.0],
+        },
+    }
+    assert quality_analysis._validate_common_nail_geometry(
+        [production_geometry, copy.deepcopy(production_geometry)]
+    ) == GEOMETRY
+    drifted = copy.deepcopy(production_geometry)
+    drifted["nail_axis"] = [0.0, 1.0, 0.0]
+    with pytest.raises(ValueError, match="common nail"):
+        quality_analysis._validate_common_nail_geometry(
+            [production_geometry, drifted]
+        )
+
+
 def test_d0_mechanism_phrase_requires_all_four_registered_conditions(analysis) -> None:
     by_arm = {
         label: [
@@ -1181,3 +1271,30 @@ def test_renderer_writes_exactly_two_static_pngs(
     }
     assert all(path.stat().st_size > 1_000 for path in paths.values())
     assert list(tmp_path.glob("*")) == list(paths.values())
+
+
+def test_renderer_marks_unavailable_practical_ratios_and_still_writes_two_pngs(
+    monkeypatch, tmp_path, analysis
+) -> None:
+    invalid_ratios = copy.deepcopy(analysis)
+    practical = invalid_ratios["fq_min_practical_acceptance"]
+    for key in ("useful_speed_ratio", "depth_gain_ratio"):
+        practical[key].pop("estimate", None)
+        practical[key]["valid"] = False
+        practical[key]["one_sided_95_lower"] = None
+    figure = quality_plot._build_paired_seed_effects(invalid_ratios)
+    assert [text.get_text() for text in figure.axes[3].texts].count(
+        "unavailable"
+    ) == 2
+    assert figure.axes[3].get_xlim() == pytest.approx((-0.5, 1.5))
+    monkeypatch.setattr(
+        quality_plot,
+        "analyze_quality_campaign",
+        lambda rows, manifest: invalid_ratios,
+    )
+    result = render_quality_figures([], [], output_dir=tmp_path)
+    assert {Path(path).name for path in result["artifacts"]} == {
+        "paired_seed_effects.png",
+        "aggregate_nail_plane_contact_map.png",
+    }
+    assert len(list(tmp_path.glob("*.png"))) == 2

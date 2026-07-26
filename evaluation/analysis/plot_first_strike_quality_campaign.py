@@ -148,27 +148,52 @@ def _build_paired_seed_effects(analysis: Mapping):
     axis = axes[1, 1]
     depth = practical["depth_gain_ratio"]
     speed_ratio = practical["useful_speed_ratio"]
-    estimates = [speed_ratio["estimate"], depth["estimate"]]
-    lowers = [
-        speed_ratio["one_sided_95_lower"],
-        depth["one_sided_95_lower"],
-    ]
-    axis.bar(
-        (0, 1),
-        estimates,
-        color=(COLORS["F8"], COLORS["D0"]),
-        alpha=0.8,
-    )
-    axis.scatter((0, 1), lowers, marker="v", color="black", label="95% lower")
+    ratio_records = (speed_ratio, depth)
+    lower_plotted = False
+    for index, (record, color) in enumerate(
+        zip(ratio_records, (COLORS["F8"], COLORS["D0"]), strict=True)
+    ):
+        estimate = record.get("estimate")
+        lower = record.get("one_sided_95_lower")
+        available = (
+            bool(record.get("valid", True))
+            and estimate is not None
+            and np.isfinite(float(estimate))
+            and lower is not None
+            and np.isfinite(float(lower))
+        )
+        if available:
+            axis.bar(index, float(estimate), color=color, alpha=0.8)
+            axis.scatter(
+                index,
+                float(lower),
+                marker="v",
+                color="black",
+                label="95% lower" if not lower_plotted else None,
+            )
+            lower_plotted = True
+        else:
+            axis.text(
+                index,
+                0.5,
+                "unavailable",
+                transform=axis.get_xaxis_transform(),
+                ha="center",
+                va="center",
+                color="#666666",
+                fontstyle="italic",
+            )
     axis.axhline(0.95, color=COLORS["F8"], linestyle="--", linewidth=1.0)
     axis.axhline(0.90, color=COLORS["D0"], linestyle=":", linewidth=1.0)
     axis.set(
         title="FQ-min preservation ratios vs F8",
         xticks=(0, 1),
         xticklabels=("useful speed", "depth gain"),
+        xlim=(-0.5, 1.5),
         ylabel="ratio",
     )
-    axis.legend(frameon=False, fontsize=8)
+    if lower_plotted:
+        axis.legend(frameon=False, fontsize=8)
     figure.suptitle("Seed-paired first-contact quality campaign effects")
     return figure
 
