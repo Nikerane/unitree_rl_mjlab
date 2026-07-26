@@ -15,6 +15,7 @@ import pytest
 import torch
 
 import evaluation.analysis.first_strike_campaign as first_strike_campaign
+import evaluation.analysis.plot_first_strike_campaign as plot_first_strike_campaign
 from evaluation.analysis.first_strike_campaign import (
     ARM_TASKS,
     CAMPAIGN_EVALUATOR_RNG,
@@ -37,6 +38,7 @@ from evaluation.analysis.first_strike_campaign import (
     validate_frozen_campaign_matrix,
 )
 from evaluation.analysis.plot_first_strike_campaign import (
+    build_campaign_figure,
     build_trajectory_figure,
     generate_report,
     write_video_overlay_html,
@@ -536,17 +538,7 @@ def campaign_rows_fixture(tmp_path_factory):
 
 
 def _artifact_representatives(rows: list[dict]) -> list[dict]:
-    traces = []
-    for arm in ("C", "D-prime", "F", "E"):
-        row = next(
-            row
-            for row in rows
-            if row["treatment"] == arm and row["training_seed"] == 0
-        )
-        with np.load(row["sampled_trace_path"], allow_pickle=False) as saved:
-            payload = json.loads(str(saved["payload_json"]))
-        traces.extend((payload["episodes"][0], payload["episodes"][506]))
-    return traces
+    return first_strike_campaign.select_representative_traces(rows)["traces"]
 
 
 def _rewrite_campaign_artifacts(
@@ -2102,16 +2094,253 @@ def test_mechanism_contrasts_require_the_frozen_hypothesized_directions(
     assert by_contrast[("E", "F")]["hypothesized_direction_passed"] is True
 
 
-def test_representative_traces_require_success_and_failure_for_every_arm():
+def test_representative_selection_is_seed_qualified_and_coordinate_only(tmp_path):
+    def candidate(
+        *,
+        env_id: int,
+        episode_ordinal: int,
+        overall_success: bool,
+        useful_speed: float,
+        source_episode_id: str | None = None,
+    ) -> dict:
+        trace = _literal_trace(
+            arm="C",
+            reason="success" if overall_success else "window",
+            overall_success=overall_success,
+        )
+        trace["episode_id"] = source_episode_id or (
+            f"C-env{env_id}-episode{episode_ordinal}"
+        )
+        trace["env_id"] = env_id
+        trace["episode_ordinal"] = episode_ordinal
+        trace["first_strike"]["v_precontact_m_s"] = useful_speed
+        trace["reward"]["impact_payout"] = [useful_speed * 1000.0]
+        trace["physical"]["net_axial_force_n"][30] = useful_speed * 100.0
+        trace["physical"]["head_position_m"][0][1] = useful_speed
+        trace["trace_digest"] = _literal_digest(
+            {
+                "physical": trace["physical"],
+                "event_trace": trace["event_trace"],
+            }
+        )
+        return trace
+
+    shared_legacy_id = "C-env2-episode0"
+    seed_zero = [
+        candidate(
+            env_id=7,
+            episode_ordinal=0,
+            overall_success=True,
+            useful_speed=0.01,
+        ),
+        candidate(
+            env_id=2,
+            episode_ordinal=1,
+            overall_success=True,
+            useful_speed=100.0,
+        ),
+        candidate(
+            env_id=2,
+            episode_ordinal=0,
+            overall_success=True,
+            useful_speed=10.0,
+            source_episode_id=shared_legacy_id,
+        ),
+    ]
+    seed_one = [
+        candidate(
+            env_id=0,
+            episode_ordinal=0,
+            overall_success=True,
+            useful_speed=1000.0,
+        ),
+        candidate(
+            env_id=2,
+            episode_ordinal=0,
+            overall_success=False,
+            useful_speed=9999.0,
+            source_episode_id=shared_legacy_id,
+        ),
+    ]
+    rows = []
+    payloads = []
+    for seed, episodes, filename in (
+        (1, seed_one, "aaa-seed-one.npz"),
+        (0, seed_zero, "zzz-seed-zero.npz"),
+    ):
+        path = tmp_path / filename
+        payload = {
+            "treatment": "C",
+            "training_seed": seed,
+            "episodes": episodes,
+        }
+        payloads.append(payload)
+        np.savez_compressed(
+            path,
+            payload_json=np.asarray(
+                json.dumps(
+                    payload,
+                    sort_keys=True,
+                    allow_nan=False,
+                ),
+                dtype=np.str_,
+            ),
+        )
+        rows.append(
+            {
+                "treatment": "C",
+                "training_seed": seed,
+                "sampled_trace_path": str(path),
+            }
+        )
+
+    selection = (
+        first_strike_campaign._select_representative_traces_from_payloads(
+            rows,
+            payloads,
+        )
+    )
+    by_outcome = {
+        bool(trace["overall_success"]): trace
+        for trace in selection["traces"]
+        if trace["arm"] == "C"
+    }
+
+    assert selection["selection_rule"] == (
+        "lexicographically_smallest_training_seed_env_id_episode_ordinal"
+    )
+    assert (
+        by_outcome[True]["training_seed"],
+        by_outcome[True]["env_id"],
+        by_outcome[True]["episode_ordinal"],
+    ) == (0, 2, 0)
+    assert by_outcome[True]["first_strike"]["v_precontact_m_s"] == 10.0
+    assert (
+        by_outcome[False]["training_seed"],
+        by_outcome[False]["env_id"],
+        by_outcome[False]["episode_ordinal"],
+    ) == (1, 2, 0)
+    assert by_outcome[True]["source_episode_id"] == shared_legacy_id
+    assert by_outcome[False]["source_episode_id"] == shared_legacy_id
+    assert by_outcome[True]["episode_id"] != by_outcome[False]["episode_id"]
+    assert "seed0" in by_outcome[True]["episode_id"]
+    assert "seed1" in by_outcome[False]["episode_id"]
+
+    with np.load(rows[1]["sampled_trace_path"], allow_pickle=False) as saved:
+        source = json.loads(str(saved["payload_json"]))["episodes"][2]
+    assert source["episode_id"] == shared_legacy_id
+    assert "training_seed" not in source
+    assert "source_episode_id" not in source
+
+
+def test_representative_figure_reports_empty_outcome_strata():
     incomplete = [
         _literal_trace(arm=arm, reason="success", overall_success=True)
         for arm in ARM_TASKS
     ]
+    omissions = [
+        {
+            "arm": arm,
+            "outcome": "failure",
+            "overall_success": False,
+            "reason": "no sampled episodes in outcome stratum",
+        }
+        for arm in ARM_TASKS
+    ]
 
-    with pytest.raises(
-        ValueError, match="success and failure representative for every arm"
-    ):
-        build_trajectory_figure(incomplete)
+    figure = build_trajectory_figure(
+        incomplete,
+        omitted_strata=omissions,
+    )
+
+    assert "Omitted empty strata" in figure.layout.title.text
+    for arm in ARM_TASKS:
+        assert f"{arm} failure" in figure.layout.title.text
+
+
+def test_campaign_figure_coerces_csv_string_numeric_fields():
+    rows = [
+        {
+            "treatment": arm,
+            "training_seed": "0",
+            "first_strike_useful_speed_mean_sampled": "1.25",
+            "first_strike_success_rate_sampled": "0.5",
+            "impact_return_discounted_mean_sampled": "2.0",
+            "delivered_return_discounted_mean_sampled": "3.0",
+        }
+        for arm in ARM_TASKS
+    ]
+
+    figure = build_campaign_figure(rows)
+
+    plotted_y = [
+        value
+        for trace in figure.data
+        for value in trace.y
+    ]
+    assert plotted_y == [
+        value
+        for _ in ARM_TASKS
+        for value in (1.25, 0.5, 2.0, 3.0)
+    ]
+    assert all(isinstance(value, float) for value in plotted_y)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    (
+        lambda omissions: omissions[0].__setitem__("outcome", "success"),
+        lambda omissions: omissions[0].__setitem__("reason", "invented"),
+        lambda omissions: omissions.append(copy.deepcopy(omissions[0])),
+    ),
+)
+def test_representative_figure_rejects_noncanonical_or_duplicate_omissions(
+    mutate,
+):
+    traces = [
+        _literal_trace(arm=arm, reason="success", overall_success=True)
+        for arm in ARM_TASKS
+    ]
+    omissions = [
+        {
+            "arm": arm,
+            "outcome": "failure",
+            "overall_success": False,
+            "reason": "no sampled episodes in outcome stratum",
+        }
+        for arm in ARM_TASKS
+    ]
+    mutate(omissions)
+
+    with pytest.raises(ValueError, match="omitted"):
+        build_trajectory_figure(traces, omitted_strata=omissions)
+
+
+def test_seed_qualification_preserves_raw_seed_presence_and_rejects_shadow_fields():
+    raw = _literal_trace(arm="C")
+    without_raw_seed = first_strike_campaign._seed_qualified_representative_trace(
+        raw,
+        training_seed=0,
+    )
+    raw_with_seed = copy.deepcopy(raw)
+    raw_with_seed["training_seed"] = 0
+    with_raw_seed = first_strike_campaign._seed_qualified_representative_trace(
+        raw_with_seed,
+        training_seed=0,
+    )
+
+    assert without_raw_seed["source_training_seed"] is None
+    assert with_raw_seed["source_training_seed"] == 0
+    assert without_raw_seed != with_raw_seed
+
+    for reserved in ("source_episode_id", "source_training_seed"):
+        shadowed = copy.deepcopy(raw)
+        shadowed[reserved] = "attacker-controlled"
+        with pytest.raises(ValueError, match="reserved"):
+            first_strike_campaign._seed_qualified_representative_trace(
+                shadowed,
+                training_seed=0,
+            )
 
 
 def test_plotly_trajectory_and_video_overlay_keep_labels_and_trace_digest(tmp_path):
@@ -2301,6 +2530,100 @@ def test_fixture_report_html_and_video_overlays_remain_digest_bound(
         assert overlay["video_sha256"] == hashlib.sha256(
             Path(overlay["video"]).read_bytes()
         ).hexdigest()
+
+
+def test_report_keeps_seed_analysis_valid_when_a_representative_stratum_is_empty(
+    tmp_path, campaign_rows_fixture
+):
+    rows = copy.deepcopy(campaign_rows_fixture)
+
+    def make_c_overall_success(trace):
+        trace["overall_success"] = True
+        trace["episode_peak_lambda"] = [0.1] * 6
+        trace["episode_delivered_accumulator_n_s"] = max(
+            0.1, float(trace["episode_delivered_accumulator_n_s"])
+        )
+        trace["episode_depth_m"] = 0.032
+
+    _rewrite_campaign_artifacts(
+        rows,
+        treatment="C",
+        output_dir=tmp_path,
+        transform=make_c_overall_success,
+    )
+
+    result = generate_report(
+        rows,
+        output_dir=tmp_path,
+        bootstrap_samples=1000,
+    )
+
+    assert result["analysis"]["valid"] is True
+    assert result["representative_trajectories"]["omitted_strata"] == [
+        {
+            "arm": "C",
+            "outcome": "failure",
+            "overall_success": False,
+            "reason": "no sampled episodes in outcome stratum",
+        }
+    ]
+    selected = result["representative_trajectories"]["selected"]
+    assert not any(
+        row["arm"] == "C" and row["overall_success"] is False
+        for row in selected
+    )
+    assert "C failure" in Path(
+        result["artifacts"]["trajectory_html"]
+    ).read_text()
+
+
+def test_report_rejects_sampled_artifact_mutated_after_campaign_analysis(
+    monkeypatch, tmp_path, campaign_rows_fixture
+):
+    rows = copy.deepcopy(campaign_rows_fixture)
+    target = next(
+        row
+        for row in rows
+        if row["treatment"] == "C" and row["training_seed"] == 0
+    )
+    source_path = Path(target["sampled_trace_path"])
+    copied_path = tmp_path / source_path.name
+    copied_path.write_bytes(source_path.read_bytes())
+    target["sampled_trace_path"] = str(copied_path)
+    real_analyze = plot_first_strike_campaign.analyze_campaign
+
+    def analyze_then_mutate(*args, **kwargs):
+        result = real_analyze(*args, **kwargs)
+        with np.load(copied_path, allow_pickle=False) as saved:
+            payload = json.loads(str(saved["payload_json"]))
+        payload["episodes"][0]["reward"]["impact_payout"] = [999_999.0]
+        payload_without_digest = dict(payload)
+        payload_without_digest.pop("payload_digest")
+        payload["payload_digest"] = _literal_digest(payload_without_digest)
+        np.savez_compressed(
+            copied_path,
+            payload_json=np.asarray(
+                json.dumps(payload, sort_keys=True, allow_nan=False),
+                dtype=np.str_,
+            ),
+        )
+        return result
+
+    monkeypatch.setattr(
+        plot_first_strike_campaign,
+        "analyze_campaign",
+        analyze_then_mutate,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="sampled trace artifact SHA-256 mismatch",
+    ):
+        plot_first_strike_campaign.generate_report(
+            rows,
+            output_dir=tmp_path,
+            bootstrap_samples=1000,
+        )
 
 
 def test_report_rejects_representative_not_in_validated_campaign_artifact(

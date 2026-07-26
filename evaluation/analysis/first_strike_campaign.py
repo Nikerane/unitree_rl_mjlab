@@ -12,11 +12,12 @@ import argparse
 from collections import defaultdict
 import csv
 import hashlib
+import io
 from itertools import combinations
 import json
 from pathlib import Path
 import sys
-from typing import Mapping, Sequence
+from typing import Iterable, Mapping, Sequence
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -1277,6 +1278,142 @@ def _episode_trace_digest(trace: Mapping) -> str:
     ).hexdigest()
 
 
+REPRESENTATIVE_SELECTION_RULE = (
+    "lexicographically_smallest_training_seed_env_id_episode_ordinal"
+)
+
+
+def _seed_qualified_representative_trace(
+    trace: Mapping, *, training_seed: int
+) -> dict:
+    """Copy one raw trace and add its seed-qualified analysis identity."""
+
+    reserved = {"source_episode_id", "source_training_seed"} & trace.keys()
+    if reserved:
+        raise ValueError(
+            "raw representative trace contains reserved analysis fields: "
+            f"{sorted(reserved)}"
+        )
+    source_episode_id = trace.get("episode_id")
+    if not isinstance(source_episode_id, str) or not source_episode_id:
+        raise ValueError("representative source episode ID must be non-empty")
+    try:
+        source_training_seed = (
+            trace["training_seed"] if "training_seed" in trace else None
+        )
+        trace_seed = (
+            training_seed
+            if source_training_seed is None
+            else int(source_training_seed)
+        )
+        env_id = int(trace["env_id"])
+        episode_ordinal = int(trace["episode_ordinal"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("representative coordinates must be integers") from error
+    if trace_seed != training_seed:
+        raise ValueError("representative trace training seed binding mismatch")
+    if env_id < 0 or episode_ordinal < 0:
+        raise ValueError("representative coordinates must be nonnegative")
+    arm = str(trace.get("arm", ""))
+    if arm not in ARM_TASKS:
+        raise ValueError(f"representative trace has invalid arm: {arm!r}")
+
+    qualified = dict(trace)
+    qualified.update(
+        {
+            "episode_id": (
+                f"{arm}-seed{training_seed}-env{env_id}-episode"
+                f"{episode_ordinal}"
+            ),
+            "source_episode_id": source_episode_id,
+            "source_training_seed": source_training_seed,
+            "training_seed": training_seed,
+        }
+    )
+    return qualified
+
+
+def _select_representative_traces_from_payloads(
+    rows: Sequence[Mapping],
+    sampled_payloads: Iterable[Mapping],
+) -> dict:
+    """Select deterministically from caller-held immutable payload snapshots."""
+
+    rows = list(rows)
+    selected: dict[tuple[str, bool], tuple[tuple[int, int, int], dict]] = {}
+    for row, payload in zip(rows, sampled_payloads, strict=True):
+        arm = str(row.get("treatment", ""))
+        if arm not in ARM_TASKS:
+            raise ValueError(f"representative row has invalid treatment: {arm!r}")
+        try:
+            training_seed = int(row["training_seed"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(
+                "representative row training seed must be an integer"
+            ) from error
+        if (
+            str(payload.get("treatment", "")) != arm
+            or int(payload.get("training_seed", -1)) != training_seed
+        ):
+            raise ValueError("representative artifact row binding mismatch")
+
+        for raw_trace in payload.get("episodes", ()):
+            trace = _seed_qualified_representative_trace(
+                raw_trace,
+                training_seed=training_seed,
+            )
+            if str(trace["arm"]) != arm:
+                raise ValueError("representative trace treatment binding mismatch")
+            coordinate = (
+                training_seed,
+                int(trace["env_id"]),
+                int(trace["episode_ordinal"]),
+            )
+            stratum = (arm, bool(trace.get("overall_success", False)))
+            previous = selected.get(stratum)
+            if previous is None or coordinate < previous[0]:
+                selected[stratum] = (coordinate, trace)
+            elif coordinate == previous[0] and trace != previous[1]:
+                raise ValueError(
+                    "distinct representative traces share one seed/env/ordinal"
+                )
+
+    traces = []
+    omitted = []
+    for arm in ARM_ORDER:
+        for outcome, overall_success in (
+            ("success", True),
+            ("failure", False),
+        ):
+            candidate = selected.get((arm, overall_success))
+            if candidate is None:
+                omitted.append(
+                    {
+                        "arm": arm,
+                        "outcome": outcome,
+                        "overall_success": overall_success,
+                        "reason": "no sampled episodes in outcome stratum",
+                    }
+                )
+            else:
+                traces.append(candidate[1])
+    return {
+        "selection_rule": REPRESENTATIVE_SELECTION_RULE,
+        "traces": traces,
+        "omitted_strata": omitted,
+    }
+
+
+def select_representative_traces(rows: Sequence[Mapping]) -> dict:
+    """Verify artifact bytes, then select each representative stratum."""
+
+    rows = list(rows)
+    return _select_representative_traces_from_payloads(
+        rows,
+        _verified_sampled_artifact_payloads(rows),
+    )
+
+
 def _treatment_config_digest(row: Mapping) -> str:
     treatment = str(row["treatment"])
     return hashlib.sha256(
@@ -1297,8 +1434,18 @@ def _treatment_config_digest(row: Mapping) -> str:
     ).hexdigest()
 
 
+def _sampled_payload_from_bytes(artifact_bytes: bytes) -> dict:
+    with np.load(io.BytesIO(artifact_bytes), allow_pickle=False) as saved:
+        if saved.files != ["payload_json"]:
+            raise ValueError("NPZ must contain exactly payload_json")
+        scalar = saved["payload_json"]
+        if scalar.shape != () or scalar.dtype.kind != "U":
+            raise ValueError("payload_json must be a scalar Unicode value")
+        return json.loads(str(scalar))
+
+
 def _load_and_recompute_sampled_artifact(
-    path_text: str, artifact_sha256: str
+    artifact_bytes: bytes, artifact_sha256: str
 ) -> tuple[
     dict,
     str,
@@ -1308,14 +1455,7 @@ def _load_and_recompute_sampled_artifact(
     tuple[str, ...],
 ]:
     del artifact_sha256  # Caller verified the bytes before parsing.
-    path = Path(path_text)
-    with np.load(path, allow_pickle=False) as saved:
-        if saved.files != ["payload_json"]:
-            raise ValueError("NPZ must contain exactly payload_json")
-        scalar = saved["payload_json"]
-        if scalar.shape != () or scalar.dtype.kind != "U":
-            raise ValueError("payload_json must be a scalar Unicode value")
-        payload = json.loads(str(scalar))
+    payload = _sampled_payload_from_bytes(artifact_bytes)
     embedded_digest = str(payload.get("payload_digest", ""))
     digest_payload = dict(payload)
     digest_payload.pop("payload_digest", None)
@@ -1493,15 +1633,27 @@ def _load_and_recompute_sampled_artifact(
     )
 
 
-def _sampled_artifact_reasons(row: Mapping, row_name: str) -> list[str]:
+def _sampled_artifact_reasons(
+    row: Mapping,
+    row_name: str,
+    *,
+    artifact_bytes: bytes | None = None,
+) -> list[str]:
     reasons: list[str] = []
     path = Path(str(row.get("sampled_trace_path", "")))
-    if not path.is_file():
-        return [f"{row_name}: sampled trace artifact is missing"]
+    if artifact_bytes is None:
+        if not path.is_file():
+            return [f"{row_name}: sampled trace artifact is missing"]
+        try:
+            artifact_bytes = path.read_bytes()
+        except OSError as error:
+            return [
+                f"{row_name}: sampled trace artifact cannot be read: {error}"
+            ]
     expected_artifact_sha = str(
         row.get("sampled_trace_artifact_sha256", "")
     )
-    actual_artifact_sha = _sha256(path)
+    actual_artifact_sha = hashlib.sha256(artifact_bytes).hexdigest()
     if actual_artifact_sha != expected_artifact_sha:
         reasons.append(f"{row_name}: sampled trace artifact SHA-256 mismatch")
     try:
@@ -1513,7 +1665,7 @@ def _sampled_artifact_reasons(row: Mapping, row_name: str) -> list[str]:
             recomputed_raw_bindings,
             semantic_reasons,
         ) = _load_and_recompute_sampled_artifact(
-            str(path.resolve()), actual_artifact_sha
+            artifact_bytes, actual_artifact_sha
         )
     except Exception as error:
         reasons.append(f"{row_name}: sampled trace artifact is invalid: {error}")
@@ -1662,6 +1814,36 @@ def _sampled_artifact_reasons(row: Mapping, row_name: str) -> list[str]:
                     f"{row_name}: combined invariant mismatch for {key}"
                 )
     return reasons
+
+
+def _verified_sampled_artifact_payloads(
+    rows: Sequence[Mapping],
+) -> Iterable[dict]:
+    """Yield one payload at a time from exact bytes revalidated for reporting."""
+
+    for row in rows:
+        arm = str(row.get("treatment", ""))
+        row_name = str(
+            row.get("name", f"{arm}/seed{row.get('training_seed')}")
+        )
+        path = Path(str(row.get("sampled_trace_path", "")))
+        try:
+            artifact_bytes = path.read_bytes()
+        except OSError as error:
+            raise ValueError(
+                f"{row_name}: sampled trace artifact cannot be read: {error}"
+            ) from error
+        reasons = _sampled_artifact_reasons(
+            row,
+            row_name,
+            artifact_bytes=artifact_bytes,
+        )
+        if reasons:
+            raise ValueError(
+                "representative sampled artifact verification failed: "
+                + "; ".join(reasons)
+            )
+        yield _sampled_payload_from_bytes(artifact_bytes)
 
 
 def _qvel_sampled_metrics_reasons(row: Mapping, row_name: str) -> list[str]:

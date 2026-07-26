@@ -17,6 +17,8 @@ from evaluation.analysis.first_strike_campaign import (
     ARM_TASKS,
     PRIMARY_METRIC,
     _episode_trace_digest,
+    _select_representative_traces_from_payloads,
+    _verified_sampled_artifact_payloads,
     analyze_campaign,
 )
 
@@ -110,20 +112,46 @@ def _marker_indices(
     return contact_index, success_index
 
 
-def _validate_representative_traces(traces: Sequence[Mapping]) -> None:
-    observed = {
+def _validate_representative_traces(
+    traces: Sequence[Mapping],
+    omitted_strata: Sequence[Mapping] = (),
+) -> None:
+    observed_list = [
         (str(trace.get("arm")), bool(trace.get("overall_success", False)))
         for trace in traces
-    }
+    ]
+    observed = set(observed_list)
+    if len(observed) != len(observed_list):
+        raise ValueError("representative set has duplicate arm/outcome strata")
     expected = {
         (arm, success)
         for arm in ARM_ORDER
         for success in (False, True)
     }
-    if not expected <= observed:
+    omitted_list = []
+    for stratum in omitted_strata:
+        arm = str(stratum.get("arm", ""))
+        overall_success = stratum.get("overall_success")
+        outcome = stratum.get("outcome")
+        reason = stratum.get("reason")
+        expected_outcome = (
+            "success" if overall_success is True else "failure"
+        )
+        if (
+            not isinstance(overall_success, bool)
+            or outcome != expected_outcome
+            or reason != "no sampled episodes in outcome stratum"
+        ):
+            raise ValueError(
+                "omitted representative strata must use canonical outcome/reason"
+            )
+        omitted_list.append((arm, overall_success))
+    omitted = set(omitted_list)
+    if len(omitted) != len(omitted_list):
+        raise ValueError("omitted representative strata must not be duplicated")
+    if observed & omitted or observed | omitted != expected:
         raise ValueError(
-            "representative set needs a success and failure representative "
-            "for every arm"
+            "every missing representative stratum must be explicitly omitted"
         )
     episode_ids = [str(trace.get("episode_id", "")) for trace in traces]
     if not all(episode_ids) or len(set(episode_ids)) != len(episode_ids):
@@ -131,70 +159,94 @@ def _validate_representative_traces(traces: Sequence[Mapping]) -> None:
 
 
 def _validated_campaign_representatives(
-    rows: Sequence[Mapping], traces: Sequence[Mapping]
+    traces: Sequence[Mapping],
+    campaign_traces: Sequence[Mapping],
 ) -> dict[str, str]:
-    """Recompute trace digests and prove exact membership in validated NPZ rows."""
+    """Prove supplied traces equal representatives from verified NPZ snapshots."""
 
-    requested: dict[tuple[str, str], tuple[str, str]] = {}
-    for trace in traces:
-        episode_id = str(trace.get("episode_id", ""))
-        arm = str(trace.get("arm", ""))
-        try:
-            recomputed_digest = _episode_trace_digest(trace)
-            canonical_trace = json.dumps(
-                trace,
-                sort_keys=True,
-                separators=(",", ":"),
-                allow_nan=False,
-            )
-        except Exception as error:
-            raise ValueError(
-                f"representative {episode_id!r} cannot be content-verified: {error}"
-            ) from error
-        if str(trace.get("trace_digest", "")) != recomputed_digest:
-            raise ValueError(
-                f"representative {episode_id!r} trace digest mismatch"
-            )
-        requested[(arm, episode_id)] = (recomputed_digest, canonical_trace)
-
-    matched: dict[str, str] = {}
-    for row in rows:
-        path = Path(str(row.get("sampled_trace_path", "")))
-        with np.load(path, allow_pickle=False) as saved:
-            payload = json.loads(str(saved["payload_json"]))
-        for candidate in payload.get("episodes", []):
-            key = (
-                str(candidate.get("arm", "")),
-                str(candidate.get("episode_id", "")),
-            )
-            if key not in requested:
-                continue
-            expected_digest, expected_trace = requested[key]
-            candidate_digest = _episode_trace_digest(candidate)
-            if (
-                str(candidate.get("trace_digest", "")) == candidate_digest
-                and candidate_digest == expected_digest
-                and json.dumps(
-                    candidate,
+    def canonical_by_identity(
+        candidates: Sequence[Mapping],
+    ) -> dict[tuple[str, int, int, int], tuple[str, str, str]]:
+        canonical = {}
+        episode_ids = set()
+        for trace in candidates:
+            episode_id = str(trace.get("episode_id", ""))
+            arm = str(trace.get("arm", ""))
+            try:
+                training_seed = int(trace["training_seed"])
+                env_id = int(trace["env_id"])
+                episode_ordinal = int(trace["episode_ordinal"])
+                identity = (
+                    arm,
+                    training_seed,
+                    env_id,
+                    episode_ordinal,
+                )
+                source_episode_id = trace["source_episode_id"]
+                if (
+                    not isinstance(source_episode_id, str)
+                    or not source_episode_id
+                    or "source_training_seed" not in trace
+                ):
+                    raise ValueError("source identity is not preserved")
+                source_training_seed = trace["source_training_seed"]
+                if (
+                    source_training_seed is not None
+                    and int(source_training_seed) != training_seed
+                ):
+                    raise ValueError("source training-seed binding mismatch")
+                if episode_id != (
+                    f"{arm}-seed{training_seed}-env{env_id}-episode"
+                    f"{episode_ordinal}"
+                ):
+                    raise ValueError("seed-qualified analysis identity mismatch")
+                recomputed_digest = _episode_trace_digest(trace)
+                canonical_trace = json.dumps(
+                    trace,
                     sort_keys=True,
                     separators=(",", ":"),
                     allow_nan=False,
                 )
-                == expected_trace
-            ):
-                matched[key[1]] = expected_digest
+            except Exception as error:
+                raise ValueError(
+                    f"representative {episode_id!r} cannot be content-verified: "
+                    f"{error}"
+                ) from error
+            if str(trace.get("trace_digest", "")) != recomputed_digest:
+                raise ValueError(
+                    f"representative {episode_id!r} trace digest mismatch"
+                )
+            if identity in canonical or episode_id in episode_ids:
+                raise ValueError("representative identities must be unique")
+            canonical[identity] = (
+                episode_id,
+                recomputed_digest,
+                canonical_trace,
+            )
+            episode_ids.add(episode_id)
+        return canonical
 
-    missing = sorted(
-        episode_id
-        for (_, episode_id), _ in requested.items()
-        if episode_id not in matched
+    expected = canonical_by_identity(campaign_traces)
+    requested = canonical_by_identity(traces)
+    mismatched = {
+        details[0]
+        for identity, details in expected.items()
+        if requested.get(identity) != details
+    }
+    mismatched.update(
+        details[0]
+        for identity, details in requested.items()
+        if identity not in expected
     )
-    if missing:
+    if mismatched:
         raise ValueError(
             "representative traces are not exact members of validated campaign "
-            f"NPZ artifacts: {', '.join(missing)}"
+            f"NPZ artifacts: {', '.join(sorted(mismatched))}"
         )
-    return matched
+    return {
+        episode_id: digest
+        for episode_id, digest, _ in expected.values()
+    }
 
 
 def _video_timing_mapping(
@@ -304,13 +356,18 @@ def _add_2d_state_path(
     )
 
 
-def build_trajectory_figure(traces: Sequence[Mapping]) -> go.Figure:
+def build_trajectory_figure(
+    traces: Sequence[Mapping],
+    *,
+    omitted_strata: Sequence[Mapping] = (),
+) -> go.Figure:
     """Build state-ground-truth path and contact-mechanism panels."""
 
     traces = list(traces)
     if not traces:
         raise ValueError("at least one representative trace is required")
-    _validate_representative_traces(traces)
+    omitted_strata = list(omitted_strata)
+    _validate_representative_traces(traces, omitted_strata)
     figure = make_subplots(
         rows=2,
         cols=3,
@@ -581,12 +638,20 @@ def build_trajectory_figure(traces: Sequence[Mapping]) -> go.Figure:
     figure.update_yaxes(title_text="depth (mm) / impulse (N·s)", row=2, col=2)
     figure.update_xaxes(title_text="control time (ms)", row=2, col=3)
     figure.update_yaxes(title_text="weighted payout", row=2, col=3)
+    omission_note = ""
+    if omitted_strata:
+        labels = ", ".join(
+            f"{str(stratum['arm'])} {str(stratum['outcome'])}"
+            for stratum in omitted_strata
+        )
+        omission_note = f"<br>Omitted empty strata: {labels}."
     figure.update_layout(
         title={
             "text": (
                 "First-strike representative traces<br>"
                 "<sup>Simulator state is ground truth; colors encode normalized time. "
-                "Reward streams are actual task payouts, not duplicated physical traces.</sup>"
+                "Reward streams are actual task payouts, not duplicated physical traces."
+                f"{omission_note}</sup>"
             )
         },
         height=900,
@@ -595,6 +660,10 @@ def build_trajectory_figure(traces: Sequence[Mapping]) -> go.Figure:
         legend={"orientation": "h", "y": -0.11},
     )
     return figure
+
+
+def _numeric_mean(rows: Sequence[Mapping], key: str) -> float:
+    return float(np.mean([float(row[key]) for row in rows]))
 
 
 def build_campaign_figure(rows: Sequence[Mapping]) -> go.Figure:
@@ -637,13 +706,9 @@ def build_campaign_figure(rows: Sequence[Mapping]) -> go.Figure:
             go.Bar(
                 x=[arm],
                 y=[
-                    float(
-                        np.mean(
-                            [
-                                row["first_strike_success_rate_sampled"]
-                                for row in arm_rows
-                            ]
-                        )
+                    _numeric_mean(
+                        arm_rows,
+                        "first_strike_success_rate_sampled",
                     )
                 ],
                 marker_color=ARM_COLORS[arm],
@@ -654,15 +719,13 @@ def build_campaign_figure(rows: Sequence[Mapping]) -> go.Figure:
             row=1,
             col=2,
         )
-        impact = float(
-            np.mean(
-                [row["impact_return_discounted_mean_sampled"] for row in arm_rows]
-            )
+        impact = _numeric_mean(
+            arm_rows,
+            "impact_return_discounted_mean_sampled",
         )
-        delivered = float(
-            np.mean(
-                [row["delivered_return_discounted_mean_sampled"] for row in arm_rows]
-            )
+        delivered = _numeric_mean(
+            arm_rows,
+            "delivered_return_discounted_mean_sampled",
         )
         figure.add_trace(
             go.Bar(
@@ -904,7 +967,7 @@ def write_video_overlay_html(
 
 def generate_report(
     rows: Sequence[Mapping],
-    representative_traces: Sequence[Mapping],
+    representative_traces: Sequence[Mapping] | None = None,
     *,
     output_dir: str | Path,
     video_artifacts: Mapping[str, Mapping] | None = None,
@@ -912,6 +975,7 @@ def generate_report(
 ) -> dict:
     """Persist Plotly HTML figures, digest-bound overlays, and analysis JSON."""
 
+    rows = list(rows)
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     analysis = analyze_campaign(rows, bootstrap_samples=bootstrap_samples)
@@ -919,13 +983,28 @@ def generate_report(
         raise ValueError(
             "cannot generate representative artifacts from an invalid campaign"
         )
-    validated_digests = _validated_campaign_representatives(
-        rows, representative_traces
+    sampled_payloads = _verified_sampled_artifact_payloads(rows)
+    selection = _select_representative_traces_from_payloads(
+        rows,
+        sampled_payloads,
     )
+    deterministic_traces = list(selection["traces"])
+    if representative_traces is None:
+        representative_traces = deterministic_traces
+    else:
+        representative_traces = list(representative_traces)
+    validated_digests = _validated_campaign_representatives(
+        representative_traces,
+        deterministic_traces,
+    )
+    representative_traces = deterministic_traces
     campaign_path = output / "first_strike_campaign.html"
     trajectory_path = output / "first_strike_trajectories.html"
     build_campaign_figure(rows).write_html(campaign_path, include_plotlyjs="cdn")
-    build_trajectory_figure(representative_traces).write_html(
+    build_trajectory_figure(
+        representative_traces,
+        omitted_strata=selection["omitted_strata"],
+    ).write_html(
         trajectory_path, include_plotlyjs="cdn"
     )
     overlays = []
@@ -960,6 +1039,28 @@ def generate_report(
             )
     result = {
         "analysis": analysis,
+        "representative_trajectories": {
+            "selection_rule": selection["selection_rule"],
+            "selected": [
+                {
+                    "episode_id": str(trace["episode_id"]),
+                    "source_episode_id": str(trace["source_episode_id"]),
+                    "arm": str(trace["arm"]),
+                    "outcome": (
+                        "success"
+                        if bool(trace["overall_success"])
+                        else "failure"
+                    ),
+                    "overall_success": bool(trace["overall_success"]),
+                    "training_seed": int(trace["training_seed"]),
+                    "env_id": int(trace["env_id"]),
+                    "episode_ordinal": int(trace["episode_ordinal"]),
+                    "trace_digest": str(trace["trace_digest"]),
+                }
+                for trace in representative_traces
+            ],
+            "omitted_strata": list(selection["omitted_strata"]),
+        },
         "artifacts": {
             "campaign_html": str(campaign_path),
             "trajectory_html": str(trajectory_path),
