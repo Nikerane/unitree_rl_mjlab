@@ -238,6 +238,19 @@ def _physical_trace_digest(trace: Mapping) -> str:
   return _canonical_digest(_physical_trace_payload(trace))
 
 
+def _validated_physical_trace_digest(
+  trace: Mapping, *, require_recorded_digest: bool
+) -> str:
+  """Fail closed before a schema-v3 physical trace is hashed or banked."""
+  payload = _physical_trace_payload(trace)
+  _require_finite_trace_value(payload, path="sampled_trace")
+  _validate_quality_trace(trace)
+  digest = _canonical_digest(payload)
+  if require_recorded_digest and str(trace.get("trace_digest", "")) != digest:
+    raise ValueError("recorded physical trace digest mismatch")
+  return digest
+
+
 def _plant_replay_payload(trace: Mapping) -> dict:
   """Physical replay projection when one trace lacks passive quality sensing.
 
@@ -946,7 +959,7 @@ class _SampledTraceCollector:
         batch = self.env.num_envs
         device = self.env.device
         self._substeps["quality_found_count"].append(
-          torch.zeros(batch, dtype=torch.long, device=device)
+          torch.zeros(batch, 1, dtype=torch.long, device=device)
         )
         self._substeps["quality_normal_force_n"].append(
           torch.zeros(batch, 1, device=device)
@@ -960,7 +973,7 @@ class _SampledTraceCollector:
       else:
         quality = self._quality_sensor.data
         self._substeps["quality_found_count"].append(
-          (quality.found > 0).sum(dim=-1).detach().clone()
+          quality.found.detach().clone()
         )
         self._substeps["quality_normal_force_n"].append(
           quality.force[..., 0].detach().clone()
@@ -1095,7 +1108,9 @@ class _SampledTraceCollector:
       ),
       "episode_depth_m": float(self.snapshot["depth"][env_id]),
     }
-    trace["trace_digest"] = _physical_trace_digest(trace)
+    trace["trace_digest"] = _validated_physical_trace_digest(
+      trace, require_recorded_digest=False
+    )
     _retain_first_completed(
       trace,
       counts=self.accepted_counts,
@@ -1354,6 +1369,9 @@ def _persist_sampled_traces(
   mean_rollout_invariants: dict,
   evaluation_contract: dict | None = None,
 ) -> dict:
+  for trace in sampled_rec["episodes"]:
+    if "physical" in trace:
+      _validated_physical_trace_digest(trace, require_recorded_digest=True)
   payload = {
     "schema_version": 3,
     "selection": "first two completed episodes from each of 256 environments",

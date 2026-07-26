@@ -448,6 +448,88 @@ def _literal_trace(
     return trace
 
 
+def _schema_v3_quality_trace() -> dict:
+    trace = _literal_trace()
+    trace["physical"].update(
+        {
+            "quality_found_count": [[0] * 8, [1, 7, 0, 0, 0, 0, 0, 0]],
+            "quality_normal_force_n": [[0.0] * 8, [3.0] * 8],
+            "quality_contact_position_m": [[[0.0] * 3] * 8, [[0.5, 0.0, 0.032]] * 8],
+            "quality_contact_normal": [[[0.0] * 3] * 8, [[0.0, 0.0, -1.0]] * 8],
+        }
+    )
+    trace["event_trace"].update(
+        {
+            "tracker_contact_point_w": [[0.0, 0.0, 0.0], [0.5, 0.0, 0.032]],
+            "tracker_contact_error_m": [0.0, 0.001],
+            "tracker_contact_quality": [0.0, 0.95],
+            "tracker_contact_quality_valid": [False, True],
+            "tracker_contact_quality_overflow": [False, False],
+            "tracker_first_contact_time_s": [0.0, 0.004],
+            "tracker_contact_normal_axiality": [0.0, 1.0],
+            "event_cumulative_transverse_impulse_n_s": [0.0, 0.002],
+        }
+    )
+    trace["first_strike"].update(
+        {
+            "contact_point_w": [0.5, 0.0, 0.032],
+            "contact_error_m": 0.001,
+            "contact_quality": 0.95,
+            "contact_quality_valid": True,
+            "contact_quality_overflow": False,
+            "first_contact_time_s": 0.004,
+            "contact_normal_axiality": 1.0,
+            "delivered_transverse_n_s": 0.002,
+        }
+    )
+    trace.update(
+        {
+            "episode_peak_lambda": [0.1] * 6,
+            "episode_delivered_accumulator_n_s": 0.1,
+            "episode_depth_m": 0.032,
+        }
+    )
+    trace["trace_digest"] = eval_impulse._physical_trace_digest(trace)
+    return trace
+
+
+def test_quality_found_slots_are_raw_and_digest_sensitive():
+    trace = _schema_v3_quality_trace()
+    assert trace["physical"]["quality_found_count"][1] == [1, 7, 0, 0, 0, 0, 0, 0]
+    baseline = eval_impulse._physical_trace_digest(trace)
+    trace["physical"]["quality_found_count"][1][1] = 1
+    assert eval_impulse._physical_trace_digest(trace) != baseline
+
+
+def test_persistence_rejects_nonfinite_quality_geometry(tmp_path):
+    trace = _schema_v3_quality_trace()
+    trace["physical"]["quality_contact_position_m"][1][0][0] = None
+    with pytest.raises(ValueError, match="nonfinite physical trace value"):
+        eval_impulse._persist_sampled_traces(
+            out_dir=tmp_path, name="invalid", sampled_rec={"control_steps": 1, "episodes": [trace]},
+            task=ARM_TASKS["E"], contract={"treatment": "E", "impact_weight": 8.0,
+            "delivered_weight": 2.0, "event_i_ref_n_s": 0.3088,
+            "impulse_limits_n_m_s": [1.64] * 6}, training_seed=0, reset_seed=1,
+            observation_seed=2, action_seed=3, nail_geometry={}, provenance={"checkpoint_sha256": "e" * 64},
+            mean_rollout_invariants={},
+        )
+
+
+def test_persistence_rejects_overflowed_quality_marked_valid(tmp_path):
+    trace = _schema_v3_quality_trace()
+    trace["event_trace"]["tracker_contact_quality_overflow"][-1] = True
+    trace["first_strike"]["contact_quality_overflow"] = True
+    with pytest.raises(ValueError, match="overflowed quality"):
+        eval_impulse._persist_sampled_traces(
+            out_dir=tmp_path, name="invalid", sampled_rec={"control_steps": 1, "episodes": [trace]},
+            task=ARM_TASKS["E"], contract={"treatment": "E", "impact_weight": 8.0,
+            "delivered_weight": 2.0, "event_i_ref_n_s": 0.3088,
+            "impulse_limits_n_m_s": [1.64] * 6}, training_seed=0, reset_seed=1,
+            observation_seed=2, action_seed=3, nail_geometry={}, provenance={"checkpoint_sha256": "e" * 64},
+            mean_rollout_invariants={},
+        )
+
+
 def test_action_tape_physics_requires_all_quality_channels_and_rejects_drift():
     """A missing or changed passive quality sample must invalidate replay identity."""
     trace = _literal_trace()
@@ -1435,6 +1517,10 @@ def test_live_substep_trace_channels_cross_real_terminal_autoreset_in_phase():
         assert set(eval_impulse._TRACE_PHYSICAL_KEYS) <= set(trace["physical"])
         assert set(eval_impulse._TRACE_EVENT_KEYS) <= set(trace["event_trace"])
         assert len(trace["physical"]["quality_found_count"]) == n_substeps
+        assert all(
+            len(frame) == 8
+            for frame in trace["physical"]["quality_found_count"]
+        )
         assert all(
             len(frame) == 8
             for frame in trace["physical"]["quality_normal_force_n"]
