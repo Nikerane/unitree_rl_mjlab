@@ -217,28 +217,37 @@ def test_install_episode_hook_requires_both_accumulators():
     eval_impulse._install_episode_hook(_FakeEnv())
 
 
-_QUALITY_CONTRACT_WEIGHTS = {
-  "F8": (8.0, 2.0),
-  "F0": (0.0, 2.0),
-  "D0": (8.0, 0.0),
-  "FQ": (8.0, 0.0),
-}
+# (arm, resolved treatment, expected (impact, delivered) weights).
+# The resolved treatment is NOT always the arm label -- see the docstring below.
+_QUALITY_CONTRACT_WEIGHTS = (
+  ("F8", "F", (8.0, 2.0)),
+  ("F0", "F0", (0.0, 2.0)),
+  ("D0", "D0", (8.0, 0.0)),
+  ("FQ", "FQ", (8.0, 0.0)),
+)
 
 
-@pytest.mark.parametrize(("arm", "expected_weights"), _QUALITY_CONTRACT_WEIGHTS.items())
-def test_sampled_env_contract_weights_match_the_four_arm_table(arm, expected_weights):
+@pytest.mark.parametrize(
+  ("arm", "expected_treatment", "expected_weights"), _QUALITY_CONTRACT_WEIGHTS
+)
+def test_sampled_env_contract_weights_match_the_four_arm_table(
+  arm, expected_treatment, expected_weights
+):
   """The strict evaluator must accept each strict-quality arm's shipped weights.
 
-  F8 resolves through the LEGACY ``TASK_TO_ARM`` map (same task string as "F"),
-  not through ``QUALITY_TASK_TO_ARM`` -- ``_validate_sampled_env_contract`` must
-  still report the resolved arm as "F8" per ``QUALITY_TASK_TO_ARM`` lookup only
-  after the legacy map misses, and either way the weight contract for that task
-  must be 8/2. FQ is the actual bug: it currently falls through to the (8,2)
-  default even though its shipped weights are (8,0).
+  ``_validate_sampled_env_contract`` resolves the treatment as
+  ``TASK_TO_ARM.get(task, QUALITY_TASK_TO_ARM.get(task))`` -- the LEGACY map is
+  consulted first and wins. The F8 arm's task string is byte-identical to the
+  legacy "F" task, so the legacy map never misses for it and F8 always resolves
+  to treatment "F" (never "F8"); its weight contract is 8/2 under either label.
+  F0/D0/FQ miss the legacy map and resolve through ``QUALITY_TASK_TO_ARM``.
+  FQ is the bug this test pins: it used to fall through to the (8,2) default
+  even though its shipped weights are (8,0).
   """
   task = eval_impulse.QUALITY_ARM_TASKS[arm]
   _, cfg, _ = eval_impulse.build_strict_quality_evaluation_cfg(task, play=False)
   contract = eval_impulse._validate_sampled_env_contract(cfg, task)
+  assert contract["treatment"] == expected_treatment
   assert (contract["impact_weight"], contract["delivered_weight"]) == expected_weights
 
 
