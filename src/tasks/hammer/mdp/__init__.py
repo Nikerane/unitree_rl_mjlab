@@ -4,6 +4,7 @@ from .contact_row_impulse import (  # noqa: F401
   contact_row_qfrc,
   reconstruct_qfrc_from_efc,
 )
+from .contact_quality import contact_point_quality  # noqa: F401
 from .first_strike import (  # noqa: F401
   REASON_NONE,
   REASON_SUCCESS,
