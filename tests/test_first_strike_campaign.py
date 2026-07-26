@@ -501,6 +501,76 @@ def test_quality_found_slots_are_raw_and_digest_sensitive():
     assert eval_impulse._physical_trace_digest(trace) != baseline
 
 
+def test_legacy_artifact_reader_accepts_schema_v3_physical_digest(tmp_path):
+    """Keeping the v2 digest projection would reject every newly recorded artifact."""
+
+    row = _campaign_rows(tmp_path)[0]
+    source = Path(row["sampled_trace_path"])
+    with np.load(source, allow_pickle=False) as saved:
+        payload = json.loads(str(saved["payload_json"]))
+    payload["schema_version"] = 3
+    payload["evaluation_contract"]["strict_config_identities"] = {}
+    for trace in payload["episodes"]:
+        started = bool(trace["first_strike"]["started"])
+        contact_point = [0.5, 0.0, 0.032] if started else [0.0, 0.0, 0.0]
+        trace["physical"].update(
+            {
+                "quality_found_count": [[0], [1 if started else 0]],
+                "quality_normal_force_n": [[0.0], [3.0 if started else 0.0]],
+                "quality_contact_position_m": [
+                    [[0.0, 0.0, 0.0]],
+                    [contact_point],
+                ],
+                "quality_contact_normal": [
+                    [[0.0, 0.0, 0.0]],
+                    [[0.0, 0.0, -1.0] if started else [0.0, 0.0, 0.0]],
+                ],
+            }
+        )
+        trace["event_trace"].update(
+            {
+                "tracker_contact_point_w": [[0.0, 0.0, 0.0], contact_point],
+                "tracker_contact_error_m": [0.0, 0.0],
+                "tracker_contact_quality": [0.0, 1.0 if started else 0.0],
+                "tracker_contact_quality_valid": [False, started],
+                "tracker_contact_quality_overflow": [False, False],
+                "tracker_first_contact_time_s": [0.0, 0.004 if started else 0.0],
+                "tracker_contact_normal_axiality": [0.0, 1.0 if started else 0.0],
+                "event_cumulative_transverse_impulse_n_s": [0.0, 0.0],
+            }
+        )
+        trace["first_strike"].update(
+            {
+                "delivered_transverse_n_s": 0.0,
+                "contact_point_w": contact_point,
+                "contact_error_m": 0.0,
+                "contact_quality": 1.0 if started else 0.0,
+                "contact_quality_valid": started,
+                "contact_quality_overflow": False,
+                "first_contact_time_s": 0.004 if started else 0.0,
+                "contact_normal_axiality": 1.0 if started else 0.0,
+            }
+        )
+        trace["trace_digest"] = eval_impulse._physical_trace_digest(trace)
+    payload_without_digest = dict(payload)
+    payload_without_digest.pop("payload_digest")
+    payload["payload_digest"] = _literal_digest(payload_without_digest)
+    path = tmp_path / "schema-v3.npz"
+    np.savez_compressed(
+        path,
+        payload_json=np.asarray(
+            json.dumps(payload, sort_keys=True, allow_nan=False), dtype=np.str_
+        ),
+    )
+    row["sampled_trace_path"] = str(path)
+    row["sampled_trace_digest"] = payload["payload_digest"]
+    row["sampled_trace_artifact_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+
+    assert first_strike_campaign._sampled_artifact_reasons(
+        row, "schema-v3"
+    ) == []
+
+
 def test_persistence_rejects_nonfinite_quality_geometry(tmp_path):
     trace = _schema_v3_quality_trace()
     trace["physical"]["quality_contact_position_m"][1][0][0] = None

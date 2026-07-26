@@ -1264,13 +1264,86 @@ def _parse_bool(value: object) -> bool:
     raise ValueError(f"invalid boolean scalar: {value!r}")
 
 
-def _episode_trace_digest(trace: Mapping) -> str:
+_SCHEMA_V3_PHYSICAL_KEYS = (
+    "contact",
+    "head_position_m",
+    "clamped_depth_m",
+    "net_axial_force_n",
+    "joint_speed_rad_s",
+    "post_step_joint_speed_rad_s",
+    "tracker_depth_post_integration_m",
+    "quality_found_count",
+    "quality_normal_force_n",
+    "quality_contact_position_m",
+    "quality_contact_normal",
+)
+_SCHEMA_V3_EVENT_KEYS = (
+    "tracker_started",
+    "tracker_finalized",
+    "tracker_productive",
+    "tracker_reason",
+    "event_cumulative_impulse_n_s",
+    "tracker_contact_point_w",
+    "tracker_contact_error_m",
+    "tracker_contact_quality",
+    "tracker_contact_quality_valid",
+    "tracker_contact_quality_overflow",
+    "tracker_first_contact_time_s",
+    "tracker_contact_normal_axiality",
+    "event_cumulative_transverse_impulse_n_s",
+)
+_SCHEMA_V3_FIRST_STRIKE_KEYS = (
+    "started",
+    "finalized",
+    "reason",
+    "accepted_onset_index",
+    "productive",
+    "v_precontact_m_s",
+    "delivered_n_s",
+    "delivered_transverse_n_s",
+    "contact_point_w",
+    "contact_error_m",
+    "contact_quality",
+    "contact_quality_valid",
+    "contact_quality_overflow",
+    "first_contact_time_s",
+    "contact_normal_axiality",
+)
+_SCHEMA_V3_EPISODE_FINAL_KEYS = (
+    "overall_success",
+    "episode_peak_lambda",
+    "episode_delivered_accumulator_n_s",
+    "episode_depth_m",
+)
+
+
+def _episode_trace_digest(trace: Mapping, *, schema_version: int = 2) -> str:
+    if schema_version == 2:
+        digest_payload = {
+            "physical": trace["physical"],
+            "event_trace": trace["event_trace"],
+        }
+    elif schema_version == 3:
+        digest_payload = {
+            "physical": {
+                key: trace["physical"][key] for key in _SCHEMA_V3_PHYSICAL_KEYS
+            },
+            "event_trace": {
+                key: trace["event_trace"][key] for key in _SCHEMA_V3_EVENT_KEYS
+            },
+            "first_strike": {
+                key: trace["first_strike"][key]
+                for key in _SCHEMA_V3_FIRST_STRIKE_KEYS
+            },
+            "episode_final": {
+                key: trace[key] for key in _SCHEMA_V3_EPISODE_FINAL_KEYS
+            },
+        }
+    else:
+        raise ValueError(f"unsupported sampled trace schema {schema_version}")
     return hashlib.sha256(
         json.dumps(
-            {
-                "physical": trace["physical"],
-                "event_trace": trace["event_trace"],
-            },
+            digest_payload,
             sort_keys=True,
             separators=(",", ":"),
             allow_nan=False,
@@ -1468,8 +1541,9 @@ def _load_and_recompute_sampled_artifact(
         ).encode()
     ).hexdigest()
     semantic_reasons: list[str] = []
-    if payload.get("schema_version") != 2:
-        semantic_reasons.append("raw schema version is not 2")
+    schema_version = payload.get("schema_version")
+    if schema_version not in (2, 3):
+        semantic_reasons.append("raw schema version is not supported (expected 2 or 3)")
     episodes = payload.get("episodes")
     expected_count = int(payload.get("expected_episode_count", -1))
     if expected_count != EXPECTED_EPISODES_PER_SEED:
@@ -1515,7 +1589,9 @@ def _load_and_recompute_sampled_artifact(
     for index, trace in enumerate(episodes):
         episode_id = str(trace.get("episode_id", f"index-{index}"))
         try:
-            actual_trace_digest = _episode_trace_digest(trace)
+            actual_trace_digest = _episode_trace_digest(
+                trace, schema_version=int(schema_version)
+            )
         except Exception as error:
             semantic_reasons.append(
                 f"{episode_id}: cannot recompute episode trace digest: {error}"
@@ -1761,6 +1837,17 @@ def _sampled_artifact_reasons(
                 "fixed_action_signature_sha256"
             ),
         }
+        if payload.get("schema_version") == 3:
+            strict_identities = payload.get("evaluation_contract", {}).get(
+                "strict_config_identities"
+            )
+            if not isinstance(strict_identities, Mapping):
+                raise ValueError(
+                    "schema-v3 evaluation contract needs strict_config_identities"
+                )
+            expected_evaluation_contract[
+                "strict_config_identities"
+            ] = strict_identities
     except (TypeError, ValueError) as error:
         reasons.append(f"{row_name}: invalid evaluation contract scalars: {error}")
     else:
