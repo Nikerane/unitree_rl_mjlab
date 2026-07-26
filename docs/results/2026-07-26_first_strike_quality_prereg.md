@@ -1,6 +1,18 @@
 # Preregistration — FQ4x8 first-contact-quality campaign (fixed impedance)
 
 **Status: FROZEN 2026-07-26, before any `fq4x8` training job was submitted.**
+
+> **Amendment 2026-07-27 (pre-training, disclosure-only).** Amended after independent review and
+> BEFORE any `fq4x8` job was submitted — no outcome data existed at the time of amendment, so no
+> post-hoc adaptation is possible. Changes are confined to making §6/§7 disclosures more precise
+> and more explicit; **no decision rule, endpoint, threshold, contrast, seed, count, or figure/video
+> rule was altered.** Specifically: (a) the q90 reproduction is now reported as bit-exact in the
+> tracker's native float32, replacing an earlier claim of agreement "within a documented
+> `2.09e-7` tolerance" — that tolerance had no independent source and was written to describe an
+> already-observed float64 rounding offset; (b) added an explicit statement that the calibration
+> bank is untracked in Git; (c) enumerated the four D0 mechanism conditions in prose; (d) restated
+> V_FQ as "not an experimental result" in the owner's language; (e) clarified the sign-flip
+> arithmetic as a conditional example, not a prediction.
 Nothing below may be revised after training outcomes exist. Any change to a decision rule,
 endpoint, threshold, or figure/video count after outcomes are visible invalidates the campaign.
 
@@ -133,17 +145,30 @@ FQ-min - D0      (does quality-gating the speed reward matter?)
 
 - **Sole decision family:** the repository's exact two-sided Mann–Whitney U test on the 8 seed
   summaries per arm, with **one** Holm correction across exactly those three p-values.
-- **Sensitivity only:** the exact paired sign-flip test. With eight strictly positive paired
-  differences it yields `p = 2/256 = 0.0078125`. It can never pass or fail a causal decision or
-  the FQ-min practical rule.
+- **Sensitivity only:** the exact paired sign-flip test. (Arithmetic note, not a predicted
+  outcome: *if* all eight paired differences were to come out strictly the same sign, the test
+  would yield `p = 2/256 = 0.0078125`, since only the all-`+` and all-`−` assignments are then
+  maximally extreme.) It can never pass or fail a causal decision or the FQ-min practical rule.
 - **Intervals:** matched-seed paired bootstrap, `PCG64` seed `20260726`, `100,000` resamples.
   Bootstrap resamples matched seed blocks, never arms independently.
 - All eight matched-seed differences are emitted for every contrast and every practical margin.
 
 **D0 mechanism endpoints** (paired intervals; these do NOT enlarge the Holm family):
-depth gain, dwell, recontact, raw delivered impulse, and both success endpoints. The phrase
-"mainly selected dwell/recontact" is permitted only under the four mechanism conditions frozen in
-the design spec.
+depth gain, dwell, recontact, raw delivered impulse, and both success endpoints.
+
+The phrase "mainly selected dwell/recontact" is permitted **only** when all four of these frozen
+mechanism conditions hold simultaneously (enforced in `_d0_mechanism()`; enumerated here so the
+rule is auditable without reading source):
+
+```text
+raw_delivered_upper_below_zero        paired upper bound on the raw delivered-impulse
+                                      difference lies below zero
+dwell_or_recontact_upper_below_zero   paired upper bound on the dwell OR recontact difference
+                                      lies below zero
+depth_gain_ratio_lower_gt_0_90        one-sided event-window depth-gain ratio lower bound > 0.90
+success_guardrails_pass               D0 first-window success >= 0.90 and no more than 0.05
+                                      below F8
+```
 
 ### FQ-min practical acceptance vs F8 (all must hold)
 
@@ -171,7 +196,7 @@ Derived as the **calibration-split q90** with NumPy `method="higher"`.
 | resolved manifest SHA-256 `69d5bc66f2127d0a5b29463b35763092d388bc0e71661b06fdd81b0eea8d661f` | `bank_manifest.json` | MATCH |
 | qualification SHA-256 `641e520c0cd35932175918d0bf48c7b6df07749ff1462b3d7da7310d76338b1b` | `probe_summary.json` | MATCH |
 | quantile method `higher` | only `higher`/`nearest` reproduce it | confirmed |
-| q90 `1.4598331451416016` | `1.4598332345485690` (abs diff `8.94e-8`) | within the documented `<= 2.09e-7` tracker-reconstruction tolerance |
+| q90 `1.4598331451416016` | `1.4598331451416016` in float32 (abs diff `0.0`) | **BIT-EXACT** |
 | calibration saturation `26/256` | `26/256` | EXACT |
 | group-held-out validation saturation `33/128` | `33/128` | EXACT |
 
@@ -181,12 +206,32 @@ Population: 384 episodes; `split = calibration if training_seed in (0,1) else va
 as `(head_position_m[fc-1].z - head_position_m[fc].z) / 0.002` at the first index `fc` with
 `contact > 0` and `fc >= 1`.
 
-`V_FQ` is an **empirical scale/knee, not a safety or sufficiency threshold.** No post-outcome
-adaptation is permitted.
+**Dtype matters and is the whole story of the reproduction.** The production tracker computed this
+quantity in **float32**. Reconstructing in float32 reproduces `V_FQ` **bit-exactly** (difference
+`0.0`). Promoting the same trace to float64 before the finite difference instead yields
+`1.4598332345485687`, an `8.94e-8` offset. That offset is a pure floating-point-precision artifact
+of the reconstruction arithmetic — **not** a discrepancy in the banked data and **not** evidence of
+tracker drift. No tolerance bound is claimed or needed: in the tracker's native dtype the agreement
+is exact.
+
+`V_FQ` is an **empirical scale/knee — not a safety threshold, not a sufficiency threshold, and not
+an experimental result.** No post-outcome adaptation is permitted.
 
 Delivered-impulse reference `I_REF_FIRST_STRIKE_SUCCESS = 0.3088 N·s` confirmed against the
 production tracker: mean `0.30883467197418213 N·s`, n=8, sd `0.0`, range `0.0`.
 Legacy normalizer `0.6094` observed at `0.6093726754188538`.
+
+### Disclosure — the calibration bank is NOT versioned in Git
+
+The three files above (`probe_raw.npz`, `bank_manifest.json`, `probe_summary.json`) are
+**untracked data assets**, not tracked source. They are absent from tracked source in both this
+repository and the sibling asset repository, and they are absent from this isolated worktree
+entirely — they live only in the main working tree at
+`docs/results/assets/2026-07-25_first_strike_reward/` and were read in place.
+
+Consequently **this campaign's FQ-min scale constant is NOT fully reproducible from Git alone.**
+Reproducing `V_FQ` requires those exact bytes, which are pinned only by the SHA-256 values recorded
+above. Anyone re-deriving `V_FQ` must obtain the identical bytes and verify those hashes first.
 
 ### Disclosure — dirty provenance of the historical calibration bank
 
