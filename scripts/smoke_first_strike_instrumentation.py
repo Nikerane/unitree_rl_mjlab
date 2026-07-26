@@ -43,6 +43,12 @@ ARM_TASKS = {
     "D-prime": "Unitree-Z1-Hammer-CaT-Impulse-FirstStrike-Legacy",
     "F": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear",
     "E": "Unitree-Z1-Hammer-CaT-Impulse-Event",
+    # fq4x8 quality-conditioned campaign. F8 is deliberately absent: its
+    # registered task is byte-identical to ARM_TASKS["F"] above, so the "F"
+    # contract already covers every F8 predicate.
+    "F0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0",
+    "D0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0",
+    "FQ-min": "Unitree-Z1-Hammer-CaT-Impulse-Event-Quality",
 }
 
 
@@ -55,6 +61,18 @@ class ArmContract:
     tracker_required: bool
     event_i_ref_n_s: float
     delivered_saturate: bool | None
+    # fq4x8 payout shape: True zeroes that side's RewardManager weight to
+    # exactly 0.0 (mjlab then never invokes the raw reader for it -- see
+    # RewardManager.compute). Both default False (every pre-fq4x8 arm pays
+    # both sides raw).
+    speed_zero: bool = False
+    delivered_zero: bool = False
+    # True only for the quality-conditioned arm (FQ-min): requires the
+    # passive hammer_nail_quality onset snapshot to be valid and non-overflowing.
+    quality_required: bool = False
+    # FQ-min's speed reader is bounded by a different normalizer than every
+    # other arm's default 1.0; checked against config drift when not None.
+    impact_v_expected_n_s: float | None = None
 
 
 @dataclass(frozen=True)
@@ -85,6 +103,22 @@ ARM_CONTRACTS: dict[str, ArmContract] = {
         "E", ARM_TASKS["E"], "FirstStrikeImpactRewardTerm",
         "FirstStrikeDeliveredRewardTerm", True, 0.3088, True,
     ),
+    "F0": ArmContract(
+        "F0", ARM_TASKS["F0"], "FirstStrikeImpactRewardTerm",
+        "FirstStrikeDeliveredRewardTerm", True, 0.3088, False,
+        speed_zero=True,
+    ),
+    "D0": ArmContract(
+        "D0", ARM_TASKS["D0"], "FirstStrikeImpactRewardTerm",
+        "FirstStrikeDeliveredRewardTerm", True, 0.3088, False,
+        delivered_zero=True,
+    ),
+    "FQ-min": ArmContract(
+        "FQ-min", ARM_TASKS["FQ-min"], "FirstStrikeQualityImpactRewardTerm",
+        "FirstStrikeDeliveredRewardTerm", True, 0.3088, False,
+        delivered_zero=True, quality_required=True,
+        impact_v_expected_n_s=1.4598331451416016,
+    ),
 }
 TASK_CONTRACTS = {contract.task: contract for contract in ARM_CONTRACTS.values()}
 LITERAL_IMPULSE_LIMITS_N_M_S = (1.64, 3.28, 1.64, 1.64, 1.64, 1.64)
@@ -97,25 +131,30 @@ COMMON_PREDICATES = (
     "normal_success",
     "lambda_live",
     "delivered_live",
-    "raw_reward_readers_finite",
-    "manager_impact_positive",
-    "manager_delivered_positive",
     "hardware_qvel",
 )
 INSTRUMENTATION_PREDICATES = tuple(
     name for name in COMMON_PREDICATES if name != "hardware_qvel"
 )
-TRACKER_PREDICATES = (
+# Reward-manager payout predicates depend on the arm's payout shape (see
+# ArmContract.speed_zero/delivered_zero): evaluate_gate selects the right
+# name per side instead of requiring one fixed set for every arm.
+TRACKER_COMMON_PREDICATES = (
     "tracker_exists",
     "tracker_started",
     "productive_success",
     "terminal_reason_success",
     "delivered_event_impulse",
+)
+TRACKER_SPEED_PULSE_PREDICATES = (
     "impact_no_early_pulse",
-    "delivered_no_early_pulse",
     "impact_exactly_one_terminal_pulse",
+)
+TRACKER_DELIVERED_PULSE_PREDICATES = (
+    "delivered_no_early_pulse",
     "delivered_exactly_one_terminal_pulse",
 )
+QUALITY_PREDICATES = ("quality_snapshot_valid", "quality_no_overflow")
 
 
 class RawRewardTap:
@@ -256,6 +295,12 @@ class DeviceSmokeRecorder:
         self.terminal_tracker_delivered = torch.zeros(
             shape, device=self.device
         )
+        self.terminal_tracker_contact_quality_valid = torch.zeros(
+            shape, dtype=torch.bool, device=self.device
+        )
+        self.terminal_tracker_contact_quality_overflow = torch.zeros(
+            shape, dtype=torch.bool, device=self.device
+        )
         self.terminal_raw_impact_finite = torch.ones(
             shape, dtype=torch.bool, device=self.device
         )
@@ -352,6 +397,8 @@ class DeviceSmokeRecorder:
         tracker_productive: torch.Tensor,
         tracker_reason: torch.Tensor,
         tracker_delivered: torch.Tensor,
+        tracker_contact_quality_valid: torch.Tensor,
+        tracker_contact_quality_overflow: torch.Tensor,
         manager_impact: torch.Tensor,
         manager_delivered: torch.Tensor,
     ) -> None:
@@ -370,6 +417,14 @@ class DeviceSmokeRecorder:
             (self.terminal_tracker_productive, tracker_productive),
             (self.terminal_tracker_reason, tracker_reason),
             (self.terminal_tracker_delivered, tracker_delivered),
+            (
+                self.terminal_tracker_contact_quality_valid,
+                tracker_contact_quality_valid,
+            ),
+            (
+                self.terminal_tracker_contact_quality_overflow,
+                tracker_contact_quality_overflow,
+            ),
             (self.terminal_raw_impact_finite, self.impact_tap.all_finite),
             (
                 self.terminal_raw_delivered_finite,
@@ -522,12 +577,18 @@ class DeviceSmokeRecorder:
                     tracker_productive = tracker_false
                     tracker_reason = tracker_reason_none
                     tracker_delivered = tracker_delivered_zero
+                    tracker_contact_quality_valid = tracker_false
+                    tracker_contact_quality_overflow = tracker_false
                 else:
                     tracker_started = tracker.started
                     tracker_finalized = tracker.finalized
                     tracker_productive = tracker.productive
                     tracker_reason = tracker.reason
                     tracker_delivered = tracker.delivered
+                    tracker_contact_quality_valid = tracker.contact_quality_valid
+                    tracker_contact_quality_overflow = (
+                        tracker.contact_quality_overflow
+                    )
                 self.capture_control_step(
                     reset_buf=env.reset_buf,
                     terminal_depth=depth,
@@ -540,6 +601,8 @@ class DeviceSmokeRecorder:
                     tracker_productive=tracker_productive,
                     tracker_reason=tracker_reason,
                     tracker_delivered=tracker_delivered,
+                    tracker_contact_quality_valid=tracker_contact_quality_valid,
+                    tracker_contact_quality_overflow=tracker_contact_quality_overflow,
                     manager_impact=step_reward[:, impact_idx] * env.step_dt,
                     manager_delivered=step_reward[:, delivered_idx] * env.step_dt,
                 )
@@ -622,10 +685,38 @@ class DeviceSmokeRecorder:
                 & (tensor_fields["terminal_raw_impact_call_count"] > 0)
                 & (tensor_fields["terminal_raw_delivered_call_count"] > 0)
             ),
+            # Per-side raw-reader liveness (fq4x8): a zeroed side's weight is
+            # 0.0, so mjlab's RewardManager never invokes its func at all
+            # (see RewardManager.compute) -- raw_reward_readers_finite above
+            # would then be permanently unsatisfiable. These let an active
+            # side be checked independently of a structurally-skipped one.
+            "raw_impact_reader_finite": (
+                seen
+                & tensor_fields["terminal_raw_impact_finite"]
+                & (tensor_fields["terminal_raw_impact_call_count"] > 0)
+            ),
+            "raw_delivered_reader_finite": (
+                seen
+                & tensor_fields["terminal_raw_delivered_finite"]
+                & (tensor_fields["terminal_raw_delivered_call_count"] > 0)
+            ),
             "manager_impact_positive": seen
             & (tensor_fields["terminal_manager_impact"] > 0.0),
             "manager_delivered_positive": seen
             & (tensor_fields["terminal_manager_delivered"] > 0.0),
+            # A weight-0 term must pay exactly zero at the terminal control
+            # step, not merely "not positive" (which would also admit a NaN
+            # or a negative value slipping through nan_to_num).
+            "manager_impact_zero": seen
+            & (tensor_fields["terminal_manager_impact"] == 0.0),
+            "manager_delivered_zero": seen
+            & (tensor_fields["terminal_manager_delivered"] == 0.0),
+            # FQ-min only: the one-shot onset quality snapshot must be valid
+            # and must not have overflowed its fixed contact-slot capacity.
+            "quality_snapshot_valid": seen
+            & tensor_fields["terminal_tracker_contact_quality_valid"],
+            "quality_no_overflow": seen
+            & ~tensor_fields["terminal_tracker_contact_quality_overflow"],
             "hardware_qvel": (
                 seen
                 & (tensor_fields["terminal_pre_qvel_max"] <= 3.1415)
@@ -792,6 +883,10 @@ def validate_live_contract(task: str) -> tuple[Any, Any, dict[str, Any]]:
         and delivered.params.get("saturate") is not contract.delivered_saturate
     ):
         raise ValueError(f"{task}: delivered saturate drift")
+    if contract.impact_v_expected_n_s is not None and float(
+        impact.params.get("v_expected", float("nan"))
+    ) != contract.impact_v_expected_n_s:
+        raise ValueError(f"{task}: impact v_expected drift")
 
     if contract.tracker_required:
         tracker = training_cfg.metrics.get("first_strike")
@@ -1237,6 +1332,44 @@ def evaluate_gate(record: Mapping[str, Any]) -> dict[str, Any]:
     for predicate in INSTRUMENTATION_PREDICATES:
         if not _count_passes(predicate_counts.get(predicate), num_envs):
             failures.add(predicate)
+
+    # Reward-manager payout predicates are arm-aware (fq4x8): a side whose
+    # weight is contractually zeroed structurally never invokes its raw
+    # reader (mjlab skips weight==0 terms) and must pay exactly zero, not
+    # merely "not positive". contract is None only when arm/task itself is
+    # invalid, already recorded above as task_arm_pairing -- treat that like
+    # every pre-fq4x8 arm (both sides raw) rather than skip checking.
+    speed_zero = contract.speed_zero if contract is not None else False
+    delivered_zero = contract.delivered_zero if contract is not None else False
+    impact_payout_predicate = (
+        "manager_impact_zero" if speed_zero else "manager_impact_positive"
+    )
+    if not _count_passes(predicate_counts.get(impact_payout_predicate), num_envs):
+        failures.add(impact_payout_predicate)
+    delivered_payout_predicate = (
+        "manager_delivered_zero" if delivered_zero else "manager_delivered_positive"
+    )
+    if not _count_passes(predicate_counts.get(delivered_payout_predicate), num_envs):
+        failures.add(delivered_payout_predicate)
+    if not speed_zero and not delivered_zero:
+        if not _count_passes(
+            predicate_counts.get("raw_reward_readers_finite"), num_envs
+        ):
+            failures.add("raw_reward_readers_finite")
+    else:
+        if not speed_zero and not _count_passes(
+            predicate_counts.get("raw_impact_reader_finite"), num_envs
+        ):
+            failures.add("raw_impact_reader_finite")
+        if not delivered_zero and not _count_passes(
+            predicate_counts.get("raw_delivered_reader_finite"), num_envs
+        ):
+            failures.add("raw_delivered_reader_finite")
+    if contract is not None and contract.quality_required:
+        for predicate in QUALITY_PREDICATES:
+            if not _count_passes(predicate_counts.get(predicate), num_envs):
+                failures.add(predicate)
+
     hardware_count_valid = _count_is_well_formed(
         predicate_counts.get("hardware_qvel"), num_envs
     )
@@ -1271,9 +1404,20 @@ def evaluate_gate(record: Mapping[str, Any]) -> dict[str, Any]:
             "finite_qvel_rail_exceedance_simulation_only"
         )
     if contract is not None and contract.tracker_required:
-        for predicate in TRACKER_PREDICATES:
+        for predicate in TRACKER_COMMON_PREDICATES:
             if not _count_passes(predicate_counts.get(predicate), num_envs):
                 failures.add(predicate)
+        # A zeroed side's reward-manager func is never invoked, so its pulse
+        # timing never advances -- only require pulse timing from a side
+        # this arm actually pays.
+        if not speed_zero:
+            for predicate in TRACKER_SPEED_PULSE_PREDICATES:
+                if not _count_passes(predicate_counts.get(predicate), num_envs):
+                    failures.add(predicate)
+        if not delivered_zero:
+            for predicate in TRACKER_DELIVERED_PULSE_PREDICATES:
+                if not _count_passes(predicate_counts.get(predicate), num_envs):
+                    failures.add(predicate)
 
     for sentinel in ("impossible_success_n", "lambda_dead_n"):
         if not _is_int(record.get(sentinel)) or record.get(sentinel) != 0:

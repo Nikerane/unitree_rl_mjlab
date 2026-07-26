@@ -23,6 +23,14 @@ ARM_TASKS = {
     "F": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear",
     "E": "Unitree-Z1-Hammer-CaT-Impulse-Event",
 }
+# fq4x8 quality-conditioned campaign arms. F8 is intentionally absent here:
+# its registered task is byte-identical to ARM_TASKS["F"] (smoke.ARM_TASKS),
+# so the existing "F" contract already covers every F8 predicate.
+QUALITY_ARM_TASKS = {
+    "F0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0",
+    "D0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0",
+    "FQ-min": "Unitree-Z1-Hammer-CaT-Impulse-Event-Quality",
+}
 
 COMMON_PREDICATES = (
     "finite_signals",
@@ -30,35 +38,59 @@ COMMON_PREDICATES = (
     "normal_success",
     "lambda_live",
     "delivered_live",
-    "raw_reward_readers_finite",
-    "manager_impact_positive",
-    "manager_delivered_positive",
     "hardware_qvel",
 )
 
-TRACKER_PREDICATES = (
+TRACKER_COMMON_PREDICATES = (
     "tracker_exists",
     "tracker_started",
     "productive_success",
     "terminal_reason_success",
     "delivered_event_impulse",
+)
+TRACKER_SPEED_PULSE_PREDICATES = (
     "impact_no_early_pulse",
-    "delivered_no_early_pulse",
     "impact_exactly_one_terminal_pulse",
+)
+TRACKER_DELIVERED_PULSE_PREDICATES = (
+    "delivered_no_early_pulse",
     "delivered_exactly_one_terminal_pulse",
 )
+QUALITY_PREDICATES = ("quality_snapshot_valid", "quality_no_overflow")
 
 
 def valid_record(*, arm: str, num_envs: int, device_type: str) -> dict[str, object]:
     """A literal record satisfying the frozen all-environment contract."""
+    contract = smoke.ARM_CONTRACTS[arm]
     predicate_names = list(COMMON_PREDICATES)
+    predicate_names.append(
+        "manager_impact_zero" if contract.speed_zero else "manager_impact_positive"
+    )
+    predicate_names.append(
+        "manager_delivered_zero"
+        if contract.delivered_zero
+        else "manager_delivered_positive"
+    )
+    if contract.speed_zero or contract.delivered_zero:
+        if not contract.speed_zero:
+            predicate_names.append("raw_impact_reader_finite")
+        if not contract.delivered_zero:
+            predicate_names.append("raw_delivered_reader_finite")
+    else:
+        predicate_names.append("raw_reward_readers_finite")
     if arm != "C":
-        predicate_names.extend(TRACKER_PREDICATES)
+        predicate_names.extend(TRACKER_COMMON_PREDICATES)
+        if not contract.speed_zero:
+            predicate_names.extend(TRACKER_SPEED_PULSE_PREDICATES)
+        if not contract.delivered_zero:
+            predicate_names.extend(TRACKER_DELIVERED_PULSE_PREDICATES)
+    if contract.quality_required:
+        predicate_names.extend(QUALITY_PREDICATES)
     actual_device = "cuda:0" if device_type == "cuda" else "cpu"
     return {
         "schema_version": "four-task-cuda-smoke-v1",
         "arm": arm,
-        "task": ARM_TASKS[arm],
+        "task": contract.task,
         "num_envs": num_envs,
         "device_type": device_type,
         "visible_cuda_device_count": 1,
@@ -105,6 +137,86 @@ def test_valid_c_record_passes_without_tracker():
     assert result["hardware_transport_qualified"] is True
     assert result["hardware_transport_label"] == "within_observed_qvel_rail"
     assert result["failed_predicates"] == []
+
+
+@pytest.mark.parametrize("arm", ("F0", "D0", "FQ-min"))
+def test_valid_quality_campaign_record_passes(arm):
+    """A frozen fq4x8 record satisfying its own payout contract must qualify."""
+    record = valid_record(arm=arm, num_envs=256, device_type="cuda")
+
+    result = smoke.evaluate_gate(record)
+
+    assert result["integration_pass"] is True
+    assert result["cuda_qualification_pass"] is True
+    assert result["failed_predicates"] == []
+
+
+def test_f0_speed_payout_must_be_exactly_zero_not_the_legacy_positive_predicate():
+    """F0's zeroed speed term must be gated by manager_impact_zero, not positive."""
+    record = valid_record(arm="F0", num_envs=256, device_type="cuda")
+    assert "manager_impact_positive" not in record["predicate_counts"]
+    record["predicate_counts"]["manager_impact_zero"] = {"passed": 200, "total": 256}  # type: ignore[index]
+
+    result = smoke.evaluate_gate(record)
+
+    assert result["cuda_qualification_pass"] is False
+    assert "manager_impact_zero" in result["failed_predicates"]
+    assert "manager_impact_positive" not in result["failed_predicates"]
+
+
+@pytest.mark.parametrize("arm", ("D0", "FQ-min"))
+def test_delivered_payout_must_be_exactly_zero_for_d0_and_fq_min(arm):
+    """D0/FQ-min's zeroed delivered term must be gated by manager_delivered_zero."""
+    record = valid_record(arm=arm, num_envs=256, device_type="cuda")
+    assert "manager_delivered_positive" not in record["predicate_counts"]
+    record["predicate_counts"]["manager_delivered_zero"] = {"passed": 0, "total": 256}  # type: ignore[index]
+
+    result = smoke.evaluate_gate(record)
+
+    assert result["cuda_qualification_pass"] is False
+    assert "manager_delivered_zero" in result["failed_predicates"]
+
+
+@pytest.mark.parametrize("predicate", QUALITY_PREDICATES)
+def test_fq_min_requires_the_quality_snapshot_predicates(predicate):
+    """A dead or overflowing quality snapshot must not silently qualify FQ-min."""
+    record = valid_record(arm="FQ-min", num_envs=256, device_type="cuda")
+    record["predicate_counts"][predicate] = {"passed": 0, "total": 256}  # type: ignore[index]
+
+    result = smoke.evaluate_gate(record)
+
+    assert result["cuda_qualification_pass"] is False
+    assert predicate in result["failed_predicates"]
+
+
+@pytest.mark.parametrize("arm", ("F0", "D0"))
+def test_non_quality_arms_never_require_the_quality_snapshot_predicates(arm):
+    """F0/D0 have no quality sensor wired; requiring it would fail them forever."""
+    record = valid_record(arm=arm, num_envs=256, device_type="cuda")
+
+    assert "quality_snapshot_valid" not in record["predicate_counts"]
+    result = smoke.evaluate_gate(record)
+    assert result["cuda_qualification_pass"] is True
+
+
+@pytest.mark.parametrize("arm", ("F0", "D0", "FQ-min"))
+def test_a_zeroed_sides_pulse_predicates_are_not_required(arm):
+    """A weight-0 term's func is never invoked, so its pulse-timing predicates
+    must never gate qualification (they would fail forever, unrelated to
+    whether the strike itself was productive)."""
+    contract = smoke.ARM_CONTRACTS[arm]
+    record = valid_record(arm=arm, num_envs=256, device_type="cuda")
+    zeroed_pulse_predicates = (
+        TRACKER_SPEED_PULSE_PREDICATES
+        if contract.speed_zero
+        else TRACKER_DELIVERED_PULSE_PREDICATES
+    )
+    for predicate in zeroed_pulse_predicates:
+        assert predicate not in record["predicate_counts"]
+
+    result = smoke.evaluate_gate(record)
+
+    assert result["cuda_qualification_pass"] is True
 
 
 def test_predicate_count_derives_failed_from_passed_and_total():
@@ -447,6 +559,39 @@ def test_arm_contracts_reject_drift_in_reader_reference_or_saturation(
 
 
 @pytest.mark.parametrize(
+    (
+        "arm", "impact_reader", "speed_zero", "delivered_zero",
+        "quality_required", "impact_v_expected_n_s",
+    ),
+    (
+        ("F0", "FirstStrikeImpactRewardTerm", True, False, False, None),
+        ("D0", "FirstStrikeImpactRewardTerm", False, True, False, None),
+        (
+            "FQ-min", "FirstStrikeQualityImpactRewardTerm", False, True, True,
+            1.4598331451416016,
+        ),
+    ),
+)
+def test_arm_contracts_pin_the_fq4x8_payout_semantics(
+    arm, impact_reader, speed_zero, delivered_zero, quality_required,
+    impact_v_expected_n_s,
+):
+    """Changing any fq4x8 arm's payout shape must fail this literal contract test."""
+    contract = smoke.ARM_CONTRACTS[arm]
+
+    assert contract.task == QUALITY_ARM_TASKS[arm]
+    assert contract.impact_reader == impact_reader
+    assert contract.delivered_reader == "FirstStrikeDeliveredRewardTerm"
+    assert contract.tracker_required is True
+    assert contract.event_i_ref_n_s == 0.3088
+    assert contract.delivered_saturate is False
+    assert contract.speed_zero is speed_zero
+    assert contract.delivered_zero is delivered_zero
+    assert contract.quality_required is quality_required
+    assert contract.impact_v_expected_n_s == impact_v_expected_n_s
+
+
+@pytest.mark.parametrize(
     ("field", "invalid_value", "failed_name"),
     (
         ("device_type", "cpu", "device_type"),
@@ -515,6 +660,46 @@ def test_live_contract_matches_each_registered_task_and_disables_only_row_diagno
     assert diagnostic_cfg.observations["critic"].enable_corruption is False
     assert diagnostic_cfg.events["reset_robot_joints"].params["position_range"] != training_cfg.events["reset_robot_joints"].params["position_range"]
     assert training_cfg.metrics["substep_impulse_rows"].params["enabled"] is True
+
+
+@pytest.mark.parametrize(
+    ("arm", "expected_impact_weight", "expected_delivered_weight"),
+    (
+        ("F0", 0.0, 2.0),
+        ("D0", 8.0, 0.0),
+        ("FQ-min", 8.0, 0.0),
+    ),
+)
+def test_live_contract_accepts_each_quality_arm_with_its_own_weight_contract(
+    arm, expected_impact_weight, expected_delivered_weight
+):
+    """Silently defaulting F0/D0/FQ-min's maximize weights to 8/2 must fail."""
+    task = QUALITY_ARM_TASKS[arm]
+
+    training_cfg, rl_cfg, digest = smoke.validate_live_contract(task)
+
+    assert digest["impact_weight"] == expected_impact_weight
+    assert digest["delivered_weight"] == expected_delivered_weight
+    assert digest["imp_max_p"] == 0.0
+    assert tuple(digest["impulse_limits_n_m_s"]) == LITERAL_IMPULSE_LIMITS
+    assert digest["rl_clip_actions"] == 1.0
+    assert digest["registered_substep_impulse_rows_enabled"] is True
+    assert digest["event_i_ref_n_s"] == smoke.TASK_CONTRACTS[task].event_i_ref_n_s
+
+    diagnostic_cfg = smoke.make_diagnostic_cfg(training_cfg, num_envs=8)
+
+    assert diagnostic_cfg.metrics["substep_impulse_rows"].params["enabled"] is False
+
+
+def test_live_contract_rejects_fq_min_v_expected_drift(monkeypatch):
+    """Silently accepting a drifted quality-speed normalizer must fail this test."""
+    task = QUALITY_ARM_TASKS["FQ-min"]
+    training_cfg, rl_cfg = _live_configs(task)
+    training_cfg.rewards["impact_progress"].params["v_expected"] = 1.0
+    _install_live_config(monkeypatch, task, training_cfg, rl_cfg)
+
+    with pytest.raises(ValueError, match="v_expected"):
+        smoke.validate_live_contract(task)
 
 
 @pytest.mark.parametrize(
@@ -1011,6 +1196,8 @@ def _control_payload(**overrides):
         "tracker_productive": torch.tensor([True, False]),
         "tracker_reason": torch.tensor([1, 0]),
         "tracker_delivered": torch.tensor([0.55, 0.02]),
+        "tracker_contact_quality_valid": torch.tensor([False, False]),
+        "tracker_contact_quality_overflow": torch.tensor([False, False]),
         "manager_impact": torch.tensor([8.0, 0.0]),
         "manager_delivered": torch.tensor([2.0, 0.0]),
     }
@@ -1212,6 +1399,72 @@ def test_terminal_latch_requires_both_raw_readers_to_have_been_called(
     )
 
 
+def test_terminal_latch_splits_raw_reader_liveness_per_side():
+    """A weight-0 side's reader is never invoked (mjlab skips it); its
+    liveness must be checkable independently of the other, active side."""
+    _, _, impact_tap, delivered_tap = _make_taps()
+    recorder = smoke.DeviceSmokeRecorder(impact_tap, delivered_tap)
+    delivered_tap(SimpleNamespace())  # F0-style: only delivered is ever called
+
+    recorder.capture_control_step(
+        **_control_payload(
+            reset_buf=torch.tensor([True, True]),
+            manager_impact=torch.tensor([0.0, 0.0]),
+            manager_delivered=torch.tensor([2.0, 2.0]),
+        )
+    )
+
+    result = recorder.finalize()
+
+    assert result["predicate_counts"]["raw_impact_reader_finite"]["passed"] == 0
+    assert result["predicate_counts"]["raw_delivered_reader_finite"]["passed"] == 2
+
+
+def test_finalize_computes_exact_zero_manager_payout_predicates():
+    """A zero-weighted term's payout must register as exactly zero, distinct
+    from merely "not positive" (which would also admit a NaN or negative)."""
+    impact, delivered, impact_tap, delivered_tap = _make_taps()
+    recorder = smoke.DeviceSmokeRecorder(impact_tap, delivered_tap)
+    _capture_rewards(
+        impact, delivered, impact_tap, delivered_tap, [1.0, 1.0], [1.0, 1.0]
+    )
+    recorder.capture_control_step(
+        **_control_payload(
+            reset_buf=torch.tensor([True, True]),
+            manager_impact=torch.tensor([0.0, 8.0]),
+            manager_delivered=torch.tensor([2.0, 0.0]),
+        )
+    )
+
+    result = recorder.finalize()
+
+    assert result["predicate_counts"]["manager_impact_zero"]["passed"] == 1
+    assert result["predicate_counts"]["manager_impact_positive"]["passed"] == 1
+    assert result["predicate_counts"]["manager_delivered_zero"]["passed"] == 1
+    assert result["predicate_counts"]["manager_delivered_positive"]["passed"] == 1
+
+
+def test_finalize_computes_quality_snapshot_predicates_from_the_tracker_latch():
+    """A dead or overflowing quality snapshot must not silently register valid."""
+    impact, delivered, impact_tap, delivered_tap = _make_taps()
+    recorder = smoke.DeviceSmokeRecorder(impact_tap, delivered_tap)
+    _capture_rewards(
+        impact, delivered, impact_tap, delivered_tap, [1.0, 1.0], [1.0, 1.0]
+    )
+    recorder.capture_control_step(
+        **_control_payload(
+            reset_buf=torch.tensor([True, True]),
+            tracker_contact_quality_valid=torch.tensor([True, False]),
+            tracker_contact_quality_overflow=torch.tensor([False, True]),
+        )
+    )
+
+    result = recorder.finalize()
+
+    assert result["predicate_counts"]["quality_snapshot_valid"]["passed"] == 1
+    assert result["predicate_counts"]["quality_no_overflow"]["passed"] == 1
+
+
 def test_terminal_latch_includes_transient_depth_nonfinite_in_finite_signals():
     """A transient NaN in either coherent depth channel must fail finiteness."""
     impact, delivered, impact_tap, delivered_tap = _make_taps()
@@ -1399,6 +1652,8 @@ def test_no_host_installed_callbacks_preserve_runtime_order_and_terminal_state(
         productive=torch.zeros(2, dtype=torch.bool),
         reason=torch.zeros(2, dtype=torch.long),
         delivered=torch.zeros(2),
+        contact_quality_valid=torch.zeros(2, dtype=torch.bool),
+        contact_quality_overflow=torch.zeros(2, dtype=torch.bool),
     )
 
     class FakeEntityCfg:
@@ -1457,6 +1712,8 @@ def test_no_host_installed_callbacks_preserve_runtime_order_and_terminal_state(
         tracker.productive[:] = torch.tensor([True, False])
         tracker.reason[:] = torch.tensor([1, 0])
         tracker.delivered[:] = torch.tensor([0.6, 0.0])
+        tracker.contact_quality_valid[:] = torch.tensor([True, False])
+        tracker.contact_quality_overflow[:] = torch.tensor([False, False])
 
     env.metrics_manager = SimpleNamespace(
         compute_substep=original_substep,
@@ -1496,6 +1753,8 @@ def test_no_host_installed_callbacks_preserve_runtime_order_and_terminal_state(
     assert recorder.terminal_success[0]
     assert recorder.terminal_tracker_started[0]
     assert recorder.terminal_tracker_finalized[0]
+    assert recorder.terminal_tracker_contact_quality_valid[0]
+    assert not recorder.terminal_tracker_contact_quality_overflow[0]
 
     recorder.uninstall()
 
@@ -2215,3 +2474,48 @@ def test_cpu_integration_runs_the_fixed_reference_for_each_task(task):
             ]
             == 1
         )
+
+
+@pytest.mark.parametrize("arm", ("F0", "D0", "FQ-min"))
+def test_cpu_integration_pays_out_each_quality_arm_treatment_correctly(arm):
+    """Prove each fq4x8 arm's reward pays out exactly as its treatment specifies.
+
+    F8 is not repeated here: its registered task is byte-identical to
+    ARM_TASKS["F"], already exercised above by
+    test_cpu_integration_runs_the_fixed_reference_for_each_task with the same
+    raw-speed/raw-delivered assertions this test applies to F0/D0/FQ-min.
+    """
+    contract = smoke.ARM_CONTRACTS[arm]
+
+    result = smoke.run_smoke(task=contract.task, device="cpu", num_envs=1)
+
+    assert result["integration_pass"] is True, result["failed_predicates"]
+    assert result["cuda_qualification_pass"] is False
+    assert result["predicate_counts"]["normal_success"]["passed"] == 1
+    assert result["predicate_counts"]["productive_success"]["passed"] == 1
+    assert result["predicate_counts"]["terminal_reason_success"]["passed"] == 1
+    # The zeroed side's reward-manager func is never invoked (mjlab skips
+    # weight==0 terms), so its pulse-timing predicate reads 0/1 -- proving
+    # both that the physical strike is unaffected AND that evaluate_gate
+    # correctly excludes this predicate from qualification for this arm.
+    assert result["predicate_counts"]["impact_exactly_one_terminal_pulse"][
+        "passed"
+    ] == (0 if contract.speed_zero else 1)
+    assert result["predicate_counts"]["delivered_exactly_one_terminal_pulse"][
+        "passed"
+    ] == (0 if contract.delivered_zero else 1)
+
+    if arm == "F0":
+        assert result["predicate_counts"]["manager_impact_zero"]["passed"] == 1
+        assert result["predicate_counts"]["manager_delivered_positive"]["passed"] == 1
+        assert result["predicate_counts"]["raw_delivered_reader_finite"]["passed"] == 1
+    elif arm == "D0":
+        assert result["predicate_counts"]["manager_impact_positive"]["passed"] == 1
+        assert result["predicate_counts"]["manager_delivered_zero"]["passed"] == 1
+        assert result["predicate_counts"]["raw_impact_reader_finite"]["passed"] == 1
+    else:
+        assert result["predicate_counts"]["manager_impact_positive"]["passed"] == 1
+        assert result["predicate_counts"]["manager_delivered_zero"]["passed"] == 1
+        assert result["predicate_counts"]["raw_impact_reader_finite"]["passed"] == 1
+        assert result["predicate_counts"]["quality_snapshot_valid"]["passed"] == 1
+        assert result["predicate_counts"]["quality_no_overflow"]["passed"] == 1
