@@ -166,8 +166,10 @@ raw_delivered_upper_below_zero        paired upper bound on the raw delivered-im
 dwell_or_recontact_upper_below_zero   paired upper bound on the dwell OR recontact difference
                                       lies below zero
 depth_gain_ratio_lower_gt_0_90        one-sided event-window depth-gain ratio lower bound > 0.90
-success_guardrails_pass               D0 first-window success >= 0.90 and no more than 0.05
-                                      below F8
+success_guardrails_pass               ALL FOUR of: D0 first-window success >= 0.90;
+                                      first-window no more than 0.05 below F8;
+                                      D0 overall success >= 0.90;
+                                      overall no more than 0.05 below F8
 ```
 
 ### FQ-min practical acceptance vs F8 (all must hold)
