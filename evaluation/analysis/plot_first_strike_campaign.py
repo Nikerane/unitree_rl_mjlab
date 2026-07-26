@@ -1,4 +1,4 @@
-"""Plotly-only figures for the fixed-impedance first-strike campaign."""
+"""Interactive and static figures for the fixed-impedance first-strike campaign."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import hashlib
 import html
 import json
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Iterable, Mapping, Sequence
 
 import numpy as np
 import plotly.graph_objects as go
@@ -445,6 +445,7 @@ def build_trajectory_figure(
         row=1,
         col=3,
     )
+    omitted_zero_no_contact_payouts = 0
     for trace in traces:
         arrays = _trace_arrays(trace)
         label = _label(trace)
@@ -534,68 +535,72 @@ def build_trajectory_figure(
                 row=1,
                 col=3,
             )
-        figure.add_trace(
-            go.Scatter(
-                x=aligned_ms,
-                y=arrays["force"],
-                mode="lines",
-                line={"color": color},
-                name=label,
-                legendgroup=arm,
-                showlegend=False,
-                hovertemplate=(
-                    f"{label}<br>%{{x:.1f}} ms<br>%{{y:.3g}} N"
-                    f"<br>trace {trace['trace_digest']}<extra></extra>"
+        if contact_index is not None:
+            figure.add_trace(
+                go.Scatter(
+                    x=aligned_ms,
+                    y=arrays["force"],
+                    mode="lines",
+                    line={"color": color},
+                    name=label,
+                    legendgroup=arm,
+                    showlegend=False,
+                    hovertemplate=(
+                        f"{label}<br>%{{x:.1f}} ms<br>%{{y:.3g}} N"
+                        f"<br>trace {trace['trace_digest']}<extra></extra>"
+                    ),
                 ),
-            ),
-            row=2,
-            col=1,
-        )
-        figure.add_trace(
-            go.Scatter(
-                x=aligned_ms,
-                y=arrays["depth"] * 1000.0,
-                mode="lines",
-                line={"color": color},
-                name=f"{label} pre-integration depth",
-                legendgroup=arm,
-                showlegend=False,
-            ),
-            row=2,
-            col=2,
-        )
-        figure.add_trace(
-            go.Scatter(
-                x=aligned_ms,
-                y=arrays["tracker_depth_post"] * 1000.0,
-                mode="lines",
-                line={"color": color, "dash": "dash"},
-                name=f"{label} tracker post-integration depth",
-                legendgroup=arm,
-                showlegend=False,
-            ),
-            row=2,
-            col=2,
-        )
-        figure.add_trace(
-            go.Scatter(
-                x=aligned_ms,
-                y=cumulative_impulse,
-                mode="lines",
-                line={"color": color, "dash": "dot"},
-                name=f"{label} cumulative event impulse",
-                legendgroup=arm,
-                showlegend=False,
-                yaxis="y6",
-            ),
-            row=2,
-            col=2,
-        )
+                row=2,
+                col=1,
+            )
+            figure.add_trace(
+                go.Scatter(
+                    x=aligned_ms,
+                    y=arrays["depth"] * 1000.0,
+                    mode="lines",
+                    line={"color": color},
+                    name=f"{label} pre-integration depth",
+                    legendgroup=arm,
+                    showlegend=False,
+                ),
+                row=2,
+                col=2,
+            )
+            figure.add_trace(
+                go.Scatter(
+                    x=aligned_ms,
+                    y=arrays["tracker_depth_post"] * 1000.0,
+                    mode="lines",
+                    line={"color": color, "dash": "dash"},
+                    name=f"{label} tracker post-integration depth",
+                    legendgroup=arm,
+                    showlegend=False,
+                ),
+                row=2,
+                col=2,
+            )
+            figure.add_trace(
+                go.Scatter(
+                    x=aligned_ms,
+                    y=cumulative_impulse,
+                    mode="lines",
+                    line={"color": color, "dash": "dot"},
+                    name=f"{label} cumulative event impulse",
+                    legendgroup=arm,
+                    showlegend=False,
+                    yaxis="y6",
+                ),
+                row=2,
+                col=2,
+            )
         reward = trace.get("reward", {})
         impact = np.asarray(reward.get("impact_payout", ()), dtype=float)
         delivered = np.asarray(reward.get("delivered_payout", ()), dtype=float)
         control_n = max(impact.size, delivered.size)
-        if control_n:
+        has_nonzero_payout = bool(
+            np.any(impact != 0.0) or np.any(delivered != 0.0)
+        )
+        if control_n and (contact_index is not None or has_nonzero_payout):
             control_ms = np.arange(control_n) * 20.0
             if impact.size < control_n:
                 impact = np.pad(impact, (0, control_n - impact.size))
@@ -627,11 +632,13 @@ def build_trajectory_figure(
                 row=2,
                 col=3,
             )
+        elif control_n and contact_index is None:
+            omitted_zero_no_contact_payouts += 1
 
     figure.update_xaxes(title_text="x (m)", row=1, col=2)
     figure.update_yaxes(title_text="z (m)", row=1, col=2)
     figure.update_xaxes(title_text="x (m)", row=1, col=3)
-    figure.update_yaxes(title_text="y (m)", scaleanchor="x3", row=1, col=3)
+    figure.update_yaxes(title_text="y (m)", scaleanchor="x2", row=1, col=3)
     figure.update_xaxes(title_text="time from contact (ms)", row=2, col=1)
     figure.update_yaxes(title_text="axial force (N)", row=2, col=1)
     figure.update_xaxes(title_text="time from contact (ms)", row=2, col=2)
@@ -645,6 +652,11 @@ def build_trajectory_figure(
             for stratum in omitted_strata
         )
         omission_note = f"<br>Omitted empty strata: {labels}."
+    if omitted_zero_no_contact_payouts:
+        omission_note += (
+            "<br>Omitted all-zero no-contact payout timelines: "
+            f"{omitted_zero_no_contact_payouts}."
+        )
     figure.update_layout(
         title={
             "text": (
@@ -658,6 +670,178 @@ def build_trajectory_figure(
         width=1500,
         template="plotly_white",
         legend={"orientation": "h", "y": -0.11},
+    )
+    return figure
+
+
+def build_fixed_reset_xz_grid(
+    rows: Sequence[Mapping],
+    sampled_payloads: Iterable[Mapping],
+    *,
+    env_id: int = 0,
+    episode_ordinal: int = 0,
+):
+    """Plot the same sampled reset coordinate for every arm/training seed."""
+
+    from matplotlib import colors
+    from matplotlib import pyplot as plt
+    from matplotlib.collections import LineCollection
+
+    rows = list(rows)
+    expected = {
+        (arm, training_seed)
+        for arm in ARM_ORDER
+        for training_seed in range(8)
+    }
+    observed = {
+        (str(row.get("treatment", "")), int(row.get("training_seed", -1)))
+        for row in rows
+    }
+    if observed != expected or len(rows) != len(expected):
+        raise ValueError("fixed-reset grid requires the complete 4×8 campaign")
+
+    traces: dict[tuple[str, int], Mapping] = {}
+    geometry_key = None
+    for row, payload in zip(rows, sampled_payloads, strict=True):
+        arm = str(row["treatment"])
+        training_seed = int(row["training_seed"])
+        if (
+            str(payload.get("treatment", "")) != arm
+            or int(payload.get("training_seed", -1)) != training_seed
+        ):
+            raise ValueError("fixed-reset payload row binding mismatch")
+        matches = [
+            trace
+            for trace in payload.get("episodes", ())
+            if int(trace.get("env_id", -1)) == env_id
+            and int(trace.get("episode_ordinal", -1)) == episode_ordinal
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                f"{arm}/seed{training_seed} must contain exactly one "
+                f"env{env_id}/episode{episode_ordinal} trace"
+            )
+        trace = matches[0]
+        candidate_geometry = trace.get("nail_geometry")
+        if candidate_geometry is None:
+            candidate_geometry = payload.get("nail_geometry")
+        if candidate_geometry is None:
+            raise ValueError("fixed-reset trace requires frozen nail geometry")
+        candidate_key = (
+            tuple(float(value) for value in candidate_geometry["nail_xy_m"]),
+            float(candidate_geometry["nail_radius_m"]),
+            str(candidate_geometry["source_sha256"]),
+        )
+        if geometry_key is None:
+            geometry_key = candidate_key
+        elif candidate_key != geometry_key:
+            raise ValueError("fixed-reset traces do not share nail geometry")
+        traces[(arm, training_seed)] = trace
+
+    assert geometry_key is not None
+    nail_x, nail_y = geometry_key[0]
+    x_limits = (nail_x - 0.035, nail_x + 0.19)
+    z_limits = (0.045, 0.27)
+
+    figure, axes = plt.subplots(
+        len(ARM_ORDER),
+        8,
+        figsize=(28, 14),
+        sharex=True,
+        sharey=True,
+        constrained_layout=True,
+    )
+    norm = colors.Normalize(0.0, 1.0)
+    for row_index, arm in enumerate(ARM_ORDER):
+        for training_seed in range(8):
+            axis = axes[row_index, training_seed]
+            trace = traces[(arm, training_seed)]
+            arrays = _trace_arrays(trace)
+            position = arrays["position"]
+            points = position[:, (0, 2)]
+            if points.shape[0] > 1:
+                segments = np.stack((points[:-1], points[1:]), axis=1)
+                path = LineCollection(
+                    segments,
+                    cmap="viridis",
+                    norm=norm,
+                    linewidth=2.0,
+                )
+                path.set_array(np.linspace(0.0, 1.0, segments.shape[0]))
+                axis.add_collection(path)
+            axis.scatter(
+                points[0, 0],
+                points[0, 1],
+                s=38,
+                color="#16a34a",
+                edgecolor="#111827",
+                linewidth=0.5,
+                zorder=5,
+            )
+            contact = arrays["contact"]
+            axis.scatter(
+                points[contact, 0],
+                points[contact, 1],
+                s=12,
+                color="#dc2626",
+                zorder=6,
+            )
+            axis.axvline(
+                nail_x,
+                color="#8c564b",
+                linestyle="--",
+                linewidth=1.2,
+                zorder=1,
+            )
+            onset, _ = _marker_indices(trace, arrays)
+            if onset is None:
+                contact_label = "no accepted contact"
+            else:
+                offset = float(
+                    np.linalg.norm(
+                        position[onset, :2] - np.asarray([nail_x, nail_y])
+                    )
+                )
+                precontact_speed = float(
+                    trace["first_strike"]["v_precontact_m_s"]
+                )
+                contact_label = (
+                    f"offset {offset * 1000:.1f} mm · "
+                    f"v_pre {precontact_speed:.2f} m/s"
+                )
+            axis.set_title(
+                f"{arm} · seed {training_seed}\n{contact_label}",
+                fontsize=8,
+            )
+            axis.set_xlim(*x_limits)
+            axis.set_ylim(*z_limits)
+            axis.grid(alpha=0.18)
+            outside = (
+                np.any(position[:, 0] < x_limits[0])
+                or np.any(position[:, 0] > x_limits[1])
+                or np.any(position[:, 2] < z_limits[0])
+                or np.any(position[:, 2] > z_limits[1])
+            )
+            if outside:
+                axis.text(
+                    0.02,
+                    0.02,
+                    "path exits view",
+                    transform=axis.transAxes,
+                    fontsize=6.5,
+                    color="#b45309",
+                )
+            if row_index == len(ARM_ORDER) - 1:
+                axis.set_xlabel("x (m)")
+            if training_seed == 0:
+                axis.set_ylabel("z (m)")
+
+    figure.suptitle(
+        "Fixed-reset hammer-head trajectories across the 4×8 campaign\n"
+        f"env {env_id} · episode {episode_ordinal} for every policy; "
+        "green=start · viridis=normalized episode time · red=contact · "
+        "brown=nail axis (x only; z not stored) · offset=radial x-y offset",
+        fontsize=15,
     )
     return figure
 
@@ -1000,6 +1184,7 @@ def generate_report(
     representative_traces = deterministic_traces
     campaign_path = output / "first_strike_campaign.html"
     trajectory_path = output / "first_strike_trajectories.html"
+    fixed_reset_grid_path = output / "first_strike_fixed_reset_xz_grid.png"
     build_campaign_figure(rows).write_html(campaign_path, include_plotlyjs="cdn")
     build_trajectory_figure(
         representative_traces,
@@ -1007,6 +1192,14 @@ def generate_report(
     ).write_html(
         trajectory_path, include_plotlyjs="cdn"
     )
+    fixed_reset_grid = build_fixed_reset_xz_grid(
+        rows,
+        _verified_sampled_artifact_payloads(rows),
+    )
+    fixed_reset_grid.savefig(fixed_reset_grid_path, dpi=180)
+    from matplotlib import pyplot as plt
+
+    plt.close(fixed_reset_grid)
     overlays = []
     if video_artifacts is not None:
         expected_episode_ids = {
@@ -1064,6 +1257,7 @@ def generate_report(
         "artifacts": {
             "campaign_html": str(campaign_path),
             "trajectory_html": str(trajectory_path),
+            "fixed_reset_xz_grid_png": str(fixed_reset_grid_path),
             "video_overlays": overlays,
         },
         "state_is_ground_truth": True,

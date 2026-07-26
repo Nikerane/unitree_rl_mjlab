@@ -39,6 +39,7 @@ from evaluation.analysis.first_strike_campaign import (
 )
 from evaluation.analysis.plot_first_strike_campaign import (
     build_campaign_figure,
+    build_fixed_reset_xz_grid,
     build_trajectory_figure,
     generate_report,
     write_video_overlay_html,
@@ -2258,6 +2259,200 @@ def test_representative_figure_reports_empty_outcome_strata():
         assert f"{arm} failure" in figure.layout.title.text
 
 
+def test_representative_top_view_uses_equal_spatial_units():
+    traces = [
+        _literal_trace(arm=arm, reason="success", overall_success=True)
+        for arm in ARM_TASKS
+    ]
+    omissions = [
+        {
+            "arm": arm,
+            "outcome": "failure",
+            "overall_success": False,
+            "reason": "no sampled episodes in outcome stratum",
+        }
+        for arm in ARM_TASKS
+    ]
+
+    figure = build_trajectory_figure(traces, omitted_strata=omissions)
+
+    # The x-y top view is subplot x2/y2.  Tying y2 to the bottom-row time
+    # axis x3 expands metres to a multi-second range and makes the path flat.
+    assert figure.layout.yaxis2.scaleanchor == "x2"
+
+
+def test_no_contact_representative_skips_only_contact_aligned_panels():
+    failure = _literal_trace(
+        arm="D-prime",
+        reason="none",
+        overall_success=False,
+        no_contact=True,
+    )
+    omissions = [
+        {
+            "arm": arm,
+            "outcome": "success" if success else "failure",
+            "overall_success": success,
+            "reason": "no sampled episodes in outcome stratum",
+        }
+        for arm in ARM_TASKS
+        for success in (False, True)
+        if (arm, success) != ("D-prime", False)
+    ]
+
+    figure = build_trajectory_figure([failure], omitted_strata=omissions)
+
+    # A no-contact timeout belongs in the state-path panels, but it has no
+    # meaningful contact-aligned force/depth/impulse timeline.  Its recorded
+    # nonzero reward stream is absolute-time evidence and must not be hidden.
+    assert not any(
+        getattr(trace, "xaxis", None) in {"x3", "x4"}
+        for trace in figure.data
+    )
+    assert any(
+        getattr(trace, "xaxis", None) == "x5"
+        for trace in figure.data
+    )
+
+
+def test_all_zero_no_contact_payout_is_omitted_with_disclosure():
+    failure = _literal_trace(
+        arm="D-prime",
+        reason="none",
+        overall_success=False,
+        no_contact=True,
+    )
+    failure["reward"]["impact_payout"] = [0.0] * 200
+    failure["reward"]["delivered_payout"] = [0.0] * 200
+    omissions = [
+        {
+            "arm": arm,
+            "outcome": "success" if success else "failure",
+            "overall_success": success,
+            "reason": "no sampled episodes in outcome stratum",
+        }
+        for arm in ARM_TASKS
+        for success in (False, True)
+        if (arm, success) != ("D-prime", False)
+    ]
+
+    figure = build_trajectory_figure([failure], omitted_strata=omissions)
+
+    assert not any(
+        getattr(trace, "xaxis", None) == "x5"
+        for trace in figure.data
+    )
+    assert "Omitted all-zero no-contact payout timelines: 1" in (
+        figure.layout.title.text
+    )
+
+
+def test_fixed_reset_xz_grid_uses_one_common_coordinate_and_spatial_window():
+    rows = []
+    payloads = []
+    for arm in ARM_TASKS:
+        for training_seed in range(8):
+            trace = _literal_trace(arm=arm)
+            trace["episode_id"] = f"{arm}-seed{training_seed}-env0-episode0"
+            trace["training_seed"] = training_seed
+            rows.append({"treatment": arm, "training_seed": training_seed})
+            payloads.append(
+                {
+                    "treatment": arm,
+                    "training_seed": training_seed,
+                    "nail_geometry": copy.deepcopy(trace["nail_geometry"]),
+                    "episodes": [trace],
+                }
+            )
+
+    figure = build_fixed_reset_xz_grid(rows, payloads)
+
+    assert len(figure.axes) == 32
+    assert len({axis.get_xlim() for axis in figure.axes}) == 1
+    assert len({axis.get_ylim() for axis in figure.axes}) == 1
+    assert [axis.get_title().splitlines()[0] for axis in figure.axes[:8]] == [
+        f"C · seed {seed}" for seed in range(8)
+    ]
+    assert all("env 0 · episode 0" in text.get_text() for text in figure.texts)
+
+
+def test_fixed_reset_grid_excludes_decoys_and_labels_actual_event_geometry():
+    rows = []
+    payloads = []
+    for arm in ARM_TASKS:
+        for training_seed in range(8):
+            trace = _literal_trace(arm=arm)
+            trace["episode_id"] = f"{arm}-seed{training_seed}-env0-episode0"
+            if (arm, training_seed) == ("E", 0):
+                trace["first_strike"]["productive"] = False
+                trace["first_strike"]["v_precontact_m_s"] = 2.5
+                trace["physical"]["head_position_m"][30][:2] = [0.509, 0.012]
+                decoy = copy.deepcopy(trace)
+                decoy["episode_id"] = "E-seed0-env1-episode0"
+                decoy["env_id"] = 1
+                decoy["first_strike"]["v_precontact_m_s"] = 9.99
+            else:
+                decoy = None
+            trace["training_seed"] = training_seed
+            rows.append({"treatment": arm, "training_seed": training_seed})
+            payloads.append(
+                {
+                    "treatment": arm,
+                    "training_seed": training_seed,
+                    "nail_geometry": copy.deepcopy(trace["nail_geometry"]),
+                    "episodes": ([decoy] if decoy is not None else []) + [trace],
+                }
+            )
+
+    figure = build_fixed_reset_xz_grid(rows, payloads)
+    axis = figure.axes[first_strike_campaign.ARM_ORDER.index("E") * 8]
+
+    assert "offset 15.0 mm" in axis.get_title()
+    assert "v_pre 2.50 m/s" in axis.get_title()
+    assert "9.99" not in axis.get_title()
+    disclosure = figure._suptitle.get_text()
+    assert "normalized episode time" in disclosure
+    assert "radial x-y offset" in disclosure
+    assert "nail axis (x only; z not stored)" in disclosure
+
+
+def test_fixed_reset_grid_requires_complete_campaign_and_streams_payloads():
+    rows = []
+    payloads = []
+    for arm in ARM_TASKS:
+        for training_seed in range(8):
+            trace = _literal_trace(arm=arm)
+            trace["training_seed"] = training_seed
+            rows.append({"treatment": arm, "training_seed": training_seed})
+            payloads.append(
+                {
+                    "treatment": arm,
+                    "training_seed": training_seed,
+                    "episodes": [trace],
+                }
+            )
+
+    with pytest.raises(ValueError, match="complete 4×8"):
+        build_fixed_reset_xz_grid(rows[:-1], payloads[:-1])
+
+    class NoLengthHintIterator:
+        def __init__(self, values):
+            self.values = iter(values)
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            return next(self.values)
+
+        def __length_hint__(self):
+            raise AssertionError("payload iterator must not be materialized")
+
+    figure = build_fixed_reset_xz_grid(rows, NoLengthHintIterator(payloads))
+
+    assert len(figure.axes) == 32
+
+
 def test_campaign_figure_coerces_csv_string_numeric_fields():
     rows = [
         {
@@ -2516,6 +2711,7 @@ def test_fixture_report_html_and_video_overlays_remain_digest_bound(
         for arm, task in ARM_TASKS.items():
             assert arm in html_text
             assert task in html_text
+    assert Path(result["artifacts"]["fixed_reset_xz_grid_png"]).is_file()
     by_episode = {trace["episode_id"]: trace for trace in traces}
     for overlay in result["artifacts"]["video_overlays"]:
         source = by_episode[overlay["episode_id"]]
