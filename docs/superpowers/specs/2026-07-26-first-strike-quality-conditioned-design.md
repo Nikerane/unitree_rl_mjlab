@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-26
 **Status:** approved design; implementation and GPU launch remain gated
-**Scope:** fixed impedance only; three-arm matched-seed reward experiment
+**Scope:** fixed impedance only; four-arm matched-seed reward experiment plus a CPU reference-recipe probe
 
 ## 1. Decision this experiment must support
 
@@ -15,13 +15,16 @@ This experiment must distinguish:
 
 1. whether the raw first-event speed payout has a large marginal effect on
    contact quality;
-2. whether conditioning impact utility on physical contact quality can preserve
+2. whether the delivered-impulse payout creates useful nail work or mainly
+   selects longer dwell/recontact;
+3. whether conditioning impact utility on physical contact quality can preserve
    speed, task success, and delivered impulse while selecting better contact;
-3. whether the observed effect remains only a simulator result because the
+4. whether the observed effect remains only a simulator result because the
    learned trajectories exceed the Z1 joint-velocity rail.
 
-It does **not** test impulse enforcement, variable impedance, a new trajectory
-architecture, or hardware transfer.
+It does **not** test impulse enforcement, variable impedance, a new
+reference-guided training architecture, or hardware transfer. Reference
+recipes are characterized on CPU only unless the explicit promotion gates pass.
 
 ## 2. Evidence that constrains the design
 
@@ -56,17 +59,19 @@ accuracy or valid first contact:
 
 ## 3. Overall experiment
 
-Run three concurrent arms with eight fresh matched training seeds per arm:
+Run four concurrent arms with eight fresh matched training seeds per arm:
 
 | Arm | First-event speed | Delivered impulse | Contact-quality conditioning |
 |---|---:|---:|---|
 | **F8** | current linear reader, weight 8 | current linear reader, weight 2 | none |
 | **F0** | disabled, weight 0 | current linear reader, weight 2 | none |
+| **D0** | current linear reader, weight 8 | disabled, weight 0 | none |
 | **FQ** | bounded reader, nominal weight 8 | bounded reader, nominal weight 2 | shared bounded quality factor |
 
 Use training seeds 8–15 in every arm. All arms use the same training budget,
 fixed gains, action space, task rewards, tracker timing, termination semantics,
 checkpoint-selection rule, and evaluation random streams.
+Freeze campaign ID `fq4x8` and run shorts `f8`, `f0`, `d0`, and `fq`.
 
 `IMP_J_LIMIT` remains unchanged. `imp_max_p` remains zero. The impulse
 constraint is log-only. There is no `set_gains`, commanded stiffness, variable
@@ -75,23 +80,54 @@ tracking, or global straightness penalty.
 
 ## 4. Physics-rate contact-quality snapshot
 
-The shared first-strike tracker will latch one immutable pre-contact/onset
-snapshot for the first accepted productive event:
+The shared first-strike tracker will maintain one immutable event record for the
+first accepted event, populated at two explicitly tested physics phases.
+
+At **onset**, before any future event-window quantity is available, it latches:
 
 - hammer-face pose;
 - nail-head pose and nail axis;
 - signed fore-aft and lateral center offsets in the nail plane;
 - actual contact point and contact normal when available;
 - precontact axial speed;
+- first-contact time.
+
+At **finalization**, after success or the fixed event-window boundary, it
+latches:
+
+- productivity and finalization reason;
 - axial and transverse object-side event impulse;
-- first-contact time;
 - delivered nail impulse;
 - per-joint event impulse;
-- peak joint velocity.
+- peak joint velocity over the event.
 
-Every field must be captured at an explicitly tested physics phase. Reward
-payout remains one-shot at the control boundary. The tracker may observe these
-quantities but must not change physics.
+Onset fields never change during finalization, and finalized fields never
+change afterward. Reward payout remains one-shot at the control boundary after
+finalization. The tracker may observe these quantities but must not change
+physics.
+
+Contact geometry comes from a dedicated diagnostic `ContactSensor`, leaving the
+existing task sensor shape unchanged. It requests `found`, contact-frame
+`force`, world-frame `pos`, and world-frame `normal` with multiple retained
+slots. The slot count is qualified on the CPU scripted reference at
+`8 -> 16 -> 64`: freeze the smallest count with no overflow whose centroid
+agrees with the next larger count to `1e-6 m`. If 64 slots overflow or adjacent
+qualified counts disagree, the experiment stops rather than approximating.
+
+Contact-quality instrumentation is orthogonal to reward treatment. A frozen
+`quality_instrumentation` mode adds only the passive sensor and diagnostic
+tracker fields; it must not alter observations, actions, rewards, terminations,
+or physics. It is enabled for all F8/F0/D0/FQ action-tape identity audits and
+strict sampled evaluations, even if F8/F0/D0 omit it during training; FQ
+requires it during training because its reward reads the score. Training and
+evaluation configuration hashes are banked separately, and the action-tape
+identity gate must prove that adding the instrumentation leaves every physical
+channel unchanged.
+
+The nail plane is compiled once from the runtime nail-head geometry: its
+world-frame pose defines the plane origin and axis, and the compiled geom size
+defines the radius. No site-center proxy or hard-coded world axis substitutes
+for this frame.
 
 ## 5. Contact-quality score
 
@@ -138,18 +174,23 @@ Before training, the score must pass all of the following offline gates:
 
 If the contact point or its impulse weight cannot be reconstructed reliably,
 the experiment pauses. There is no fallback to the 12 mm site-center indicator.
+No physical contact earns zero quality, but instrumentation overflow or
+nonfinite contact geometry invalidates the evaluation row; it is not silently
+converted into a legitimate zero-quality episode. During training, the same
+condition fails closed to zero payout and increments an explicit sentinel.
 
 The primary endpoint is each seed's all-episode mean
-`first_contact_quality_sampled`, with no-contact and invalid-contact episodes
-scored zero. Report central-half-radius rate (`e_c <= 0.5 r_n`), full-head rate
-(`e_c <= r_n`), contact-conditional mean quality, and the continuous \(e_c\)
-distribution as supporting diagnostics. These are task-quality measures, not
-physical harm thresholds.
+`first_contact_quality_sampled`, with no-contact and zero-positive-normal-force
+physical episodes scored zero. Instrumentation-invalid episodes invalidate
+their evaluation row as defined above. Report central-half-radius rate
+(`e_c <= 0.5 r_n`), full-head rate (`e_c <= r_n`), contact-conditional mean
+quality, and the continuous \(e_c\) distribution as supporting diagnostics.
+These are task-quality measures, not physical harm thresholds.
 
 The provisional `I_REF_FIRST_STRIKE_SUCCESS=0.3088 N·s` must also pass its
 existing production-tracker provenance/reproducibility gate before launch. If
-it is recalibrated, the frozen replacement is used identically in F8, F0, and
-FQ; the campaign must not mix normalizers across arms.
+it is recalibrated, the frozen replacement is used identically in F8, F0, D0,
+and FQ; the campaign must not mix normalizers across arms.
 
 ## 6. FQ reward
 
@@ -178,15 +219,16 @@ The unit-test suite must explicitly reject an additive implementation such as
 reward for poor contact.
 
 F8 and F0 keep the current linear delivered reader so the F8/F0 comparison
-isolates the marginal raw speed payout. FQ is a remedy arm, not a one-variable
-ablation.
+isolates the marginal raw speed payout. D0 keeps the current linear speed
+reader so F8/D0 isolates the marginal delivered-impulse payout. FQ is a remedy
+arm, not a one-variable ablation.
 
 ## 7. Offline evidence and visual audit before GPU
 
 Bank locally, with checksums:
 
 - all raw trace payloads;
-- the resolved accepted-attempt manifest;
+- the archived C/D′/F/E resolved accepted-attempt manifest;
 - seed summaries and evaluation configuration;
 - the exact asset revision needed for contact-point reconstruction.
 
@@ -203,10 +245,119 @@ Trajectory examples must be predeclared seed-level medoids, not
 lexicographically first episodes. Interactive HTML may supplement, but never
 replace, the static evidence.
 
+The medoid distance uses standardized Euclidean distance over
+`(quality, useful_speed, contact_time, delivered_impulse, signed_x, signed_y)`.
+Within a seed, each scale is its finite standard deviation, replaced by `1.0`
+when zero. Exact ties break by `(env_id, episode_ordinal)`.
+
 Counterfactually rescore the archived C/D′/F/E episodes under `q_contact`. Reject
-the proposed FQ score if higher counterfactual reward still systematically
-selects worse contact-point quality or if the score is effectively only a
-speed proxy.
+the proposed FQ score if either preregistered check fails:
+
+1. within each archived arm, the top quartile by counterfactual FQ has lower
+   mean physical contact quality than the bottom quartile; or
+2. the absolute seed-level Spearman correlation between counterfactual FQ and
+   physical contact quality is below `0.50` while its absolute correlation with
+   useful speed exceeds the quality correlation.
+
+These are falsification checks, not thresholds tuned to separate the archived
+arms.
+
+### 7.1 Human-review video library
+
+For every accepted arm/seed, render the exact medoid episode used by the static
+trajectory grid. Each entry binds the MP4 and state trace by episode identity,
+trace digest, explicit frame-to-substep timing, and SHA-256. Display the video
+beside its x-z/x-y path, contact close-up, contact-aligned force/impulse trace,
+and frozen metrics. Also render one deterministic mean-policy rollout per
+checkpoint as a clearly labelled secondary diagnostic.
+
+The gallery provides separate human annotations (`good`, `questionable`,
+`bad`, plus free-text reasons). These annotations are qualitative diagnostics:
+they cannot change the preregistered replacement rule or select a different
+episode after results are visible. Large MP4 files remain outside Git; the
+manifest, checksums, montages, state overlays, and annotation export are
+banked.
+
+Simulator state remains quantitative ground truth. Pixel-space computer vision
+may check video/overlay consistency and extract keyframes, but it does not
+replace the exact simulator trajectory or contact measurements.
+
+### 7.2 Paired CPU reference-recipe probe
+
+Reference design is evaluated independently before adding another training
+arm. Replay three nail-frame-relative recipes over the same 32 randomized reset
+states:
+
+1. **R0 — shipped centered polyline:** the current `SingleStrikeReference`;
+2. **R1 — learned impact-only arc:** the transverse template from the medoid
+   `dc_imponly` trace, with R0's axial schedule;
+3. **R2 — terminally repaired arc:** identical to R1 until 90 mm axial
+   standoff, then smoothly blend transverse offset to zero by 20 mm standoff.
+
+This is 96 paired CPU rollouts. It asks whether the reward-induced arc provides
+any physical benefit and whether terminal alignment can be repaired without
+deleting the early wind-up. The template must be anchored to the live reset
+head and live nail frame; world-coordinate replay is invalid.
+
+The R1 source set is exactly the three locally banked `dc_imponly` precontact
+traces, frozen by content hash before the probe. In each source trace, the
+earliest maximum axial standoff before accepted onset separates wind-up from
+descent. Resample the two segments on 51 uniformly spaced points each, sharing
+the apex for a 101-point template. At each point, store the nail-frame
+transverse residual between the realized trace and the R0 centered path built
+from that source trace's own live head and nail poses. Select the residual
+template minimizing summed pairwise transverse L2 distance; exact ties break by
+lexicographic trace digest. At replay, rotate that residual through the same
+nail-frame basis used by the signed-offset diagnostic and add it to the live
+R0 target at the corresponding wind-up/descent progress. This anchors the
+target to both the live reset head and live nail while changing only the
+transverse template; R0's axial schedule and pacing remain unchanged. For R2,
+let \(d\) be axial standoff and
+\(u=\operatorname{clip}((0.09-d)/0.07,0,1)\). Its transverse offset is R1's
+offset multiplied by the quintic minimum-jerk factor
+\(1-(10u^3-15u^4+6u^5)\), making it identical to R1 through 90 mm and zero with
+continuous first and second derivatives by 20 mm.
+
+Before any recipe outcome is inspected, freeze a 32-row reset manifest using
+reset seeds `0..31`. Each row records the realized initial robot/nail state,
+live head and nail poses, nail-frame basis, code/config/asset revisions, and a
+canonical state digest. All three recipes must reproduce each row's digest.
+After the nominal script, issue no more than two final-target control steps,
+stopping earlier on success; there is no further endpoint hold. A rollout that
+has not produced both a productive first event and task success by the
+`n_script + 2` boundary is a press-through failure.
+
+R0 first serves as the calibration baseline: it must reproduce the Phase M
+in-script productive-contact and success contract and its 32-reset physical
+baseline is banked. Apply the following absolute gates to any R1 or R2 recipe
+proposed for promotion, not automatically to the diagnostic comparator:
+at least 30/32 productive in-script first events, at least 29/32 accepted
+onsets inside the provisional 12 mm center proxy, median precontact speed at
+least 95% of R0, every accepted event above 0.5 m/s, median raw delivered
+impulse at least 90% of R0, no prefix joint speed above 3.1415 rad/s, no rollout
+above `Lambda/cap=1`, and no numerical/sentinel failure. The R2 repair contrast
+additionally requires at least four more within-12-mm onsets than R1
+(`>=4/32`, i.e. 12.5 percentage points), whether or not R1 passes an absolute
+promotion gate. Replacing R0 additionally requires a positive physical reason:
+at least 5% higher precontact speed or at least 10% lower p95 prefix joint
+speed. Delivered impulse alone cannot justify replacement because it is
+dwell/force dominated.
+
+Before any GPU reference arm, counterfactually score each replay under all
+three references. The generating recipe must have the largest cumulative raw
+imitation score in at least 26/32 resets and a median self/next-best score ratio
+of at least 1.25. Otherwise the weak prior cannot identify the recipes. A
+passing candidate is then tested under `solref_scale=2` and rejected if speed,
+delivered impulse, or worst-joint impulse changes by 20% or more, or if
+success/centering fails.
+
+A CPU pass certifies scripted feasibility and separability under the existing
+weak prior only; it is not evidence that PPO will learn the recipe.
+
+No global-straightness reward is introduced. A GPU
+`FQ` versus `FQ+terminal-funnel` comparison is launched only if the CPU probe
+passes and the first 4x8 result shows a remaining terminal credit-assignment
+failure.
 
 ## 8. Verification before training
 
@@ -221,7 +372,7 @@ Add unit tests for:
 - finite bounded `q_contact`, `phi_v`, and `phi_I`;
 - monotonic quality behavior;
 - no off-quality speed or impulse compensation;
-- F8/F0/FQ action-tape physical identity;
+- F8/F0/D0/FQ action-tape physical identity;
 - exact allowed configuration differences among arms.
 
 Then run:
@@ -255,17 +406,39 @@ episodes, using only `*_sampled` columns. Require:
 ### Primary contrasts
 
 1. **F0 versus F8:** causal effect of removing raw first-event speed payout.
-2. **FQ versus F8:** effect of replacing center-blind maximize payout with
+2. **D0 versus F8:** causal effect of removing raw delivered-impulse payout.
+3. **FQ versus F8:** effect of replacing center-blind maximize payout with
    bounded quality-conditioned utility.
 
-FQ versus F0 is secondary.
+FQ versus F0 and FQ versus D0 are secondary.
+
+For the D0-versus-F8 mechanism question, preregister three secondary
+first-event endpoints:
+
+- event-window nail-depth gain,
+  `max(peak_depth - depth_at_contact, 0)`;
+- contact dwell in milliseconds, defined as raw-contact substeps inside the
+  accepted event window times `physics_dt`;
+- recontact count, defined as off-to-on transitions after the accepted onset
+  and before finalization.
+
+Report their eight paired seed differences and paired-bootstrap intervals,
+alongside raw delivered impulse and first-window/overall success. These
+mechanism endpoints do not enlarge either three-test Holm family. Describe the
+delivered reader as mainly selecting dwell/recontact only if the one-sided 95%
+paired-bootstrap upper bound for the D0-minus-F8 delivered-impulse difference
+is below zero, the corresponding upper bound is below zero for either dwell or
+recontact count, the lower bound for the event-window-depth-gain ratio is
+greater than `0.90`, and the existing success guardrails pass. A nonpositive or
+nonfinite F8 depth-gain denominator makes that mechanism claim not
+distinguishable.
 
 For each primary contrast:
 
 - report the required two-sided seed-level Mann–Whitney test;
 - report an exact paired sign-flip test on matched-seed differences;
-- use Holm correction across the two primary Mann–Whitney tests and,
-  separately, across the two paired sign-flip tests;
+- use Holm correction across the three primary Mann–Whitney tests and,
+  separately, across the three paired sign-flip tests;
 - report paired seed-bootstrap confidence intervals and all eight differences;
 - do not describe the tests as independent confirmations.
 
@@ -293,6 +466,11 @@ A null F0 result means only that the experiment found no evidence for the
 predeclared large marginal effect. It does not prove equivalence or falsify
 all reward-level explanations.
 
+A null D0 result has the same limited interpretation for the delivered-impulse
+reader. A D0 change in dwell or per-joint impulse without additional nail work
+is evidence about contact-regime selection, not proof that delivered impulse
+is intrinsically unsafe.
+
 ### Hardware interpretation
 
 Joint-velocity legality is always reported. This campaign is explicitly
@@ -307,6 +485,14 @@ Use named-file commits only. Deploy through commit, push, and a clean Vega
 checkout/pull; never copy tracked files with `scp`. Any `-dirty` evaluation row
 is invalid. Use one GPU per training run.
 
+Freeze a 32-row accepted-training/checkpoint manifest before strict evaluation.
+It binds arm/seed, retained checkpoint, training attempt and retry history,
+code/config/asset revisions, and artifact hash. After infrastructure-only
+evaluation retries are resolved, freeze a separate 32-row accepted-evaluation
+manifest binding each checkpoint to its evaluation attempt, RNG stream,
+payload hash, provenance, and dirty/sentinel state. Analysis starts only after
+the second manifest is complete.
+
 GPU launch is authorized only after the offline quality-score audit,
 counterfactual rescoring, unit tests, standard gates, preregistration, and code
 review all pass.
@@ -317,6 +503,8 @@ review all pass.
 |---|---|---|
 | F0 improves quality and passes guardrails | Raw speed payout has a large harmful marginal effect | Adopt F0 provisionally; compare with FQ |
 | F0 improves quality but loses speed/impulse | Speed proxy is useful but mis-specified | Prefer FQ if FQ passes |
+| D0 shortens dwell/lowers Lambda without losing task work | Delivered-impulse payout was selecting press/recontact | Keep it disabled or bounded/quality-conditioned |
+| D0 loses useful depth/success | Delivered-impulse payout contributes task work | Retain it only in bounded quality-conditioned form |
 | FQ improves quality and passes guardrails | Quality-conditioned impact is a viable fixed-impedance objective | Revalidate with speed-aware controller |
 | Neither improves quality | Center-blind speed alone is not the dominant cause | Factor one-shot credit, reader semantics, and normalizer separately |
 | Quality improves but qvel remains illegal | Reward diagnosis succeeded only in simulation | Do not infer hardware readiness |
@@ -325,7 +513,8 @@ review all pass.
 ## 12. Explicitly deferred
 
 - global trajectory reference or straight-line tracking;
-- late ante-impact funnel shaping;
+- GPU late ante-impact funnel shaping unless the CPU recipe and FQ
+  credit-assignment gates both pass;
 - contact-force reward;
 - accuracy as a new constrained-RL mechanism;
 - changes to impulse caps or accumulation-window semantics;
