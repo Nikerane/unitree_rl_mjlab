@@ -28,7 +28,8 @@ import shutil
 import socket
 import subprocess
 import sys
-from dataclasses import asdict, fields
+from collections.abc import Mapping
+from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -71,6 +72,14 @@ from evaluation.analysis.first_strike_campaign import (
 
 ARM_JOINTS = ("joint1", "joint2", "joint3", "joint4", "joint5", "joint6")
 TASK_TO_ARM = {task: arm for arm, task in ARM_TASKS.items()}
+QUALITY_ARM_TASKS = {
+  "F8": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear",
+  "F0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0",
+  "D0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0",
+  "FQ": "Unitree-Z1-Hammer-CaT-Impulse-Event-Quality",
+}
+QUALITY_TASK_TO_ARM = {task: arm for arm, task in QUALITY_ARM_TASKS.items()}
+QUALITY_EVALUATION_REFERENCE_TASK = QUALITY_ARM_TASKS["FQ"]
 RESET_SEED_OFFSET = 10_000_019
 OBSERVATION_SEED_OFFSET = 20_000_033
 ACTION_SEED_OFFSET = 30_000_041
@@ -79,7 +88,39 @@ PAYOUT_SEMANTICS = {
   "D-prime": "actual_legacy_first_event",
   "F": "actual_event_linear",
   "E": "actual_event_saturated",
+  "F8": "actual_event_linear",
+  "F0": "actual_event_linear_speed_disabled",
+  "D0": "actual_event_linear_delivered_disabled",
+  "FQ": "actual_event_quality_bounded",
 }
+
+_TRACE_PHYSICAL_KEYS = (
+  "contact", "head_position_m", "clamped_depth_m", "net_axial_force_n",
+  "joint_speed_rad_s", "post_step_joint_speed_rad_s",
+  "tracker_depth_post_integration_m", "quality_found_count",
+  "quality_normal_force_n", "quality_contact_position_m",
+  "quality_contact_normal",
+)
+_TRACE_EVENT_KEYS = (
+  "tracker_started", "tracker_finalized", "tracker_productive",
+  "tracker_reason", "event_cumulative_impulse_n_s",
+  "tracker_contact_point_w", "tracker_contact_error_m",
+  "tracker_contact_quality", "tracker_contact_quality_valid",
+  "tracker_contact_quality_overflow", "tracker_first_contact_time_s",
+  "tracker_contact_normal_axiality",
+  "event_cumulative_transverse_impulse_n_s",
+)
+_TRACE_FIRST_STRIKE_PHYSICAL_KEYS = (
+  "started", "finalized", "reason", "accepted_onset_index", "productive",
+  "v_precontact_m_s", "delivered_n_s", "delivered_transverse_n_s",
+  "contact_point_w", "contact_error_m", "contact_quality",
+  "contact_quality_valid", "contact_quality_overflow", "first_contact_time_s",
+  "contact_normal_axiality",
+)
+_TRACE_EPISODE_PHYSICAL_KEYS = (
+  "overall_success", "episode_peak_lambda",
+  "episode_delivered_accumulator_n_s", "episode_depth_m",
+)
 
 FIELDNAMES = [
   "name", "ckpt_path", "checkpoint_path", "checkpoint_sha256",
@@ -146,6 +187,107 @@ def _canonical_digest(value) -> str:
     value, sort_keys=True, separators=(",", ":"), allow_nan=False
   ).encode()
   return hashlib.sha256(encoded).hexdigest()
+
+
+def _physical_trace_payload(trace: Mapping) -> dict:
+  """Extract replay-relevant channels, deliberately excluding reward payouts."""
+  physical = trace.get("physical", {})
+  event_trace = trace.get("event_trace", {})
+  first_strike = trace.get("first_strike", {})
+  missing = {
+    "physical": [key for key in _TRACE_PHYSICAL_KEYS if key not in physical],
+    "event_trace": [key for key in _TRACE_EVENT_KEYS if key not in event_trace],
+    "first_strike": [
+      key for key in _TRACE_FIRST_STRIKE_PHYSICAL_KEYS if key not in first_strike
+    ],
+    "episode_final": [
+      key for key in _TRACE_EPISODE_PHYSICAL_KEYS if key not in trace
+    ],
+  }
+  if any(missing.values()):
+    raise ValueError(f"sampled trace missing physical channels: {missing}")
+  return {
+    "physical": {key: physical[key] for key in _TRACE_PHYSICAL_KEYS},
+    "event_trace": {key: event_trace[key] for key in _TRACE_EVENT_KEYS},
+    "first_strike": {
+      key: first_strike[key] for key in _TRACE_FIRST_STRIKE_PHYSICAL_KEYS
+    },
+    "episode_final": {
+      key: trace[key] for key in _TRACE_EPISODE_PHYSICAL_KEYS
+    },
+  }
+
+
+def _physical_trace_digest(trace: Mapping) -> str:
+  return _canonical_digest(_physical_trace_payload(trace))
+
+
+def _require_finite_trace_value(value, *, path: str) -> None:
+  if isinstance(value, Mapping):
+    for key, item in value.items():
+      _require_finite_trace_value(item, path=f"{path}.{key}")
+  elif isinstance(value, (list, tuple)):
+    for index, item in enumerate(value):
+      _require_finite_trace_value(item, path=f"{path}[{index}]")
+  elif isinstance(value, (float, int, np.floating, np.integer)):
+    if not math.isfinite(float(value)):
+      raise ValueError(f"nonfinite physical trace value at {path}")
+  elif value is None:
+    if path.endswith("accepted_onset_index"):
+      return
+    raise ValueError(f"nonfinite physical trace value at {path}")
+
+
+def _validate_quality_trace(trace: Mapping) -> None:
+  event = trace["event_trace"]
+  snapshot = trace["first_strike"]
+  valid = np.asarray(event["tracker_contact_quality_valid"], dtype=bool)
+  overflow = np.asarray(event["tracker_contact_quality_overflow"], dtype=bool)
+  if np.any(valid & overflow):
+    raise ValueError("overflowed quality cannot be valid in event stream")
+  if bool(snapshot["contact_quality_valid"]) and bool(
+    snapshot["contact_quality_overflow"]
+  ):
+    raise ValueError("overflowed quality cannot be valid in first-strike snapshot")
+  if len(valid) and bool(snapshot["started"]):
+    for stream_key, snapshot_key in (
+      ("tracker_contact_point_w", "contact_point_w"),
+      ("tracker_contact_error_m", "contact_error_m"),
+      ("tracker_contact_quality", "contact_quality"),
+      ("tracker_contact_quality_valid", "contact_quality_valid"),
+      ("tracker_contact_quality_overflow", "contact_quality_overflow"),
+      ("tracker_first_contact_time_s", "first_contact_time_s"),
+      ("tracker_contact_normal_axiality", "contact_normal_axiality"),
+      ("event_cumulative_transverse_impulse_n_s", "delivered_transverse_n_s"),
+    ):
+      if event[stream_key][-1] != snapshot[snapshot_key]:
+        raise ValueError(
+          f"first-strike snapshot disagrees with event stream for {snapshot_key}"
+        )
+
+
+def compare_action_tape_physics(
+  traces: Mapping[str, Mapping],
+) -> dict[str, object]:
+  """Require byte-identical physical/event channels for F8/F0/D0/FQ replay."""
+  if not traces:
+    raise ValueError("action-tape replay requires at least one trace")
+  digests: dict[str, str] = {}
+  for arm, trace in traces.items():
+    payload = _physical_trace_payload(trace)
+    _require_finite_trace_value(payload, path=str(arm))
+    _validate_quality_trace(trace)
+    digest = _canonical_digest(payload)
+    recorded = trace.get("trace_digest")
+    if recorded is not None and str(recorded) != digest:
+      raise ValueError(f"{arm}: recorded physical trace digest mismatch")
+    digests[str(arm)] = digest
+  if len(set(digests.values())) != 1:
+    raise ValueError(f"physical/event replay drift across action tapes: {digests}")
+  return {
+    "arms": tuple(sorted(digests)),
+    "physical_digest": next(iter(digests.values())),
+  }
 
 
 def _sha256_file(path: str | Path) -> str:
@@ -332,20 +474,128 @@ def _ensure_first_strike_instrumentation(env_cfg) -> None:
     )
 
 
-def _validate_sampled_env_contract(env_cfg, task: str) -> dict:
-  if task not in TASK_TO_ARM:
+def _freeze_config_value(value):
+  """Convert config objects to deterministic, JSON-safe identity data."""
+  if isinstance(value, Mapping):
+    return {
+      str(key): _freeze_config_value(item)
+      for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+    }
+  if isinstance(value, (tuple, list)):
+    return [_freeze_config_value(item) for item in value]
+  if isinstance(value, set):
+    return sorted(_freeze_config_value(item) for item in value)
+  if is_dataclass(value):
+    return {
+      field.name: _freeze_config_value(getattr(value, field.name))
+      for field in fields(value)
+    }
+  if callable(value):
+    return f"{value.__module__}.{value.__qualname__}"
+  if isinstance(value, Path):
+    return str(value)
+  if isinstance(value, (str, bool, int, float)) or value is None:
+    return value
+  return repr(value)
+
+
+def _policy_observation_signature(env_cfg) -> dict:
+  return _freeze_config_value(env_cfg.observations["actor"])
+
+
+def _treatment_reward_signature(env_cfg) -> dict:
+  return {
+    name: _freeze_config_value(cfg)
+    for name, cfg in sorted(env_cfg.rewards.items())
+  }
+
+
+def _strict_evaluation_config_signature(env_cfg) -> dict:
+  """Bank the complete fixed-impedance evaluator configuration identity."""
+  return {
+    "observations": _policy_observation_signature(env_cfg),
+    "rewards": _treatment_reward_signature(env_cfg),
+    "actions": _freeze_config_value(env_cfg.actions),
+    "actuators": _freeze_config_value(
+      env_cfg.scene.entities["robot"].articulation.actuators
+    ),
+    "metrics": _freeze_config_value(env_cfg.metrics),
+    "sensors": _freeze_config_value(env_cfg.scene.sensors or ()),
+    "terminations": _freeze_config_value(env_cfg.terminations),
+    "sim": _freeze_config_value(env_cfg.sim),
+    "decimation": int(env_cfg.decimation),
+  }
+
+
+def build_strict_quality_evaluation_cfg(task: str, *, play: bool):
+  """Build a quality-instrumented strict eval config without changing treatment."""
+  if task not in QUALITY_TASK_TO_ARM:
     raise ValueError(
-      f"sampled first-strike evaluation requires one of {tuple(TASK_TO_ARM)}, "
-      f"got {task!r}"
+      f"strict quality evaluation requires one of {tuple(QUALITY_TASK_TO_ARM)}, got {task!r}"
     )
-  treatment = TASK_TO_ARM[task]
+  training_cfg = load_env_cfg(task, play=play)
+  evaluation_cfg = copy.deepcopy(training_cfg)
+  reference_cfg = load_env_cfg(QUALITY_EVALUATION_REFERENCE_TASK, play=play)
+  quality_sensor = next(
+    sensor for sensor in (reference_cfg.scene.sensors or ())
+    if sensor.name == "hammer_nail_quality"
+  )
+  if not any(
+    sensor.name == "hammer_nail_quality"
+    for sensor in (evaluation_cfg.scene.sensors or ())
+  ):
+    evaluation_cfg.scene.sensors = (
+      *(evaluation_cfg.scene.sensors or ()), copy.deepcopy(quality_sensor)
+    )
+  evaluation_cfg.metrics["first_strike"] = copy.deepcopy(
+    reference_cfg.metrics["first_strike"]
+  )
+  training_observation = _canonical_digest(
+    _policy_observation_signature(training_cfg)
+  )
+  evaluation_observation = _canonical_digest(
+    _policy_observation_signature(evaluation_cfg)
+  )
+  training_reward = _canonical_digest(_treatment_reward_signature(training_cfg))
+  evaluation_reward = _canonical_digest(
+    _treatment_reward_signature(evaluation_cfg)
+  )
+  if training_observation != evaluation_observation:
+    raise ValueError("quality instrumentation changed policy observations")
+  if training_reward != evaluation_reward:
+    raise ValueError("quality instrumentation changed treatment rewards")
+  return training_cfg, evaluation_cfg, {
+    "training_config_sha256": _canonical_digest(
+      _strict_evaluation_config_signature(training_cfg)
+    ),
+    "evaluation_config_sha256": _canonical_digest(
+      _strict_evaluation_config_signature(evaluation_cfg)
+    ),
+    "training_policy_observation_sha256": training_observation,
+    "evaluation_policy_observation_sha256": evaluation_observation,
+    "training_treatment_reward_sha256": training_reward,
+    "evaluation_treatment_reward_sha256": evaluation_reward,
+  }
+
+
+def _validate_sampled_env_contract(env_cfg, task: str) -> dict:
+  if task not in TASK_TO_ARM and task not in QUALITY_TASK_TO_ARM:
+    raise ValueError(
+      "sampled first-strike evaluation requires a registered legacy or strict "
+      f"quality task, got {task!r}"
+    )
+  treatment = TASK_TO_ARM.get(task, QUALITY_TASK_TO_ARM.get(task))
   impact = env_cfg.rewards["impact_progress"]
   delivered = env_cfg.rewards["delivered_impulse"]
   impact_weight = float(impact.weight)
   delivered_weight = float(delivered.weight)
-  if impact_weight != 8.0 or delivered_weight != 2.0:
+  expected_weights = {
+    "F0": (0.0, 2.0), "D0": (8.0, 0.0),
+  }.get(treatment, (8.0, 2.0))
+  if (impact_weight, delivered_weight) != expected_weights:
     raise ValueError(
-      f"{task}: configured maximize weights must be exactly 8/2, got "
+      f"{task}: configured maximize weights must be exactly "
+      f"{expected_weights[0]}/{expected_weights[1]}, got "
       f"{impact_weight}/{delivered_weight}"
     )
   reset_range = tuple(
@@ -539,6 +789,13 @@ class _SampledTraceCollector:
         "post_step_joint_speed_rad_s", "tracker_depth_post_integration_m",
         "tracker_started", "tracker_finalized", "tracker_productive",
         "tracker_reason", "event_cumulative_impulse_n_s",
+        "quality_found_count", "quality_normal_force_n",
+        "quality_contact_position_m", "quality_contact_normal",
+        "tracker_contact_point_w", "tracker_contact_error_m",
+        "tracker_contact_quality", "tracker_contact_quality_valid",
+        "tracker_contact_quality_overflow", "tracker_first_contact_time_s",
+        "tracker_contact_normal_axiality",
+        "event_cumulative_transverse_impulse_n_s",
       )
     }
     self._actions: list[torch.Tensor] = []
@@ -564,6 +821,10 @@ class _SampledTraceCollector:
     self._tracker = getattr(env, _ENV_FIRST_STRIKE_ATTR, None)
     if self._tracker is None:
       raise RuntimeError("sampled evaluator requires FirstStrikeEventTracker")
+    try:
+      self._quality_sensor = env.scene["hammer_nail_quality"]
+    except KeyError:
+      self._quality_sensor = None
     names = env.reward_manager.active_terms
     self._impact_idx = names.index("impact_progress")
     self._delivered_idx = names.index("delivered_impulse")
@@ -622,6 +883,59 @@ class _SampledTraceCollector:
       self._substeps["event_cumulative_impulse_n_s"].append(
         self._tracker.delivered.detach().clone()
       )
+      self._substeps["tracker_contact_point_w"].append(
+        self._tracker.contact_point_w.detach().clone()
+      )
+      self._substeps["tracker_contact_error_m"].append(
+        self._tracker.contact_error_m.detach().clone()
+      )
+      self._substeps["tracker_contact_quality"].append(
+        self._tracker.contact_quality.detach().clone()
+      )
+      self._substeps["tracker_contact_quality_valid"].append(
+        self._tracker.contact_quality_valid.detach().clone()
+      )
+      self._substeps["tracker_contact_quality_overflow"].append(
+        self._tracker.contact_quality_overflow.detach().clone()
+      )
+      self._substeps["tracker_first_contact_time_s"].append(
+        self._tracker.first_contact_time_s.detach().clone()
+      )
+      self._substeps["tracker_contact_normal_axiality"].append(
+        self._tracker.contact_normal_axiality.detach().clone()
+      )
+      self._substeps["event_cumulative_transverse_impulse_n_s"].append(
+        self._tracker.delivered_transverse.detach().clone()
+      )
+      if self._quality_sensor is None:
+        batch = self.env.num_envs
+        device = self.env.device
+        self._substeps["quality_found_count"].append(
+          torch.zeros(batch, dtype=torch.long, device=device)
+        )
+        self._substeps["quality_normal_force_n"].append(
+          torch.zeros(batch, 1, device=device)
+        )
+        self._substeps["quality_contact_position_m"].append(
+          torch.zeros(batch, 1, 3, device=device)
+        )
+        self._substeps["quality_contact_normal"].append(
+          torch.zeros(batch, 1, 3, device=device)
+        )
+      else:
+        quality = self._quality_sensor.data
+        self._substeps["quality_found_count"].append(
+          (quality.found > 0).sum(dim=-1).detach().clone()
+        )
+        self._substeps["quality_normal_force_n"].append(
+          quality.force[..., 0].detach().clone()
+        )
+        self._substeps["quality_contact_position_m"].append(
+          quality.pos.detach().clone()
+        )
+        self._substeps["quality_contact_normal"].append(
+          quality.normal.detach().clone()
+        )
 
     self.env.metrics_manager.compute_substep = capture_substep  # type: ignore[method-assign]
 
@@ -670,22 +984,12 @@ class _SampledTraceCollector:
     }.get(reason_code, "none")
     physical = {
       key: _json_values(self._slice_substep(key, env_id))
-      for key in (
-        "contact", "head_position_m", "clamped_depth_m",
-        "net_axial_force_n", "joint_speed_rad_s",
-        "post_step_joint_speed_rad_s", "tracker_depth_post_integration_m",
-      )
+      for key in _TRACE_PHYSICAL_KEYS
     }
     event_trace = {
       key: _json_values(self._slice_substep(key, env_id))
-      for key in (
-        "tracker_started", "tracker_finalized", "tracker_productive",
-        "tracker_reason", "event_cumulative_impulse_n_s",
-      )
+      for key in _TRACE_EVENT_KEYS
     }
-    trace_digest = _canonical_digest(
-      {"physical": physical, "event_trace": event_trace}
-    )
     actions = self._slice_control(self._actions, env_id)
     impact = self._slice_control(self._impact_payout, env_id)
     delivered_payout = self._slice_control(self._delivered_payout, env_id)
@@ -696,7 +1000,6 @@ class _SampledTraceCollector:
       "episode_ordinal": ordinal,
       "arm": self.treatment,
       "task": self.task,
-      "trace_digest": trace_digest,
       "physics_dt_s": float(self.env.physics_dt),
       "phase_contract": {
         "physical_channels": "pre_integration",
@@ -719,6 +1022,24 @@ class _SampledTraceCollector:
         "productive": bool(self._tracker.productive[env_id]),
         "v_precontact_m_s": float(self._tracker.v_precontact[env_id]),
         "delivered_n_s": event_delivered,
+        "delivered_transverse_n_s": float(
+          self._tracker.delivered_transverse[env_id]
+        ),
+        "contact_point_w": _json_values(self._tracker.contact_point_w[env_id]),
+        "contact_error_m": float(self._tracker.contact_error_m[env_id]),
+        "contact_quality": float(self._tracker.contact_quality[env_id]),
+        "contact_quality_valid": bool(
+          self._tracker.contact_quality_valid[env_id]
+        ),
+        "contact_quality_overflow": bool(
+          self._tracker.contact_quality_overflow[env_id]
+        ),
+        "first_contact_time_s": float(
+          self._tracker.first_contact_time_s[env_id]
+        ),
+        "contact_normal_axiality": float(
+          self._tracker.contact_normal_axiality[env_id]
+        ),
         "saturated": (
           self.treatment == "E"
           and event_delivered >= self.event_i_ref_n_s
@@ -739,6 +1060,7 @@ class _SampledTraceCollector:
       ),
       "episode_depth_m": float(self.snapshot["depth"][env_id]),
     }
+    trace["trace_digest"] = _physical_trace_digest(trace)
     _retain_first_completed(
       trace,
       counts=self.accepted_counts,
@@ -998,7 +1320,7 @@ def _persist_sampled_traces(
   evaluation_contract: dict | None = None,
 ) -> dict:
   payload = {
-    "schema_version": 2,
+    "schema_version": 3,
     "selection": "first two completed episodes from each of 256 environments",
     "expected_episode_count": EXPECTED_EPISODES_PER_SEED,
     "treatment": contract["treatment"],
@@ -1168,7 +1490,7 @@ def _enforce_postwrite_invariants(
 def main() -> None:
   ap = argparse.ArgumentParser()
   ap.add_argument("--task", default="Unitree-Z1-Hammer-CaT-Impulse",
-                  choices=tuple(TASK_TO_ARM),
+                  choices=tuple(TASK_TO_ARM | QUALITY_TASK_TO_ARM),
                   help="exact registered C/D-prime/F/E treatment task used to train this checkpoint")
   ap.add_argument("--ckpt", required=True, help="checkpoint .pt path")
   ap.add_argument("--name", default=None, help="row label; defaults to the checkpoint's parent dir name")
@@ -1269,13 +1591,20 @@ def main() -> None:
 
   # Training cfg is deliberate: play cfg zeros reset noise and disables actor
   # observation corruption, which would make the sampled campaign off-policy.
-  env_cfg = load_env_cfg(args.task, play=False)
+  config_identities = {}
+  if args.task in QUALITY_TASK_TO_ARM:
+    _, env_cfg, config_identities = build_strict_quality_evaluation_cfg(
+      args.task, play=False
+    )
+  else:
+    env_cfg = load_env_cfg(args.task, play=False)
   env_cfg.scene.num_envs = args.num_envs
   env_cfg.episode_length_s = args.episode_len_s
   if "cat_soft" not in env_cfg.metrics:
     raise RuntimeError(f"--task {args.task} has no 'cat_soft' metric -- not a cat_impulse=True task.")
   env_cfg.metrics["cat_soft"].params["imp_max_p"] = args.imp_max_p
-  _ensure_first_strike_instrumentation(env_cfg)
+  if args.task not in QUALITY_TASK_TO_ARM:
+    _ensure_first_strike_instrumentation(env_cfg)
   contract = _validate_sampled_env_contract(env_cfg, args.task)
   agent_cfg = load_rl_cfg(args.task)
   runner_cls = load_runner_cls(args.task) or MjlabOnPolicyRunner
@@ -1435,6 +1764,7 @@ def main() -> None:
     "fixed_action_signature_sha256": (
       contract["fixed_action_signature_sha256"]
     ),
+    "strict_config_identities": config_identities,
   }
   trace_artifact = _persist_sampled_traces(
     out_dir=out_dir,

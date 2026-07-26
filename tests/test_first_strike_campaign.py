@@ -448,6 +448,146 @@ def _literal_trace(
     return trace
 
 
+def test_action_tape_physics_requires_all_quality_channels_and_rejects_drift():
+    """A missing or changed passive quality sample must invalidate replay identity."""
+    trace = _literal_trace()
+    trace["physical"].update(
+        {
+            "quality_found_count": [0, 1],
+            "quality_normal_force_n": [[0.0], [3.0]],
+            "quality_contact_position_m": [
+                [[0.0, 0.0, 0.0]],
+                [[0.50, 0.0, 0.032]],
+            ],
+            "quality_contact_normal": [
+                [[0.0, 0.0, 0.0]],
+                [[0.0, 0.0, -1.0]],
+            ],
+        }
+    )
+    trace["event_trace"].update(
+        {
+            "tracker_contact_point_w": [[0.0, 0.0, 0.0], [0.50, 0.0, 0.032]],
+            "tracker_contact_error_m": [0.0, 0.001],
+            "tracker_contact_quality": [0.0, 0.95],
+            "tracker_contact_quality_valid": [False, True],
+            "tracker_contact_quality_overflow": [False, False],
+            "tracker_first_contact_time_s": [0.0, 0.004],
+            "tracker_contact_normal_axiality": [0.0, 1.0],
+            "event_cumulative_transverse_impulse_n_s": [0.0, 0.002],
+        }
+    )
+    trace["first_strike"].update(
+        {
+            "contact_point_w": [0.50, 0.0, 0.032],
+            "contact_error_m": 0.001,
+            "contact_quality": 0.95,
+            "contact_quality_valid": True,
+            "contact_quality_overflow": False,
+            "first_contact_time_s": 0.004,
+            "contact_normal_axiality": 1.0,
+            "delivered_transverse_n_s": 0.002,
+        }
+    )
+    trace.update(
+        {
+            "episode_peak_lambda": [0.1] * 6,
+            "episode_delivered_accumulator_n_s": 0.1,
+            "episode_depth_m": 0.032,
+        }
+    )
+    trace["trace_digest"] = eval_impulse._physical_trace_digest(trace)
+    traces = {arm: copy.deepcopy(trace) for arm in ("F8", "F0", "D0", "FQ")}
+
+    result = eval_impulse.compare_action_tape_physics(traces)
+
+    assert result["physical_digest"] == trace["trace_digest"]
+    assert result["arms"] == ("D0", "F0", "F8", "FQ")
+
+    traces["FQ"]["event_trace"]["tracker_contact_quality"][1] = 0.50
+    traces["FQ"]["first_strike"]["contact_quality"] = 0.50
+    traces["FQ"]["trace_digest"] = eval_impulse._physical_trace_digest(traces["FQ"])
+    with pytest.raises(ValueError, match="physical/event replay drift"):
+        eval_impulse.compare_action_tape_physics(traces)
+
+
+def test_action_tape_physics_rejects_overflowed_quality_as_valid():
+    """Overflow is a failed quality measurement, never a valid onset snapshot."""
+    trace = _literal_trace()
+    trace["physical"].update(
+        {
+            "quality_found_count": [0, 9],
+            "quality_normal_force_n": [[0.0], [3.0]],
+            "quality_contact_position_m": [[[0.0, 0.0, 0.0]], [[0.5, 0.0, 0.032]]],
+            "quality_contact_normal": [[[0.0, 0.0, 0.0]], [[0.0, 0.0, -1.0]]],
+        }
+    )
+    trace["event_trace"].update(
+        {
+            "tracker_contact_point_w": [[0.0, 0.0, 0.0], [0.5, 0.0, 0.032]],
+            "tracker_contact_error_m": [0.0, 0.001],
+            "tracker_contact_quality": [0.0, 0.95],
+            "tracker_contact_quality_valid": [False, True],
+            "tracker_contact_quality_overflow": [False, True],
+            "tracker_first_contact_time_s": [0.0, 0.004],
+            "tracker_contact_normal_axiality": [0.0, 1.0],
+            "event_cumulative_transverse_impulse_n_s": [0.0, 0.002],
+        }
+    )
+    trace["first_strike"].update(
+        {
+            "contact_point_w": [0.5, 0.0, 0.032],
+            "contact_error_m": 0.001,
+            "contact_quality": 0.95,
+            "contact_quality_valid": True,
+            "contact_quality_overflow": True,
+            "first_contact_time_s": 0.004,
+            "contact_normal_axiality": 1.0,
+            "delivered_transverse_n_s": 0.002,
+        }
+    )
+    trace.update(
+        {
+            "episode_peak_lambda": [0.1] * 6,
+            "episode_delivered_accumulator_n_s": 0.1,
+            "episode_depth_m": 0.032,
+        }
+    )
+    trace["trace_digest"] = eval_impulse._physical_trace_digest(trace)
+
+    with pytest.raises(ValueError, match="overflowed quality"):
+        eval_impulse.compare_action_tape_physics({"F8": trace})
+
+
+@pytest.mark.parametrize("arm", ("F8", "F0", "D0", "FQ"))
+def test_strict_quality_evaluation_config_preserves_policy_and_treatment(arm):
+    """The passive sensor may alter only evaluation instrumentation metadata."""
+    task = eval_impulse.QUALITY_ARM_TASKS[arm]
+
+    training_cfg, evaluation_cfg, identities = (
+        eval_impulse.build_strict_quality_evaluation_cfg(task, play=False)
+    )
+
+    assert "hammer_nail_quality" not in {
+        sensor.name for sensor in (training_cfg.scene.sensors or ())
+    } if arm != "FQ" else True
+    assert "hammer_nail_quality" in {
+        sensor.name for sensor in (evaluation_cfg.scene.sensors or ())
+    }
+    assert identities["training_config_sha256"]
+    assert identities["evaluation_config_sha256"]
+    if arm != "FQ":
+        assert identities["training_config_sha256"] != identities["evaluation_config_sha256"]
+    assert (
+        identities["training_policy_observation_sha256"]
+        == identities["evaluation_policy_observation_sha256"]
+    )
+    assert (
+        identities["training_treatment_reward_sha256"]
+        == identities["evaluation_treatment_reward_sha256"]
+    )
+
+
 def _campaign_rows(tmp_path: Path) -> list[dict]:
     values = {
         "C": 0.9,
@@ -1190,8 +1330,8 @@ def test_substep_phase_capture_lags_post_step_joint_and_depth_to_preintegration(
 
 
 def test_live_substep_trace_channels_cross_real_terminal_autoreset_in_phase():
-    task = ARM_TASKS["E"]
-    cfg = eval_impulse.load_env_cfg(task, play=False)
+    task = eval_impulse.QUALITY_ARM_TASKS["FQ"]
+    _, cfg, _ = eval_impulse.build_strict_quality_evaluation_cfg(task, play=False)
     cfg.scene.num_envs = 1
     cfg.episode_length_s = float(
         cfg.sim.mujoco.timestep * cfg.decimation
@@ -1203,7 +1343,7 @@ def test_live_substep_trace_channels_cross_real_terminal_autoreset_in_phase():
     collector = eval_impulse._SampledTraceCollector(
         env,
         snapshot=snapshot,
-        treatment="E",
+        treatment="FQ",
         task=task,
         gamma=0.99,
         event_i_ref_n_s=0.3088,
@@ -1290,6 +1430,29 @@ def test_live_substep_trace_channels_cross_real_terminal_autoreset_in_phase():
             len(collector.completed[1]["physical"]["contact"])
             == len(literal_frames)
         )
+        trace = collector.completed[0]
+        n_substeps = len(trace["physical"]["contact"])
+        assert set(eval_impulse._TRACE_PHYSICAL_KEYS) <= set(trace["physical"])
+        assert set(eval_impulse._TRACE_EVENT_KEYS) <= set(trace["event_trace"])
+        assert len(trace["physical"]["quality_found_count"]) == n_substeps
+        assert all(
+            len(frame) == 8
+            for frame in trace["physical"]["quality_normal_force_n"]
+        )
+        assert all(
+            len(frame) == 8 and all(len(point) == 3 for point in frame)
+            for frame in trace["physical"]["quality_contact_position_m"]
+        )
+        assert all(
+            len(frame) == 8 and all(len(normal) == 3 for normal in frame)
+            for frame in trace["physical"]["quality_contact_normal"]
+        )
+        assert all(
+            len(values) == n_substeps
+            for values in trace["event_trace"].values()
+        )
+        assert eval_impulse._physical_trace_digest(trace) == trace["trace_digest"]
+        eval_impulse.compare_action_tape_physics({"FQ": trace})
         assert collector._phase._joint_speed_rad_s is None
         assert collector._phase._clamped_depth_m is None
 
@@ -1439,7 +1602,7 @@ def test_sampled_trace_artifacts_are_content_addressed_and_keep_provenance(tmp_p
     assert first["artifact_sha256"] == hashlib.sha256(first_bytes).hexdigest()
     with np.load(first["path"], allow_pickle=False) as saved:
         payload = json.loads(str(saved["payload_json"]))
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert payload["provenance"] == provenance
 
 

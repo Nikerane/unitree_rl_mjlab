@@ -19,6 +19,8 @@ control interactively; it was never committed (the I12 finding).
 from __future__ import annotations
 
 import importlib.util
+import copy
+import json
 from pathlib import Path
 
 import pytest
@@ -46,6 +48,90 @@ eval_impulse = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(eval_impulse)
 
 HOLD_STEPS = 6  # post-playback settle steps, mirrors derive_impulse_thresholds.py
+
+
+def _fixed_reference_action_tape() -> list[torch.Tensor]:
+  task = eval_impulse.QUALITY_ARM_TASKS["F8"]
+  _, cfg, _ = eval_impulse.build_strict_quality_evaluation_cfg(task, play=True)
+  cfg.scene.num_envs = 1
+  env = ManagerBasedRlEnv(cfg, device="cpu")
+  try:
+    robot = env.scene["robot"]
+    nail = env.scene["nail_block"]
+    head_cfg = SceneEntityCfg("robot", site_names=(HAMMER_HEAD_SITE_NAME,))
+    head_cfg.resolve(env.scene)
+    nail_cfg = SceneEntityCfg("nail_block", site_names=("nail_top",))
+    nail_cfg.resolve(env.scene)
+    head = lambda: robot.data.site_pos_w[:, head_cfg.site_ids].squeeze(1)
+    nail_top = lambda: nail.data.site_pos_w[:, nail_cfg.site_ids].squeeze(1)
+    env.reset()
+    reference = SingleStrikeReference(1, env.device, approach_height=0.10)
+    reference.update(head(), nail_top(), torch.zeros(1, dtype=torch.long))
+    tape = []
+    for step in range(1, reference.playback_length() + HOLD_STEPS + 1):
+      target = reference.playback_target(min(step, reference.playback_length()))
+      action = ((target - head()) / Z1_HAMMER_DELTA_POS_SCALE).clamp(-1.0, 1.0)
+      tape.append(action.detach().clone())
+      env.step(action)
+      if bool(env.reset_terminated.any()):
+        break
+    assert bool(env.reset_terminated.any()), "reference tape did not reach contact/success"
+    return tape
+  finally:
+    env.close()
+
+
+def _single_control_trace(
+  task: str, *, strict_quality: bool, action_tape: list[torch.Tensor]
+) -> dict:
+  if strict_quality:
+    _, cfg, _ = eval_impulse.build_strict_quality_evaluation_cfg(task, play=True)
+  else:
+    cfg = eval_impulse.load_env_cfg(task, play=True)
+  cfg.scene.num_envs = 1
+  cfg.episode_length_s = float(
+    len(action_tape) * cfg.sim.mujoco.timestep * cfg.decimation
+  )
+  cfg.metrics["cat_soft"].params["imp_max_p"] = 0.0
+  env = ManagerBasedRlEnv(cfg, device="cpu")
+  try:
+    snapshot = eval_impulse._install_episode_hook(env)
+    collector = eval_impulse._SampledTraceCollector(
+      env,
+      snapshot=snapshot,
+      treatment=(
+        eval_impulse.QUALITY_TASK_TO_ARM[task] if strict_quality else "F8"
+      ),
+      task=task,
+      gamma=0.99,
+      event_i_ref_n_s=0.3088,
+      nail_geometry={
+        "nail_axis": [0.0, 0.0, -1.0],
+        "nail_xy_m": [0.5, 0.0],
+        "nail_radius_m": 0.012,
+        "source_sha256": "0" * 64,
+      },
+    )
+    env.reset()
+    for action in action_tape:
+      env.step(action)
+      if collector.completed:
+        break
+    assert len(collector.completed) == 1
+    return copy.deepcopy(collector.completed[0])
+  finally:
+    env.close()
+
+
+def _without_raw_quality_sensor_channels(trace: dict) -> dict:
+  payload = eval_impulse._physical_trace_payload(trace)
+  payload = copy.deepcopy(payload)
+  for key in (
+    "quality_found_count", "quality_normal_force_n",
+    "quality_contact_position_m", "quality_contact_normal",
+  ):
+    del payload["physical"][key]
+  return payload
 
 
 def test_episode_hook_snapshots_pre_reset_buffers_on_the_terminal_step():
@@ -118,3 +204,30 @@ def test_install_episode_hook_requires_both_accumulators():
 
   with pytest.raises(RuntimeError, match="requires BOTH"):
     eval_impulse._install_episode_hook(_FakeEnv())
+
+
+@pytest.mark.integration
+def test_fixed_action_tape_preserves_physics_across_strict_quality_arms():
+  """Passive quality sensing changes no plant channel; payouts are intentionally absent."""
+  action_tape = _fixed_reference_action_tape()
+  traces = {
+    arm: _single_control_trace(task, strict_quality=True, action_tape=action_tape)
+    for arm, task in eval_impulse.QUALITY_ARM_TASKS.items()
+  }
+  assert eval_impulse.compare_action_tape_physics(traces)["arms"] == (
+    "D0", "F0", "F8", "FQ",
+  )
+  assert len({json.dumps(trace["action_tape"]) for trace in traces.values()}) == 1
+  assert traces["F8"]["first_strike"]["started"] is True
+  assert max(traces["F8"]["episode_peak_lambda"]) > 0.0
+
+  uninstrumented_f8 = _single_control_trace(
+    eval_impulse.QUALITY_ARM_TASKS["F8"],
+    strict_quality=False,
+    action_tape=action_tape,
+  )
+  assert eval_impulse._canonical_digest(
+    _without_raw_quality_sensor_channels(traces["F8"])
+  ) == eval_impulse._canonical_digest(
+    _without_raw_quality_sensor_channels(uninstrumented_f8)
+  )
