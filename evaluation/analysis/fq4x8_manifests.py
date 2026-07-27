@@ -32,9 +32,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 from evaluation.analysis import first_strike_campaign as legacy
 from evaluation.analysis import first_strike_quality_campaign as quality
@@ -594,6 +595,175 @@ def validate_evaluation_manifest(
 
 
 # ---------------------------------------------------------------------------
+# build-training-manifest: scan real training run directories and build the
+# 21-field TRAINING_FIELDS rows validate_training_manifest expects.  Fails
+# closed on every drift the caller could hand us; never returns a manifest
+# validate_training_manifest itself would reject.
+# ---------------------------------------------------------------------------
+
+# Verified cluster layout: <log_root>/<TIMESTAMP>_fq4x8_<short>_seed<N>/model_499.pt
+_RUN_DIR_PATTERN = re.compile(
+    r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_fq4x8_(?P<short>[a-z0-9]+)_seed(?P<seed>\d+)$"
+)
+_LABEL_BY_SHORT = {short: label for label, short in SHORT.items()}
+
+
+def default_config_identity(arm: str, task: str) -> tuple[str, str]:
+    """Derive ``(campaign_config_sha256, treatment_config_sha256)`` from the
+    LIVE registered env cfg for ``task`` -- never hand-written.
+
+    Reuses ``scripts.eval_impulse._validate_sampled_env_contract``, which
+    fails closed on any drift from the frozen fixed-impedance/action
+    contract, then asserts the maximize-reward weights it actually observed
+    there match this arm's frozen ``WEIGHTS`` before trusting the frozen
+    treatment-config digest. (``contract["treatment"]`` is not used for this
+    cross-check: F8 shares its exact registered task with the legacy "F"
+    arm, so the shared helper's own arm-label lookup resolves to "F", not
+    "F8" -- the weights are the unambiguous, arm-identifying quantity.)
+    mjlab/torch are imported lazily so importing this module never requires
+    them -- only calling this function (the production default) does.
+    """
+
+    from mjlab.tasks.registry import load_env_cfg
+
+    from scripts.eval_impulse import _validate_sampled_env_contract
+
+    env_cfg = load_env_cfg(task, play=False)
+    contract = _validate_sampled_env_contract(env_cfg, task)
+    observed_weights = (contract["impact_weight"], contract["delivered_weight"])
+    if observed_weights != quality.WEIGHTS[arm]:
+        raise ValueError(
+            f"{arm}: live cfg maximize weights {observed_weights} do not match "
+            f"the frozen weights {quality.WEIGHTS[arm]} for task {task!r}"
+        )
+    campaign_config_sha256 = _digest(
+        {
+            "schema_version": 1,
+            "physics_dt_s": contract["physics_dt_s"],
+            "control_decimation": contract["control_decimation"],
+            "impulse_limits_n_m_s": contract["impulse_limits_n_m_s"],
+            "fixed_impedance_signature_sha256": contract["fixed_impedance_signature_sha256"],
+            "fixed_action_signature_sha256": contract["fixed_action_signature_sha256"],
+        }
+    )
+    return campaign_config_sha256, EXPECTED_TREATMENT_CONFIG_SHA256[arm]
+
+
+def build_training_manifest(
+    log_root: str | Path,
+    *,
+    code_revision: str,
+    asset_revision: str,
+    attempt: str = "attempt1",
+    config_identity: Callable[[str, str], tuple[str, str]] | None = None,
+) -> list[dict]:
+    """Scan ``log_root`` for the 32 accepted fq4x8 run directories and build
+    validated TRAINING_FIELDS rows.
+
+    Fails closed (raises ``ValueError``) on any missing/duplicate/extra
+    identity, out-of-range seed, unparseable run-dir name, missing/zero-
+    length/unreadable checkpoint, dirty code/asset revision, or a derived
+    config identity that does not match the frozen expectation for its
+    treatment.  Never returns a partial manifest: the returned rows have
+    already passed :func:`validate_training_manifest`.
+    """
+
+    if not legacy._is_hex_digest(code_revision, 40):
+        raise ValueError("code_revision must be a clean 40-hex revision")
+    if not legacy._is_hex_digest(asset_revision, 40):
+        raise ValueError("asset_revision must be a clean 40-hex revision")
+    if not str(attempt).strip():
+        raise ValueError("attempt must not be empty")
+    identity_fn = config_identity if config_identity is not None else default_config_identity
+
+    root = Path(log_root)
+    if not root.is_dir():
+        raise ValueError(f"log root is not a directory: {root}")
+
+    found: dict[tuple[str, int], Path] = {}
+    for entry in sorted(root.iterdir()):
+        if not entry.is_dir():
+            continue
+        match = _RUN_DIR_PATTERN.match(entry.name)
+        if match is None:
+            raise ValueError(f"run directory name does not parse: {entry.name}")
+        short = match.group("short")
+        if short not in _LABEL_BY_SHORT:
+            raise ValueError(f"run directory has unknown short {short!r}: {entry.name}")
+        arm = _LABEL_BY_SHORT[short]
+        seed = int(match.group("seed"))
+        if seed not in SEEDS:
+            raise ValueError(f"{entry.name}: training_seed must be 8..15, got {seed}")
+        key = (arm, seed)
+        if key in found:
+            raise ValueError(
+                f"duplicate run directory for {arm}/seed{seed}: "
+                f"{found[key].name} and {entry.name}"
+            )
+        found[key] = entry
+
+    expected_keys = {(arm, seed) for arm in LABELS for seed in SEEDS}
+    missing = sorted(expected_keys - set(found))
+    if missing:
+        raise ValueError(f"missing run directories for: {missing}")
+    extra = sorted(set(found) - expected_keys)
+    if extra:
+        raise ValueError(f"unexpected run directories for: {extra}")
+
+    identity_cache: dict[str, tuple[str, str]] = {}
+    rows: list[dict] = []
+    for arm in LABELS:
+        for seed in sorted(SEEDS):
+            run_dir = found[(arm, seed)]
+            prefix = f"{arm}/seed{seed}"
+            checkpoint_path = run_dir / "model_499.pt"
+            if not checkpoint_path.is_file():
+                raise ValueError(f"{prefix}: model_499.pt is missing in {run_dir}")
+            if checkpoint_path.stat().st_size <= 0:
+                raise ValueError(f"{prefix}: checkpoint is zero-length: {checkpoint_path}")
+            try:
+                checkpoint_sha256 = legacy._sha256(checkpoint_path)
+            except OSError as error:
+                raise ValueError(f"{prefix}: checkpoint is unreadable: {error}") from error
+
+            task = TASKS[arm]
+            if arm not in identity_cache:
+                identity_cache[arm] = identity_fn(arm, task)
+            campaign_config_sha256, treatment_config_sha256 = identity_cache[arm]
+
+            rows.append(
+                {
+                    "campaign": CAMPAIGN_NAME,
+                    "disposition": "accepted",
+                    "arm": arm,
+                    "short": SHORT[arm],
+                    "task": task,
+                    "training_seed": seed,
+                    "checkpoint_path": str(checkpoint_path.resolve()),
+                    "checkpoint_sha256": checkpoint_sha256,
+                    "training_attempt": str(attempt),
+                    "retry_history": f"{attempt}:accepted",
+                    "code_revision": code_revision,
+                    "asset_revision": asset_revision,
+                    "campaign_config_sha256": campaign_config_sha256,
+                    "treatment_config_sha256": treatment_config_sha256,
+                    "reader_sha256": EXPECTED_READER_SHA256[arm],
+                    "normalizer_sha256": EXPECTED_NORMALIZER_SHA256[arm],
+                    "treatment_reward_sha256": quality.EXPECTED_TREATMENT_REWARD_SHA256[arm],
+                    "fixed_action_signature_sha256": legacy.EXPECTED_FIXED_ACTION_SIGNATURE_SHA256,
+                    "fixed_impedance_signature_sha256": (
+                        legacy.EXPECTED_FIXED_IMPEDANCE_SIGNATURE_SHA256
+                    ),
+                    "cap_signature_sha256": EXPECTED_CAP_SIGNATURE_SHA256,
+                    "clean_state": True,
+                }
+            )
+
+    validate_training_manifest(rows)
+    return rows
+
+
+# ---------------------------------------------------------------------------
 # CLI: mirrors first_strike_campaign's ``validate-accepted-manifest`` command so
 # the Slurm launcher can validate a snapshot of the accepted-training manifest
 # through one Python entry point, before any GPU work. Emits one TSV line per
@@ -615,10 +785,56 @@ def _command_line() -> int:
     manifest.add_argument("--manifest", required=True)
     manifest.add_argument("--expected-code-revision", required=True)
     manifest.add_argument("--expected-asset-revision", required=True)
-    args = parser.parse_args()
-    if args.command != "validate-accepted-manifest":
-        parser.error("unsupported command")
 
+    build = subparsers.add_parser(
+        "build-training-manifest",
+        help="scan fq4x8 training run directories and emit the accepted-training manifest",
+    )
+    build.add_argument("--log-root", required=True)
+    build.add_argument("--code-revision", required=True)
+    build.add_argument("--asset-revision", required=True)
+    build.add_argument("--attempt", default="attempt1")
+    build.add_argument("--out")
+
+    args = parser.parse_args()
+    if args.command == "validate-accepted-manifest":
+        return _validate_accepted_manifest_command(args)
+    if args.command == "build-training-manifest":
+        return _build_training_manifest_command(args)
+    parser.error("unsupported command")
+    return 2  # pragma: no cover -- parser.error exits the process
+
+
+def _build_training_manifest_command(args) -> int:
+    try:
+        rows = build_training_manifest(
+            args.log_root,
+            code_revision=args.code_revision,
+            asset_revision=args.asset_revision,
+            attempt=args.attempt,
+        )
+        text = serialize_training_manifest(rows)
+        out_path = (
+            Path(args.out)
+            if args.out
+            else Path(args.log_root) / "accepted_training_checkpoints.tsv"
+        )
+        out_path.write_text(text, encoding="utf-8")
+        # Re-parse and re-validate the bytes actually on disk, in-process,
+        # before declaring success -- guards against a serialization bug
+        # silently emitting a manifest the module's own validator rejects.
+        written_rows = parse_training_manifest(out_path.read_text(encoding="utf-8"))
+        validate_training_manifest(written_rows)
+    except Exception as error:  # noqa: BLE001 -- fail-closed CLI boundary
+        print(f"MANIFEST_FAIL: {error}", file=sys.stderr)
+        return 2
+
+    manifest_sha256 = hashlib.sha256(out_path.read_bytes()).hexdigest()
+    print(f"{out_path}\t{manifest_sha256}\t{len(rows)}")
+    return 0
+
+
+def _validate_accepted_manifest_command(args) -> int:
     manifest_path = Path(args.manifest)
     try:
         if not legacy._is_hex_digest(args.expected_code_revision, 40):

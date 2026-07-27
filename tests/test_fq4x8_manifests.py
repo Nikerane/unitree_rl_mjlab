@@ -10,7 +10,11 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import os
 import random
+import shutil
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -673,3 +677,256 @@ def test_evaluation_manifest_rejects_evaluation_retry_history_not_ending_in_acce
     rows = _mutate(rows, 0, evaluation_retry_history="eval-attempt0:infra_failure")
     with pytest.raises(ValueError, match="retry history"):
         manifests.validate_evaluation_manifest(rows, training_rows, TRAINING_MANIFEST_SHA256)
+
+
+# ---------------------------------------------------------------------------
+# build-training-manifest: scans real run directories and builds TRAINING_FIELDS
+# rows.  The config-identity derivation (which in production loads the live
+# registered env cfg via mjlab/torch) is injected as a stub here so these
+# tests need neither a GPU nor mjlab -- only ``test_cli_build_training_*``
+# monkeypatches the real ``default_config_identity`` entry point, and only to
+# replace it with the same stub.
+# ---------------------------------------------------------------------------
+
+
+def _run_dir_name(arm: str, seed: int, *, timestamp: str = "2026-07-27_20-36-22") -> str:
+    return f"{timestamp}_fq4x8_{manifests.SHORT[arm]}_seed{seed}"
+
+
+def _write_checkpoint(run_dir: Path, *, content: bytes) -> None:
+    run_dir.mkdir(parents=True)
+    (run_dir / "model_499.pt").write_bytes(content)
+
+
+def _populate_valid_run_dirs(root: Path) -> None:
+    for arm in manifests.LABELS:
+        for seed in sorted(manifests.SEEDS):
+            run_dir = root / _run_dir_name(arm, seed)
+            _write_checkpoint(run_dir, content=f"checkpoint:{arm}:{seed}".encode())
+
+
+def _stub_config_identity(arm: str, task: str) -> tuple[str, str]:
+    assert task == manifests.TASKS[arm], (arm, task)
+    return SHARED_CAMPAIGN_CONFIG_SHA256, manifests.EXPECTED_TREATMENT_CONFIG_SHA256[arm]
+
+
+def _build_kwargs(**overrides) -> dict:
+    kwargs = dict(
+        code_revision=SHARED_CODE_REVISION,
+        asset_revision=SHARED_ASSET_REVISION,
+        config_identity=_stub_config_identity,
+    )
+    kwargs.update(overrides)
+    return kwargs
+
+
+def test_build_training_manifest_happy_path_returns_valid_32_row_manifest(tmp_path):
+    _populate_valid_run_dirs(tmp_path)
+    rows = manifests.build_training_manifest(
+        tmp_path, attempt="attempt1", **_build_kwargs()
+    )
+    manifests.validate_training_manifest(rows)  # must not raise
+    assert len(rows) == 32
+    identities = {(row["arm"], row["training_seed"]) for row in rows}
+    expected = {(arm, seed) for arm in manifests.LABELS for seed in manifests.SEEDS}
+    assert identities == expected
+    for row in rows:
+        checkpoint_path = Path(row["checkpoint_path"])
+        assert checkpoint_path.is_absolute()
+        assert checkpoint_path.name == "model_499.pt"
+        assert row["checkpoint_sha256"] == hashlib.sha256(
+            checkpoint_path.read_bytes()
+        ).hexdigest()
+        assert row["training_attempt"] == "attempt1"
+        assert row["retry_history"] == "attempt1:accepted"
+        assert row["clean_state"] is True
+        assert row["disposition"] == "accepted"
+        assert row["campaign"] == manifests.CAMPAIGN_NAME
+        assert row["campaign_config_sha256"] == SHARED_CAMPAIGN_CONFIG_SHA256
+
+
+def test_build_training_manifest_is_deterministic_regardless_of_directory_order(tmp_path):
+    root_a = tmp_path / "a"
+    root_b = tmp_path / "b"
+    root_a.mkdir()
+    root_b.mkdir()
+    pairs = [(arm, seed) for arm in manifests.LABELS for seed in sorted(manifests.SEEDS)]
+    for arm, seed in pairs:
+        _write_checkpoint(
+            root_a / _run_dir_name(arm, seed), content=f"checkpoint:{arm}:{seed}".encode()
+        )
+    for arm, seed in reversed(pairs):
+        _write_checkpoint(
+            root_b / _run_dir_name(arm, seed), content=f"checkpoint:{arm}:{seed}".encode()
+        )
+
+    rows_a = manifests.build_training_manifest(root_a, **_build_kwargs())
+    rows_b = manifests.build_training_manifest(root_b, **_build_kwargs())
+    text_a = manifests.serialize_training_manifest(rows_a).replace(str(root_a), "<ROOT>")
+    text_b = manifests.serialize_training_manifest(rows_b).replace(str(root_b), "<ROOT>")
+    assert text_a == text_b
+
+
+def test_build_training_manifest_rejects_missing_run_dir(tmp_path):
+    _populate_valid_run_dirs(tmp_path)
+    shutil.rmtree(tmp_path / _run_dir_name("FQ-min", 15))
+    with pytest.raises(ValueError, match="missing"):
+        manifests.build_training_manifest(tmp_path, **_build_kwargs())
+
+
+def test_build_training_manifest_rejects_duplicate_identity(tmp_path):
+    _populate_valid_run_dirs(tmp_path)
+    _write_checkpoint(
+        tmp_path / _run_dir_name("F8", 8, timestamp="2026-07-27_21-00-00"),
+        content=b"checkpoint:F8:8:dup",
+    )
+    with pytest.raises(ValueError, match="duplicate"):
+        manifests.build_training_manifest(tmp_path, **_build_kwargs())
+
+
+def test_build_training_manifest_rejects_seed_outside_range(tmp_path):
+    _populate_valid_run_dirs(tmp_path)
+    _write_checkpoint(
+        tmp_path / _run_dir_name("F8", 16), content=b"checkpoint:F8:16"
+    )
+    with pytest.raises(ValueError, match="8..15"):
+        manifests.build_training_manifest(tmp_path, **_build_kwargs())
+
+
+def test_build_training_manifest_rejects_unknown_short(tmp_path):
+    _populate_valid_run_dirs(tmp_path)
+    bad_dir = tmp_path / "2026-07-27_20-36-22_fq4x8_zz_seed8"
+    _write_checkpoint(bad_dir, content=b"unknown-short")
+    with pytest.raises(ValueError, match="short"):
+        manifests.build_training_manifest(tmp_path, **_build_kwargs())
+
+
+def test_build_training_manifest_rejects_unparseable_run_dir_name(tmp_path):
+    _populate_valid_run_dirs(tmp_path)
+    (tmp_path / "not_a_run_dir").mkdir()
+    with pytest.raises(ValueError, match="does not parse"):
+        manifests.build_training_manifest(tmp_path, **_build_kwargs())
+
+
+def test_build_training_manifest_rejects_missing_checkpoint_file(tmp_path):
+    _populate_valid_run_dirs(tmp_path)
+    (tmp_path / _run_dir_name("F0", 9) / "model_499.pt").unlink()
+    with pytest.raises(ValueError, match="model_499.pt"):
+        manifests.build_training_manifest(tmp_path, **_build_kwargs())
+
+
+def test_build_training_manifest_rejects_zero_length_checkpoint(tmp_path):
+    _populate_valid_run_dirs(tmp_path)
+    (tmp_path / _run_dir_name("D0", 12) / "model_499.pt").write_bytes(b"")
+    with pytest.raises(ValueError, match="zero-length"):
+        manifests.build_training_manifest(tmp_path, **_build_kwargs())
+
+
+def test_build_training_manifest_rejects_unreadable_checkpoint(tmp_path):
+    _populate_valid_run_dirs(tmp_path)
+    bad = tmp_path / _run_dir_name("F8", 8) / "model_499.pt"
+    os.chmod(bad, 0o000)
+    try:
+        with pytest.raises(ValueError, match="unreadable"):
+            manifests.build_training_manifest(tmp_path, **_build_kwargs())
+    finally:
+        os.chmod(bad, 0o644)
+
+
+@pytest.mark.parametrize("field", ["code_revision", "asset_revision"])
+def test_build_training_manifest_rejects_dirty_revision_arg(tmp_path, field):
+    _populate_valid_run_dirs(tmp_path)
+    with pytest.raises(ValueError, match="40-hex"):
+        manifests.build_training_manifest(tmp_path, **_build_kwargs(**{field: "not-40-hex"}))
+
+
+def test_build_training_manifest_rejects_config_identity_not_matching_frozen_expectation(tmp_path):
+    _populate_valid_run_dirs(tmp_path)
+
+    def bad_identity(arm, task):
+        campaign_hash, treatment_hash = _stub_config_identity(arm, task)
+        if arm == "F8":
+            treatment_hash = _hex("wrong-treatment-config", 64)
+        return campaign_hash, treatment_hash
+
+    with pytest.raises(ValueError, match="treatment_config_sha256"):
+        manifests.build_training_manifest(
+            tmp_path, **_build_kwargs(config_identity=bad_identity)
+        )
+
+
+def test_build_training_manifest_rejects_non_uniform_campaign_config_hash(tmp_path):
+    _populate_valid_run_dirs(tmp_path)
+
+    def varying_identity(arm, task):
+        _, treatment_hash = _stub_config_identity(arm, task)
+        return _hex(f"campaign-config:{arm}", 64), treatment_hash
+
+    with pytest.raises(ValueError, match="campaign_config_sha256"):
+        manifests.build_training_manifest(
+            tmp_path, **_build_kwargs(config_identity=varying_identity)
+        )
+
+
+# ---------------------------------------------------------------------------
+# CLI (build-training-manifest): exercises the real subprocess-free entry
+# point in-process so ``default_config_identity`` can be monkeypatched to the
+# same GPU/mjlab-free stub used above.
+# ---------------------------------------------------------------------------
+
+
+def test_cli_build_training_manifest_happy_path(tmp_path, monkeypatch):
+    _populate_valid_run_dirs(tmp_path)
+    monkeypatch.setattr(manifests, "default_config_identity", _stub_config_identity)
+    out_path = tmp_path / "accepted_training_checkpoints.tsv"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "fq4x8_manifests",
+            "build-training-manifest",
+            "--log-root",
+            str(tmp_path),
+            "--code-revision",
+            SHARED_CODE_REVISION,
+            "--asset-revision",
+            SHARED_ASSET_REVISION,
+            "--attempt",
+            "attempt1",
+            "--out",
+            str(out_path),
+        ],
+    )
+    returncode = manifests._command_line()
+    assert returncode == 0
+    rows = manifests.parse_training_manifest(out_path.read_text(encoding="utf-8"))
+    manifests.validate_training_manifest(rows)
+    assert len(rows) == 32
+
+
+def test_cli_build_training_manifest_fails_closed_and_writes_nothing(tmp_path, monkeypatch, capsys):
+    _populate_valid_run_dirs(tmp_path)
+    (tmp_path / _run_dir_name("D0", 10) / "model_499.pt").unlink()
+    monkeypatch.setattr(manifests, "default_config_identity", _stub_config_identity)
+    out_path = tmp_path / "accepted_training_checkpoints.tsv"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "fq4x8_manifests",
+            "build-training-manifest",
+            "--log-root",
+            str(tmp_path),
+            "--code-revision",
+            SHARED_CODE_REVISION,
+            "--asset-revision",
+            SHARED_ASSET_REVISION,
+            "--out",
+            str(out_path),
+        ],
+    )
+    returncode = manifests._command_line()
+    assert returncode == 2
+    captured = capsys.readouterr()
+    assert "MANIFEST_FAIL" in captured.err
+    assert not out_path.exists()
