@@ -1367,6 +1367,16 @@ def _episode_trace_digest(trace: Mapping, *, schema_version: int = 2) -> str:
                 key: trace[key] for key in _SCHEMA_V3_EPISODE_FINAL_KEYS
             },
         }
+        # D2 cross-binding: mirror scripts/eval_impulse.py::_physical_trace_payload
+        # exactly. The evaluator folds reset_state_digest into the digest payload
+        # whenever the trace carries one, so this reader MUST do the same -- otherwise
+        # every post-D2 episode recomputes a different digest and is rejected as an
+        # "episode trace digest mismatch". Conditional and additive: traces recorded
+        # before D2 carry no reset_state_digest and keep hashing exactly as before.
+        if "reset_state_digest" in trace:
+            digest_payload["reset"] = {
+                "reset_state_digest": trace["reset_state_digest"]
+            }
     else:
         raise ValueError(f"unsupported sampled trace schema {schema_version}")
     return hashlib.sha256(

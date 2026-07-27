@@ -3893,3 +3893,42 @@ def test_slurm_logs_and_warp_cache_are_outside_unignored_repo_paths():
     assert '--training-code-revision "$TRAINING_CODE_REVISION"' in driver
     assert '--training-asset-revision "$TRAINING_ASSET_REVISION"' in driver
     assert '--expected-checkpoint-sha256 "$expected_checkpoint_sha256"' in driver
+
+
+def test_schema_v3_digest_cross_binds_reset_state_digest():
+    """The analysis reader must recompute the SAME digest the evaluator banked.
+
+    D2 folds ``reset_state_digest`` into the evaluator's trace-digest payload.  If the
+    reader's schema-v3 projection omits that section, every post-D2 episode recomputes a
+    different digest and is rejected as "episode trace digest mismatch" -- which would
+    invalidate all 16,384 sampled episodes at analysis time.  Legacy traces that carry no
+    ``reset_state_digest`` must keep hashing exactly as before.
+    """
+    import scripts.eval_impulse as eval_impulse
+    from evaluation.analysis.first_strike_campaign import _episode_trace_digest
+
+    def _trace():
+        return {
+            "physical": {k: [0.0, 1.0] for k in eval_impulse._TRACE_PHYSICAL_KEYS},
+            "event_trace": {k: [0.0, 1.0] for k in eval_impulse._TRACE_EVENT_KEYS},
+            "first_strike": {
+                k: 0.0 for k in eval_impulse._TRACE_FIRST_STRIKE_PHYSICAL_KEYS
+            },
+            **{k: 0.0 for k in eval_impulse._TRACE_EPISODE_PHYSICAL_KEYS},
+        }
+
+    legacy = _trace()
+    assert _episode_trace_digest(legacy, schema_version=3) == (
+        eval_impulse._physical_trace_digest(legacy)
+    ), "legacy (pre-D2) traces must hash identically in reader and writer"
+
+    with_reset = _trace()
+    with_reset["reset_state_digest"] = "a" * 64
+    assert _episode_trace_digest(with_reset, schema_version=3) == (
+        eval_impulse._physical_trace_digest(with_reset)
+    ), "post-D2 traces must cross-bind reset_state_digest in BOTH reader and writer"
+
+    # And the cross-binding must actually change the digest, or it binds nothing.
+    assert eval_impulse._physical_trace_digest(with_reset) != (
+        eval_impulse._physical_trace_digest(legacy)
+    )
