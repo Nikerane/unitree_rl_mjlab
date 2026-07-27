@@ -83,6 +83,12 @@ QUALITY_EVALUATION_REFERENCE_TASK = QUALITY_ARM_TASKS["FQ"]
 RESET_SEED_OFFSET = 10_000_019
 OBSERVATION_SEED_OFFSET = 20_000_033
 ACTION_SEED_OFFSET = 30_000_041
+# D2 (2026-07-27): exact-episode-replay contract version. Bump only alongside
+# a change to what `reset_state` banks or how it is validated/restored.
+RESET_CONTRACT_VERSION = 1
+_RESET_STATE_REALIZED_KEYS = (
+  "robot_joint_pos", "robot_joint_vel", "nail_joint_pos", "nail_joint_vel",
+)
 PAYOUT_SEMANTICS = {
   "C": "actual_legacy_repeated",
   "D-prime": "actual_legacy_first_event",
@@ -222,7 +228,7 @@ def _physical_trace_payload(trace: Mapping) -> dict:
   }
   if any(missing.values()):
     raise ValueError(f"sampled trace missing physical channels: {missing}")
-  return {
+  payload = {
     "physical": {key: physical[key] for key in _TRACE_PHYSICAL_KEYS},
     "event_trace": {key: event_trace[key] for key in _TRACE_EVENT_KEYS},
     "first_strike": {
@@ -232,6 +238,15 @@ def _physical_trace_payload(trace: Mapping) -> dict:
       key: trace[key] for key in _TRACE_EPISODE_PHYSICAL_KEYS
     },
   }
+  # D2 cross-binding (2026-07-27): fold reset_state_digest into the physical
+  # payload so a tampered/mismatched reset state invalidates trace_digest.
+  # Additive and conditional -- traces recorded before D2 (and every fixture
+  # in this repo that predates it) have no reset_state_digest key and hash
+  # exactly as before; only new schema-v3 records (which always carry it)
+  # actually get cross-bound.
+  if "reset_state_digest" in trace:
+    payload["reset"] = {"reset_state_digest": trace["reset_state_digest"]}
+  return payload
 
 
 def _physical_trace_digest(trace: Mapping) -> str:
@@ -248,6 +263,98 @@ def _validated_physical_trace_digest(
   digest = _canonical_digest(payload)
   if require_recorded_digest and str(trace.get("trace_digest", "")) != digest:
     raise ValueError("recorded physical trace digest mismatch")
+  return digest
+
+
+def _validated_reset_state_digest(
+  trace: Mapping, *, require_recorded_digest: bool
+) -> str:
+  """Fail closed on a schema-v3 reset state (D2) before it is hashed, banked,
+  or used to regenerate a replay env.
+
+  ``reset_state`` = regeneration inputs (which isolated RNG stream/call
+  produced this env+episode's reset) PLUS the full per-env realized reset
+  (robot qpos/qvel, nail slide joint qpos/qvel) needed to restore the exact
+  stochastic episode. ``reset_state_digest`` is the canonical digest of only
+  the "realized" half -- the part that determines physics.
+  """
+  if "reset_contract_version" not in trace:
+    raise ValueError("sampled trace missing reset_contract_version")
+  if str(trace["reset_contract_version"]) != str(RESET_CONTRACT_VERSION):
+    raise ValueError(
+      "reset_contract_version mismatch: expected "
+      f"{RESET_CONTRACT_VERSION}, got {trace['reset_contract_version']!r}"
+    )
+  reset_state = trace.get("reset_state")
+  if not isinstance(reset_state, Mapping):
+    raise ValueError("sampled trace missing or malformed reset_state")
+  regeneration_inputs = reset_state.get("regeneration_inputs")
+  realized = reset_state.get("realized")
+  if not isinstance(regeneration_inputs, Mapping) or not isinstance(realized, Mapping):
+    raise ValueError(
+      "reset_state must contain regeneration_inputs and realized mappings"
+    )
+  missing_inputs = [
+    key for key in ("reset_rng_seed", "reset_rng_call_index")
+    if key not in regeneration_inputs
+  ]
+  if missing_inputs:
+    raise ValueError(f"reset_state.regeneration_inputs missing: {missing_inputs}")
+  missing_realized = [
+    key for key in _RESET_STATE_REALIZED_KEYS if key not in realized
+  ]
+  if missing_realized:
+    raise ValueError(f"reset_state.realized missing channels: {missing_realized}")
+  for key in _RESET_STATE_REALIZED_KEYS:
+    values = realized[key]
+    if not isinstance(values, list) or not values:
+      raise ValueError(f"reset_state.realized.{key} must be a non-empty list")
+  if len(realized["robot_joint_pos"]) != len(realized["robot_joint_vel"]):
+    raise ValueError("reset_state.realized robot qpos/qvel length mismatch")
+  if len(realized["nail_joint_pos"]) != len(realized["nail_joint_vel"]):
+    raise ValueError("reset_state.realized nail qpos/qvel length mismatch")
+  _require_finite_trace_value(reset_state, path="reset_state")
+  digest = _canonical_digest(realized)
+  if require_recorded_digest and str(trace.get("reset_state_digest", "")) != digest:
+    raise ValueError("recorded reset state digest mismatch")
+  return digest
+
+
+def restore_reset_state(
+  env: ManagerBasedRlEnv, trace: Mapping, *, env_id: int = 0
+) -> str:
+  """Regenerate + verify one banked reset state before any replay stepping.
+
+  D2 replay contract, in order: (1) verify the banked ``reset_state_digest``
+  against a fresh canonical digest of the realized reset state -- fail
+  closed on anything missing, malformed, nonfinite, or mismatched, BEFORE
+  writing a single value into the sim; (2) write the realized robot/nail
+  joint state into ``env`` at ``env_id`` and refresh derived kinematics.
+
+  Callers must invoke this after ``env.reset()`` (so every other manager --
+  action/reward/metrics/termination/curriculum -- is deterministically
+  initialized exactly as it would be for a fresh episode) and before
+  replaying ``trace["action_tape"]``.
+  """
+  digest = _validated_reset_state_digest(trace, require_recorded_digest=True)
+  realized = trace["reset_state"]["realized"]
+  device = env.device
+  env_ids = torch.tensor([env_id], dtype=torch.int64, device=device)
+  robot = env.scene["robot"]
+  nail = env.scene["nail_block"]
+  robot.write_joint_state_to_sim(
+    torch.tensor([realized["robot_joint_pos"]], dtype=torch.float32, device=device),
+    torch.tensor([realized["robot_joint_vel"]], dtype=torch.float32, device=device),
+    env_ids=env_ids,
+  )
+  nail.write_joint_state_to_sim(
+    torch.tensor([realized["nail_joint_pos"]], dtype=torch.float32, device=device),
+    torch.tensor([realized["nail_joint_vel"]], dtype=torch.float32, device=device),
+    env_ids=env_ids,
+  )
+  env.scene.write_data_to_sim()
+  env.sim.forward()
+  env.sim.sense()
   return digest
 
 
@@ -829,6 +936,8 @@ class _SampledTraceCollector:
     gamma: float,
     event_i_ref_n_s: float,
     nail_geometry: dict,
+    reset_seed: int = 0,
+    initial_reset_states: Mapping[int, Mapping] | None = None,
   ):
     self.env = env
     self.snapshot = snapshot
@@ -840,6 +949,21 @@ class _SampledTraceCollector:
     self.completed: list[dict] = []
     self.accepted_counts = [0] * env.num_envs
     self._seen_counts = [0] * env.num_envs
+    # D2 (exact-episode replay): every `_reset_idx` call this collector
+    # observes is banked per env_id, in call order, so `_capture_completed`
+    # can attach the reset state that actually produced each episode
+    # ordinal. `initial_reset_states` lets a replay harness seed env_id 0's
+    # first entry directly with a banked reset_state (bypassing the live
+    # hook, which would otherwise capture the FRESH re-randomized draw a
+    # bare `env.reset()` produces before `restore_reset_state` overwrites it).
+    self._reset_seed = int(reset_seed)
+    self._reset_call_index = 0
+    self._reset_snapshots: dict[int, list[dict]] = {
+      i: [] for i in range(env.num_envs)
+    }
+    if initial_reset_states:
+      for env_id, reset_state in initial_reset_states.items():
+        self._reset_snapshots[int(env_id)].append(copy.deepcopy(reset_state))
     self._substep_start = [0] * env.num_envs
     self._control_start = [0] * env.num_envs
     self._substeps: dict[str, list[torch.Tensor]] = {
@@ -896,6 +1020,38 @@ class _SampledTraceCollector:
     self._install()
 
   def _install(self) -> None:
+    original_reset_idx = self.env._reset_idx
+
+    def reset_idx_and_snapshot(env_ids=None) -> None:
+      original_reset_idx(env_ids)
+      call_index = self._reset_call_index
+      self._reset_call_index += 1
+      ids = (
+        torch.arange(self.env.num_envs, device=self.env.device)
+        if env_ids is None else env_ids
+      )
+      robot_pos = self._robot.data.joint_pos.detach().clone()
+      robot_vel = self._robot.data.joint_vel.detach().clone()
+      nail_pos = self._nail.data.joint_pos.detach().clone()
+      nail_vel = self._nail.data.joint_vel.detach().clone()
+      for env_id in ids.tolist():
+        self._reset_snapshots[env_id].append(
+          {
+            "regeneration_inputs": {
+              "reset_rng_seed": self._reset_seed,
+              "reset_rng_call_index": call_index,
+            },
+            "realized": {
+              "robot_joint_pos": _json_values(robot_pos[env_id]),
+              "robot_joint_vel": _json_values(robot_vel[env_id]),
+              "nail_joint_pos": _json_values(nail_pos[env_id]),
+              "nail_joint_vel": _json_values(nail_vel[env_id]),
+            },
+          }
+        )
+
+    self.env._reset_idx = reset_idx_and_snapshot  # type: ignore[method-assign]
+
     original_sim_step = self.env.sim.step
 
     def cache_preintegration_then_step() -> None:
@@ -1032,6 +1188,22 @@ class _SampledTraceCollector:
       raise RuntimeError("completed episode has no captured control steps")
     return torch.stack([value[env_id] for value in selected])
 
+  def _reset_state_for(self, env_id: int, ordinal: int) -> dict:
+    """The banked reset_state that produced episode `ordinal` for `env_id`.
+
+    Reset call order == episode order: the initial `env.reset()` produces
+    ordinal 0's reset (call index 0), and each subsequent in-step auto-reset
+    for that env produces the next ordinal's reset, in the same order.
+    """
+    snapshots = self._reset_snapshots.get(env_id, [])
+    if ordinal >= len(snapshots):
+      raise RuntimeError(
+        f"no captured reset state for env {env_id} episode ordinal {ordinal} "
+        f"(have {len(snapshots)} recorded resets) -- _reset_idx hook did not "
+        "fire before this episode completed"
+      )
+    return copy.deepcopy(snapshots[ordinal])
+
   def _capture_completed(self, env_id: int) -> None:
     ordinal = self._seen_counts[env_id]
     self._seen_counts[env_id] += 1
@@ -1055,6 +1227,7 @@ class _SampledTraceCollector:
     impact = self._slice_control(self._impact_payout, env_id)
     delivered_payout = self._slice_control(self._delivered_payout, env_id)
     event_delivered = float(self._tracker.delivered[env_id])
+    reset_state = self._reset_state_for(env_id, ordinal)
     trace = {
       "episode_id": f"{self.treatment}-env{env_id}-episode{ordinal}",
       "env_id": env_id,
@@ -1069,6 +1242,11 @@ class _SampledTraceCollector:
         "tracker_depth_lead_substeps": 1,
       },
       "nail_geometry": copy.deepcopy(self.nail_geometry),
+      # D2 (exact-episode replay): the reset that produced THIS episode --
+      # see restore_reset_state()/_validated_reset_state_digest() for the
+      # replay contract this feeds.
+      "reset_contract_version": RESET_CONTRACT_VERSION,
+      "reset_state": reset_state,
       "physical": physical,
       "event_trace": event_trace,
       "action_tape": _json_values(actions),
@@ -1121,6 +1299,9 @@ class _SampledTraceCollector:
       ),
       "episode_depth_m": float(self.snapshot["depth"][env_id]),
     }
+    trace["reset_state_digest"] = _validated_reset_state_digest(
+      trace, require_recorded_digest=False
+    )
     trace["trace_digest"] = _validated_physical_trace_digest(
       trace, require_recorded_digest=False
     )
@@ -1293,6 +1474,7 @@ def _rollout_balanced_sampled(
     gamma=gamma,
     event_i_ref_n_s=contract["event_i_ref_n_s"],
     nail_geometry=nail_geometry,
+    reset_seed=reset_seed,
   )
   wrapped = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
   runner = runner_cls(wrapped, asdict(agent_cfg), device=device)
@@ -1385,6 +1567,8 @@ def _persist_sampled_traces(
   for trace in sampled_rec["episodes"]:
     if "physical" in trace:
       _validated_physical_trace_digest(trace, require_recorded_digest=True)
+    if "reset_state" in trace:
+      _validated_reset_state_digest(trace, require_recorded_digest=True)
   payload = {
     "schema_version": 3,
     "selection": "first two completed episodes from each of 256 environments",
