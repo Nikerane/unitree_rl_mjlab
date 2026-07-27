@@ -619,7 +619,15 @@ def default_config_identity(arm: str, task: str) -> tuple[str, str]:
     treatment-config digest. (``contract["treatment"]`` is not used for this
     cross-check: F8 shares its exact registered task with the legacy "F"
     arm, so the shared helper's own arm-label lookup resolves to "F", not
-    "F8" -- the weights are the unambiguous, arm-identifying quantity.)
+    "F8".)
+
+    The weights are NOT sufficient on their own: **D0 and FQ-min both have
+    weights (8, 0)**, so a weights-only check is blind between them and would
+    happily label an FQ-min checkpoint as D0 -- corrupting the very contrast
+    this campaign exists to measure. ``task`` is therefore pinned to the arm's
+    frozen registered task first; the weights check then guards the remaining
+    pairs (F8/F0/D0), whose weights genuinely differ.
+
     mjlab/torch are imported lazily so importing this module never requires
     them -- only calling this function (the production default) does.
     """
@@ -627,6 +635,15 @@ def default_config_identity(arm: str, task: str) -> tuple[str, str]:
     from mjlab.tasks.registry import load_env_cfg
 
     from scripts.eval_impulse import _validate_sampled_env_contract
+
+    expected_task = TASKS.get(arm)
+    if expected_task is None:
+        raise ValueError(f"arm/task: unknown arm {arm!r}")
+    if task != expected_task:
+        raise ValueError(
+            f"arm/task mismatch: arm {arm!r} is frozen to task "
+            f"{expected_task!r}, got {task!r}"
+        )
 
     env_cfg = load_env_cfg(task, play=False)
     contract = _validate_sampled_env_contract(env_cfg, task)

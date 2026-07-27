@@ -930,3 +930,26 @@ def test_cli_build_training_manifest_fails_closed_and_writes_nothing(tmp_path, m
     captured = capsys.readouterr()
     assert "MANIFEST_FAIL" in captured.err
     assert not out_path.exists()
+
+
+def test_default_config_identity_rejects_arm_task_mismatch():
+    """Weights alone cannot identify an arm: D0 and FQ-min are BOTH (8, 0).
+
+    `default_config_identity` cross-checks the live cfg's observed weights against the
+    arm's frozen WEIGHTS, which distinguishes F8/F0/D0 but is blind between D0 and
+    FQ-min. Today it is safe only because `build_training_manifest` always passes
+    `task = TASKS[arm]`. Pin that invariant here so any future caller that decouples
+    arm from task fails closed instead of silently mislabelling an FQ-min checkpoint
+    as D0 -- which would corrupt the exact contrast this campaign exists to measure.
+    """
+    from evaluation.analysis import first_strike_quality_campaign as quality
+    from evaluation.analysis.fq4x8_manifests import TASKS, default_config_identity
+
+    WEIGHTS = quality.WEIGHTS
+
+    assert WEIGHTS["D0"] == WEIGHTS["FQ-min"], "premise: these arms share weights"
+
+    with pytest.raises(ValueError, match="arm/task"):
+        default_config_identity("D0", TASKS["FQ-min"])
+    with pytest.raises(ValueError, match="arm/task"):
+        default_config_identity("FQ-min", TASKS["D0"])
