@@ -460,6 +460,7 @@ def _eval_env(env_data, **overrides) -> dict:
             "EVAL_ROOT": str(env_data["eval_root"]),
             "ACCEPTED_MANIFEST": str(env_data["manifest_path"]),
             "EXPECTED_CODE_REVISION": env_data["code_rev"],
+            "EXPECTED_TRAINING_CODE_REVISION": env_data["code_rev"],
             "EXPECTED_ASSET_REVISION": env_data["asset_rev"],
             "FQ_SOURCE_ROOT": str(REPO_ROOT),
             "FQ_REAL_PYTHON": sys.executable,
@@ -586,6 +587,52 @@ def test_eval_rejects_nonhex_code_revision(eval_env_data):
     assert "EVAL_FAIL: EXPECTED_CODE_REVISION must be a clean 40-hex revision" in result.stdout
 
 
+def test_eval_rejects_missing_training_code_revision(eval_env_data):
+    env = _eval_env(eval_env_data, EXPECTED_TRAINING_CODE_REVISION=None)
+    result = _run(EVAL_SCRIPT, env)
+    assert result.returncode == 2
+    assert (
+        "EVAL_FAIL: EXPECTED_TRAINING_CODE_REVISION must be a clean 40-hex revision"
+        in result.stdout
+    )
+
+
+def test_eval_rejects_dirty_training_code_revision(eval_env_data):
+    env = _eval_env(
+        eval_env_data,
+        EXPECTED_TRAINING_CODE_REVISION=eval_env_data["code_rev"] + "-dirty",
+    )
+    result = _run(EVAL_SCRIPT, env)
+    assert result.returncode == 2
+    assert (
+        "EVAL_FAIL: EXPECTED_TRAINING_CODE_REVISION must be a clean 40-hex revision"
+        in result.stdout
+    )
+
+
+def test_eval_rejects_short_training_code_revision(eval_env_data):
+    env = _eval_env(
+        eval_env_data,
+        EXPECTED_TRAINING_CODE_REVISION=eval_env_data["code_rev"][:10],
+    )
+    result = _run(EVAL_SCRIPT, env)
+    assert result.returncode == 2
+    assert (
+        "EVAL_FAIL: EXPECTED_TRAINING_CODE_REVISION must be a clean 40-hex revision"
+        in result.stdout
+    )
+
+
+def test_eval_rejects_nonhex_training_code_revision(eval_env_data):
+    env = _eval_env(eval_env_data, EXPECTED_TRAINING_CODE_REVISION="g" * 40)
+    result = _run(EVAL_SCRIPT, env)
+    assert result.returncode == 2
+    assert (
+        "EVAL_FAIL: EXPECTED_TRAINING_CODE_REVISION must be a clean 40-hex revision"
+        in result.stdout
+    )
+
+
 def test_eval_rejects_missing_asset_revision(eval_env_data):
     env = _eval_env(eval_env_data, EXPECTED_ASSET_REVISION=None)
     result = _run(EVAL_SCRIPT, env)
@@ -625,6 +672,35 @@ def test_eval_rejects_wrong_asset_revision_equality(eval_env_data):
     result = _run(EVAL_SCRIPT, env)
     assert result.returncode == 2
     assert "EVAL_FAIL: asset revision does not equal expected asset revision" in result.stdout
+
+
+def test_eval_accepts_training_manifest_whose_code_revision_differs_from_eval_checkout(
+    eval_env_data,
+):
+    """Provenance over-constraint fix (root regression test): the training
+    manifest's code_revision is bound to EXPECTED_TRAINING_CODE_REVISION, not
+    to the evaluation checkout's own EXPECTED_CODE_REVISION -- a persistence/
+    provenance-only fix can land in the evaluation checkout after training
+    froze. The asset revision is unaffected and still bound to the single
+    EXPECTED_ASSET_REVISION for both training and evaluation."""
+    frozen_training_revision = "9" * 40
+    rows = valid_training_rows(
+        code_rev=frozen_training_revision, asset_rev=eval_env_data["asset_rev"]
+    )
+    _write_manifest(eval_env_data["manifest_path"], rows)
+    env = _eval_env(
+        eval_env_data,
+        EXPECTED_TRAINING_CODE_REVISION=frozen_training_revision,
+    )
+    result = _run(EVAL_SCRIPT, env)
+    out = result.stdout + result.stderr
+    assert "EVAL_FAIL" not in out
+    assert "MANIFEST_FAIL" not in out
+    assert "### EVAL_PROVENANCE" in out
+    # The guard passed; it must now fail for an unrelated, pre-existing
+    # reason (no CUDA on this machine) -- never reaching real evaluation.
+    assert result.returncode == 1
+    assert "### NO CUDA" in out
 
 
 def test_eval_rejects_actual_dirty_code_repo(eval_env_data):

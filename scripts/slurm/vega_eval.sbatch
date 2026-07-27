@@ -18,13 +18,19 @@
 # validate-accepted-manifest`, which fails closed on every drift from the
 # frozen FROZEN_QUALITY_CAMPAIGN_MATRIX identity (arm/short/task/seed
 # uniqueness, checkpoint basename+hash+uniqueness, reader/normalizer/reward/
-# action/impedance/cap signature hashes, clean code/asset revisions). EVAL_ROOT
-# and ACCEPTED_MANIFEST must be the exact paths below -- no other layout is
+# action/impedance/cap signature hashes, clean asset revision, and every
+# manifest row's training code revision against EXPECTED_TRAINING_CODE_REVISION
+# -- deliberately NOT EXPECTED_CODE_REVISION: training and evaluation code
+# revisions are independently pinned, since a persistence/provenance-only fix
+# can land in the evaluation checkout after training froze). EVAL_ROOT and
+# ACCEPTED_MANIFEST must be the exact paths below -- no other layout is
 # accepted, and the fq4x8 segment is appended exactly once:
 #   CAMPAIGN=fq4x8 EVAL_ATTEMPT=attempt1 EVAL_ROOT="$HOME/unitree_rl_mjlab_eval" \
 #     ACCEPTED_MANIFEST="$HOME/unitree_rl_mjlab_eval/fq4x8/accepted_training_checkpoints.tsv" \
-#     EXPECTED_CODE_REVISION=<40hex> EXPECTED_ASSET_REVISION=<40hex> \
-#     sbatch --export=ALL,CAMPAIGN,EVAL_ATTEMPT,EVAL_ROOT,ACCEPTED_MANIFEST,EXPECTED_CODE_REVISION,EXPECTED_ASSET_REVISION scripts/slurm/vega_eval.sbatch
+#     EXPECTED_CODE_REVISION=<40hex clean evaluation checkout> \
+#     EXPECTED_TRAINING_CODE_REVISION=<40hex frozen training checkout> \
+#     EXPECTED_ASSET_REVISION=<40hex> \
+#     sbatch --export=ALL,CAMPAIGN,EVAL_ATTEMPT,EVAL_ROOT,ACCEPTED_MANIFEST,EXPECTED_CODE_REVISION,EXPECTED_TRAINING_CODE_REVISION,EXPECTED_ASSET_REVISION scripts/slurm/vega_eval.sbatch
 #SBATCH --job-name=z1-eval
 #SBATCH --account=d2026d06-166-users
 #SBATCH --partition=gpu
@@ -92,6 +98,12 @@ CKGLOBS="${CKGLOBS:-${CKGLOB:-*a05_* *b1_*}}"
 if [ "$CAMPAIGN" = "fq4x8" ]; then
   [[ "${EXPECTED_CODE_REVISION:-}" =~ ^[0-9a-f]{40}$ ]] \
     || { echo "EVAL_FAIL: EXPECTED_CODE_REVISION must be a clean 40-hex revision"; exit 2; }
+  # Deliberately separate from EXPECTED_CODE_REVISION: the frozen manifest's
+  # training checkpoints were trained at a revision that need not equal the
+  # (possibly newer, e.g. carrying a persistence/provenance-only fix) clean
+  # evaluation checkout above.
+  [[ "${EXPECTED_TRAINING_CODE_REVISION:-}" =~ ^[0-9a-f]{40}$ ]] \
+    || { echo "EVAL_FAIL: EXPECTED_TRAINING_CODE_REVISION must be a clean 40-hex revision"; exit 2; }
   [[ "${EXPECTED_ASSET_REVISION:-}" =~ ^[0-9a-f]{40}$ ]] \
     || { echo "EVAL_FAIL: EXPECTED_ASSET_REVISION must be a clean 40-hex revision"; exit 2; }
   case "${EVAL_ATTEMPT:-}" in
@@ -181,11 +193,14 @@ if [ "$CAMPAIGN" = "fq4x8" ]; then
   # FQ4X8 ACCEPTED-MANIFEST CONTRACT: the canonical 21-column, headered TSV defined by
   # evaluation.analysis.fq4x8_manifests.TRAINING_FIELDS. Every row is checked against the frozen
   # FROZEN_QUALITY_CAMPAIGN_MATRIX identity by that module -- not reinterpreted here.
+  # --expected-code-revision here validates the manifest's TRAINING code revision, so it is bound
+  # to EXPECTED_TRAINING_CODE_REVISION, NOT the evaluation checkout's own $FQ_CODE_HASH (already
+  # independently verified against EXPECTED_CODE_REVISION above).
   FQ_VALIDATED_ROWS=$(
     "$PY" -m evaluation.analysis.fq4x8_manifests \
       validate-accepted-manifest \
       --manifest "$ACCEPTED_MANIFEST" \
-      --expected-code-revision "$FQ_CODE_HASH" \
+      --expected-code-revision "$EXPECTED_TRAINING_CODE_REVISION" \
       --expected-asset-revision "$FQ_ASSET_HASH"
   ) || { echo "EVAL_FAIL: accepted-training manifest validation failed"; exit 2; }
   [ "$(printf '%s\n' "$FQ_VALIDATED_ROWS" | awk 'NF{n++} END{print n+0}')" -eq 32 ] \
@@ -373,7 +388,7 @@ elif [ "$CAMPAIGN" = "fq4x8" ]; then
     FRESH=0 DEV=cuda:0 PY="$PY" NENVS=256 NSTEPS=400 EPLEN=4.0 \
       SEED=2026072900 TASK="$task" OUT="$EVAL_OUTPUT" RUN_LEGACY_DIAG=0 \
       ACCEPTED_MANIFEST_SHA256="$ACCEPTED_MANIFEST_SHA256" \
-      TRAINING_CODE_REVISION="$CODE_HASH" \
+      TRAINING_CODE_REVISION="$EXPECTED_TRAINING_CODE_REVISION" \
       TRAINING_ASSET_REVISION="$ASSET_HASH" \
       CKPTS="$arm_ckpts" scripts/eval_impulse.sh
   }

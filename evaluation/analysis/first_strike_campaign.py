@@ -25,6 +25,7 @@ import numpy as np
 from evaluation.analysis.terminal_funnel import (
     WINDOW_SAMPLES_BEFORE,
     compute_episode_metrics,
+    decode_payload_json,
 )
 
 
@@ -1547,12 +1548,7 @@ def _treatment_config_digest(row: Mapping) -> str:
 
 def _sampled_payload_from_bytes(artifact_bytes: bytes) -> dict:
     with np.load(io.BytesIO(artifact_bytes), allow_pickle=False) as saved:
-        if saved.files != ["payload_json"]:
-            raise ValueError("NPZ must contain exactly payload_json")
-        scalar = saved["payload_json"]
-        if scalar.shape != () or scalar.dtype.kind != "U":
-            raise ValueError("payload_json must be a scalar Unicode value")
-        return json.loads(str(scalar))
+        return json.loads(decode_payload_json(saved))
 
 
 def _load_and_recompute_sampled_artifact(
@@ -2262,8 +2258,15 @@ def _campaign_validity(rows: Sequence[Mapping]) -> list[str]:
             reasons.append(f"{row_name}: accepted checkpoint SHA-256 mismatch")
         if not _is_hex_digest(row.get("accepted_manifest_sha256"), 64):
             reasons.append(f"{row_name}: invalid accepted manifest SHA-256")
-        if row.get("training_code_revision") != row.get("git_revision"):
-            reasons.append(f"{row_name}: training/eval code revision mismatch")
+        # Code revision is independently pinned, not required to equal the
+        # training revision: a persistence/provenance-only fix can land in
+        # the evaluation checkout after training froze. git_revision's own
+        # hex/dirty validity is checked below (the "git"/"asset_git" loop);
+        # training_code_revision is checked here since it has no other
+        # format guard once it is no longer transitively validated via
+        # equality with git_revision.
+        if not _is_hex_digest(row.get("training_code_revision"), 40):
+            reasons.append(f"{row_name}: invalid training code revision")
         if row.get("training_asset_revision") != row.get("asset_git_revision"):
             reasons.append(f"{row_name}: training/eval asset revision mismatch")
         missing_columns = sorted(

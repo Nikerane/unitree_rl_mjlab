@@ -44,6 +44,11 @@ from evaluation.analysis.plot_first_strike_campaign import (
     generate_report,
     write_video_overlay_html,
 )
+from evaluation.analysis.terminal_funnel import (
+    LEGACY_UNICODE_MAX_CHARS,
+    decode_payload_json,
+    encode_payload_json,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1780,9 +1785,247 @@ def test_sampled_trace_artifacts_are_content_addressed_and_keep_provenance(tmp_p
     assert first["payload_digest"] in Path(first["path"]).name
     assert first["artifact_sha256"] == hashlib.sha256(first_bytes).hexdigest()
     with np.load(first["path"], allow_pickle=False) as saved:
-        payload = json.loads(str(saved["payload_json"]))
+        assert saved["payload_json"].dtype == np.dtype("uint8")
+        payload = json.loads(decode_payload_json(saved))
     assert payload["schema_version"] == 3
     assert payload["provenance"] == provenance
+
+
+# ---------------------------------------------------------------------------
+# Sampled-trace persistence format (evidence-storage capacity defect): a
+# 1-D uint8 UTF-8-bytes array replaces the legacy fixed-width Unicode ("<U")
+# scalar, whose itemsize ceiling a weak seed's un-terminated, long episodes
+# can exceed (fq4x8_f8_seed12: TypeError: string too large to store inside
+# array). Both scripts/eval_impulse.py's write/readback and the two readers
+# (first_strike_campaign._sampled_payload_from_bytes,
+# terminal_funnel.load_qualified_bank) share the same
+# evaluation.analysis.terminal_funnel.{encode,decode}_payload_json codec.
+# ---------------------------------------------------------------------------
+
+
+def test_legacy_fixed_width_unicode_capacity_ceiling_mechanism():
+    """RED reproduction: pins the exact numpy mechanism the old
+    ``np.asarray(text, dtype=np.str_)`` write path silently depended on, and
+    that the observed failure (``fq4x8_f8_seed12``,
+    ``TypeError: string too large to store inside array``) is not
+    seed-specific bad luck -- ANY payload past this many characters was
+    always going to hit it.
+
+    numpy's ``<U`` dtype stores ``itemsize = 4 * char_count`` in a field
+    that must fit a signed 32-bit int, capping usable character count at
+    ``LEGACY_UNICODE_MAX_CHARS`` = 536,870,911: one past it, even
+    *constructing the dtype* fails, with no character buffer allocated.
+    This is the identical boundary as the full-scale failure (confirmed
+    live in ``test_encode_payload_json_exceeds_legacy_unicode_capacity_ceiling``
+    below, which is opt-in because it allocates >500MB); this asserts it
+    for free.
+    """
+    ok = np.dtype(f"<U{LEGACY_UNICODE_MAX_CHARS}")
+    assert ok.itemsize == 4 * LEGACY_UNICODE_MAX_CHARS
+    with pytest.raises(TypeError):
+        np.dtype(f"<U{LEGACY_UNICODE_MAX_CHARS + 1}")
+
+
+def _sample_payload_text() -> str:
+    return json.dumps(
+        {
+            "schema_version": 3,
+            "episodes": [{"episode_id": "e", "n": i} for i in range(50)],
+        },
+        sort_keys=True,
+        allow_nan=False,
+    )
+
+
+def _write_payload_npz(path: Path, *, array: np.ndarray) -> None:
+    np.savez_compressed(path, payload_json=array)
+
+
+def test_encode_payload_json_round_trips_canonical_bytes_exactly(tmp_path):
+    text = _sample_payload_text()
+    path = tmp_path / "roundtrip.npz"
+    _write_payload_npz(path, array=encode_payload_json(text))
+    with np.load(path, allow_pickle=False) as saved:
+        assert list(saved.files) == ["payload_json"]
+        assert saved["payload_json"].dtype == np.dtype("uint8")
+        assert saved["payload_json"].ndim == 1
+        decoded = decode_payload_json(saved)
+    assert decoded == text
+    assert json.loads(decoded) == json.loads(text)
+
+
+def test_decode_payload_json_accepts_legacy_scalar_unicode_format(tmp_path):
+    """Backward read compatibility: schema-v3 artifacts already written in
+    the old scalar-Unicode format (attempt1's 7 npz files, all prior
+    fsr4x8 artifacts) must keep loading unchanged."""
+    text = _sample_payload_text()
+    path = tmp_path / "legacy.npz"
+    _write_payload_npz(path, array=np.asarray(text, dtype=np.str_))
+    with np.load(path, allow_pickle=False) as saved:
+        decoded = decode_payload_json(saved)
+    assert decoded == text
+
+
+def test_old_and_new_formats_decode_to_identical_logical_payloads(tmp_path):
+    text = _sample_payload_text()
+    legacy_path = tmp_path / "legacy.npz"
+    bytes_path = tmp_path / "bytes.npz"
+    _write_payload_npz(legacy_path, array=np.asarray(text, dtype=np.str_))
+    _write_payload_npz(bytes_path, array=encode_payload_json(text))
+    with np.load(legacy_path, allow_pickle=False) as saved:
+        legacy_decoded = decode_payload_json(saved)
+    with np.load(bytes_path, allow_pickle=False) as saved:
+        bytes_decoded = decode_payload_json(saved)
+    assert legacy_decoded == bytes_decoded == text
+    assert json.loads(legacy_decoded) == json.loads(bytes_decoded)
+
+
+def test_decode_payload_json_rejects_wrong_npz_membership(tmp_path):
+    path = tmp_path / "extra.npz"
+    np.savez_compressed(
+        path,
+        payload_json=encode_payload_json(_sample_payload_text()),
+        extra=np.zeros(1),
+    )
+    with np.load(path, allow_pickle=False) as saved:
+        with pytest.raises(ValueError, match="must contain exactly"):
+            decode_payload_json(saved)
+
+
+def test_decode_payload_json_rejects_unexpected_dtype(tmp_path):
+    path = tmp_path / "wrong_dtype.npz"
+    _write_payload_npz(path, array=np.zeros(4, dtype=np.int32))
+    with np.load(path, allow_pickle=False) as saved:
+        with pytest.raises(ValueError, match="unsupported dtype"):
+            decode_payload_json(saved)
+
+
+def test_decode_payload_json_rejects_2d_byte_array(tmp_path):
+    path = tmp_path / "wrong_ndim.npz"
+    _write_payload_npz(path, array=np.zeros((2, 2), dtype=np.uint8))
+    with np.load(path, allow_pickle=False) as saved:
+        with pytest.raises(ValueError, match="1-D uint8"):
+            decode_payload_json(saved)
+
+
+def test_decode_payload_json_rejects_nonscalar_legacy_array(tmp_path):
+    path = tmp_path / "wrong_shape.npz"
+    _write_payload_npz(path, array=np.asarray(["a", "b"], dtype=np.str_))
+    with np.load(path, allow_pickle=False) as saved:
+        with pytest.raises(ValueError, match="scalar Unicode"):
+            decode_payload_json(saved)
+
+
+def test_decode_payload_json_rejects_invalid_utf8(tmp_path):
+    path = tmp_path / "bad_utf8.npz"
+    _write_payload_npz(
+        path, array=np.frombuffer(b"\xff\xfe\x00\x01", dtype=np.uint8)
+    )
+    with np.load(path, allow_pickle=False) as saved:
+        with pytest.raises(ValueError, match="not valid UTF-8"):
+            decode_payload_json(saved)
+
+
+def test_decode_payload_json_output_feeding_malformed_json_fails_closed(tmp_path):
+    path = tmp_path / "not_json.npz"
+    _write_payload_npz(path, array=encode_payload_json("{not valid json"))
+    with np.load(path, allow_pickle=False) as saved:
+        decoded = decode_payload_json(saved)
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(decoded)
+
+
+def test_persist_sampled_traces_stores_uint8_bytes_and_preserves_digests(tmp_path):
+    """Production write path: stores uint8 bytes (never an object array or
+    pickle), and sampled_trace_digest is exactly the payload_digest
+    recomputed from the decoded, digest-stripped payload -- i.e. the digest
+    is unaffected by the storage-format change, because it is computed
+    upstream of JSON/npz serialization in _persist_sampled_traces."""
+    contract = {
+        "treatment": "E",
+        "impact_weight": 8.0,
+        "delivered_weight": 2.0,
+        "event_i_ref_n_s": 0.3088,
+        "impulse_limits_n_m_s": [1.64, 3.28, 1.64, 1.64, 1.64, 1.64],
+    }
+    provenance = {
+        "code_git": {"revision": "a" * 40, "dirty": False, "status": ""},
+        "asset_git": {"revision": "b" * 40, "dirty": False, "status": ""},
+        "checkpoint_sha256": "e" * 64,
+        "campaign_config_sha256": "d" * 64,
+        "nail_asset_sha256": "c" * 64,
+    }
+    result = eval_impulse._persist_sampled_traces(
+        out_dir=tmp_path,
+        name="digest-check",
+        sampled_rec={
+            "control_steps": 3,
+            "episodes": [{"episode_id": "only", "value": 7}],
+        },
+        task=ARM_TASKS["E"],
+        contract=contract,
+        training_seed=0,
+        reset_seed=1,
+        observation_seed=2,
+        action_seed=3,
+        nail_geometry={
+            "nail_axis": [0.0, 0.0, -1.0],
+            "nail_xy_m": [0.5, 0.0],
+            "nail_radius_m": 0.012,
+            "source_sha256": "c" * 64,
+        },
+        provenance=provenance,
+        mean_rollout_invariants={"impossible_success_n": 0, "lambda_dead_n": 0},
+    )
+    with np.load(result["path"], allow_pickle=False) as saved:
+        assert saved["payload_json"].dtype == np.dtype("uint8")
+        assert saved["payload_json"].ndim == 1
+        payload = json.loads(decode_payload_json(saved))
+    embedded_digest = payload.pop("payload_digest")
+    assert embedded_digest == result["payload_digest"]
+    assert (
+        first_strike_campaign._sampled_payload_from_bytes(
+            Path(result["path"]).read_bytes()
+        )["payload_digest"]
+        == result["payload_digest"]
+    )
+    assert (
+        hashlib.sha256(
+            json.dumps(
+                payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+            ).encode()
+        ).hexdigest()
+        == embedded_digest
+    )
+
+
+_CAPACITY_TEST_ENV = "RUN_PAYLOAD_JSON_CAPACITY_TEST"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    os.environ.get(_CAPACITY_TEST_ENV) != "1",
+    reason=(
+        "allocates >500MB to exceed the legacy <U capacity ceiling -- opt in with "
+        f"{_CAPACITY_TEST_ENV}=1, e.g.:\n"
+        f"  PYTHONPATH=. {_CAPACITY_TEST_ENV}=1 "
+        "/Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -m pytest "
+        "tests/test_first_strike_campaign.py -k capacity_ceiling -q"
+    ),
+)
+def test_encode_payload_json_exceeds_legacy_unicode_capacity_ceiling(tmp_path):
+    """Bounded capacity proof (not part of the routine unit suite -- see the
+    opt-in gate above): a payload one character past the old 536,870,911-char
+    ceiling is exactly what np.asarray(text, dtype=np.str_) could never
+    store; encode_payload_json/decode_payload_json round-trip it exactly."""
+    text = "a" * (LEGACY_UNICODE_MAX_CHARS + 1)
+    with pytest.raises(TypeError, match="string too large to store inside array"):
+        np.asarray(text, dtype=np.str_)  # the exact old failure, reconfirmed live
+
+    path = tmp_path / "over_ceiling.npz"
+    np.savez_compressed(path, payload_json=encode_payload_json(text))
+    with np.load(path, allow_pickle=False) as saved:
+        assert decode_payload_json(saved) == text
 
 
 def test_exact_seed_tests_enumerate_all_assignments_with_midranks():
@@ -1858,7 +2101,7 @@ def test_campaign_requires_complete_sampled_contract_and_exhaustive_statuses(
         ("fixed_action_signature_sha256", "f" * 64, "fixed action"),
         ("accepted_checkpoint_sha256", "f" * 64, "accepted checkpoint"),
         ("accepted_manifest_sha256", "not-a-digest", "accepted manifest"),
-        ("training_code_revision", "f" * 40, "training/eval code"),
+        ("training_code_revision", "not-a-40-hex-revision", "invalid training code"),
         ("training_asset_revision", "f" * 40, "training/eval asset"),
         ("checkpoint_path", "/wrong/model_498.pt", "model_499.pt"),
     ],
@@ -1873,6 +2116,49 @@ def test_campaign_rejects_any_nonfrozen_runtime_contract(
 
     assert result["valid"] is False
     assert any(reason in item for item in result["invalidation_reasons"])
+
+
+def test_campaign_accepts_training_code_revision_that_differs_from_eval_git_revision(
+    tmp_path, campaign_rows_fixture
+):
+    """Provenance over-constraint fix: training and evaluation code revisions
+    are independently pinned, not required to be equal -- a persistence/
+    provenance-only fix can land in the evaluation checkout after training
+    froze. This must be VALID across the whole campaign (all 32 rows share
+    one training_code_revision, so every row -- and its artifact's embedded
+    provenance, kept self-consistent with the row -- is updated together to
+    keep the separate "identical across rows" and row-vs-artifact binding
+    invariants satisfied); the asset revision equality is untouched and
+    still required."""
+    rows = copy.deepcopy(campaign_rows_fixture)
+    new_training_code_revision = "9" * 40
+    for row in rows:
+        with np.load(row["sampled_trace_path"], allow_pickle=False) as saved:
+            payload = json.loads(str(saved["payload_json"]))
+        payload["provenance"]["training_code_revision"] = new_training_code_revision
+        payload_without_digest = dict(payload)
+        payload_without_digest.pop("payload_digest")
+        payload["payload_digest"] = _literal_digest(payload_without_digest)
+        path = tmp_path / f"{row['name']}-decoupled.npz"
+        np.savez_compressed(
+            path,
+            payload_json=np.asarray(
+                json.dumps(payload, sort_keys=True, allow_nan=False), dtype=np.str_
+            ),
+        )
+        row["training_code_revision"] = new_training_code_revision
+        row["sampled_trace_path"] = str(path)
+        row["sampled_trace_digest"] = payload["payload_digest"]
+        row["sampled_trace_artifact_sha256"] = hashlib.sha256(
+            path.read_bytes()
+        ).hexdigest()
+        # git_revision (the evaluation checkout) is deliberately left at its
+        # fixture baseline ("a" * 40) -- the whole point is that it differs.
+
+    result = analyze_campaign(rows, bootstrap_samples=1000)
+
+    assert result["valid"] is True
+    assert result["primary"]["passed"] is True
 
 
 def test_campaign_reports_the_frozen_identity_comparison_contract(

@@ -1027,6 +1027,41 @@ def test_contract_rejects_every_frozen_drift(
         validate_quality_campaign_contract(rows, manifest)
 
 
+def test_contract_accepts_training_code_revision_that_differs_from_eval_git_revision(
+    tmp_path,
+) -> None:
+    """Provenance over-constraint fix: training and evaluation code
+    revisions are independently pinned, not required to be equal -- a
+    persistence/provenance-only fix can land in the evaluation checkout
+    after training froze. git_revision must still match the accepted
+    attempt's pinned revision (row/accepted binding, unchanged), and the
+    asset revision equality (training vs. evaluation) is untouched and
+    still required -- only the code side is decoupled."""
+    rows, manifest = _campaign_rows(tmp_path)
+    new_training_code_revision = "9" * 40
+    for row, accepted in zip(rows, manifest, strict=True):
+        path = tmp_path / f"{row['name']}.npz"
+        path.write_bytes(row["name"].encode())
+        row["sampled_trace_path"] = str(path)
+        row["sampled_trace_digest"] = hashlib.sha256(
+            f"payload-{row['name']}".encode()
+        ).hexdigest()
+        row["sampled_trace_artifact_sha256"] = hashlib.sha256(
+            path.read_bytes()
+        ).hexdigest()
+        accepted["sampled_trace_digest"] = row["sampled_trace_digest"]
+        accepted["sampled_trace_artifact_sha256"] = row[
+            "sampled_trace_artifact_sha256"
+        ]
+        row["training_code_revision"] = new_training_code_revision
+        # git_revision (the evaluation checkout, on both the row and the
+        # accepted manifest) is deliberately left at the fixture baseline
+        # ("a" * 40) -- the whole point is that it differs from the
+        # training revision.
+
+    validate_quality_campaign_contract(rows, manifest)  # must not raise
+
+
 def test_analysis_uses_one_mwu_holm_family_and_sign_flip_is_sensitivity(
     analysis,
 ) -> None:

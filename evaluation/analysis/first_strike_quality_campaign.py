@@ -458,9 +458,16 @@ def validate_quality_campaign_contract(
             EXPECTED_TREATMENT_REWARD_SHA256[label]
         ):
             raise ValueError(f"{prefix}: frozen reward semantics mismatch")
-        for prefix_key, training_key in (
-            ("git", "training_code_revision"),
-            ("asset_git", "training_asset_revision"),
+        # Code revision is independently pinned, not required to equal the
+        # training revision: a persistence/provenance-only fix can land in
+        # the evaluation checkout after training froze. The evaluation
+        # checkout itself must still match the accepted attempt's pinned
+        # revision (revision == accepted_revision) for BOTH code and asset;
+        # only code additionally may differ from the training checkout --
+        # asset (nail/scene geometry) may not.
+        for prefix_key, training_key, require_training_match in (
+            ("git", "training_code_revision", False),
+            ("asset_git", "training_asset_revision", True),
         ):
             revision = row.get(f"{prefix_key}_revision")
             training_revision = row.get(training_key)
@@ -470,7 +477,9 @@ def validate_quality_campaign_contract(
                 for value in (revision, training_revision, accepted_revision)
             ):
                 raise ValueError(f"{prefix}: invalid {prefix_key} revision")
-            if revision != training_revision or revision != accepted_revision:
+            if revision != accepted_revision:
+                raise ValueError(f"{prefix}: {prefix_key} revision binding mismatch")
+            if require_training_match and revision != training_revision:
                 raise ValueError(f"{prefix}: {prefix_key} revision binding mismatch")
         if row["treatment_config_sha256"] != _treatment_digest(frozen):
             raise ValueError(f"{prefix}: treatment configuration binding mismatch")

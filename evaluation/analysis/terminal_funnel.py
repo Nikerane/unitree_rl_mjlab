@@ -22,6 +22,53 @@ WINDOW_SAMPLES_BEFORE = 30
 EXPECTED_SCHEMA_VERSION = 5
 ASSET_MANIFEST_KEY = "assets:hammer_z1_env/assets/nail_block_scene.xml"
 
+NPZ_PAYLOAD_KEY = "payload_json"
+# numpy's fixed-width Unicode ("<U") dtype stores itemsize = 4 * char_count in a
+# field that must fit a signed 32-bit int, so np.asarray(text, dtype=np.str_)
+# raises TypeError("string too large to store inside array") past this many
+# characters. A weak seed's un-terminated episodes can serialize well past it.
+LEGACY_UNICODE_MAX_CHARS = 536_870_911
+
+
+def encode_payload_json(text: str) -> np.ndarray:
+    """Encode JSON text as a 1-D ``uint8`` array of its UTF-8 bytes.
+
+    Replaces the legacy scalar fixed-width-Unicode (``<U``) encoding, whose
+    itemsize ceiling (see ``LEGACY_UNICODE_MAX_CHARS``) a long-episode weak
+    seed's payload can exceed. A byte array has no such ceiling.
+    """
+
+    return np.frombuffer(text.encode("utf-8"), dtype=np.uint8)
+
+
+def decode_payload_json(npz) -> str:
+    """Decode a loaded NPZ's ``payload_json`` member back to JSON text.
+
+    Accepts both the current 1-D ``uint8`` UTF-8-bytes encoding and the
+    legacy scalar ``<U`` encoding it replaces, so artifacts written before
+    this change keep loading unchanged. Fails closed (raises ``ValueError``,
+    never warns) on any other member set, dtype, shape, or invalid UTF-8.
+    """
+
+    files = list(npz.files)
+    if files != [NPZ_PAYLOAD_KEY]:
+        raise ValueError(
+            f"NPZ must contain exactly {[NPZ_PAYLOAD_KEY]!r}, found {files!r}"
+        )
+    array = npz[NPZ_PAYLOAD_KEY]
+    if array.dtype.kind == "U":
+        if array.shape != ():
+            raise ValueError("legacy payload_json must be a scalar Unicode value")
+        return str(array)
+    if array.dtype == np.dtype("uint8"):
+        if array.ndim != 1:
+            raise ValueError("payload_json byte array must be 1-D uint8")
+        try:
+            return array.tobytes().decode("utf-8", errors="strict")
+        except UnicodeDecodeError as error:
+            raise ValueError(f"payload_json is not valid UTF-8: {error}") from error
+    raise ValueError(f"payload_json has an unsupported dtype: {array.dtype!r}")
+
 
 def _sha256(path: str | Path) -> str:
     digest = hashlib.sha256()
@@ -246,12 +293,7 @@ def load_qualified_bank(
         raise ValueError("manifest artifact SHA-256 mismatch")
 
     with np.load(raw_path, allow_pickle=False) as saved:
-        if saved.files != ["payload_json"]:
-            raise ValueError("raw NPZ must contain exactly payload_json")
-        payload = saved["payload_json"]
-        if payload.shape != () or payload.dtype.kind != "U":
-            raise ValueError("payload_json must be a scalar Unicode value")
-        raw = json.loads(str(payload))
+        raw = json.loads(decode_payload_json(saved))
 
     if raw.get("schema_version") != EXPECTED_SCHEMA_VERSION:
         raise ValueError("unsupported raw schema version")
