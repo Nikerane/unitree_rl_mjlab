@@ -229,6 +229,42 @@ def test_train_fsr4x8_still_requires_impact_w_8(campaign_env):
 
 
 # --------------------------------------------------------------------------
+# CAMPAIGN typo guard (case-insensitive resemblance to a known campaign)
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "bad_campaign, expected_prefix",
+    [
+        ("Fq4x8", "FQ4X8_FAIL"),
+        ("FQ4X8", "FQ4X8_FAIL"),
+        ("fsr4X8", "FSR4X8_FAIL"),
+    ],
+)
+def test_train_rejects_campaign_typo(campaign_env, bad_campaign, expected_prefix):
+    """A CAMPAIGN value that case-insensitively matches a known campaign but
+    isn't an exact match must be rejected, not silently fall through to the
+    unguarded default path (with leaked overrides, wrong seeds, no revision
+    enforcement)."""
+    env = _train_env(campaign_env, CAMPAIGN=bad_campaign, SEEDS="0 1 2", IMPACT_W="999")
+    result = _run(TRAIN_SCRIPT, env)
+    assert result.returncode == 2
+    assert f"{expected_prefix}: CAMPAIGN '{bad_campaign}' looks like" in result.stdout
+
+
+def test_train_unrelated_campaign_unaffected_by_typo_guard(campaign_env):
+    """Regression: a genuinely different campaign name must behave exactly as
+    before -- the new typo guard must not reject it."""
+    env = _train_env(campaign_env, CAMPAIGN="ab1")
+    result = _run(TRAIN_SCRIPT, env)
+    out = result.stdout + result.stderr
+    assert "FQ4X8_FAIL" not in out
+    assert "FSR4X8_FAIL" not in out
+    assert result.returncode == 1
+    assert "### NO GPU/A100" in out
+
+
+# --------------------------------------------------------------------------
 # Evaluation branch
 # --------------------------------------------------------------------------
 
@@ -380,3 +416,87 @@ def test_eval_fsr4x8_unaffected_by_fq4x8_guard(campaign_env):
     out = result.stdout + result.stderr
     assert "### NO CUDA" in out
     assert "EVAL_FAIL: EXPECTED_CODE_REVISION must be a clean 40-hex" not in out
+
+
+# --------------------------------------------------------------------------
+# CAMPAIGN typo guard (case-insensitive resemblance to a known campaign)
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad_campaign", ["Fq4x8", "FQ4X8", "fsr4X8"])
+def test_eval_rejects_campaign_typo(eval_env_data, bad_campaign):
+    """A CAMPAIGN value that case-insensitively matches a known campaign but
+    isn't an exact match must be rejected before any GPU/manifest work, not
+    silently fall through to the unguarded default (glob-based) path."""
+    env = _eval_env(eval_env_data, CAMPAIGN=bad_campaign)
+    result = _run(EVAL_SCRIPT, env)
+    assert result.returncode == 2
+    assert f"EVAL_FAIL: CAMPAIGN '{bad_campaign}' looks like" in result.stdout
+
+
+def test_eval_unrelated_campaign_unaffected_by_typo_guard(campaign_env):
+    """Regression: a genuinely different campaign name must behave exactly as
+    before -- the new typo guard must not reject it."""
+    env = _base_env(campaign_env["home"])
+    env.update(
+        {
+            "SLURM_SUBMIT_DIR": str(campaign_env["repo_root"]),
+            "CAMPAIGN": "ab1",
+        }
+    )
+    result = _run(EVAL_SCRIPT, env)
+    out = result.stdout + result.stderr
+    assert "EVAL_FAIL: CAMPAIGN" not in out
+    assert "### NO CUDA" in out
+
+
+# --------------------------------------------------------------------------
+# Accepted-training manifest row shape (field count + training_seed range)
+# --------------------------------------------------------------------------
+
+
+def test_eval_rejects_manifest_row_with_too_few_fields(eval_env_data):
+    """A row missing checkpoint_path/checkpoint_sha256 (fewer than 6 tab
+    fields) must fail closed even though it still preserves the 32-row count
+    and the per-arm count (columns 1-2 are untouched)."""
+    rows = _valid_manifest_rows()
+    short, task, seed, run_name, _ckpt, _sha = rows[0]
+    rows[0] = (short, task, seed, run_name)  # missing checkpoint_path + checkpoint_sha256
+    _write_manifest(eval_env_data["manifest_path"], rows)
+    env = _eval_env(eval_env_data)
+    result = _run(EVAL_SCRIPT, env)
+    assert result.returncode == 2
+    assert (
+        "EVAL_FAIL: accepted-training manifest has 1 row(s) without exactly 6 tab-separated fields"
+        in result.stdout
+    )
+
+
+def test_eval_rejects_training_seed_out_of_range(eval_env_data):
+    rows = _valid_manifest_rows()
+    short, task, _seed, run_name, ckpt, sha = rows[0]
+    rows[0] = (short, task, 7, run_name, ckpt, sha)  # valid range is 8..15
+    _write_manifest(eval_env_data["manifest_path"], rows)
+    env = _eval_env(eval_env_data)
+    result = _run(EVAL_SCRIPT, env)
+    assert result.returncode == 2
+    assert (
+        "EVAL_FAIL: accepted-training manifest has 1 row(s) with training_seed outside 8..15"
+        in result.stdout
+    )
+
+
+def test_eval_rejects_duplicate_training_seed_within_arm(eval_env_data):
+    """8 rows, all seeds in range, but not the exact set 8..15 (a duplicate
+    displaces one of the required seeds) must still fail closed."""
+    rows = _valid_manifest_rows()
+    short, task, _seed, run_name, ckpt, sha = rows[7]  # f8 arm, seed 15
+    rows[7] = (short, task, 8, run_name, ckpt, sha)  # duplicate seed 8; seed 15 now missing
+    _write_manifest(eval_env_data["manifest_path"], rows)
+    env = _eval_env(eval_env_data)
+    result = _run(EVAL_SCRIPT, env)
+    assert result.returncode == 2
+    assert (
+        "EVAL_FAIL: accepted-training manifest has duplicate training_seed values "
+        "for f8/Unitree-Z1-Hammer-CaT-Impulse-Event-Linear" in result.stdout
+    )

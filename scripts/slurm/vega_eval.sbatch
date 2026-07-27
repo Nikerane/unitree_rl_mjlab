@@ -57,6 +57,19 @@ mkdir -p "$WARP_CACHE_PATH"
 PY=.venv/bin/python
 CKGLOB="${CKGLOB:-}"
 CAMPAIGN="${CAMPAIGN:-ab1}"
+# Reject typos of a known campaign name (e.g. "Fq4x8") before any GPU or
+# manifest work -- otherwise they fall through to the unguarded default
+# (glob-based) path. Exact matches proceed to their dedicated guard blocks;
+# unrelated campaign names are untouched.
+CAMPAIGN_LC=$(printf '%s' "$CAMPAIGN" | tr '[:upper:]' '[:lower:]')
+if [ "$CAMPAIGN_LC" = "fq4x8" ] && [ "$CAMPAIGN" != "fq4x8" ]; then
+  echo "EVAL_FAIL: CAMPAIGN '$CAMPAIGN' looks like fq4x8 but is not an exact, case-sensitive match"
+  exit 2
+fi
+if [ "$CAMPAIGN_LC" = "fsr4x8" ] && [ "$CAMPAIGN" != "fsr4x8" ]; then
+  echo "EVAL_FAIL: CAMPAIGN '$CAMPAIGN' looks like fsr4x8 but is not an exact, case-sensitive match"
+  exit 2
+fi
 EVAL_OUTPUT="$PWD/eval/${CAMPAIGN}"
 # Space-separated dir globs (campaign-agnostic). Default = the A/B parking-fix campaign.
 CKGLOBS="${CKGLOBS:-${CKGLOB:-*a05_* *b1_*}}"
@@ -132,6 +145,12 @@ if [ "$CAMPAIGN" = "fq4x8" ]; then
   FQ_ROW_COUNT=$(awk 'NF{n++} END{print n+0}' "$ACCEPTED_MANIFEST")
   [ "$FQ_ROW_COUNT" -eq 32 ] \
     || { echo "EVAL_FAIL: accepted-training manifest must contain exactly 32 rows, found $FQ_ROW_COUNT"; exit 2; }
+  FQ_MALFORMED_ROWS=$(awk -F'\t' 'NF && NF!=6{n++} END{print n+0}' "$ACCEPTED_MANIFEST")
+  [ "$FQ_MALFORMED_ROWS" -eq 0 ] \
+    || { echo "EVAL_FAIL: accepted-training manifest has $FQ_MALFORMED_ROWS row(s) without exactly 6 tab-separated fields"; exit 2; }
+  FQ_BAD_SEEDS=$(awk -F'\t' 'NF && ($3 !~ /^[0-9]+$/ || $3+0 < 8 || $3+0 > 15){n++} END{print n+0}' "$ACCEPTED_MANIFEST")
+  [ "$FQ_BAD_SEEDS" -eq 0 ] \
+    || { echo "EVAL_FAIL: accepted-training manifest has $FQ_BAD_SEEDS row(s) with training_seed outside 8..15"; exit 2; }
   FQ_BAD_ROWS=$(awk -F'\t' '
     !(($1=="f8" && $2=="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear") ||
       ($1=="f0" && $2=="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0") ||
@@ -141,10 +160,16 @@ if [ "$CAMPAIGN" = "fq4x8" ]; then
   [ "$FQ_BAD_ROWS" -eq 0 ] \
     || { echo "EVAL_FAIL: accepted-training manifest has $FQ_BAD_ROWS row(s) outside the frozen fq4x8 task/short mapping"; exit 2; }
   fq_check_arm_count() {
-    local short=$1 task=$2 n
+    local short=$1 task=$2 n dup
     n=$(awk -F'\t' -v s="$short" -v t="$task" '$1==s && $2==t {n++} END{print n+0}' "$ACCEPTED_MANIFEST")
     [ "$n" -eq 8 ] \
       || { echo "EVAL_FAIL: accepted-training manifest must have exactly 8 rows for $short/$task, found $n"; exit 2; }
+    # Combined with the row count above and the 8..15 range check earlier,
+    # "no duplicates" guarantees the arm's seeds are the exact set 8..15.
+    dup=$(awk -F'\t' -v s="$short" -v t="$task" \
+      '$1==s && $2==t {c[$3]++} END{d=0; for (k in c) if (c[k]>1) d++; print d}' "$ACCEPTED_MANIFEST")
+    [ "$dup" -eq 0 ] \
+      || { echo "EVAL_FAIL: accepted-training manifest has duplicate training_seed values for $short/$task"; exit 2; }
   }
   fq_check_arm_count f8 Unitree-Z1-Hammer-CaT-Impulse-Event-Linear
   fq_check_arm_count f0 Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0

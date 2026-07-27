@@ -57,6 +57,19 @@ export WARP_CACHE_PATH="$HOME/.cache/unitree_rl_mjlab/warp"
 mkdir -p "$WARP_CACHE_PATH"
 PY=.venv/bin/python
 CAMPAIGN="${CAMPAIGN:-nf}"
+# Reject typos of a known campaign name (e.g. "Fq4x8") that would otherwise
+# fall through to the unguarded default path below with leaked overrides,
+# wrong seeds, and no revision-equality enforcement. Exact matches proceed to
+# their dedicated guard blocks; unrelated campaign names are untouched.
+CAMPAIGN_LC=$(printf '%s' "$CAMPAIGN" | tr '[:upper:]' '[:lower:]')
+if [ "$CAMPAIGN_LC" = "fq4x8" ] && [ "$CAMPAIGN" != "fq4x8" ]; then
+  echo "FQ4X8_FAIL: CAMPAIGN '$CAMPAIGN' looks like fq4x8 but is not an exact, case-sensitive match"
+  exit 2
+fi
+if [ "$CAMPAIGN_LC" = "fsr4x8" ] && [ "$CAMPAIGN" != "fsr4x8" ]; then
+  echo "FSR4X8_FAIL: CAMPAIGN '$CAMPAIGN' looks like fsr4x8 but is not an exact, case-sensitive match"
+  exit 2
+fi
 read -ra SEEDARR <<< "${SEEDS:-0 1 2}"
 # nail_driven=0.5 is now the BAKED default (farm-cut). Optional per-run reward-weight overrides:
 #   DELIVERED_W=0  -> F2 arm (delivered-impulse reward off, tests its contribution to the strike).
