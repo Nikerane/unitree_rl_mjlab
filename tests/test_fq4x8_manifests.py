@@ -366,6 +366,177 @@ def test_training_manifest_rejects_retry_history_not_ending_in_accepted_attempt(
         manifests.validate_training_manifest(rows)
 
 
+def test_training_manifest_rejects_wrong_campaign():
+    rows = _mutate(valid_training_rows(), 0, campaign="fsr4x8")
+    with pytest.raises(ValueError, match="campaign"):
+        manifests.validate_training_manifest(rows)
+
+
+def test_training_manifest_rejects_non_accepted_disposition():
+    rows = _mutate(valid_training_rows(), 0, disposition="pending")
+    with pytest.raises(ValueError, match="disposition"):
+        manifests.validate_training_manifest(rows)
+
+
+def test_training_manifest_rejects_missing_training_attempt():
+    rows = _mutate(valid_training_rows(), 0, training_attempt="", retry_history=":accepted")
+    with pytest.raises(ValueError, match="training_attempt"):
+        manifests.validate_training_manifest(rows)
+
+
+def test_training_manifest_rejects_bogus_training_attempt_not_matching_retry_history():
+    # A "bogus" attempt label alone is not what makes this invalid -- what closes the hole is
+    # that it must match the final, accepted entry of its own retry history.
+    rows = _mutate(valid_training_rows(), 0, training_attempt="bogus")
+    with pytest.raises(ValueError, match="retry history"):
+        manifests.validate_training_manifest(rows)
+
+
+def test_training_manifest_rejects_treatment_config_hash_mismatch():
+    rows = _mutate(valid_training_rows(), 0, treatment_config_sha256=_hex("wrong-treatment-config", 64))
+    with pytest.raises(ValueError, match="treatment_config_sha256"):
+        manifests.validate_training_manifest(rows)
+
+
+def test_training_manifest_rejects_fixed_action_signature_mismatch():
+    rows = _mutate(
+        valid_training_rows(), 0, fixed_action_signature_sha256=_hex("wrong-action-sig", 64)
+    )
+    with pytest.raises(ValueError, match="fixed_action_signature_sha256"):
+        manifests.validate_training_manifest(rows)
+
+
+def test_training_manifest_rejects_fixed_impedance_signature_mismatch():
+    rows = _mutate(
+        valid_training_rows(), 0, fixed_impedance_signature_sha256=_hex("wrong-impedance-sig", 64)
+    )
+    with pytest.raises(ValueError, match="fixed_impedance_signature_sha256"):
+        manifests.validate_training_manifest(rows)
+
+
+def test_training_manifest_rejects_cap_signature_mismatch():
+    rows = _mutate(valid_training_rows(), 0, cap_signature_sha256=_hex("wrong-cap-sig", 64))
+    with pytest.raises(ValueError, match="cap_signature_sha256"):
+        manifests.validate_training_manifest(rows)
+
+
+def test_training_manifest_rejects_non_model_499_checkpoint_basename():
+    rows = _mutate(valid_training_rows(), 0, checkpoint_path="/checkpoints/F8/seed8/model_250.pt")
+    with pytest.raises(ValueError, match="model_499.pt"):
+        manifests.validate_training_manifest(rows)
+
+
+def test_training_manifest_rejects_duplicate_checkpoint_path():
+    rows = valid_training_rows()
+    rows[1] = {**rows[1], "checkpoint_path": rows[0]["checkpoint_path"]}
+    with pytest.raises(ValueError, match="checkpoint_path is duplicated"):
+        manifests.validate_training_manifest(rows)
+
+
+def test_training_manifest_rejects_duplicate_checkpoint_sha256():
+    rows = valid_training_rows()
+    rows[1] = {**rows[1], "checkpoint_sha256": rows[0]["checkpoint_sha256"]}
+    with pytest.raises(ValueError, match="checkpoint_sha256 is duplicated"):
+        manifests.validate_training_manifest(rows)
+
+
+def test_training_manifest_rejects_eight_copies_of_seed_8_per_arm():
+    """Reproduces the exact independent-review attack: eight duplicate seed-8
+    rows per arm (32 rows total, right count, wrong content) must still fail
+    closed -- this was the HIGH-1 hole (the old hand-rolled awk validator let
+    this reach the CUDA guard)."""
+    rows = []
+    for arm in manifests.LABELS:
+        for _ in manifests.SEEDS:
+            rows.append(_training_row(arm, 8))
+    assert len(rows) == 32
+    with pytest.raises(ValueError):
+        manifests.validate_training_manifest(rows)
+
+
+# ---------------------------------------------------------------------------
+# CLI (validate-accepted-manifest): exercises the real subprocess entry point
+# the Slurm launcher invokes, end to end.
+# ---------------------------------------------------------------------------
+
+
+def _run_cli(manifest_path, *, expected_code_revision, expected_asset_revision):
+    import subprocess
+    import sys as _sys
+
+    return subprocess.run(
+        [
+            _sys.executable,
+            "-m",
+            "evaluation.analysis.fq4x8_manifests",
+            "validate-accepted-manifest",
+            "--manifest",
+            str(manifest_path),
+            "--expected-code-revision",
+            expected_code_revision,
+            "--expected-asset-revision",
+            expected_asset_revision,
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_cli_accepts_valid_32_row_manifest_and_emits_32_rows(tmp_path):
+    rows = valid_training_rows()
+    manifest_path = tmp_path / "accepted_training_checkpoints.tsv"
+    manifest_path.write_text(manifests.serialize_training_manifest(rows))
+
+    result = _run_cli(
+        manifest_path,
+        expected_code_revision=SHARED_CODE_REVISION,
+        expected_asset_revision=SHARED_ASSET_REVISION,
+    )
+
+    assert result.returncode == 0, result.stderr
+    lines = [line for line in result.stdout.splitlines() if line]
+    assert len(lines) == 32
+    manifest_sha = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    for line in lines:
+        fields = line.split("\t")
+        assert len(fields) == 7
+        assert fields[0] == manifest_sha
+
+
+def test_cli_rejects_manifest_with_duplicate_seeds(tmp_path):
+    rows = []
+    for arm in manifests.LABELS:
+        for _ in manifests.SEEDS:
+            rows.append(_training_row(arm, 8))
+    manifest_path = tmp_path / "accepted_training_checkpoints.tsv"
+    manifest_path.write_text(manifests.serialize_training_manifest(rows))
+
+    result = _run_cli(
+        manifest_path,
+        expected_code_revision=SHARED_CODE_REVISION,
+        expected_asset_revision=SHARED_ASSET_REVISION,
+    )
+
+    assert result.returncode == 2
+    assert "MANIFEST_FAIL" in result.stderr
+    assert result.stdout == ""
+
+
+def test_cli_rejects_code_revision_not_matching_expected(tmp_path):
+    rows = valid_training_rows()
+    manifest_path = tmp_path / "accepted_training_checkpoints.tsv"
+    manifest_path.write_text(manifests.serialize_training_manifest(rows))
+
+    result = _run_cli(
+        manifest_path,
+        expected_code_revision=_hex("different-code-revision", 40),
+        expected_asset_revision=SHARED_ASSET_REVISION,
+    )
+
+    assert result.returncode == 2
+    assert "code_revision does not equal expected code revision" in result.stderr
+
+
 # ---------------------------------------------------------------------------
 # Evaluation manifest rejections
 # ---------------------------------------------------------------------------

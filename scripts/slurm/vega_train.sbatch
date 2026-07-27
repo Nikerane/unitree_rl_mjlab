@@ -118,13 +118,19 @@ fi
 if [ "$CAMPAIGN" = "fq4x8" ]; then
   [ "${SEEDS:-}" = "8 9 10 11 12 13 14 15" ] \
     || { echo "FQ4X8_FAIL: seeds must be exactly 8..15"; exit 2; }
-  [ "${ITERS:-500}" = "500" ] \
-    || { echo "FQ4X8_FAIL: ITERS must be 500"; exit 2; }
-  [ -z "${IMPACT_W:-}" ] \
+  # Exact presence + value: "${ITERS:-500}" = "500" would silently accept both an unset AND an
+  # explicitly empty ITERS (the ":-" operator treats empty the same as unset). ITERS=500 is a
+  # frozen contract for this campaign, not a default -- an omitted/empty override must fail closed.
+  [ "${ITERS+x}" = x ] && [ "$ITERS" = 500 ] \
+    || { echo "FQ4X8_FAIL: ITERS must be exactly 500 (set, not omitted or empty)"; exit 2; }
+  # "must be unset" means unset, not merely empty: "-z ${VAR:-}" accepts an exported-but-empty
+  # override (e.g. IMPACT_W="" leaked via --export=ALL), silently passing a value that would later
+  # be treated as absent. "${VAR+x}" only expands when VAR is actually set (even to "").
+  [ -z "${IMPACT_W+x}" ] \
     || { echo "FQ4X8_FAIL: IMPACT_W must be unset (weights come from the registered task)"; exit 2; }
-  [ -z "${DELIVERED_W:-}" ] \
+  [ -z "${DELIVERED_W+x}" ] \
     || { echo "FQ4X8_FAIL: DELIVERED_W must be unset (weights come from the registered task)"; exit 2; }
-  [ -z "${NAIL_DRIVEN_W:-}" ] \
+  [ -z "${NAIL_DRIVEN_W+x}" ] \
     || { echo "FQ4X8_FAIL: NAIL_DRIVEN_W must be unset (weights come from the registered task)"; exit 2; }
   [[ "${EXPECTED_CODE_REVISION:-}" =~ ^[0-9a-f]{40}$ ]] \
     || { echo "FQ4X8_FAIL: EXPECTED_CODE_REVISION must be a clean 40-hex revision"; exit 2; }

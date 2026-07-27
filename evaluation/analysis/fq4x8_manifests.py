@@ -29,8 +29,11 @@ violation it finds.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
+import sys
+from pathlib import Path
 from typing import Mapping, Sequence
 
 from evaluation.analysis import first_strike_campaign as legacy
@@ -389,16 +392,31 @@ def validate_training_manifest(rows: Sequence[Mapping]) -> None:
     code_revisions: set[str] = set()
     asset_revisions: set[str] = set()
     campaign_config_hashes: set[str] = set()
+    checkpoint_paths: set[str] = set()
+    checkpoint_hashes: set[str] = set()
     for (arm, seed), row in identity.items():
         prefix = f"training manifest: {arm}/seed{seed}"
         if row["campaign"] != CAMPAIGN_NAME:
             raise ValueError(f"{prefix}: campaign must be {CAMPAIGN_NAME!r}")
         if row["disposition"] != "accepted":
             raise ValueError(f"{prefix}: disposition must be 'accepted'")
-        if not str(row["checkpoint_path"]).strip():
+        checkpoint_path = str(row["checkpoint_path"])
+        if not checkpoint_path.strip():
             raise ValueError(f"{prefix}: checkpoint_path is missing")
+        if Path(checkpoint_path).name != "model_499.pt":
+            raise ValueError(
+                f"{prefix}: checkpoint_path must be a model_499.pt checkpoint, "
+                f"got {checkpoint_path!r}"
+            )
+        if checkpoint_path in checkpoint_paths:
+            raise ValueError(f"{prefix}: checkpoint_path is duplicated across the manifest")
+        checkpoint_paths.add(checkpoint_path)
         if not legacy._is_hex_digest(row["checkpoint_sha256"], 64):
             raise ValueError(f"{prefix}: checkpoint_sha256 is missing or malformed")
+        checkpoint_hash = str(row["checkpoint_sha256"]).lower()
+        if checkpoint_hash in checkpoint_hashes:
+            raise ValueError(f"{prefix}: checkpoint_sha256 is duplicated across the manifest")
+        checkpoint_hashes.add(checkpoint_hash)
         if not str(row["training_attempt"]).strip():
             raise ValueError(f"{prefix}: training_attempt is missing")
         _validate_retry_history(
@@ -573,3 +591,72 @@ def validate_evaluation_manifest(
         for key in SENTINELS:
             if int(row[key]) != 0:
                 raise ValueError(f"{prefix}: sentinel {key} is nonzero")
+
+
+# ---------------------------------------------------------------------------
+# CLI: mirrors first_strike_campaign's ``validate-accepted-manifest`` command so
+# the Slurm launcher can validate a snapshot of the accepted-training manifest
+# through one Python entry point, before any GPU work. Emits one TSV line per
+# validated row -- (manifest_sha256, short, training_seed, task, name,
+# checkpoint_path, checkpoint_sha256) -- so the launcher never has to
+# re-parse or reinterpret the manifest columns itself.
+# ---------------------------------------------------------------------------
+
+
+def _command_line() -> int:
+    parser = argparse.ArgumentParser(
+        description="fq4x8 accepted-training-manifest validation support"
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    manifest = subparsers.add_parser(
+        "validate-accepted-manifest",
+        help="validate and emit the frozen fq4x8 accepted-training manifest",
+    )
+    manifest.add_argument("--manifest", required=True)
+    manifest.add_argument("--expected-code-revision", required=True)
+    manifest.add_argument("--expected-asset-revision", required=True)
+    args = parser.parse_args()
+    if args.command != "validate-accepted-manifest":
+        parser.error("unsupported command")
+
+    manifest_path = Path(args.manifest)
+    try:
+        if not legacy._is_hex_digest(args.expected_code_revision, 40):
+            raise ValueError("expected code revision must be a full 40-hex revision")
+        if not legacy._is_hex_digest(args.expected_asset_revision, 40):
+            raise ValueError("expected asset revision must be a full 40-hex revision")
+        rows = parse_training_manifest(manifest_path.read_text(encoding="utf-8"))
+        validate_training_manifest(rows)
+        for row in rows:
+            prefix = f"{row['arm']}/seed{row['training_seed']}"
+            if row["code_revision"] != args.expected_code_revision:
+                raise ValueError(f"{prefix}: code_revision does not equal expected code revision")
+            if row["asset_revision"] != args.expected_asset_revision:
+                raise ValueError(
+                    f"{prefix}: asset_revision does not equal expected asset revision"
+                )
+    except Exception as error:  # noqa: BLE001 -- fail-closed CLI boundary
+        print(f"MANIFEST_FAIL: {error}", file=sys.stderr)
+        return 2
+
+    manifest_sha256 = legacy._sha256(manifest_path)
+    for row in sorted(rows, key=_sort_key):
+        name = f"{CAMPAIGN_NAME}_{row['short']}_seed{row['training_seed']}"
+        print(
+            "\t".join(
+                (
+                    manifest_sha256,
+                    str(row["short"]),
+                    str(row["training_seed"]),
+                    str(row["task"]),
+                    name,
+                    str(row["checkpoint_path"]),
+                    str(row["checkpoint_sha256"]),
+                )
+            )
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(_command_line())

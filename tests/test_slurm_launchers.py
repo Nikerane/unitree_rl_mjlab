@@ -11,11 +11,17 @@ reaches real training or evaluation.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+
+import evaluation.analysis.first_strike_campaign as legacy
+import evaluation.analysis.first_strike_quality_campaign as quality
+import evaluation.analysis.fq4x8_manifests as manifests
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TRAIN_SCRIPT = REPO_ROOT / "scripts" / "slurm" / "vega_train.sbatch"
@@ -30,6 +36,12 @@ FQ_ARMS = (
 FQ_SEEDS = tuple(range(8, 16))
 
 
+def _write_executable(path: Path, source: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(source)
+    path.chmod(0o755)
+
+
 def _git(path: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", "-c", "user.email=test@example.com", "-c", "user.name=Test", *args],
@@ -41,9 +53,17 @@ def _git(path: Path, *args: str) -> subprocess.CompletedProcess:
 
 
 def _git_repo(path: Path) -> str:
-    """Init a one-commit repo (clean, so the launcher's dirty-check passes)."""
+    """Init a one-commit repo (clean, so the launcher's dirty-check passes).
+
+    The commit content is seeded from ``path`` itself so two independently
+    created repos never collide on commit hash (git commit hashes have
+    second-resolution timestamps by default -- an identical tree/author/
+    message committed within the same wall-clock second produces an
+    IDENTICAL hash, which would silently defeat any "wrong revision"
+    equality test).
+    """
     path.mkdir(parents=True, exist_ok=True)
-    (path / ".gitignore").write_text("logs/\n.venv/\n")
+    (path / ".gitignore").write_text(f"logs/\n.venv/\n# {path.name}\n")
     _git(path, "init", "-q")
     _git(path, "add", ".gitignore")
     _git(path, "commit", "-q", "-m", "init")
@@ -157,12 +177,42 @@ def test_train_rejects_wrong_iteration_count(campaign_env):
     env = _train_env(campaign_env, ITERS="1000")
     result = _run(TRAIN_SCRIPT, env)
     assert result.returncode == 2
-    assert "FQ4X8_FAIL: ITERS must be 500" in result.stdout
+    assert "FQ4X8_FAIL: ITERS must be exactly 500" in result.stdout
+
+
+def test_train_rejects_missing_iters(campaign_env):
+    """MEDIUM-3: an omitted ITERS must fail closed, not silently default to
+    500 -- ITERS=500 is a frozen contract for this campaign, not a default."""
+    env = _train_env(campaign_env, ITERS=None)
+    result = _run(TRAIN_SCRIPT, env)
+    assert result.returncode == 2
+    assert "FQ4X8_FAIL: ITERS must be exactly 500" in result.stdout
+
+
+def test_train_rejects_empty_iters(campaign_env):
+    """MEDIUM-3: an exported-but-empty ITERS must also fail closed --
+    "${ITERS:-500}" treats empty the same as unset, which is the hole."""
+    env = _train_env(campaign_env, ITERS="")
+    result = _run(TRAIN_SCRIPT, env)
+    assert result.returncode == 2
+    assert "FQ4X8_FAIL: ITERS must be exactly 500" in result.stdout
 
 
 @pytest.mark.parametrize("override_var", ["IMPACT_W", "DELIVERED_W", "NAIL_DRIVEN_W"])
 def test_train_rejects_each_leaked_reward_override(campaign_env, override_var):
     env = _train_env(campaign_env, **{override_var: "8"})
+    result = _run(TRAIN_SCRIPT, env)
+    assert result.returncode == 2
+    assert f"FQ4X8_FAIL: {override_var} must be unset" in result.stdout
+
+
+@pytest.mark.parametrize("override_var", ["IMPACT_W", "DELIVERED_W", "NAIL_DRIVEN_W"])
+def test_train_rejects_each_exported_empty_reward_override(campaign_env, override_var):
+    """LOW-5: "must be unset" was implemented as "must be empty" (`-z
+    ${VAR:-}`), so an exported-but-empty override (e.g. a leaked --export=ALL
+    setting IMPACT_W="") passed. `${VAR+x}` distinguishes "unset" from
+    "set to empty"."""
+    env = _train_env(campaign_env, **{override_var: ""})
     result = _run(TRAIN_SCRIPT, env)
     assert result.returncode == 2
     assert f"FQ4X8_FAIL: {override_var} must be unset" in result.stdout
@@ -203,6 +253,54 @@ def test_train_rejects_bad_asset_revision(campaign_env):
     result = _run(TRAIN_SCRIPT, env)
     assert result.returncode == 2
     assert "FQ4X8_FAIL: EXPECTED_ASSET_REVISION must be a clean 40-hex revision" in result.stdout
+
+
+def test_train_rejects_missing_asset_revision(campaign_env):
+    env = _train_env(campaign_env, EXPECTED_ASSET_REVISION=None)
+    result = _run(TRAIN_SCRIPT, env)
+    assert result.returncode == 2
+    assert "FQ4X8_FAIL: EXPECTED_ASSET_REVISION must be a clean 40-hex revision" in result.stdout
+
+
+def test_train_rejects_short_asset_revision(campaign_env):
+    env = _train_env(campaign_env, EXPECTED_ASSET_REVISION=campaign_env["asset_rev"][:10])
+    result = _run(TRAIN_SCRIPT, env)
+    assert result.returncode == 2
+    assert "FQ4X8_FAIL: EXPECTED_ASSET_REVISION must be a clean 40-hex revision" in result.stdout
+
+
+def test_train_rejects_wrong_code_revision_equality(campaign_env):
+    """Well-formed 40-hex, but simply the wrong commit -- distinct from the
+    format checks above."""
+    other = _git_repo(campaign_env["home"].parent / "other-code-repo")
+    env = _train_env(campaign_env, EXPECTED_CODE_REVISION=other)
+    result = _run(TRAIN_SCRIPT, env)
+    assert result.returncode == 2
+    assert "FQ4X8_FAIL: code revision does not equal expected code revision" in result.stdout
+
+
+def test_train_rejects_wrong_asset_revision_equality(campaign_env):
+    other = _git_repo(campaign_env["home"].parent / "other-asset-repo")
+    env = _train_env(campaign_env, EXPECTED_ASSET_REVISION=other)
+    result = _run(TRAIN_SCRIPT, env)
+    assert result.returncode == 2
+    assert "FQ4X8_FAIL: asset revision does not equal expected asset revision" in result.stdout
+
+
+def test_train_rejects_actual_dirty_code_repo(campaign_env):
+    (campaign_env["repo_root"] / "untracked.txt").write_text("dirty")
+    env = _train_env(campaign_env)
+    result = _run(TRAIN_SCRIPT, env)
+    assert result.returncode == 2
+    assert "code provenance is unknown or dirty" in result.stdout
+
+
+def test_train_rejects_actual_dirty_asset_repo(campaign_env):
+    (campaign_env["sibling"] / "untracked.txt").write_text("dirty")
+    env = _train_env(campaign_env)
+    result = _run(TRAIN_SCRIPT, env)
+    assert result.returncode == 2
+    assert "asset provenance is unknown or dirty" in result.stdout
 
 
 def test_train_fsr4x8_still_requires_impact_w_8(campaign_env):
@@ -266,33 +364,89 @@ def test_train_unrelated_campaign_unaffected_by_typo_guard(campaign_env):
 
 # --------------------------------------------------------------------------
 # Evaluation branch
+#
+# The accepted-training manifest is now the canonical 21-column, headered TSV
+# (evaluation.analysis.fq4x8_manifests.TRAINING_FIELDS), validated by invoking
+# the real `python -m evaluation.analysis.fq4x8_manifests validate-accepted-
+# manifest` CLI from inside the launcher. To exercise that real validation
+# (not just stop at "no CUDA"), eval_env_data installs a `.venv/bin/python`
+# wrapper that forwards ONLY that one invocation to the real interpreter
+# (against the real source tree, via FQ_SOURCE_ROOT/FQ_REAL_PYTHON) and fails
+# every other invocation -- so the pre-existing CUDA-guard fallback ("### NO
+# CUDA", returncode 1) still fires for every accepted manifest, exactly as
+# before, and the launcher never reaches real evaluation.
 # --------------------------------------------------------------------------
 
 
-def _valid_manifest_rows() -> list[tuple]:
-    rows = []
-    for task, short in FQ_ARMS:
-        for seed in FQ_SEEDS:
-            run_name = f"fq4x8_{short}_seed{seed}"
-            rows.append(
-                (short, task, seed, run_name, f"/fake/{run_name}/model_499.pt", "a" * 64)
-            )
+def _hex(label: str, length: int = 64) -> str:
+    return hashlib.sha256(label.encode()).hexdigest()[:length]
+
+
+def _training_row(arm: str, seed: int, *, code_rev: str, asset_rev: str) -> dict:
+    return {
+        "campaign": manifests.CAMPAIGN_NAME,
+        "disposition": "accepted",
+        "arm": arm,
+        "short": manifests.SHORT[arm],
+        "task": manifests.TASKS[arm],
+        "training_seed": seed,
+        "checkpoint_path": f"/fake/checkpoints/{arm}/seed{seed}/model_499.pt",
+        "checkpoint_sha256": _hex(f"checkpoint:{arm}:{seed}"),
+        "training_attempt": "attempt1",
+        "retry_history": "attempt1:accepted",
+        "code_revision": code_rev,
+        "asset_revision": asset_rev,
+        "campaign_config_sha256": _hex("campaign-config"),
+        "treatment_config_sha256": manifests.EXPECTED_TREATMENT_CONFIG_SHA256[arm],
+        "reader_sha256": manifests.EXPECTED_READER_SHA256[arm],
+        "normalizer_sha256": manifests.EXPECTED_NORMALIZER_SHA256[arm],
+        "treatment_reward_sha256": quality.EXPECTED_TREATMENT_REWARD_SHA256[arm],
+        "fixed_action_signature_sha256": legacy.EXPECTED_FIXED_ACTION_SIGNATURE_SHA256,
+        "fixed_impedance_signature_sha256": legacy.EXPECTED_FIXED_IMPEDANCE_SIGNATURE_SHA256,
+        "cap_signature_sha256": manifests.EXPECTED_CAP_SIGNATURE_SHA256,
+        "clean_state": True,
+    }
+
+
+def valid_training_rows(*, code_rev: str, asset_rev: str) -> list[dict]:
+    return [
+        _training_row(arm, seed, code_rev=code_rev, asset_rev=asset_rev)
+        for arm in manifests.LABELS
+        for seed in sorted(manifests.SEEDS)
+    ]
+
+
+def _mutate(rows: list[dict], index: int, **overrides) -> list[dict]:
+    import copy
+
+    rows = copy.deepcopy(rows)
+    rows[index] = {**rows[index], **overrides}
     return rows
 
 
-def _write_manifest(path: Path, rows: list[tuple]) -> None:
+def _write_manifest(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    lines = ["\t".join(str(field) for field in row) for row in rows]
-    path.write_text("\n".join(lines) + "\n")
+    path.write_text(manifests.serialize_training_manifest(rows))
+
+
+FQ_PYTHON_WRAPPER = """#!/bin/sh
+if [ "$1" = "-m" ] && [ "$2" = "evaluation.analysis.fq4x8_manifests" ]; then
+  PYTHONPATH="$FQ_SOURCE_ROOT" exec "$FQ_REAL_PYTHON" "$@"
+fi
+exit 1
+"""
 
 
 @pytest.fixture
 def eval_env_data(campaign_env):
     eval_root = campaign_env["home"] / "unitree_rl_mjlab_eval"
     manifest_path = eval_root / "fq4x8" / "accepted_training_checkpoints.tsv"
-    _write_manifest(manifest_path, _valid_manifest_rows())
+    rows = valid_training_rows(code_rev=campaign_env["code_rev"], asset_rev=campaign_env["asset_rev"])
+    _write_manifest(manifest_path, rows)
+    _write_executable(campaign_env["repo_root"] / ".venv" / "bin" / "python", FQ_PYTHON_WRAPPER)
     campaign_env["eval_root"] = eval_root
     campaign_env["manifest_path"] = manifest_path
+    campaign_env["rows"] = rows
     return campaign_env
 
 
@@ -307,16 +461,29 @@ def _eval_env(env_data, **overrides) -> dict:
             "ACCEPTED_MANIFEST": str(env_data["manifest_path"]),
             "EXPECTED_CODE_REVISION": env_data["code_rev"],
             "EXPECTED_ASSET_REVISION": env_data["asset_rev"],
+            "FQ_SOURCE_ROOT": str(REPO_ROOT),
+            "FQ_REAL_PYTHON": sys.executable,
         }
     )
     return _apply_overrides(env, overrides)
 
 
+def _assert_manifest_content_rejected(result: subprocess.CompletedProcess, stderr_substring: str) -> None:
+    assert result.returncode == 2
+    assert "EVAL_FAIL: accepted-training manifest validation failed" in result.stdout
+    assert "MANIFEST_FAIL" in result.stderr
+    assert stderr_substring in result.stderr
+
+
 def test_eval_accepts_valid_32_row_manifest(eval_env_data):
+    """The central positive case: a fully valid canonical 32-row manifest
+    must be ACCEPTED by the real Python validator, then fall through to the
+    pre-existing CUDA guard (never reaching real evaluation)."""
     env = _eval_env(eval_env_data)
     result = _run(EVAL_SCRIPT, env)
     out = result.stdout + result.stderr
     assert "EVAL_FAIL" not in out
+    assert "MANIFEST_FAIL" not in out
     assert "### EVAL_PROVENANCE" in out
     # The guard passed; it must now fail for an unrelated, pre-existing reason
     # (no CUDA on this machine) -- never reaching real evaluation.
@@ -325,26 +492,21 @@ def test_eval_accepts_valid_32_row_manifest(eval_env_data):
 
 
 def test_eval_rejects_wrong_manifest_row_count(eval_env_data):
-    rows = _valid_manifest_rows()[:-1]  # 31 rows
+    rows = valid_training_rows(
+        code_rev=eval_env_data["code_rev"], asset_rev=eval_env_data["asset_rev"]
+    )[:-1]  # 31 rows
     _write_manifest(eval_env_data["manifest_path"], rows)
     env = _eval_env(eval_env_data)
     result = _run(EVAL_SCRIPT, env)
-    assert result.returncode == 2
-    assert (
-        "EVAL_FAIL: accepted-training manifest must contain exactly 32 rows, found 31"
-        in result.stdout
-    )
+    _assert_manifest_content_rejected(result, "32 rows")
 
 
 def test_eval_rejects_task_short_mapping_violation(eval_env_data):
-    rows = _valid_manifest_rows()
-    short, _task, seed, run_name, ckpt, sha = rows[0]
-    rows[0] = (short, "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-BOGUS", seed, run_name, ckpt, sha)
+    rows = _mutate(eval_env_data["rows"], 0, task="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-BOGUS")
     _write_manifest(eval_env_data["manifest_path"], rows)
     env = _eval_env(eval_env_data)
     result = _run(EVAL_SCRIPT, env)
-    assert result.returncode == 2
-    assert "outside the frozen fq4x8 task/short mapping" in result.stdout
+    _assert_manifest_content_rejected(result, "task")
 
 
 def test_eval_rejects_missing_manifest(eval_env_data):
@@ -360,6 +522,28 @@ def test_eval_rejects_duplicated_fq4x8_segment_via_eval_root(eval_env_data):
     result = _run(EVAL_SCRIPT, env)
     assert result.returncode == 2
     assert "EVAL_FAIL: EVAL_ROOT must be exactly" in result.stdout
+
+
+def test_eval_rejects_symlinked_eval_root_with_duplicated_fq4x8_component(eval_env_data):
+    """MEDIUM-4: EVAL_ROOT is checked literally against the fixed expected
+    path, but a symlink at that exact path can resolve to a physical
+    directory that already ends in "fq4x8" -- the literal check alone cannot
+    see through the symlink, so the appended campaign segment would be
+    duplicated (.../fq4x8/fq4x8/attempt1)."""
+    import shutil
+
+    physical_target = eval_env_data["home"].parent / "physical-eval-root" / "fq4x8"
+    physical_target.mkdir(parents=True)
+    symlinked_root = eval_env_data["home"] / "unitree_rl_mjlab_eval"
+    shutil.rmtree(symlinked_root)  # eval_env_data pre-creates this as a real directory
+    symlinked_root.symlink_to(physical_target)
+    env = _eval_env(eval_env_data)
+    result = _run(EVAL_SCRIPT, env)
+    assert result.returncode == 2
+    assert (
+        "EVAL_FAIL: resolved EVAL_ROOT must not already contain an fq4x8 path component"
+        in result.stdout
+    )
 
 
 def test_eval_rejects_duplicated_fq4x8_segment_via_manifest(eval_env_data):
@@ -400,6 +584,71 @@ def test_eval_rejects_nonhex_code_revision(eval_env_data):
     result = _run(EVAL_SCRIPT, env)
     assert result.returncode == 2
     assert "EVAL_FAIL: EXPECTED_CODE_REVISION must be a clean 40-hex revision" in result.stdout
+
+
+def test_eval_rejects_missing_asset_revision(eval_env_data):
+    env = _eval_env(eval_env_data, EXPECTED_ASSET_REVISION=None)
+    result = _run(EVAL_SCRIPT, env)
+    assert result.returncode == 2
+    assert "EVAL_FAIL: EXPECTED_ASSET_REVISION must be a clean 40-hex revision" in result.stdout
+
+
+def test_eval_rejects_dirty_asset_revision(eval_env_data):
+    env = _eval_env(
+        eval_env_data, EXPECTED_ASSET_REVISION=eval_env_data["asset_rev"] + "-dirty"
+    )
+    result = _run(EVAL_SCRIPT, env)
+    assert result.returncode == 2
+    assert "EVAL_FAIL: EXPECTED_ASSET_REVISION must be a clean 40-hex revision" in result.stdout
+
+
+def test_eval_rejects_short_asset_revision(eval_env_data):
+    env = _eval_env(eval_env_data, EXPECTED_ASSET_REVISION=eval_env_data["asset_rev"][:10])
+    result = _run(EVAL_SCRIPT, env)
+    assert result.returncode == 2
+    assert "EVAL_FAIL: EXPECTED_ASSET_REVISION must be a clean 40-hex revision" in result.stdout
+
+
+def test_eval_rejects_wrong_code_revision_equality(eval_env_data):
+    """Well-formed 40-hex, but simply the wrong commit -- distinct from the
+    format checks above."""
+    other = _git_repo(eval_env_data["home"].parent / "other-code-repo")
+    env = _eval_env(eval_env_data, EXPECTED_CODE_REVISION=other)
+    result = _run(EVAL_SCRIPT, env)
+    assert result.returncode == 2
+    assert "EVAL_FAIL: code revision does not equal expected code revision" in result.stdout
+
+
+def test_eval_rejects_wrong_asset_revision_equality(eval_env_data):
+    other = _git_repo(eval_env_data["home"].parent / "other-asset-repo")
+    env = _eval_env(eval_env_data, EXPECTED_ASSET_REVISION=other)
+    result = _run(EVAL_SCRIPT, env)
+    assert result.returncode == 2
+    assert "EVAL_FAIL: asset revision does not equal expected asset revision" in result.stdout
+
+
+def test_eval_rejects_actual_dirty_code_repo(eval_env_data):
+    (eval_env_data["repo_root"] / "untracked.txt").write_text("dirty")
+    env = _eval_env(eval_env_data)
+    result = _run(EVAL_SCRIPT, env)
+    assert result.returncode == 2
+    assert "EVAL_FAIL: code provenance is unknown or dirty" in result.stdout
+
+
+def test_eval_rejects_actual_dirty_asset_repo(eval_env_data):
+    (eval_env_data["sibling"] / "untracked.txt").write_text("dirty")
+    env = _eval_env(eval_env_data)
+    result = _run(EVAL_SCRIPT, env)
+    assert result.returncode == 2
+    assert "EVAL_FAIL: asset provenance is unknown or dirty" in result.stdout
+
+
+@pytest.mark.parametrize("bad_attempt", ["", ".", "..", "foo/bar", "attempt one"])
+def test_eval_rejects_unsafe_eval_attempt(eval_env_data, bad_attempt):
+    env = _eval_env(eval_env_data, EVAL_ATTEMPT=bad_attempt if bad_attempt else None)
+    result = _run(EVAL_SCRIPT, env)
+    assert result.returncode == 2
+    assert "EVAL_FAIL: EVAL_ATTEMPT must be a nonempty path-safe attempt label" in result.stdout
 
 
 def test_eval_fsr4x8_unaffected_by_fq4x8_guard(campaign_env):
@@ -451,52 +700,206 @@ def test_eval_unrelated_campaign_unaffected_by_typo_guard(campaign_env):
 
 
 # --------------------------------------------------------------------------
-# Accepted-training manifest row shape (field count + training_seed range)
+# Accepted-training manifest content (HIGH-1: the frozen 32-row identity)
+#
+# The old hand-rolled awk validator only checked row count, per-arm count,
+# and the task/short mapping -- it did not enforce seed uniqueness, checkpoint
+# identity, or any of the frozen reward/action/impedance/cap signatures. Every
+# check below now runs through the real Python validator
+# (evaluation.analysis.fq4x8_manifests.validate_training_manifest).
 # --------------------------------------------------------------------------
 
 
-def test_eval_rejects_manifest_row_with_too_few_fields(eval_env_data):
-    """A row missing checkpoint_path/checkpoint_sha256 (fewer than 6 tab
-    fields) must fail closed even though it still preserves the 32-row count
-    and the per-arm count (columns 1-2 are untouched)."""
-    rows = _valid_manifest_rows()
-    short, task, seed, run_name, _ckpt, _sha = rows[0]
-    rows[0] = (short, task, seed, run_name)  # missing checkpoint_path + checkpoint_sha256
-    _write_manifest(eval_env_data["manifest_path"], rows)
+def test_eval_rejects_manifest_row_with_wrong_column_count(eval_env_data):
+    """A row with fewer columns than the canonical 21-field header (e.g.
+    checkpoint_path/checkpoint_sha256 truncated off) must fail closed."""
+    text = manifests.serialize_training_manifest(eval_env_data["rows"])
+    lines = text.rstrip("\n").split("\n")
+    header, first_row, *rest = lines
+    truncated = "\t".join(first_row.split("\t")[:-2])
+    eval_env_data["manifest_path"].write_text(
+        "\n".join([header, truncated, *rest]) + "\n"
+    )
     env = _eval_env(eval_env_data)
     result = _run(EVAL_SCRIPT, env)
-    assert result.returncode == 2
-    assert (
-        "EVAL_FAIL: accepted-training manifest has 1 row(s) without exactly 6 tab-separated fields"
-        in result.stdout
-    )
+    _assert_manifest_content_rejected(result, "expected 21 columns")
 
 
 def test_eval_rejects_training_seed_out_of_range(eval_env_data):
-    rows = _valid_manifest_rows()
-    short, task, _seed, run_name, ckpt, sha = rows[0]
-    rows[0] = (short, task, 7, run_name, ckpt, sha)  # valid range is 8..15
+    rows = _mutate(eval_env_data["rows"], 0, training_seed=7)
+    _write_manifest(eval_env_data["manifest_path"], rows)
+    env = _eval_env(eval_env_data)
+    result = _run(EVAL_SCRIPT, env)
+    _assert_manifest_content_rejected(result, "8..15")
+
+
+def test_eval_rejects_missing_seed(eval_env_data):
+    """32 rows, right shape, but one arm is missing seed 11 (displaced by a
+    duplicate of a D0/seed8 row). Seeds are a closed 8-element set per arm, so
+    any "missing seed, still 32 rows" shape necessarily introduces a
+    duplicate (arm, seed) somewhere else -- the duplicate check and the exact-
+    seed-set check are the same underlying violation here; either is a
+    legitimate rejection."""
+    rows = [
+        row
+        for row in eval_env_data["rows"]
+        if not (row["arm"] == "F8" and row["training_seed"] == 11)
+    ]
+    rows.append(
+        _training_row(
+            "D0", 8, code_rev=eval_env_data["code_rev"], asset_rev=eval_env_data["asset_rev"]
+        )
+    )
+    assert len(rows) == 32
     _write_manifest(eval_env_data["manifest_path"], rows)
     env = _eval_env(eval_env_data)
     result = _run(EVAL_SCRIPT, env)
     assert result.returncode == 2
-    assert (
-        "EVAL_FAIL: accepted-training manifest has 1 row(s) with training_seed outside 8..15"
-        in result.stdout
+    assert "EVAL_FAIL: accepted-training manifest validation failed" in result.stdout
+    assert "MANIFEST_FAIL" in result.stderr
+
+
+def test_eval_rejects_uneven_per_arm_row_count(eval_env_data):
+    """32 rows total, but F8 holds 9 (one duplicated) and F0 holds 7."""
+    rows = [
+        row
+        for row in eval_env_data["rows"]
+        if not (row["arm"] == "F0" and row["training_seed"] == 8)
+    ]
+    rows.append(
+        _training_row(
+            "F8", 8, code_rev=eval_env_data["code_rev"], asset_rev=eval_env_data["asset_rev"]
+        )
     )
-
-
-def test_eval_rejects_duplicate_training_seed_within_arm(eval_env_data):
-    """8 rows, all seeds in range, but not the exact set 8..15 (a duplicate
-    displaces one of the required seeds) must still fail closed."""
-    rows = _valid_manifest_rows()
-    short, task, _seed, run_name, ckpt, sha = rows[7]  # f8 arm, seed 15
-    rows[7] = (short, task, 8, run_name, ckpt, sha)  # duplicate seed 8; seed 15 now missing
+    assert len(rows) == 32
     _write_manifest(eval_env_data["manifest_path"], rows)
     env = _eval_env(eval_env_data)
     result = _run(EVAL_SCRIPT, env)
     assert result.returncode == 2
-    assert (
-        "EVAL_FAIL: accepted-training manifest has duplicate training_seed values "
-        "for f8/Unitree-Z1-Hammer-CaT-Impulse-Event-Linear" in result.stdout
+    assert "EVAL_FAIL: accepted-training manifest validation failed" in result.stdout
+    assert "MANIFEST_FAIL" in result.stderr
+
+
+def test_eval_rejects_duplicate_arm_seed(eval_env_data):
+    """Row 1 becomes a byte-identical copy of row 0 -- 32 rows, but only 31
+    distinct (arm, seed) identities."""
+    rows = _mutate(eval_env_data["rows"], 1, **eval_env_data["rows"][0])
+    _write_manifest(eval_env_data["manifest_path"], rows)
+    env = _eval_env(eval_env_data)
+    result = _run(EVAL_SCRIPT, env)
+    _assert_manifest_content_rejected(result, "duplicate")
+
+
+def test_eval_rejects_eight_copies_of_seed_8_per_arm(eval_env_data):
+    """Reproduces the exact independent-review HIGH-1 attack: eight duplicate
+    seed-8 rows per arm (32 rows total, right count, wrong content). This
+    manifest passed the old hand-rolled awk validator and reached the CUDA
+    guard."""
+    rows = [
+        _training_row(
+            arm, 8, code_rev=eval_env_data["code_rev"], asset_rev=eval_env_data["asset_rev"]
+        )
+        for arm in manifests.LABELS
+        for _ in manifests.SEEDS
+    ]
+    assert len(rows) == 32
+    _write_manifest(eval_env_data["manifest_path"], rows)
+    env = _eval_env(eval_env_data)
+    result = _run(EVAL_SCRIPT, env)
+    _assert_manifest_content_rejected(result, "duplicate")
+
+
+def test_eval_rejects_the_original_review_attack_manifest(eval_env_data):
+    """The literal review reproduction: eight duplicate seed-8 rows per arm,
+    every checkpoint hash malformed, every training_attempt 'bogus' -- 32
+    rows, right shape, wrong content throughout."""
+    rows = []
+    for arm in manifests.LABELS:
+        for _ in manifests.SEEDS:
+            row = _training_row(
+                arm, 8, code_rev=eval_env_data["code_rev"], asset_rev=eval_env_data["asset_rev"]
+            )
+            row["training_attempt"] = "bogus"
+            row["retry_history"] = "bogus:accepted"
+            row["checkpoint_sha256"] = "not-a-sha"
+            rows.append(row)
+    _write_manifest(eval_env_data["manifest_path"], rows)
+    env = _eval_env(eval_env_data)
+    result = _run(EVAL_SCRIPT, env)
+    assert result.returncode == 2
+    assert "EVAL_FAIL: accepted-training manifest validation failed" in result.stdout
+    assert "MANIFEST_FAIL" in result.stderr
+
+
+def test_eval_rejects_duplicate_checkpoint_path(eval_env_data):
+    rows = _mutate(
+        eval_env_data["rows"], 1, checkpoint_path=eval_env_data["rows"][0]["checkpoint_path"]
     )
+    _write_manifest(eval_env_data["manifest_path"], rows)
+    env = _eval_env(eval_env_data)
+    result = _run(EVAL_SCRIPT, env)
+    _assert_manifest_content_rejected(result, "checkpoint_path is duplicated")
+
+
+def test_eval_rejects_non_model_499_checkpoint_basename(eval_env_data):
+    rows = _mutate(
+        eval_env_data["rows"], 0, checkpoint_path="/fake/checkpoints/F8/seed8/model_250.pt"
+    )
+    _write_manifest(eval_env_data["manifest_path"], rows)
+    env = _eval_env(eval_env_data)
+    result = _run(EVAL_SCRIPT, env)
+    _assert_manifest_content_rejected(result, "model_499.pt")
+
+
+def test_eval_rejects_malformed_checkpoint_sha256(eval_env_data):
+    rows = _mutate(eval_env_data["rows"], 0, checkpoint_sha256="z" * 64)
+    _write_manifest(eval_env_data["manifest_path"], rows)
+    env = _eval_env(eval_env_data)
+    result = _run(EVAL_SCRIPT, env)
+    _assert_manifest_content_rejected(result, "checkpoint_sha256")
+
+
+def test_eval_rejects_wrong_campaign_identity(eval_env_data):
+    rows = _mutate(eval_env_data["rows"], 0, campaign="fsr4x8")
+    _write_manifest(eval_env_data["manifest_path"], rows)
+    env = _eval_env(eval_env_data)
+    result = _run(EVAL_SCRIPT, env)
+    _assert_manifest_content_rejected(result, "campaign")
+
+
+def test_eval_rejects_non_accepted_disposition(eval_env_data):
+    rows = _mutate(eval_env_data["rows"], 0, disposition="pending")
+    _write_manifest(eval_env_data["manifest_path"], rows)
+    env = _eval_env(eval_env_data)
+    result = _run(EVAL_SCRIPT, env)
+    _assert_manifest_content_rejected(result, "disposition")
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "treatment_config_sha256",
+        "reader_sha256",
+        "normalizer_sha256",
+        "treatment_reward_sha256",
+        "fixed_action_signature_sha256",
+        "fixed_impedance_signature_sha256",
+        "cap_signature_sha256",
+    ],
+)
+def test_eval_rejects_each_wrong_frozen_signature(eval_env_data, field):
+    rows = _mutate(eval_env_data["rows"], 0, **{field: _hex(f"wrong-{field}")})
+    _write_manifest(eval_env_data["manifest_path"], rows)
+    env = _eval_env(eval_env_data)
+    result = _run(EVAL_SCRIPT, env)
+    _assert_manifest_content_rejected(result, field)
+
+
+def test_eval_rejects_code_revision_mismatch_within_manifest_row(eval_env_data):
+    """Every row's code_revision must equal the actual accepted revision --
+    not just be well-formed 40-hex."""
+    rows = _mutate(eval_env_data["rows"], 0, code_revision=_hex("other-code-revision", 40))
+    _write_manifest(eval_env_data["manifest_path"], rows)
+    env = _eval_env(eval_env_data)
+    result = _run(EVAL_SCRIPT, env)
+    _assert_manifest_content_rejected(result, "code_revision")
