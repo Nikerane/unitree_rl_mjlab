@@ -13,17 +13,18 @@ touching anything. Every fail-closed boundary below is load-bearing.
 | Accepted-training manifest | ✅ FROZEN, sha256 `fb55f214…` |
 | Evaluation attempt2 (job 40237539) | ✅ COMPLETE, `COMPLETED / 0:0`, 01:20:17, gn54 |
 | Phase-2 read-only verification | ✅ PASS, 16,384 episodes, evidence frozen read-only |
-| `build-evaluation-manifest` builder + ratified validity gates | ✅ IMPLEMENTED, 583 passed / 1 skipped full regression |
+| `build-evaluation-manifest` builder + ratified validity gates | ✅ IMPLEMENTED, 610 passed / 1 skipped full regression |
 | Reviewer B (scientific/provenance) | ✅ COMPLETE — 1 CRITICAL + 2 IMPORTANT, **all resolved** |
 | Reviewer A (correctness) | ✅ COMPLETE — 2 CRITICAL + 4 IMPORTANT, **all resolved** |
 | Width-8 ratification reviews | ✅ GPT-5.6 independent review + Claude Opus review, **approved** |
-| Commit / push | ❌ NOT DONE (deliberate) |
+| Initial width/sentinel commit + push | ✅ `9c2683eb550366bae61620434d1cab1bc44b5f1f` |
+| Float32 replay correction | ✅ reviewed + 610/1 regression; commit pending |
 | `accepted_evaluations.tsv` freeze | ❌ NOT DONE |
 | Task 9 analysis | ❌ NOT STARTED — **yours** |
 
-**Nothing is committed.** The worktree `/private/tmp/unitree_rl_mjlab-first-strike-quality`
-(branch `first-strike-quality`, base `ffac038`) is dirty by design, holding the five named
-source/test/handover files listed in Task B.
+The worktree `/private/tmp/unitree_rl_mjlab-first-strike-quality` is on branch
+`first-strike-quality`. The initial five-file hardening was committed and pushed at
+`9c2683e`; the reviewed float32 replay correction is the only pending source/test work.
 
 **NO TREATMENT OUTCOME HAS BEEN INSPECTED.** No arm mean, contrast, ranking, p-value,
 success comparison or video selection has been computed by anyone. Keep it that way until
@@ -221,6 +222,39 @@ reaches ANY emitted column. **Do not weaken this test to make another one pass.*
 
 ## 5. YOUR TASKS
 
+### Manifest-freeze invocation audit (2026-07-28)
+
+Publication invocation 1 used clean builder revision
+`9c2683eb550366bae61620434d1cab1bc44b5f1f` against immutable evaluation
+attempt2. It failed before writing `accepted_evaluations.tsv`:
+
+```
+MANIFEST_FAIL: evaluation attempt: F8/seed8:
+sentinel quality_nonfinite_n is nonzero (506)
+```
+
+This was a manifest-validator defect, not an evaluation retry or campaign-row
+failure. The validator recomputed producer-native Torch CUDA float32 latches
+with NumPy/float64 and an inappropriate absolute tolerance. A Torch float32
+replay demonstrated that the banked evidence was valid; no checkpoint,
+evaluation artifact, or frozen input changed. No outcome aggregate, contrast,
+ranking, p-value, or video was inspected.
+
+The correction now:
+
+- replays the producer operation order in Torch float32;
+- uses fixed field-specific, `rtol=0` forward-error bounds only for
+  raw-to-snapshot recomputation;
+- keeps every event-to-snapshot latch exact and immutable;
+- rejects nonnumeric, nonfinite, out-of-float32-range, wrong-width, malformed,
+  and out-of-domain evidence;
+- derives genuine overflow independently from malformed-quality and liveness
+  sentinels.
+
+Verification: direct analysis `91/91`; builder `249/249`; original four-suite
+regression `610 passed, 1 skipped`. Two independent reviews found no remaining
+reproducible fail-open blocker.
+
 ### Task A — Phase 4 is COMPLETE; nothing to redo
 Both reviews are done and every Critical/Important finding is resolved with a test.
 Note for any future review: one Reviewer-A dispatch reviewed the WRONG worktree
@@ -242,7 +276,9 @@ cd /private/tmp/unitree_rl_mjlab-first-strike-quality && grep -c build_evaluatio
    evaluation revision.
 3. Deploy a clean detached checkout on Vega (`$HOME/campaigns/fq4x8_evalmanifest_<sha>/`),
    never scp tracked source.
-4. Run the builder ONCE against the immutable attempt2:
+4. Run one publication attempt for the newly reviewed builder revision against
+   immutable attempt2. Failed pre-publication invocations remain in this audit
+   trail; they are not evaluation retries:
 ```
 python -m evaluation.analysis.fq4x8_manifests build-evaluation-manifest \
   --attempt-dir  $HOME/unitree_rl_mjlab_eval/fq4x8/attempt2 \

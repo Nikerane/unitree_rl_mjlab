@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 
 import numpy as np
 import pytest
+import torch
 
 import evaluation.analysis.first_strike_campaign as legacy
 import evaluation.analysis.first_strike_quality_campaign as quality_analysis
@@ -59,6 +61,110 @@ FQ_WRONG_NORMALIZER_HASH = (
     "35985aeb3420b7c58a38fcf850be655690564703478427b603645d50505d46ac"
 )
 QUALITY_SENSOR_SLOT_COUNT = 8
+
+
+def _load_contact_quality_reference():
+    source = (
+        Path(__file__).parents[1]
+        / "src/tasks/hammer/mdp/contact_quality.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "_test_contact_quality_reference", source
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.contact_point_quality
+
+
+CONTACT_QUALITY_REFERENCE = _load_contact_quality_reference()
+
+
+def _bank_producer_quality(trace: dict) -> None:
+    """Replace fixture latches with the actual Torch float32 producer values."""
+
+    onset = trace["first_strike"]["accepted_onset_index"]
+    assert onset is not None
+    physical = trace["physical"]
+    found = torch.tensor(
+        physical["quality_found_count"][onset], dtype=torch.float32
+    ).unsqueeze(0)
+    force = torch.zeros(
+        1, QUALITY_SENSOR_SLOT_COUNT, 3, dtype=torch.float32
+    )
+    force[0, :, 0] = torch.tensor(
+        physical["quality_normal_force_n"][onset], dtype=torch.float32
+    )
+    position = torch.tensor(
+        physical["quality_contact_position_m"][onset], dtype=torch.float32
+    ).unsqueeze(0)
+    normal = torch.tensor(
+        physical["quality_contact_normal"][onset], dtype=torch.float32
+    ).unsqueeze(0)
+    axis = torch.tensor(GEOMETRY["nail_axis"], dtype=torch.float32)
+    nail_top = torch.tensor(
+        [[*GEOMETRY["nail_xy_m"], 0.0]], dtype=torch.float32
+    )
+    point, error, contact_quality, valid, overflow = (
+        CONTACT_QUALITY_REFERENCE(
+            found=found,
+            force_contact=force,
+            position_w=position,
+            nail_top_w=nail_top,
+            nail_axis_w=axis,
+            nail_radius_m=GEOMETRY["nail_radius_m"],
+            num_slots=QUALITY_SENSOR_SLOT_COUNT,
+        )
+    )
+    weights = torch.where(
+        found > 0.0,
+        force[..., 0].clamp_min(0.0),
+        torch.zeros_like(found),
+    )
+    weighted_normal = (normal * weights.unsqueeze(-1)).sum(dim=1)
+    normal_norm = torch.linalg.vector_norm(
+        weighted_normal, dim=-1, keepdim=True
+    )
+    unit_normal = weighted_normal / torch.where(
+        normal_norm > 0.0,
+        normal_norm,
+        torch.ones_like(normal_norm),
+    )
+    axiality = (unit_normal * axis).sum(dim=-1).clamp(0.0, 1.0)
+    axiality = torch.where(
+        valid & (normal_norm.squeeze(-1) > 0.0),
+        axiality,
+        torch.zeros_like(axiality),
+    )
+    snapshot = {
+        "contact_point_w": point[0].tolist(),
+        "contact_error_m": float(error[0]),
+        "contact_quality": float(contact_quality[0]),
+        "contact_quality_valid": bool(valid[0]),
+        "contact_quality_overflow": bool(overflow[0]),
+        "contact_normal_axiality": float(axiality[0]),
+    }
+    trace["first_strike"].update(snapshot)
+    event = trace["event_trace"]
+    first_time = float(
+        np.float32(trace["first_strike"]["first_contact_time_s"])
+    )
+    trace["first_strike"]["first_contact_time_s"] = first_time
+    event["tracker_first_contact_time_s"][onset:] = [
+        first_time for _ in event["tracker_first_contact_time_s"][onset:]
+    ]
+    for event_key, snapshot_key in (
+        ("tracker_contact_point_w", "contact_point_w"),
+        ("tracker_contact_error_m", "contact_error_m"),
+        ("tracker_contact_quality", "contact_quality"),
+        ("tracker_contact_quality_valid", "contact_quality_valid"),
+        ("tracker_contact_quality_overflow", "contact_quality_overflow"),
+        ("tracker_contact_normal_axiality", "contact_normal_axiality"),
+    ):
+        event[event_key][onset:] = [
+            snapshot[snapshot_key]
+            for _ in event[event_key][onset:]
+        ]
 
 
 def _digest(value: dict) -> str:
@@ -198,6 +304,7 @@ def _trace(
             "delivered_payout": [0.0],
         },
     }
+    _bank_producer_quality(trace)
     trace["trace_digest"] = legacy._episode_trace_digest(
         trace, schema_version=3
     )
@@ -708,6 +815,409 @@ def test_quality_recomputes_from_positive_contact_normal_force_not_axial_force()
     assert metrics["first_contact_quality_valid_sampled"] is True
 
 
+def _float32_quality_trace() -> tuple[dict, float, float]:
+    trace = _trace()
+    zero = [0.0, 0.0, 0.0]
+    found = [1, 1] + [0] * (QUALITY_SENSOR_SLOT_COUNT - 2)
+    force = [
+        12.345678329467773,
+        8.765432357788086,
+    ] + [0.0] * (QUALITY_SENSOR_SLOT_COUNT - 2)
+    positions = [
+        [0.5071234703063965, 0.0023456700146198273, 0.10000000149011612],
+        [0.5065432190895081, -0.00123456004075706, 0.10000000149011612],
+    ] + [zero] * (QUALITY_SENSOR_SLOT_COUNT - 2)
+    normals = [
+        [0.10000000149011612, 0.20000000298023224, -0.9700000286102295],
+        [-0.20000000298023224, 0.10000000149011612, -0.9700000286102295],
+    ] + [zero] * (QUALITY_SENSOR_SLOT_COUNT - 2)
+    physical = trace["physical"]
+    physical["quality_found_count"][1] = found
+    physical["quality_normal_force_n"][1] = force
+    physical["quality_contact_position_m"][1] = positions
+    physical["quality_contact_normal"][1] = normals
+
+    # Hand-banked outputs from the producer's float32 tensor arithmetic.  The
+    # test deliberately does not derive its expected values with analysis code.
+    point = [
+        0.5068825483322144,
+        0.000859141640830785,
+        0.10000000149011612,
+    ]
+    error = 0.006935963872820139
+    contact_quality = 0.6659195423126221
+    axiality = 0.9866067171096802
+    event = trace["event_trace"]
+    event["tracker_contact_point_w"][1:] = [point, point]
+    event["tracker_contact_error_m"][1:] = [error, error]
+    event["tracker_contact_quality"][1:] = [
+        contact_quality,
+        contact_quality,
+    ]
+    event["tracker_contact_normal_axiality"][1:] = [axiality, axiality]
+    trace["first_strike"].update(
+        {
+            "contact_point_w": point,
+            "contact_error_m": error,
+            "contact_quality": contact_quality,
+            "contact_normal_axiality": axiality,
+        }
+    )
+    return trace, contact_quality, axiality
+
+
+def test_quality_validation_replays_producer_float32_arithmetic() -> None:
+    """Serialized finite float32 evidence must survive offline recomputation."""
+
+    trace, contact_quality, _ = _float32_quality_trace()
+    metrics = analyze_quality_episode(trace, nail_geometry=GEOMETRY)
+    assert metrics["first_contact_quality_sampled"] == contact_quality
+
+
+def test_quality_validation_matches_actual_torch_producer_across_contacts() -> None:
+    """Offline validation must follow the real producer, not NumPy lookalikes."""
+
+    source = (
+        Path(__file__).parents[1]
+        / "src/tasks/hammer/mdp/contact_quality.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "_test_contact_quality_reference", source
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    producer = module.contact_point_quality
+    rng = np.random.default_rng(20260728)
+    axis = torch.tensor(GEOMETRY["nail_axis"], dtype=torch.float32)
+    nail_top = torch.tensor(
+        [[*GEOMETRY["nail_xy_m"], 0.0]], dtype=torch.float32
+    )
+
+    for _ in range(32):
+        trace = _trace()
+        found = torch.zeros(1, QUALITY_SENSOR_SLOT_COUNT, dtype=torch.float32)
+        found[:, :4] = 1.0
+        force = torch.zeros(
+            1, QUALITY_SENSOR_SLOT_COUNT, 3, dtype=torch.float32
+        )
+        force[0, :4, 0] = torch.tensor(
+            rng.uniform(0.1, 50.0, 4), dtype=torch.float32
+        )
+        position = torch.zeros(
+            1, QUALITY_SENSOR_SLOT_COUNT, 3, dtype=torch.float32
+        )
+        position[0, :4] = torch.tensor(
+            np.column_stack(
+                (
+                    rng.uniform(0.49, 0.51, 4),
+                    rng.uniform(-0.01, 0.01, 4),
+                    rng.uniform(0.08, 0.12, 4),
+                )
+            ),
+            dtype=torch.float32,
+        )
+        normal = torch.zeros(
+            1, QUALITY_SENSOR_SLOT_COUNT, 3, dtype=torch.float32
+        )
+        normal[0, :4] = torch.tensor(
+            rng.normal(size=(4, 3)), dtype=torch.float32
+        )
+        point, error, contact_quality, valid, overflow = producer(
+            found=found,
+            force_contact=force,
+            position_w=position,
+            nail_top_w=nail_top,
+            nail_axis_w=axis,
+            nail_radius_m=GEOMETRY["nail_radius_m"],
+            num_slots=QUALITY_SENSOR_SLOT_COUNT,
+        )
+        weights = torch.where(
+            found > 0.0,
+            force[..., 0].clamp_min(0.0),
+            torch.zeros_like(found),
+        )
+        weighted_normal = (normal * weights.unsqueeze(-1)).sum(dim=1)
+        normal_norm = torch.linalg.vector_norm(
+            weighted_normal, dim=-1, keepdim=True
+        )
+        unit_normal = weighted_normal / torch.where(
+            normal_norm > 0.0,
+            normal_norm,
+            torch.ones_like(normal_norm),
+        )
+        axiality = (unit_normal * axis).sum(dim=-1).clamp(0.0, 1.0)
+        axiality = torch.where(
+            valid & (normal_norm.squeeze(-1) > 0.0),
+            axiality,
+            torch.zeros_like(axiality),
+        )
+
+        physical = trace["physical"]
+        physical["quality_found_count"][1] = found[0].tolist()
+        physical["quality_normal_force_n"][1] = force[0, :, 0].tolist()
+        physical["quality_contact_position_m"][1] = position[0].tolist()
+        physical["quality_contact_normal"][1] = normal[0].tolist()
+        snapshot = {
+            "contact_point_w": point[0].tolist(),
+            "contact_error_m": float(error[0]),
+            "contact_quality": float(contact_quality[0]),
+            "contact_quality_valid": bool(valid[0]),
+            "contact_quality_overflow": bool(overflow[0]),
+            "contact_normal_axiality": float(axiality[0]),
+        }
+        trace["first_strike"].update(snapshot)
+        event = trace["event_trace"]
+        for event_key, snapshot_key in (
+            ("tracker_contact_point_w", "contact_point_w"),
+            ("tracker_contact_error_m", "contact_error_m"),
+            ("tracker_contact_quality", "contact_quality"),
+            ("tracker_contact_quality_valid", "contact_quality_valid"),
+            ("tracker_contact_quality_overflow", "contact_quality_overflow"),
+            ("tracker_contact_normal_axiality", "contact_normal_axiality"),
+        ):
+            event[event_key][1:] = [
+                snapshot[snapshot_key],
+                snapshot[snapshot_key],
+            ]
+        analyze_quality_episode(trace, nail_geometry=GEOMETRY)
+
+
+def test_quality_recomputation_allows_bounded_float32_roundoff() -> None:
+    """Accept only the bounded CUDA roundoff observed for axiality."""
+
+    trace, _, axiality = _float32_quality_trace()
+    producer_value = np.float32(axiality)
+    roundoff = float(producer_value + np.float32(np.finfo(np.float32).eps))
+    trace["first_strike"]["contact_normal_axiality"] = roundoff
+    trace["event_trace"]["tracker_contact_normal_axiality"][1:] = [
+        roundoff,
+        roundoff,
+    ]
+    analyze_quality_episode(trace, nail_geometry=GEOMETRY)
+
+
+@pytest.mark.parametrize(
+    ("field", "drift"),
+    [
+        ("contact_point_w", 1e-7),
+        ("contact_error_m", 1e-8),
+        ("contact_quality", 5e-7),
+        ("contact_normal_axiality", 2e-7),
+    ],
+)
+def test_quality_recomputation_rejects_field_specific_material_drift(
+    field: str, drift: float
+) -> None:
+    """A single generic tolerance must not hide dimensionally different drift."""
+
+    trace = _trace()
+    value = trace["first_strike"][field]
+    if isinstance(value, list):
+        material_drift = list(value)
+        material_drift[0] = float(
+            np.float32(material_drift[0]) + np.float32(drift)
+        )
+    else:
+        material_drift = float(np.float32(value) + np.float32(drift))
+    event_key = {
+        "contact_point_w": "tracker_contact_point_w",
+        "contact_error_m": "tracker_contact_error_m",
+        "contact_quality": "tracker_contact_quality",
+        "contact_normal_axiality": "tracker_contact_normal_axiality",
+    }[field]
+    trace["first_strike"][field] = material_drift
+    trace["event_trace"][event_key][1:] = [
+        material_drift,
+        material_drift,
+    ]
+    with pytest.raises(
+        ValueError,
+        match=rf"snapshot differs from recomputed {field}",
+    ):
+        analyze_quality_episode(trace, nail_geometry=GEOMETRY)
+
+
+def test_no_onset_requires_zero_initialized_tracker_quality_streams() -> None:
+    """A no-contact snapshot cannot coexist with a nonzero dense tracker latch."""
+
+    trace = _no_contact_trace()
+    trace["event_trace"]["tracker_contact_quality"][1] = 0.5
+
+    with pytest.raises(ValueError, match=r"event/snapshot"):
+        analyze_quality_episode(trace, nail_geometry=GEOMETRY)
+
+
+def test_no_onset_requires_false_initialized_tracker_overflow_stream() -> None:
+    """Overflow cannot be latched when the tracker accepted no contact onset."""
+
+    trace = _no_contact_trace()
+    trace["event_trace"]["tracker_contact_quality_overflow"][1] = True
+
+    with pytest.raises(ValueError, match=r"overflow"):
+        analyze_quality_episode(trace, nail_geometry=GEOMETRY)
+
+
+def test_quality_validation_rejects_values_outside_float32_range() -> None:
+    """Finite JSON numbers that overflow the producer dtype fail closed."""
+
+    trace = _trace()
+    trace["first_strike"]["contact_point_w"][0] = 1e300
+    trace["event_trace"]["tracker_contact_point_w"][1:] = [
+        list(trace["first_strike"]["contact_point_w"]),
+        list(trace["first_strike"]["contact_point_w"]),
+    ]
+
+    with pytest.raises(ValueError, match=r"float32 range"):
+        analyze_quality_episode(trace, nail_geometry=GEOMETRY)
+
+
+def test_event_snapshot_binding_remains_exact_across_float32_roundoff() -> None:
+    """Tolerance applies only to raw recomputation, never to the stored latch."""
+
+    trace = _trace()
+    stored = np.float32(trace["first_strike"]["contact_quality"])
+    trace["event_trace"]["tracker_contact_quality"][1] = float(
+        np.nextafter(stored, np.float32(np.inf))
+    )
+
+    with pytest.raises(ValueError, match=r"event/snapshot"):
+        analyze_quality_episode(trace, nail_geometry=GEOMETRY)
+
+
+@pytest.mark.parametrize("sample", [0, 2])
+def test_raw_quality_requires_float32_range_across_dense_trace(sample: int) -> None:
+    """Every raw slot was produced as float32, not only the onset sample."""
+
+    trace = _trace()
+    trace["physical"]["quality_contact_position_m"][sample][0][0] = 1e300
+
+    with pytest.raises(ValueError, match=r"float32 range"):
+        analyze_quality_episode(trace, nail_geometry=GEOMETRY)
+
+
+def test_no_onset_raw_quality_requires_float32_range() -> None:
+    """No-contact evidence cannot hide an impossible dense raw value."""
+
+    trace = _no_contact_trace()
+    trace["physical"]["quality_contact_position_m"][1][0][0] = 1e300
+
+    with pytest.raises(ValueError, match=r"float32 range"):
+        analyze_quality_episode(trace, nail_geometry=GEOMETRY)
+
+
+@pytest.mark.parametrize(
+    ("event_key", "sample", "value"),
+    [
+        ("tracker_contact_quality", 0, 0.5),
+        ("tracker_contact_quality", 2, 0.5),
+        ("tracker_contact_quality_overflow", 0, True),
+        ("tracker_first_contact_time_s", 2, 0.5),
+    ],
+)
+def test_accepted_onset_quality_latches_are_dense_and_immutable(
+    event_key: str, sample: int, value: object
+) -> None:
+    """The dense event trace must be zero before onset and latched afterward."""
+
+    trace = _trace()
+    trace["event_trace"][event_key][sample] = value
+
+    with pytest.raises(ValueError, match=r"event/snapshot|overflow"):
+        analyze_quality_episode(trace, nail_geometry=GEOMETRY)
+
+
+def test_first_contact_time_binding_is_exact_and_float32_bounded() -> None:
+    """The event and snapshot serialize one float32 tracker latch."""
+
+    mismatch = _trace()
+    stored_time = np.float32(
+        mismatch["event_trace"]["tracker_first_contact_time_s"][1]
+    )
+    mismatch["event_trace"]["tracker_first_contact_time_s"][1] = float(
+        np.nextafter(stored_time, np.float32(np.inf))
+    )
+    with pytest.raises(ValueError, match=r"event/snapshot"):
+        analyze_quality_episode(mismatch, nail_geometry=GEOMETRY)
+
+    out_of_range = _trace()
+    out_of_range["first_strike"]["first_contact_time_s"] = 1e300
+    out_of_range["event_trace"]["tracker_first_contact_time_s"][1:] = [
+        1e300,
+        1e300,
+    ]
+    with pytest.raises(ValueError, match=r"float32 range"):
+        analyze_quality_episode(out_of_range, nail_geometry=GEOMETRY)
+
+
+def test_no_onset_requires_zero_snapshot_time() -> None:
+    """The unlatched first-contact clock remains exactly initialized."""
+
+    trace = _no_contact_trace()
+    trace["first_strike"]["first_contact_time_s"] = 5e-13
+
+    with pytest.raises(ValueError, match=r"first_contact_time_s"):
+        analyze_quality_episode(trace, nail_geometry=GEOMETRY)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("first_contact_time_s", -0.004),
+        ("contact_error_m", -5e-10),
+        ("contact_quality", float(np.float32(1.0) + np.finfo(np.float32).eps)),
+        ("contact_normal_axiality", -float(np.finfo(np.float32).eps)),
+    ],
+)
+def test_quality_snapshot_enforces_physical_domains(
+    field: str, value: float
+) -> None:
+    """Finite, mutually latched values still must respect their domains."""
+
+    trace = _trace()
+    event_key = {
+        "first_contact_time_s": "tracker_first_contact_time_s",
+        "contact_error_m": "tracker_contact_error_m",
+        "contact_quality": "tracker_contact_quality",
+        "contact_normal_axiality": "tracker_contact_normal_axiality",
+    }[field]
+    trace["first_strike"][field] = value
+    trace["event_trace"][event_key][1:] = [value, value]
+
+    with pytest.raises(ValueError, match=field):
+        analyze_quality_episode(trace, nail_geometry=GEOMETRY)
+
+
+def test_tracker_started_is_initialized_then_immutable() -> None:
+    """The tracker-started latch cannot turn off after accepted onset."""
+
+    trace = _trace()
+    trace["event_trace"]["tracker_started"][2] = False
+
+    with pytest.raises(ValueError, match=r"started"):
+        analyze_quality_episode(trace, nail_geometry=GEOMETRY)
+
+
+def test_no_onset_still_validates_nail_geometry_float32_range() -> None:
+    """A no-contact outcome cannot bypass malformed frozen geometry."""
+
+    geometry = copy.deepcopy(GEOMETRY)
+    geometry["nail_radius_m"] = 1e300
+
+    with pytest.raises(ValueError, match=r"nail"):
+        analyze_quality_episode(_no_contact_trace(), nail_geometry=geometry)
+
+
+def test_numeric_quality_arrays_reject_mixed_json_booleans() -> None:
+    """A bool nested among numbers cannot be silently coerced to 0/1."""
+
+    trace = _trace()
+    trace["physical"]["quality_normal_force_n"][1][0] = True
+
+    with pytest.raises(ValueError, match=r"JSON numbers"):
+        analyze_quality_episode(trace, nail_geometry=GEOMETRY)
+
+
 @pytest.mark.parametrize(
     "width",
     [
@@ -745,7 +1255,7 @@ def test_analyze_quality_episode_requires_exactly_eight_raw_slots(width) -> None
             lambda trace: trace["first_strike"].__setitem__(
                 "contact_quality", 0.25
             ),
-            "recomputed",
+            "event/snapshot|recomputed",
         ),
         (
             lambda trace: trace["event_trace"][
@@ -769,10 +1279,9 @@ def test_raw_quality_slots_and_latches_fail_closed(mutation, message) -> None:
 
 
 def test_quality_overflow_scope_is_only_the_tracker_accepted_onset() -> None:
-    """Later raw/event overflow cannot rewrite the immutable onset snapshot."""
+    """Later raw slot pressure cannot rewrite the immutable onset snapshot."""
     trace = _trace()
     trace["physical"]["quality_found_count"][2][0] = 9
-    trace["event_trace"]["tracker_contact_quality_overflow"][2] = True
 
     metrics = analyze_quality_episode(trace, nail_geometry=GEOMETRY)
 

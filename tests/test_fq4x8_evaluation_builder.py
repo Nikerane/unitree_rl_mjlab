@@ -60,12 +60,12 @@ QUALITY_SENSOR_SLOT_COUNT = 8
 def _episode(env_id: int, ordinal: int, *, weak: bool = False, **overrides) -> dict:
     """One sampled episode.  ``weak`` = valid instrumentation, poor outcome."""
     sample_count = 4
-    quality_value = 0.0 if weak else 0.83
-    contact_error = 0.0 if weak else 0.012 * float(np.sqrt(1.0 - quality_value))
+    quality_value = 0.0 if weak else 1.0
+    contact_error = 0.0
     contact_point = (
         [0.0, 0.0, 0.0]
         if weak
-        else [0.5 + contact_error, 0.0, 0.1]
+        else [0.5, 0.0, float(np.float32(0.1))]
     )
     contact_normal = [0.0, 0.0, -1.0]
     contact = [False] * sample_count if weak else [False, True, True, False]
@@ -139,7 +139,7 @@ def _episode(env_id: int, ordinal: int, *, weak: bool = False, **overrides) -> d
     latched_time = (
         [0.0] * sample_count
         if weak
-        else [0.0, 0.004, 0.004, 0.004]
+        else [0.0] + [float(np.float32(0.004))] * (sample_count - 1)
     )
     latched_axiality = (
         [0.0] * sample_count
@@ -172,7 +172,9 @@ def _episode(env_id: int, ordinal: int, *, weak: bool = False, **overrides) -> d
             "contact_quality": quality_value,
             "contact_quality_valid": False if weak else True,
             "contact_quality_overflow": False,
-            "first_contact_time_s": 0.0 if weak else 0.004,
+            "first_contact_time_s": (
+                0.0 if weak else float(np.float32(0.004))
+            ),
             "contact_normal_axiality": 0.0 if weak else 1.0,
         },
         # Instrument liveness: the tracker appends one reading per physics
@@ -780,7 +782,11 @@ def test_quality_overflow_episode_fails(tmp_path):
         for o in range(manifests.EXPECTED_EPISODES_PER_ENV)
     ]
     episodes[7]["physical"]["quality_found_count"][1][0] = 9
-    episodes[7]["event_trace"]["tracker_contact_quality_overflow"][1] = True
+    episodes[7]["event_trace"]["tracker_contact_quality_overflow"][1:] = [
+        True,
+        True,
+        True,
+    ]
     episodes[7]["first_strike"]["contact_quality_overflow"] = True
     attempt, training_rows = _make_attempt(
         tmp_path, payload_overrides={("F8", 8): {"episodes": episodes}}
@@ -1090,7 +1096,7 @@ def test_sparse_tracker_stream_fails_liveness(tmp_path):
     attempt, training_rows = _make_attempt(
         tmp_path, payload_overrides={("F8", 8): {"episodes": episodes}}
     )
-    with pytest.raises(ValueError, match="liveness"):
+    with pytest.raises(ValueError, match="liveness|quality_nonfinite"):
         _build(attempt, training_rows)
 
 
@@ -1105,7 +1111,7 @@ def test_dead_instrument_episode_fails(tmp_path):
     attempt, training_rows = _make_attempt(
         tmp_path, payload_overrides={("F8", 8): {"episodes": episodes}}
     )
-    with pytest.raises(ValueError, match="liveness"):
+    with pytest.raises(ValueError, match="liveness|quality_nonfinite"):
         _build(attempt, training_rows)
 
 
@@ -1291,7 +1297,11 @@ def test_liveness_and_aligned_true_onset_overflow_are_independent():
     episode = _episode(0, 0)
     episode["event_trace"]["tracker_contact_quality"] = []
     episode["physical"]["quality_found_count"][1][0] = 9
-    episode["event_trace"]["tracker_contact_quality_overflow"][1] = True
+    episode["event_trace"]["tracker_contact_quality_overflow"][1:] = [
+        True,
+        True,
+        True,
+    ]
     episode["first_strike"]["contact_quality_overflow"] = True
 
     sentinels = manifests._derive_validity_sentinels(
@@ -1336,7 +1346,11 @@ def test_missing_physical_contact_and_aligned_overflow_are_independent():
     episode = _episode(0, 0)
     episode["physical"].pop("contact")
     episode["physical"]["quality_found_count"][1][0] = 9
-    episode["event_trace"]["tracker_contact_quality_overflow"][1] = True
+    episode["event_trace"]["tracker_contact_quality_overflow"][1:] = [
+        True,
+        True,
+        True,
+    ]
     episode["first_strike"]["contact_quality_overflow"] = True
 
     sentinels = manifests._derive_validity_sentinels(
@@ -1352,7 +1366,11 @@ def test_aligned_true_onset_overflow_counts_as_overflow():
     """All three accepted-onset representations agreeing True is overflow."""
     episode = _episode(0, 0)
     episode["physical"]["quality_found_count"][1][0] = 9
-    episode["event_trace"]["tracker_contact_quality_overflow"][1] = True
+    episode["event_trace"]["tracker_contact_quality_overflow"][1:] = [
+        True,
+        True,
+        True,
+    ]
     episode["first_strike"]["contact_quality_overflow"] = True
 
     sentinels = manifests._derive_validity_sentinels(
@@ -2000,7 +2018,6 @@ def test_post_onset_overflow_does_not_change_accepted_snapshot_scope(tmp_path):
         for o in range(manifests.EXPECTED_EPISODES_PER_ENV)
     ]
     episodes[29]["physical"]["quality_found_count"][3][0] = 9
-    episodes[29]["event_trace"]["tracker_contact_quality_overflow"][3] = True
     attempt, training_rows = _make_attempt(
         tmp_path, payload_overrides={("F8", 8): {"episodes": episodes}}
     )

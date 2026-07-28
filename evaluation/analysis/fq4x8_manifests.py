@@ -1066,12 +1066,13 @@ def _derive_validity_sentinels(
             and snapshot_valid
             and raw_quality_valid
             and overflow_evidence_valid
-            and not overflowed
         ):
             try:
                 quality.validate_first_contact_quality(
                     episode, nail_geometry=nail_geometry
                 )
+            except quality.QualityOverflowError:
+                pass
             except ValueError:
                 episode_nonfinite = True
         if episode_nonfinite:
