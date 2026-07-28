@@ -18,13 +18,13 @@ touching anything. Every fail-closed boundary below is load-bearing.
 | Reviewer A (correctness) | ✅ COMPLETE — 2 CRITICAL + 4 IMPORTANT, **all resolved** |
 | Width-8 ratification reviews | ✅ GPT-5.6 independent review + Claude Opus review, **approved** |
 | Initial width/sentinel commit + push | ✅ `9c2683eb550366bae61620434d1cab1bc44b5f1f` |
-| Float32 replay correction | ✅ reviewed + 610/1 regression; commit pending |
-| `accepted_evaluations.tsv` freeze | ❌ NOT DONE |
+| Float32 replay correction | ✅ `6ae9ff3f60ca4e0d6b31cd5e675ecabf2b45acb2`, 610/1 regression |
+| `accepted_evaluations.tsv` freeze | ✅ 32 rows, sha256 `8679604440712d…`, read-only |
 | Task 9 analysis | ❌ NOT STARTED — **yours** |
 
 The worktree `/private/tmp/unitree_rl_mjlab-first-strike-quality` is on branch
-`first-strike-quality`. The initial five-file hardening was committed and pushed at
-`9c2683e`; the reviewed float32 replay correction is the only pending source/test work.
+`first-strike-quality`. Initial hardening was committed at `9c2683e`; the reviewed
+float32 correction was committed and pushed at `6ae9ff3`.
 
 **NO TREATMENT OUTCOME HAS BEEN INSPECTED.** No arm mean, contrast, ranking, p-value,
 success comparison or video selection has been computed by anyone. Keep it that way until
@@ -255,6 +255,24 @@ Verification: direct analysis `91/91`; builder `249/249`; original four-suite
 regression `610 passed, 1 skipped`. Two independent reviews found no remaining
 reproducible fail-open blocker.
 
+Publication invocation 2 at clean detached Vega builder revision `6ae9ff3`
+succeeded with exactly 32 rows and all six sentinels zero. Canonical validation
+passed, then these files were frozen read-only:
+
+- `accepted_evaluations.tsv`:
+  `8679604440712d276996b8768842fa2358b8119c798ab94208c7a504a4f34136`
+- `accepted_evaluations.tsv.sha256`:
+  `3ebdbff4d918005253813b99330cf2ec52bb78b676458f2714b58cca1c0dbe37`
+- `accepted_evaluations_inventory.sha256`:
+  `ae4ff87dc4f40cb4193a993ce47fcf5bd46e39be99d21ba9f214d16792cbef0c`
+
+The earlier expected SHA `e927662…` was reproduced from the preserved local
+dry run and diagnosed exactly: its 32 retry-history cells contained only
+`attempt2:accepted`. Replacing those cells with the frozen lineage
+`attempt1:infra_failure;attempt2:accepted` makes it byte-identical to the Vega
+manifest and yields `86796044…`. No other byte differs; therefore the mismatch
+was a stale provenance-only expectation, not evidence or outcome drift.
+
 ### Task A — Phase 4 is COMPLETE; nothing to redo
 Both reviews are done and every Critical/Important finding is resolved with a test.
 Note for any future review: one Reviewer-A dispatch reviewed the WRONG worktree
@@ -285,6 +303,7 @@ python -m evaluation.analysis.fq4x8_manifests build-evaluation-manifest \
   --training-manifest $HOME/unitree_rl_mjlab_eval/fq4x8/accepted_training_checkpoints.tsv \
   --training-manifest-sha256 fb55f214d6e0cb2da308e6580ef535d4823038bc8ab842a05ca4085ab346ec14 \
   --evaluation-attempt attempt2 \
+  --evaluation-retry-history 'attempt1:infra_failure;attempt2:accepted' \
   --expected-evaluation-code-revision ffac038c6ee5ad903fbd0feb33311b7c562699e4 \
   --out $HOME/unitree_rl_mjlab_eval/fq4x8/accepted_evaluations.tsv
 ```
@@ -292,9 +311,10 @@ python -m evaluation.analysis.fq4x8_manifests build-evaluation-manifest \
 6. Bank the `accepted_evaluations.tsv` SHA-256; make it and a SHA sidecar read-only; add both
    to the evidence inventory; update the ledger.
 
-Expected sha (from the local dry run, for cross-check only — the Vega run is authoritative):
-`e92766265796218035e07bcef878c7b5c09de15072952fd947b92db755de6a60`.
-A mismatch is a real signal, not noise — investigate before proceeding.
+Authoritative SHA:
+`8679604440712d276996b8768842fa2358b8119c798ab94208c7a504a4f34136`.
+The retired dry-run SHA `e927662…` omitted the failed-attempt lineage; see the
+byte-exact diagnosis above.
 
 ### Task C — Task 9 analysis (yours from the start)
 Only AFTER the manifest is frozen. Statistics, figures, video selection.
