@@ -363,6 +363,183 @@ def test_train_unrelated_campaign_unaffected_by_typo_guard(campaign_env):
 
 
 # --------------------------------------------------------------------------
+# fq3x8 training branch
+# --------------------------------------------------------------------------
+
+
+FQ3X8_ARMS = (
+    ("Unitree-Z1-Hammer-CaT-Impulse-Event-Linear", "f8"),
+    ("Unitree-Z1-Hammer-CaT-Impulse-Event-Bounded", "b8"),
+    ("Unitree-Z1-Hammer-CaT-Impulse-Event-Quality", "fq"),
+)
+
+
+def _fq3x8_train_env(campaign_env, **overrides) -> dict:
+    env = _base_env(campaign_env["home"])
+    env.update(
+        {
+            "SLURM_SUBMIT_DIR": str(campaign_env["repo_root"]),
+            "SLURM_ARRAY_TASK_ID": "0",
+            "CAMPAIGN": "fq3x8",
+            "SEEDS": "16 17 18 19 20 21 22 23",
+            "SINGLE_TASK": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear",
+            "SINGLE_SHORT": "f8",
+            "ITERS": "500",
+            "EXPECTED_CODE_REVISION": campaign_env["code_rev"],
+            "EXPECTED_ASSET_REVISION": campaign_env["asset_rev"],
+        }
+    )
+    return _apply_overrides(env, overrides)
+
+
+@pytest.mark.parametrize("task, short", FQ3X8_ARMS)
+def test_fq3x8_train_accepts_only_each_frozen_arm(campaign_env, task, short):
+    """Changing the frozen task/short matrix must reject before GPU work."""
+    result = _run(
+        TRAIN_SCRIPT, _fq3x8_train_env(campaign_env, SINGLE_TASK=task, SINGLE_SHORT=short)
+    )
+    out = result.stdout + result.stderr
+    assert "FQ3X8_FAIL" not in out
+    assert "### TRAIN task=" in out
+    assert result.returncode == 1
+    assert "### NO GPU/A100" in out
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"SINGLE_TASK": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Bogus"},
+        {"SINGLE_SHORT": "wrong"},
+    ],
+)
+def test_fq3x8_train_rejects_task_short_matrix_mutations(campaign_env, overrides):
+    """A broadened or mismatched frozen matrix must fail closed."""
+    result = _run(TRAIN_SCRIPT, _fq3x8_train_env(campaign_env, **overrides))
+    assert result.returncode == 2
+    assert "FQ3X8_FAIL: SINGLE_TASK/SINGLE_SHORT is not a frozen fq3x8 arm" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "task, short",
+    [
+        ("Unitree-Z1-Hammer-CaT-Impulse-Event-Linear", "b8"),
+        ("Unitree-Z1-Hammer-CaT-Impulse-Event-Linear", "fq"),
+        ("Unitree-Z1-Hammer-CaT-Impulse-Event-Bounded", "f8"),
+        ("Unitree-Z1-Hammer-CaT-Impulse-Event-Bounded", "fq"),
+        ("Unitree-Z1-Hammer-CaT-Impulse-Event-Quality", "f8"),
+        ("Unitree-Z1-Hammer-CaT-Impulse-Event-Quality", "b8"),
+    ],
+)
+def test_fq3x8_train_rejects_every_cross_pair_of_frozen_values(campaign_env, task, short):
+    """Valid task and short values are invalid when paired with another arm."""
+    result = _run(
+        TRAIN_SCRIPT, _fq3x8_train_env(campaign_env, SINGLE_TASK=task, SINGLE_SHORT=short)
+    )
+    assert result.returncode == 2
+    assert "FQ3X8_FAIL: SINGLE_TASK/SINGLE_SHORT is not a frozen fq3x8 arm" in result.stdout
+    assert "### NO GPU/A100" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    "overrides, expected_message",
+    [
+        ({"CAMPAIGN": "Fq3x8"}, "FQ3X8_FAIL: CAMPAIGN 'Fq3x8' looks like fq3x8"),
+        ({"SEEDS": "8 9 10 11 12 13 14 15"}, "FQ3X8_FAIL: seeds must be exactly 16..23"),
+        ({"ITERS": "499"}, "FQ3X8_FAIL: ITERS must be exactly 500"),
+        ({"ITERS": None}, "FQ3X8_FAIL: ITERS must be exactly 500"),
+        ({"ITERS": ""}, "FQ3X8_FAIL: ITERS must be exactly 500"),
+    ],
+)
+def test_fq3x8_train_rejects_campaign_seed_iteration_mutations(
+    campaign_env, overrides, expected_message
+):
+    """Exact campaign spelling, seed list, and explicit iteration count are frozen."""
+    result = _run(TRAIN_SCRIPT, _fq3x8_train_env(campaign_env, **overrides))
+    assert result.returncode == 2
+    assert expected_message in result.stdout
+
+
+@pytest.mark.parametrize("override_var", ["IMPACT_W", "DELIVERED_W", "NAIL_DRIVEN_W"])
+@pytest.mark.parametrize("leaked_value", ["8", ""])
+def test_fq3x8_train_rejects_set_reward_override(campaign_env, override_var, leaked_value):
+    """Set-to-empty is still a leaked reward override, not an unset variable."""
+    result = _run(
+        TRAIN_SCRIPT, _fq3x8_train_env(campaign_env, **{override_var: leaked_value})
+    )
+    assert result.returncode == 2
+    assert f"FQ3X8_FAIL: {override_var} must be unset" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "revision_var, bad_revision",
+    [
+        ("EXPECTED_CODE_REVISION", None),
+        ("EXPECTED_CODE_REVISION", "g" * 40),
+        ("EXPECTED_CODE_REVISION", "a" * 39),
+        ("EXPECTED_ASSET_REVISION", None),
+        ("EXPECTED_ASSET_REVISION", "z" * 40),
+        ("EXPECTED_ASSET_REVISION", "b" * 39),
+    ],
+)
+def test_fq3x8_train_rejects_noncanonical_expected_revision(
+    campaign_env, revision_var, bad_revision
+):
+    """Both expected revisions must be supplied as clean, 40-character hex IDs."""
+    result = _run(
+        TRAIN_SCRIPT, _fq3x8_train_env(campaign_env, **{revision_var: bad_revision})
+    )
+    assert result.returncode == 2
+    assert f"FQ3X8_FAIL: {revision_var} must be a clean 40-hex revision" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "revision_var, other_repo",
+    [
+        ("EXPECTED_CODE_REVISION", "other-fq3x8-code-repo"),
+        ("EXPECTED_ASSET_REVISION", "other-fq3x8-asset-repo"),
+    ],
+)
+def test_fq3x8_train_rejects_wrong_well_formed_revision(
+    campaign_env, revision_var, other_repo
+):
+    """A syntactically valid revision must still equal the clean target repository."""
+    other = _git_repo(campaign_env["home"].parent / other_repo)
+    result = _run(TRAIN_SCRIPT, _fq3x8_train_env(campaign_env, **{revision_var: other}))
+    assert result.returncode == 2
+    expected = "code" if revision_var == "EXPECTED_CODE_REVISION" else "asset"
+    assert f"FQ3X8_FAIL: {expected} revision does not equal expected {expected} revision" in result.stdout
+
+
+@pytest.mark.parametrize("campaign", ["fq4x8", "fsr4x8"])
+def test_fq3x8_train_guard_leaves_historical_campaigns_unchanged(campaign_env, campaign):
+    """The fq3x8 branch must not reject pre-existing guarded campaigns."""
+    if campaign == "fq4x8":
+        env = _train_env(campaign_env)
+    else:
+        env = _base_env(campaign_env["home"])
+        env.update(
+            {
+                "SLURM_SUBMIT_DIR": str(campaign_env["repo_root"]),
+                "SLURM_ARRAY_TASK_ID": "0",
+                "CAMPAIGN": "fsr4x8",
+                "SEEDS": "0 1 2 3 4 5 6 7",
+                "SINGLE_TASK": "Unitree-Z1-Hammer-CaT-Impulse",
+                "SINGLE_SHORT": "c",
+                "ITERS": "500",
+                "IMPACT_W": "8",
+                "DELIVERED_W": "2",
+                "EXPECTED_CODE_REVISION": campaign_env["code_rev"],
+                "EXPECTED_ASSET_REVISION": campaign_env["asset_rev"],
+            }
+        )
+    result = _run(TRAIN_SCRIPT, env)
+    out = result.stdout + result.stderr
+    assert "FQ3X8_FAIL" not in out
+    assert result.returncode == 1
+    assert "### NO GPU/A100" in out
+
+
+# --------------------------------------------------------------------------
 # Evaluation branch
 #
 # The accepted-training manifest is now the canonical 21-column, headered TSV

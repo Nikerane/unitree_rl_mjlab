@@ -5,10 +5,14 @@ import torch
 
 from src.tasks.hammer.mdp.contact_quality import contact_point_quality
 from src.tasks.hammer.mdp.first_strike import _ENV_FIRST_STRIKE_ATTR
-from src.tasks.hammer.mdp.rewards import FirstStrikeQualityImpactRewardTerm
+from src.tasks.hammer.mdp.rewards import (
+  FirstStrikeBoundedImpactRewardTerm,
+  FirstStrikeQualityImpactRewardTerm,
+)
 
 
 NAIL_RADIUS_M = 0.012
+V_FQ = 1.4598331451416016
 
 
 def _single_contact(
@@ -181,6 +185,7 @@ def _quality_reward_env(
   productive: bool = True,
   quality: float = 0.25,
   quality_valid: bool = True,
+  overflow: bool = False,
   v_precontact: float = 3.0,
   delivered: float = 10.0,
 ):
@@ -193,6 +198,7 @@ def _quality_reward_env(
       "productive": torch.tensor([productive]),
       "contact_quality": torch.tensor([quality]),
       "contact_quality_valid": torch.tensor([quality_valid]),
+      "contact_overflow": torch.tensor([overflow]),
       "v_precontact": torch.tensor([v_precontact]),
       "delivered": torch.tensor([delivered]),
     },
@@ -249,3 +255,60 @@ def test_quality_speed_reader_rejects_nonpositive_or_nonfinite_normalizer(bad):
 
   with pytest.raises(ValueError):
     term(env, v_expected=bad)
+
+
+@pytest.mark.parametrize(
+  ("v_precontact", "expected"),
+  [
+    (-V_FQ, 0.0),
+    (0.0, 0.0),
+    (0.5 * V_FQ, 0.5),
+    (V_FQ, 1.0),
+    (300.0 * V_FQ, 1.0),
+  ],
+  ids=["negative", "zero", "half-knee", "knee", "extreme-speed"],
+)
+def test_bounded_speed_reader_clamps_the_productive_first_strike(v_precontact, expected):
+  """Removing either lower/upper clamp must fail this center-blind B8 contract."""
+  env, _ = _quality_reward_env(v_precontact=v_precontact)
+  term = FirstStrikeBoundedImpactRewardTerm(cfg=None, env=env)
+
+  assert term(env, v_expected=V_FQ).item() == pytest.approx(expected)
+
+
+def test_bounded_speed_reader_pays_a_productive_event_only_once():
+  """Removing the inherited first-event latch would repeat B8's maximize credit."""
+  env, _ = _quality_reward_env(v_precontact=V_FQ)
+  term = FirstStrikeBoundedImpactRewardTerm(cfg=None, env=env)
+
+  assert term(env, v_expected=V_FQ).item() == pytest.approx(1.0)
+  assert term(env, v_expected=V_FQ).item() == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize("bad", [0.0, -1.0, float("inf"), float("nan")])
+def test_bounded_speed_reader_rejects_nonpositive_or_nonfinite_normalizer(bad):
+  """Passing an invalid B8 speed normalizer must fail rather than normalize silently."""
+  env, _ = _quality_reward_env()
+  term = FirstStrikeBoundedImpactRewardTerm(cfg=None, env=env)
+
+  with pytest.raises(ValueError):
+    term(env, v_expected=bad)
+
+
+@pytest.mark.parametrize(
+  "quality, quality_valid, overflow",
+  [(0.0, False, False), (1.0, True, True), (0.25, False, True)],
+)
+def test_bounded_speed_reader_is_center_blind_to_quality_validity_and_overflow(
+  quality, quality_valid, overflow
+):
+  """Reading FQ contact-quality fields would make B8 anything other than center-blind."""
+  env, _ = _quality_reward_env(
+    quality=quality,
+    quality_valid=quality_valid,
+    overflow=overflow,
+    v_precontact=0.5 * V_FQ,
+  )
+  term = FirstStrikeBoundedImpactRewardTerm(cfg=None, env=env)
+
+  assert term(env, v_expected=V_FQ).item() == pytest.approx(0.5)

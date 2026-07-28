@@ -21,6 +21,7 @@ from contextlib import contextmanager
 import copy
 import csv
 import hashlib
+import inspect
 import json
 import math
 import re
@@ -47,6 +48,7 @@ import src.tasks  # noqa: F401  (register hammer tasks)
 from src.assets.robots.unitree_z1.z1_constants import HAMMER_HEAD_SITE_NAME
 from src.tasks.hammer.config.z1.env_cfgs import IMP_J_LIMIT
 from src.tasks.hammer.mdp.first_strike import (
+  FirstStrikeEventTracker,
   REASON_SUCCESS,
   REASON_WINDOW,
   _ENV_FIRST_STRIKE_ATTR,
@@ -75,15 +77,25 @@ from evaluation.analysis.first_strike_campaign import (
 )
 
 ARM_JOINTS = ("joint1", "joint2", "joint3", "joint4", "joint5", "joint6")
+LITERAL_IMPULSE_LIMITS_N_M_S = (1.64, 3.28, 1.64, 1.64, 1.64, 1.64)
 TASK_TO_ARM = {task: arm for arm, task in ARM_TASKS.items()}
 QUALITY_ARM_TASKS = {
   "F8": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear",
   "F0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0",
   "D0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0",
   "FQ": "Unitree-Z1-Hammer-CaT-Impulse-Event-Quality",
+  "B8": "Unitree-Z1-Hammer-CaT-Impulse-Event-Bounded",
 }
 QUALITY_TASK_TO_ARM = {task: arm for arm, task in QUALITY_ARM_TASKS.items()}
 QUALITY_EVALUATION_REFERENCE_TASK = QUALITY_ARM_TASKS["FQ"]
+FQ3X8_TASKS = frozenset(
+  QUALITY_ARM_TASKS[arm] for arm in ("F8", "B8", "FQ")
+)
+FQ3X8_EVALUATION_RNG = {
+  "reset": 2036073019,
+  "observation": 2046073033,
+  "action": 2056073041,
+}
 RESET_SEED_OFFSET = 10_000_019
 OBSERVATION_SEED_OFFSET = 20_000_033
 ACTION_SEED_OFFSET = 30_000_041
@@ -102,6 +114,7 @@ PAYOUT_SEMANTICS = {
   "F0": "actual_event_linear_speed_disabled",
   "D0": "actual_event_linear_delivered_disabled",
   "FQ": "actual_event_quality_bounded",
+  "B8": "actual_event_center_blind_bounded",
 }
 
 _TRACE_PHYSICAL_KEYS = (
@@ -400,15 +413,28 @@ def _require_finite_trace_value(value, *, path: str) -> None:
 def _validate_quality_trace(trace: Mapping) -> None:
   event = trace["event_trace"]
   snapshot = trace["first_strike"]
+  # _SampledTraceCollector writes the canonical treatment identity in ``arm``.
+  # Other tasks can carry zero-filled instrumentation fields for replay-shape
+  # compatibility even though their registered tracker has no quality sensor.
+  if str(trace.get("arm", "")) not in ("FQ", "B8"):
+    return
   valid = np.asarray(event["tracker_contact_quality_valid"], dtype=bool)
   overflow = np.asarray(event["tracker_contact_quality_overflow"], dtype=bool)
-  if np.any(valid & overflow):
-    raise ValueError("overflowed quality cannot be valid in event stream")
-  if bool(snapshot["contact_quality_valid"]) and bool(
-    snapshot["contact_quality_overflow"]
-  ):
-    raise ValueError("overflowed quality cannot be valid in first-strike snapshot")
-  if len(valid) and bool(snapshot["started"]):
+  if np.any(overflow) or bool(snapshot["contact_quality_overflow"]):
+    raise ValueError("overflowed quality is invalid for sampled evaluation")
+  started = bool(snapshot["started"])
+  quality = float(snapshot["contact_quality"])
+  if started:
+    if (
+      not len(valid)
+      or not bool(valid[-1])
+      or not bool(snapshot["contact_quality_valid"])
+      or not math.isfinite(quality)
+    ):
+      raise ValueError("contact episode requires valid finite contact quality")
+  elif quality != 0.0 or bool(snapshot["contact_quality_valid"]):
+    raise ValueError("no-contact episode must retain zero invalid quality")
+  if len(valid) and started:
     for stream_key, snapshot_key in (
       ("tracker_contact_point_w", "contact_point_w"),
       ("tracker_contact_error_m", "contact_error_m"),
@@ -669,6 +695,11 @@ def _treatment_reward_signature(env_cfg) -> dict:
   }
 
 
+def _configured_reader_name(func) -> str:
+  """Normalize class-valued and instantiated reward-term configs."""
+  return func.__name__ if inspect.isclass(func) else type(func).__name__
+
+
 def _strict_evaluation_config_signature(env_cfg) -> dict:
   """Bank the complete fixed-impedance evaluator configuration identity."""
   return {
@@ -686,6 +717,25 @@ def _strict_evaluation_config_signature(env_cfg) -> dict:
   }
 
 
+def _require_native_quality_instrumentation(training_cfg, task: str) -> None:
+  """Reject B8/FQ registration drift instead of healing it from a reference."""
+  sensors = [
+    sensor for sensor in (training_cfg.scene.sensors or ())
+    if sensor.name == "hammer_nail_quality"
+  ]
+  tracker = training_cfg.metrics.get("first_strike")
+  if (
+    len(sensors) != 1
+    or sensors[0].num_slots != 8
+    or tracker is None
+    or tracker.func is not FirstStrikeEventTracker
+    or tracker.per_substep is not True
+    or tracker.reduce != "last"
+    or tracker.params.get("quality_sensor_name") != "hammer_nail_quality"
+  ):
+    raise ValueError(f"{task}: native quality instrumentation drift")
+
+
 def build_strict_quality_evaluation_cfg(task: str, *, play: bool):
   """Build a quality-instrumented strict eval config without changing treatment."""
   if task not in QUALITY_TASK_TO_ARM:
@@ -694,21 +744,25 @@ def build_strict_quality_evaluation_cfg(task: str, *, play: bool):
     )
   training_cfg = load_env_cfg(task, play=play)
   evaluation_cfg = copy.deepcopy(training_cfg)
-  reference_cfg = load_env_cfg(QUALITY_EVALUATION_REFERENCE_TASK, play=play)
-  quality_sensor = next(
-    sensor for sensor in (reference_cfg.scene.sensors or ())
-    if sensor.name == "hammer_nail_quality"
-  )
-  if not any(
-    sensor.name == "hammer_nail_quality"
-    for sensor in (evaluation_cfg.scene.sensors or ())
-  ):
-    evaluation_cfg.scene.sensors = (
-      *(evaluation_cfg.scene.sensors or ()), copy.deepcopy(quality_sensor)
+  native_quality = QUALITY_TASK_TO_ARM[task] in ("FQ", "B8")
+  if native_quality:
+    _require_native_quality_instrumentation(training_cfg, task)
+  else:
+    reference_cfg = load_env_cfg(QUALITY_EVALUATION_REFERENCE_TASK, play=play)
+    quality_sensor = next(
+      sensor for sensor in (reference_cfg.scene.sensors or ())
+      if sensor.name == "hammer_nail_quality"
     )
-  evaluation_cfg.metrics["first_strike"] = copy.deepcopy(
-    reference_cfg.metrics["first_strike"]
-  )
+    if not any(
+      sensor.name == "hammer_nail_quality"
+      for sensor in (evaluation_cfg.scene.sensors or ())
+    ):
+      evaluation_cfg.scene.sensors = (
+        *(evaluation_cfg.scene.sensors or ()), copy.deepcopy(quality_sensor)
+      )
+    evaluation_cfg.metrics["first_strike"] = copy.deepcopy(
+      reference_cfg.metrics["first_strike"]
+    )
   training_observation = _canonical_digest(
     _policy_observation_signature(training_cfg)
   )
@@ -758,6 +812,7 @@ def _validate_sampled_env_contract(env_cfg, task: str) -> dict:
     "F0": (0.0, 2.0),
     "D0": (8.0, 0.0),
     "FQ": (8.0, 0.0),
+    "B8": (8.0, 0.0),
   }
   if treatment not in expected_weights_by_treatment:
     raise ValueError(
@@ -770,6 +825,23 @@ def _validate_sampled_env_contract(env_cfg, task: str) -> dict:
       f"{expected_weights[0]}/{expected_weights[1]}, got "
       f"{impact_weight}/{delivered_weight}"
     )
+  impact_reader = _configured_reader_name(impact.func)
+  delivered_reader = _configured_reader_name(delivered.func)
+  delivered_saturate = delivered.params.get("saturate")
+  impact_v_expected_n_s = float(impact.params.get("v_expected", float("nan")))
+  strict_quality_reader = {
+    "FQ": "FirstStrikeQualityImpactRewardTerm",
+    "B8": "FirstStrikeBoundedImpactRewardTerm",
+  }.get(treatment)
+  if strict_quality_reader is not None:
+    if impact_reader != strict_quality_reader:
+      raise ValueError(f"{task}: impact reader must be {strict_quality_reader}")
+    if impact_v_expected_n_s != 1.4598331451416016:
+      raise ValueError(f"{task}: impact v_expected drift")
+    if delivered_reader != "FirstStrikeDeliveredRewardTerm":
+      raise ValueError(f"{task}: delivered reader drift")
+    if delivered_saturate is not False:
+      raise ValueError(f"{task}: delivered saturate must be False")
   reset_range = tuple(
     float(value)
     for value in env_cfg.events["reset_robot_joints"].params["position_range"]
@@ -790,9 +862,14 @@ def _validate_sampled_env_contract(env_cfg, task: str) -> dict:
     float(value)
     for value in env_cfg.metrics["cat_soft"].params["imp_limit"]
   )
-  if impulse_limits != tuple(float(value) for value in IMP_J_LIMIT):
+  imported_impulse_limits = tuple(float(value) for value in IMP_J_LIMIT)
+  if impulse_limits != LITERAL_IMPULSE_LIMITS_N_M_S:
     raise ValueError(
-      f"{task}: sampled evaluation impulse limits do not match IMP_J_LIMIT"
+      f"{task}: sampled evaluation frozen impulse limits drift"
+    )
+  if imported_impulse_limits != LITERAL_IMPULSE_LIMITS_N_M_S:
+    raise ValueError(
+      f"{task}: imported IMP_J_LIMIT differs from frozen impulse limits"
     )
   actuator_signature = tuple(
     (
@@ -848,6 +925,10 @@ def _validate_sampled_env_contract(env_cfg, task: str) -> dict:
     "actor_observation_corruption": actor_corruption,
     "critic_observation_corruption": critic_corruption,
     "event_i_ref_n_s": float(delivered.params["i_ref"]),
+    "impact_reader": impact_reader,
+    "delivered_reader": delivered_reader,
+    "impact_v_expected_n_s": impact_v_expected_n_s,
+    "delivered_saturate": delivered_saturate,
     "impulse_limits_n_m_s": list(impulse_limits),
     "physics_dt_s": physics_dt_s,
     "control_decimation": decimation,
@@ -906,8 +987,7 @@ def _campaign_config_digest(
 def _treatment_config_digest(*, task: str, contract: dict) -> str:
   """Hash reward semantics that intentionally differ between campaign arms."""
   treatment = str(contract["treatment"])
-  return _canonical_digest(
-    {
+  identity = {
       "schema_version": 1,
       "task": task,
       "treatment": treatment,
@@ -915,8 +995,17 @@ def _treatment_config_digest(*, task: str, contract: dict) -> str:
       "impact_weight": float(contract["impact_weight"]),
       "delivered_weight": float(contract["delivered_weight"]),
       "event_i_ref_n_s": float(contract["event_i_ref_n_s"]),
-    }
-  )
+  }
+  if treatment in ("FQ", "B8"):
+    identity.update(
+      {
+        "impact_reader": str(contract["impact_reader"]),
+        "delivered_reader": str(contract["delivered_reader"]),
+        "impact_v_expected_n_s": float(contract["impact_v_expected_n_s"]),
+        "delivered_saturate": bool(contract["delivered_saturate"]),
+      }
+    )
+  return _canonical_digest(identity)
 
 
 def _physics_timestep_s(env_cfg) -> float:
@@ -1688,6 +1777,31 @@ def _training_seed(name: str, explicit: int | None) -> int:
   return int(match.group(1))
 
 
+def _validate_evaluation_campaign(
+  campaign: str | None,
+  *,
+  task: str,
+  reset_seed: int,
+  observation_seed: int,
+  action_seed: int,
+) -> None:
+  """Enforce campaign-specific identity without changing unscoped evaluations."""
+  if campaign is None:
+    return
+  if task not in FQ3X8_TASKS:
+    raise ValueError(f"fq3x8 evaluation requires a registered fq3x8 task, got {task}")
+  for stream, actual in (
+    ("reset", reset_seed),
+    ("observation", observation_seed),
+    ("action", action_seed),
+  ):
+    expected = FQ3X8_EVALUATION_RNG[stream]
+    if actual != expected:
+      raise ValueError(
+        f"fq3x8 evaluation requires {stream} RNG seed {expected}, got {actual}"
+      )
+
+
 def _enforce_postwrite_invariants(
   *,
   name: str,
@@ -1744,6 +1858,12 @@ def main() -> None:
   ap.add_argument("--task", default="Unitree-Z1-Hammer-CaT-Impulse",
                   choices=tuple(TASK_TO_ARM | QUALITY_TASK_TO_ARM),
                   help="exact registered C/D-prime/F/E treatment task used to train this checkpoint")
+  ap.add_argument(
+    "--campaign",
+    choices=("fq3x8",),
+    default=None,
+    help="optional frozen evaluation contract; fq3x8 binds its three arms and RNG streams",
+  )
   ap.add_argument("--ckpt", required=True, help="checkpoint .pt path")
   ap.add_argument("--name", default=None, help="row label; defaults to the checkpoint's parent dir name")
   ap.add_argument("--training-seed", type=int, default=None,
@@ -1813,6 +1933,13 @@ def main() -> None:
   )
   if len({reset_seed, observation_seed, action_seed}) != 3:
     raise ValueError("reset, observation, and action RNG seeds must be distinct")
+  _validate_evaluation_campaign(
+    args.campaign,
+    task=args.task,
+    reset_seed=reset_seed,
+    observation_seed=observation_seed,
+    action_seed=action_seed,
+  )
   manifest_identity = (
     args.accepted_manifest_sha256,
     args.training_code_revision,

@@ -15,6 +15,8 @@ import torch
 from mjlab.managers.reward_manager import RewardManager, RewardTermCfg
 
 from scripts import smoke_first_strike_instrumentation as smoke
+from src.tasks.hammer.mdp.first_strike import _ENV_FIRST_STRIKE_ATTR
+from src.tasks.hammer.mdp.rewards import FirstStrikeBoundedImpactRewardTerm
 
 
 ARM_TASKS = {
@@ -30,6 +32,7 @@ QUALITY_ARM_TASKS = {
     "F0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0",
     "D0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0",
     "FQ-min": "Unitree-Z1-Hammer-CaT-Impulse-Event-Quality",
+    "B8": "Unitree-Z1-Hammer-CaT-Impulse-Event-Bounded",
 }
 
 COMMON_PREDICATES = (
@@ -149,6 +152,35 @@ def test_valid_quality_campaign_record_passes(arm):
     assert result["integration_pass"] is True
     assert result["cuda_qualification_pass"] is True
     assert result["failed_predicates"] == []
+
+
+def test_valid_b8_record_requires_bounded_center_blind_quality_instrumentation():
+    """Replacing B8's bounded reader or dropping its passive onset gates must fail."""
+    record = valid_record(arm="B8", num_envs=256, device_type="cuda")
+
+    result = smoke.evaluate_gate(record)
+    contract = smoke.ARM_CONTRACTS["B8"]
+
+    assert result["integration_pass"] is True
+    assert contract.task == QUALITY_ARM_TASKS["B8"]
+    assert contract.impact_reader == "FirstStrikeBoundedImpactRewardTerm"
+    assert contract.delivered_reader == "FirstStrikeDeliveredRewardTerm"
+    assert contract.speed_zero is False
+    assert contract.delivered_zero is True
+    assert contract.quality_required is True
+    assert contract.impact_v_expected_n_s == pytest.approx(1.4598331451416016)
+
+
+@pytest.mark.parametrize("predicate", QUALITY_PREDICATES)
+def test_b8_record_rejects_dead_or_overflowed_passive_quality_snapshot(predicate):
+    """Removing B8's passive sensor liveness gate would accept a dead onset snapshot."""
+    record = valid_record(arm="B8", num_envs=256, device_type="cuda")
+    record["predicate_counts"][predicate]["passed"] = 0
+
+    result = smoke.evaluate_gate(record)
+
+    assert result["integration_pass"] is False
+    assert predicate in result["failed_predicates"]
 
 
 def test_f0_speed_payout_must_be_exactly_zero_not_the_legacy_positive_predicate():
@@ -699,6 +731,48 @@ def test_live_contract_rejects_fq_min_v_expected_drift(monkeypatch):
     _install_live_config(monkeypatch, task, training_cfg, rl_cfg)
 
     with pytest.raises(ValueError, match="v_expected"):
+        smoke.validate_live_contract(task)
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    (
+        (
+            lambda cfg: cfg.rewards["impact_progress"].__setattr__("func", object),
+            "impact reader",
+        ),
+        (
+            lambda cfg: cfg.rewards["impact_progress"].params.__setitem__(
+                "v_expected", 1.0
+            ),
+            "v_expected",
+        ),
+        (
+            lambda cfg: cfg.rewards["delivered_impulse"].__setattr__("weight", 2.0),
+            "weights",
+        ),
+        (
+            lambda cfg: cfg.scene.__setattr__(
+                "sensors",
+                tuple(
+                    sensor for sensor in cfg.scene.sensors
+                    if sensor.name != "hammer_nail_quality"
+                ),
+            ),
+            "quality sensor",
+        ),
+    ),
+)
+def test_live_b8_smoke_contract_rejects_reader_normalizer_payout_or_sensor_drift(
+    monkeypatch, mutate, message
+):
+    """B8 smoke must fail closed before rollout on every preregistered input drift."""
+    task = QUALITY_ARM_TASKS["B8"]
+    training_cfg, rl_cfg = _live_configs(task)
+    mutate(training_cfg)
+    _install_live_config(monkeypatch, task, training_cfg, rl_cfg)
+
+    with pytest.raises(ValueError, match=message):
         smoke.validate_live_contract(task)
 
 
@@ -2519,3 +2593,37 @@ def test_cpu_integration_pays_out_each_quality_arm_treatment_correctly(arm):
         assert result["predicate_counts"]["raw_impact_reader_finite"]["passed"] == 1
         assert result["predicate_counts"]["quality_snapshot_valid"]["passed"] == 1
         assert result["predicate_counts"]["quality_no_overflow"]["passed"] == 1
+
+
+def test_b8_cpu_runtime_saturates_above_knee_center_blind_and_keeps_quality_gate_live():
+    """B8 must cap above-knee speed at one without reading quality fields."""
+    task = QUALITY_ARM_TASKS["B8"]
+    training_cfg, _, _ = smoke.validate_live_contract(task)
+    cfg = smoke.make_diagnostic_cfg(training_cfg, num_envs=1)
+    env = smoke.ManagerBasedRlEnv(cfg, device="cpu")
+    try:
+        env.reset()
+        tracker = getattr(env, _ENV_FIRST_STRIKE_ATTR)
+        tracker._finalized[:] = True
+        tracker._productive[:] = True
+        tracker._v_precontact[:] = 2.0 * 1.4598331451416016
+        payouts = []
+        for quality, valid, overflow in (
+            (0.0, False, False),
+            (1.0, True, True),
+            (0.25, False, True),
+        ):
+            tracker._contact_quality[:] = quality
+            tracker._contact_quality_valid[:] = valid
+            tracker._contact_quality_overflow[:] = overflow
+            term = FirstStrikeBoundedImpactRewardTerm(cfg=None, env=env)
+            payouts.append(float(term(env, v_expected=1.4598331451416016)[0]))
+
+        assert payouts == pytest.approx([1.0, 1.0, 1.0])
+    finally:
+        env.close()
+
+    result = smoke.run_smoke(task=task, device="cpu", num_envs=1)
+    assert result["integration_pass"] is True, result["failed_predicates"]
+    assert result["predicate_counts"]["quality_snapshot_valid"]["passed"] == 1
+    assert result["predicate_counts"]["quality_no_overflow"]["passed"] == 1

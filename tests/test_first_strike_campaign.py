@@ -455,6 +455,12 @@ def _literal_trace(
 
 def _schema_v3_quality_trace() -> dict:
     trace = _literal_trace()
+    # This is deliberately shaped like _SampledTraceCollector output: sampled
+    # traces record their canonical treatment identity in ``arm``, never in a
+    # ``treatment`` field (the latter belongs to the CSV/payload envelope).
+    trace["arm"] = "FQ"
+    trace["task"] = eval_impulse.QUALITY_ARM_TASKS["FQ"]
+    assert "treatment" not in trace
     trace["physical"].update(
         {
             "quality_found_count": [[0] * 8, [1, 7, 0, 0, 0, 0, 0, 0]],
@@ -628,6 +634,58 @@ def test_persistence_rejects_overflowed_quality_marked_valid(tmp_path):
         )
 
 
+def test_trace_validation_rejects_overflow_even_when_quality_is_marked_invalid():
+    """Overflow is a collection failure, not a permissible low-quality contact."""
+    trace = _schema_v3_quality_trace()
+    trace["event_trace"]["tracker_contact_quality_valid"][-1] = False
+    trace["event_trace"]["tracker_contact_quality_overflow"][-1] = True
+    trace["first_strike"]["contact_quality_valid"] = False
+    trace["first_strike"]["contact_quality_overflow"] = True
+
+    with pytest.raises(ValueError, match="overflowed quality"):
+        eval_impulse._validated_physical_trace_digest(
+            trace, require_recorded_digest=False
+        )
+
+
+def test_trace_validation_rejects_contact_without_valid_finite_quality():
+    """A tracker-accepted contact needs an actual finite onset-quality reading."""
+    trace = _schema_v3_quality_trace()
+    trace["event_trace"]["tracker_contact_quality_valid"][-1] = False
+    trace["first_strike"]["contact_quality_valid"] = False
+
+    with pytest.raises(ValueError, match="valid finite contact quality"):
+        eval_impulse._validated_physical_trace_digest(
+            trace, require_recorded_digest=False
+        )
+
+
+def test_trace_validation_allows_no_contact_with_zero_quality():
+    """No-contact failures remain valid samples when their quality latch is zero."""
+    trace = _schema_v3_quality_trace()
+    trace["first_strike"].update(
+        {
+            "started": False,
+            "accepted_onset_index": None,
+            "contact_quality": 0.0,
+            "contact_quality_valid": False,
+            "contact_quality_overflow": False,
+        }
+    )
+    trace["event_trace"].update(
+        {
+            "tracker_started": [False, False],
+            "tracker_contact_quality": [0.0, 0.0],
+            "tracker_contact_quality_valid": [False, False],
+            "tracker_contact_quality_overflow": [False, False],
+        }
+    )
+
+    assert eval_impulse._validated_physical_trace_digest(
+        trace, require_recorded_digest=False
+    )
+
+
 def test_action_tape_physics_requires_all_quality_channels_and_rejects_drift():
     """A missing or changed passive quality sample must invalidate replay identity."""
     trace = _literal_trace()
@@ -694,6 +752,9 @@ def test_action_tape_physics_requires_all_quality_channels_and_rejects_drift():
 def test_action_tape_physics_rejects_overflowed_quality_as_valid():
     """Overflow is a failed quality measurement, never a valid onset snapshot."""
     trace = _literal_trace()
+    trace["arm"] = "FQ"
+    trace["task"] = eval_impulse.QUALITY_ARM_TASKS["FQ"]
+    assert "treatment" not in trace
     trace["physical"].update(
         {
             "quality_found_count": [0, 9],
@@ -739,7 +800,7 @@ def test_action_tape_physics_rejects_overflowed_quality_as_valid():
         eval_impulse.compare_action_tape_physics({"F8": trace})
 
 
-@pytest.mark.parametrize("arm", ("F8", "F0", "D0", "FQ"))
+@pytest.mark.parametrize("arm", ("F8", "F0", "D0", "FQ", "B8"))
 def test_strict_quality_evaluation_config_preserves_policy_and_treatment(arm):
     """The passive sensor may alter only evaluation instrumentation metadata."""
     task = eval_impulse.QUALITY_ARM_TASKS[arm]
@@ -750,13 +811,13 @@ def test_strict_quality_evaluation_config_preserves_policy_and_treatment(arm):
 
     assert "hammer_nail_quality" not in {
         sensor.name for sensor in (training_cfg.scene.sensors or ())
-    } if arm != "FQ" else True
+    } if arm not in ("FQ", "B8") else True
     assert "hammer_nail_quality" in {
         sensor.name for sensor in (evaluation_cfg.scene.sensors or ())
     }
     assert identities["training_config_sha256"]
     assert identities["evaluation_config_sha256"]
-    if arm != "FQ":
+    if arm not in ("FQ", "B8"):
         assert identities["training_config_sha256"] != identities["evaluation_config_sha256"]
     assert (
         identities["training_policy_observation_sha256"]

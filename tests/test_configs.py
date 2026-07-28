@@ -4,6 +4,9 @@ Tests that all config objects are correctly constructed and wired.
 No MuJoCo model compilation, no mjlab env creation needed.
 """
 
+import copy
+import dataclasses
+
 import pytest
 
 from mjlab.actuator import BuiltinPositionActuatorCfg
@@ -40,6 +43,7 @@ from src.tasks.hammer.mdp.first_strike import FirstStrikeEventTracker
 from src.tasks.hammer.mdp.rewards import (
     DeliveredImpulseTerm,
     FirstStrikeDeliveredRewardTerm,
+    FirstStrikeBoundedImpactRewardTerm,
     FirstStrikeImpactRewardTerm,
     FirstStrikeQualityDeliveredRewardTerm,
     FirstStrikeQualityImpactRewardTerm,
@@ -742,6 +746,68 @@ class TestFirstStrikeEventArm:
             8,
         )
         assert fq_sensors == d0_sensors
+
+    def test_bounded_and_quality_tasks_differ_only_in_the_impact_reader(self):
+        """Any B8/FQ drift beyond their preregistered speed-reader treatment must fail."""
+        b8_id = "Unitree-Z1-Hammer-CaT-Impulse-Event-Bounded"
+        fq_id = "Unitree-Z1-Hammer-CaT-Impulse-Event-Quality"
+        v_fq = 1.4598331451416016
+
+        assert {b8_id, fq_id}.issubset(set(list_tasks()))
+        b8 = load_env_cfg(b8_id)
+        fq = load_env_cfg(fq_id)
+        linear = load_env_cfg("Unitree-Z1-Hammer-CaT-Impulse-Event-Linear")
+
+        assert b8.rewards["impact_progress"].func is FirstStrikeBoundedImpactRewardTerm
+        assert fq.rewards["impact_progress"].func is FirstStrikeQualityImpactRewardTerm
+        for cfg in (b8, fq):
+            assert cfg.rewards["impact_progress"].params["v_expected"] == v_fq
+            assert cfg.rewards["impact_progress"].weight == pytest.approx(8.0)
+            assert cfg.rewards["delivered_impulse"].weight == pytest.approx(0.0)
+            assert cfg.rewards["delivered_impulse"].params["saturate"] is False
+            assert cfg.metrics["cat_soft"].params["imp_max_p"] == 0.0
+            assert tuple(cfg.metrics["cat_soft"].params["imp_limit"]) == (
+                1.64, 3.28, 1.64, 1.64, 1.64, 1.64,
+            )
+            quality_sensor = next(
+                sensor for sensor in cfg.scene.sensors if sensor.name == "hammer_nail_quality"
+            )
+            assert quality_sensor.num_slots == 8
+
+        def actuator_signature(cfg):
+            return tuple(
+                (act.stiffness, act.damping, act.effort_limit, act.armature)
+                for act in cfg.scene.entities["robot"].articulation.actuators
+            )
+
+        assert repr(b8.actions) == repr(fq.actions) == repr(linear.actions)
+        assert actuator_signature(b8) == actuator_signature(fq) == actuator_signature(linear)
+        assert (
+            tuple(b8.metrics["cat_soft"].params["imp_limit"])
+            == tuple(fq.metrics["cat_soft"].params["imp_limit"])
+            == tuple(linear.metrics["cat_soft"].params["imp_limit"])
+        )
+
+        def normalize(value):
+            if dataclasses.is_dataclass(value):
+                return {
+                    field.name: normalize(getattr(value, field.name))
+                    for field in dataclasses.fields(value)
+                }
+            if isinstance(value, dict):
+                return {key: normalize(item) for key, item in value.items()}
+            if isinstance(value, (list, tuple)):
+                return tuple(normalize(item) for item in value)
+            if callable(value):
+                return (value.__module__, value.__qualname__)
+            return value
+
+        normalized_b8 = copy.deepcopy(b8)
+        normalized_fq = copy.deepcopy(fq)
+        sentinel = object()
+        normalized_b8.rewards["impact_progress"].func = sentinel
+        normalized_fq.rewards["impact_progress"].func = sentinel
+        assert normalize(normalized_b8) == normalize(normalized_fq)
 
     def test_registered_first_strike_legacy_task_keeps_legacy_readout(self):
         task_id = "Unitree-Z1-Hammer-CaT-Impulse-FirstStrike-Legacy"

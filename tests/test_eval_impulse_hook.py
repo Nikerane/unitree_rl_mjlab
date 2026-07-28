@@ -21,6 +21,7 @@ from __future__ import annotations
 import importlib.util
 import copy
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -48,6 +49,88 @@ eval_impulse = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(eval_impulse)
 
 HOLD_STEPS = 6  # post-playback settle steps, mirrors derive_impulse_thresholds.py
+
+
+def test_fq3x8_rng_contract_accepts_the_preregistered_streams():
+  """The three frozen streams are accepted for every fq3x8 treatment arm."""
+  for task in (
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear",
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Bounded",
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Quality",
+  ):
+    eval_impulse._validate_evaluation_campaign(
+      "fq3x8",
+      task=task,
+      reset_seed=2036073019,
+      observation_seed=2046073033,
+      action_seed=2056073041,
+    )
+
+
+@pytest.mark.parametrize(
+  "stream, reset_seed, observation_seed, action_seed",
+  (
+    ("reset", 2036073020, 2046073033, 2056073041),
+    ("observation", 2036073019, 2046073034, 2056073041),
+    ("action", 2036073019, 2046073033, 2056073042),
+  ),
+)
+def test_fq3x8_rng_contract_rejects_each_single_stream_drift(
+  stream, reset_seed, observation_seed, action_seed
+):
+  """A one-field RNG mutation must fail before any fq3x8 rollout begins."""
+  with pytest.raises(ValueError, match=f"fq3x8.*{stream}"):
+    eval_impulse._validate_evaluation_campaign(
+      "fq3x8",
+      task="Unitree-Z1-Hammer-CaT-Impulse-Event-Bounded",
+      reset_seed=reset_seed,
+      observation_seed=observation_seed,
+      action_seed=action_seed,
+    )
+
+
+def test_fq3x8_rng_contract_rejects_non_preregistered_arm():
+  """The campaign selector cannot silently evaluate a historical F0 arm."""
+  with pytest.raises(ValueError, match="fq3x8.*task"):
+    eval_impulse._validate_evaluation_campaign(
+      "fq3x8",
+      task="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0",
+      reset_seed=2036073019,
+      observation_seed=2046073033,
+      action_seed=2056073041,
+    )
+
+
+def test_unscoped_evaluation_preserves_historical_rng_flexibility():
+  """No campaign selector leaves historical task and stream behavior unchanged."""
+  eval_impulse._validate_evaluation_campaign(
+    None,
+    task="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0",
+    reset_seed=11,
+    observation_seed=22,
+    action_seed=33,
+  )
+
+
+def test_fq3x8_main_rejects_rng_drift_before_checkpoint_or_rollout(monkeypatch):
+  """The CLI contract fires before the evaluator can load a checkpoint."""
+  monkeypatch.setattr(
+    sys,
+    "argv",
+    [
+      "eval_impulse.py",
+      "--campaign", "fq3x8",
+      "--task", "Unitree-Z1-Hammer-CaT-Impulse-Event-Bounded",
+      "--ckpt", "checkpoint-not-opened.pt",
+      "--training-seed", "16",
+      "--reset-seed", "2036073020",
+      "--observation-seed", "2046073033",
+      "--action-seed", "2056073041",
+    ],
+  )
+
+  with pytest.raises(ValueError, match="fq3x8.*reset"):
+    eval_impulse.main()
 
 
 def _fixed_reference_action_tape() -> list[torch.Tensor]:
@@ -224,6 +307,7 @@ _QUALITY_CONTRACT_WEIGHTS = (
   ("F0", "F0", (0.0, 2.0)),
   ("D0", "D0", (8.0, 0.0)),
   ("FQ", "FQ", (8.0, 0.0)),
+  ("B8", "B8", (8.0, 0.0)),
 )
 
 
@@ -262,6 +346,183 @@ def test_sampled_env_contract_rejects_fq_with_legacy_delivered_weight():
     eval_impulse._validate_sampled_env_contract(cfg, task)
 
 
+def test_b8_evaluator_contract_pins_bounded_reader_normalizer_and_identity_digest():
+  """Changing B8's reader or full normalizer must alter its frozen treatment identity."""
+  task = "Unitree-Z1-Hammer-CaT-Impulse-Event-Bounded"
+  _, cfg, _ = eval_impulse.build_strict_quality_evaluation_cfg(task, play=False)
+
+  contract = eval_impulse._validate_sampled_env_contract(cfg, task)
+  baseline_digest = eval_impulse._treatment_config_digest(task=task, contract=contract)
+
+  assert contract["treatment"] == "B8"
+  assert (contract["impact_weight"], contract["delivered_weight"]) == (8.0, 0.0)
+  assert contract["impact_reader"] == "FirstStrikeBoundedImpactRewardTerm"
+  assert contract["impact_v_expected_n_s"] == pytest.approx(1.4598331451416016)
+  assert contract["delivered_saturate"] is False
+
+  changed_contract = dict(contract)
+  changed_contract["impact_v_expected_n_s"] = 1.0
+  changed_digest = eval_impulse._treatment_config_digest(
+    task=task, contract=changed_contract
+  )
+  assert changed_digest != baseline_digest
+
+
+@pytest.mark.parametrize(
+  ("arm", "impact_reader"),
+  (
+    ("FQ", "FirstStrikeQualityImpactRewardTerm"),
+    ("B8", "FirstStrikeBoundedImpactRewardTerm"),
+  ),
+)
+def test_b8_and_fq_treatment_identities_pin_reader_normalizer_and_delivered_semantics(
+  arm, impact_reader
+):
+  """The same 8/0 weights must not make the B8/FQ readers interchangeable."""
+  task = eval_impulse.QUALITY_ARM_TASKS[arm]
+  _, cfg, _ = eval_impulse.build_strict_quality_evaluation_cfg(task, play=False)
+  contract = eval_impulse._validate_sampled_env_contract(cfg, task)
+  baseline_digest = eval_impulse._treatment_config_digest(task=task, contract=contract)
+
+  assert contract["impact_reader"] == impact_reader
+  assert contract["impact_v_expected_n_s"] == pytest.approx(1.4598331451416016)
+  assert contract["delivered_reader"] == "FirstStrikeDeliveredRewardTerm"
+  assert contract["delivered_saturate"] is False
+
+  changed = dict(contract)
+  changed["impact_reader"] = "wrong-reader"
+  assert eval_impulse._treatment_config_digest(task=task, contract=changed) != baseline_digest
+  changed = dict(contract)
+  changed["impact_v_expected_n_s"] = 1.0
+  assert eval_impulse._treatment_config_digest(task=task, contract=changed) != baseline_digest
+  changed = dict(contract)
+  changed["delivered_saturate"] = True
+  assert eval_impulse._treatment_config_digest(task=task, contract=changed) != baseline_digest
+
+
+@pytest.mark.parametrize(
+  ("mutate", "message"),
+  (
+    (
+      lambda cfg: cfg.rewards["impact_progress"].__setattr__("func", object),
+      "impact reader",
+    ),
+    (
+      lambda cfg: cfg.rewards["impact_progress"].params.__setitem__("v_expected", 1.0),
+      "v_expected",
+    ),
+    (
+      lambda cfg: cfg.rewards["delivered_impulse"].params.__setitem__("saturate", True),
+      "delivered saturate",
+    ),
+  ),
+)
+def test_fq_evaluator_rejects_reader_normalizer_or_delivered_semantic_drift(mutate, message):
+  """FQ's strict treatment identity must fail before rollout on semantic drift."""
+  task = eval_impulse.QUALITY_ARM_TASKS["FQ"]
+  _, cfg, _ = eval_impulse.build_strict_quality_evaluation_cfg(task, play=False)
+  mutate(cfg)
+
+  with pytest.raises(ValueError, match=message):
+    eval_impulse._validate_sampled_env_contract(cfg, task)
+
+
+@pytest.mark.parametrize(
+  ("mutate", "message"),
+  (
+    (
+      lambda cfg: cfg.rewards["impact_progress"].__setattr__("func", object),
+      "impact reader",
+    ),
+    (
+      lambda cfg: cfg.rewards["impact_progress"].params.__setitem__("v_expected", 1.0),
+      "v_expected",
+    ),
+    (
+      lambda cfg: cfg.rewards["delivered_impulse"].__setattr__("weight", 2.0),
+      "configured maximize weights",
+    ),
+    (
+      lambda cfg: cfg.rewards["delivered_impulse"].params.__setitem__("saturate", True),
+      "delivered saturate",
+    ),
+    (
+      lambda cfg: cfg.actions["ik_hammer_head"].__setattr__("max_dq", 0.29),
+      "fixed action signature",
+    ),
+    (
+      lambda cfg: cfg.scene.entities["robot"].articulation.actuators[0].__setattr__("stiffness", 1.0),
+      "fixed-impedance actuator signature",
+    ),
+    (
+      lambda cfg: cfg.metrics["cat_soft"].params.__setitem__("imp_limit", [1.0] * 6),
+      "impulse limits",
+    ),
+    (
+      lambda cfg: cfg.metrics["cat_soft"].params.__setitem__("imp_max_p", 0.5),
+      "imp_max_p",
+    ),
+  ),
+)
+def test_b8_evaluator_rejects_identity_or_fixed_plant_mutations(mutate, message):
+  """Any B8 reader, payout, action/gain, or CaT-cap drift must fail before rollout."""
+  task = "Unitree-Z1-Hammer-CaT-Impulse-Event-Bounded"
+  _, cfg, _ = eval_impulse.build_strict_quality_evaluation_cfg(task, play=False)
+  mutate(cfg)
+
+  with pytest.raises(ValueError, match=message):
+    eval_impulse._validate_sampled_env_contract(cfg, task)
+
+
+def test_b8_evaluator_rejects_coordinated_imported_and_live_cap_drift(monkeypatch):
+  """A shared mutable cap constant must not redefine B8's frozen safety rails."""
+  task = eval_impulse.QUALITY_ARM_TASKS["B8"]
+  _, cfg, _ = eval_impulse.build_strict_quality_evaluation_cfg(task, play=False)
+  drifted = (1.0,) * 6
+  cfg.metrics["cat_soft"].params["imp_limit"] = list(drifted)
+  monkeypatch.setattr(eval_impulse, "IMP_J_LIMIT", drifted)
+
+  with pytest.raises(ValueError, match="frozen impulse limits"):
+    eval_impulse._validate_sampled_env_contract(cfg, task)
+
+
+@pytest.mark.parametrize("arm", ("FQ", "B8"))
+@pytest.mark.parametrize("mutation", ("missing_sensor", "missing_tracker"))
+def test_strict_native_quality_arms_reject_missing_native_quality_path(
+  monkeypatch, arm, mutation
+):
+  """B8/FQ must not be repaired from a reference config at evaluation time."""
+  task = eval_impulse.QUALITY_ARM_TASKS[arm]
+  source_load = eval_impulse.load_env_cfg
+  cfg = source_load(task, play=False)
+  if mutation == "missing_sensor":
+    cfg.scene.sensors = tuple(
+      sensor for sensor in cfg.scene.sensors
+      if sensor.name != "hammer_nail_quality"
+    )
+  else:
+    del cfg.metrics["first_strike"]
+  monkeypatch.setattr(
+    eval_impulse,
+    "load_env_cfg",
+    lambda requested, play=False: cfg if requested == task else source_load(requested, play=play),
+  )
+
+  with pytest.raises(ValueError, match="native quality"):
+    eval_impulse.build_strict_quality_evaluation_cfg(task, play=False)
+
+
+@pytest.mark.parametrize("arm", ("FQ", "B8"))
+def test_strict_native_quality_arms_reject_delivered_reader_swap(arm):
+  """An equal-weight raw delivered reader must not alias the strict quality arms."""
+  task = eval_impulse.QUALITY_ARM_TASKS[arm]
+  _, cfg, _ = eval_impulse.build_strict_quality_evaluation_cfg(task, play=False)
+  cfg.rewards["delivered_impulse"].func = object
+
+  with pytest.raises(ValueError, match="delivered reader"):
+    eval_impulse._validate_sampled_env_contract(cfg, task)
+
+
 @pytest.mark.integration
 def test_fixed_action_tape_preserves_physics_across_strict_quality_arms():
   """Passive quality sensing changes no plant channel; payouts are intentionally absent."""
@@ -271,7 +532,7 @@ def test_fixed_action_tape_preserves_physics_across_strict_quality_arms():
     for arm, task in eval_impulse.QUALITY_ARM_TASKS.items()
   }
   assert eval_impulse.compare_action_tape_physics(traces)["arms"] == (
-    "D0", "F0", "F8", "FQ",
+    "B8", "D0", "F0", "F8", "FQ",
   )
   assert len({json.dumps(trace["action_tape"]) for trace in traces.values()}) == 1
   assert traces["F8"]["first_strike"]["started"] is True

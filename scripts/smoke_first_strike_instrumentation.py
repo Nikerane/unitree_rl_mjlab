@@ -49,6 +49,7 @@ ARM_TASKS = {
     "F0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0",
     "D0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0",
     "FQ-min": "Unitree-Z1-Hammer-CaT-Impulse-Event-Quality",
+    "B8": "Unitree-Z1-Hammer-CaT-Impulse-Event-Bounded",
 }
 
 
@@ -115,6 +116,12 @@ ARM_CONTRACTS: dict[str, ArmContract] = {
     ),
     "FQ-min": ArmContract(
         "FQ-min", ARM_TASKS["FQ-min"], "FirstStrikeQualityImpactRewardTerm",
+        "FirstStrikeDeliveredRewardTerm", True, 0.3088, False,
+        delivered_zero=True, quality_required=True,
+        impact_v_expected_n_s=1.4598331451416016,
+    ),
+    "B8": ArmContract(
+        "B8", ARM_TASKS["B8"], "FirstStrikeBoundedImpactRewardTerm",
         "FirstStrikeDeliveredRewardTerm", True, 0.3088, False,
         delivered_zero=True, quality_required=True,
         impact_v_expected_n_s=1.4598331451416016,
@@ -894,6 +901,15 @@ def validate_live_contract(task: str) -> tuple[Any, Any, dict[str, Any]]:
             raise ValueError(f"{task}: missing or wrong FirstStrikeEventTracker")
         if tracker.per_substep is not True or tracker.reduce != "last":
             raise ValueError(f"{task}: FirstStrikeEventTracker timing drift")
+        if contract.quality_required:
+            if tracker.params.get("quality_sensor_name") != "hammer_nail_quality":
+                raise ValueError(f"{task}: first-strike quality sensor drift")
+            quality_sensors = [
+                sensor for sensor in (training_cfg.scene.sensors or ())
+                if sensor.name == "hammer_nail_quality"
+            ]
+            if len(quality_sensors) != 1 or quality_sensors[0].num_slots != 8:
+                raise ValueError(f"{task}: missing or wrong quality sensor")
 
     live_limits = tuple(
         float(value) for value in training_cfg.metrics["cat_soft"].params["imp_limit"]

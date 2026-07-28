@@ -403,6 +403,18 @@ class FirstStrikeImpactRewardTerm(_FirstStrikeRewardTerm):
     return torch.where(pay, value, torch.zeros_like(value))
 
 
+class FirstStrikeBoundedImpactRewardTerm(FirstStrikeImpactRewardTerm):
+  """Pay a center-blind, bounded first-strike speed exactly once."""
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    v_expected: float = 1.0,
+    **params,
+  ) -> torch.Tensor:
+    return super().__call__(env, v_expected=v_expected, **params).clamp(0.0, 1.0)
+
+
 class FirstStrikeDeliveredRewardTerm(_FirstStrikeRewardTerm):
   """Pay productive first-window delivered impulse exactly once.
 

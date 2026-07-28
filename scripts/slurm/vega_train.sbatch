@@ -66,6 +66,10 @@ if [ "$CAMPAIGN_LC" = "fq4x8" ] && [ "$CAMPAIGN" != "fq4x8" ]; then
   echo "FQ4X8_FAIL: CAMPAIGN '$CAMPAIGN' looks like fq4x8 but is not an exact, case-sensitive match"
   exit 2
 fi
+if [ "$CAMPAIGN_LC" = "fq3x8" ] && [ "$CAMPAIGN" != "fq3x8" ]; then
+  echo "FQ3X8_FAIL: CAMPAIGN '$CAMPAIGN' looks like fq3x8 but is not an exact, case-sensitive match"
+  exit 2
+fi
 if [ "$CAMPAIGN_LC" = "fsr4x8" ] && [ "$CAMPAIGN" != "fsr4x8" ]; then
   echo "FSR4X8_FAIL: CAMPAIGN '$CAMPAIGN' looks like fsr4x8 but is not an exact, case-sensitive match"
   exit 2
@@ -144,6 +148,31 @@ if [ "$CAMPAIGN" = "fq4x8" ]; then
     *) echo "FQ4X8_FAIL: SINGLE_TASK/SINGLE_SHORT is not a frozen fq4x8 arm"; exit 2 ;;
   esac
 fi
+
+# fq3x8 keeps the first-contact reward weights in registered tasks and freezes
+# the matched F8/B8/FQ 3x8 matrix. Reject leaked overrides before GPU work.
+if [ "$CAMPAIGN" = "fq3x8" ]; then
+  [ "${SEEDS:-}" = "16 17 18 19 20 21 22 23" ] \
+    || { echo "FQ3X8_FAIL: seeds must be exactly 16..23"; exit 2; }
+  [ "${ITERS+x}" = x ] && [ "$ITERS" = 500 ] \
+    || { echo "FQ3X8_FAIL: ITERS must be exactly 500 (set, not omitted or empty)"; exit 2; }
+  [ -z "${IMPACT_W+x}" ] \
+    || { echo "FQ3X8_FAIL: IMPACT_W must be unset (weights come from the registered task)"; exit 2; }
+  [ -z "${DELIVERED_W+x}" ] \
+    || { echo "FQ3X8_FAIL: DELIVERED_W must be unset (weights come from the registered task)"; exit 2; }
+  [ -z "${NAIL_DRIVEN_W+x}" ] \
+    || { echo "FQ3X8_FAIL: NAIL_DRIVEN_W must be unset (weights come from the registered task)"; exit 2; }
+  [[ "${EXPECTED_CODE_REVISION:-}" =~ ^[0-9a-f]{40}$ ]] \
+    || { echo "FQ3X8_FAIL: EXPECTED_CODE_REVISION must be a clean 40-hex revision"; exit 2; }
+  [[ "${EXPECTED_ASSET_REVISION:-}" =~ ^[0-9a-f]{40}$ ]] \
+    || { echo "FQ3X8_FAIL: EXPECTED_ASSET_REVISION must be a clean 40-hex revision"; exit 2; }
+  case "$task:$short" in
+    Unitree-Z1-Hammer-CaT-Impulse-Event-Linear:f8|\
+    Unitree-Z1-Hammer-CaT-Impulse-Event-Bounded:b8|\
+    Unitree-Z1-Hammer-CaT-Impulse-Event-Quality:fq) ;;
+    *) echo "FQ3X8_FAIL: SINGLE_TASK/SINGLE_SHORT is not a frozen fq3x8 arm"; exit 2 ;;
+  esac
+fi
 RUN="${CAMPAIGN}_${short}_seed${seed}"
 # Provenance: record the exact code state that trains (git hash + '-dirty' if the tree has uncommitted
 # tracked edits). Deploy via git pull, NOT scp, so this hash is trustworthy (2026-07-19 provenance fix).
@@ -169,6 +198,12 @@ if [ "$CAMPAIGN" = "fq4x8" ]; then
     || { echo "FQ4X8_FAIL: code revision does not equal expected code revision"; exit 2; }
   [ "$ASSET_HASH" = "$EXPECTED_ASSET_REVISION" ] \
     || { echo "FQ4X8_FAIL: asset revision does not equal expected asset revision"; exit 2; }
+fi
+if [ "$CAMPAIGN" = "fq3x8" ]; then
+  [ "$GITHASH" = "$EXPECTED_CODE_REVISION" ] \
+    || { echo "FQ3X8_FAIL: code revision does not equal expected code revision"; exit 2; }
+  [ "$ASSET_HASH" = "$EXPECTED_ASSET_REVISION" ] \
+    || { echo "FQ3X8_FAIL: asset revision does not equal expected asset revision"; exit 2; }
 fi
 $PY -c "import torch; assert torch.cuda.is_available() and 'A100' in torch.cuda.get_device_name(0), 'no A100'; print('A100 ok:', torch.cuda.get_device_name(0))" || { echo "### NO GPU/A100 on $(hostname) — requeue+exit"; scontrol requeue "${SLURM_JOB_ID}" 2>/dev/null; exit 1; }
 $PY scripts/train.py "$task" --gpu-ids [0] --agent.logger tensorboard \
