@@ -13,6 +13,7 @@ import torch
 import evaluation.analysis.first_strike_campaign as legacy
 import evaluation.analysis.first_strike_quality_campaign as quality_analysis
 import evaluation.analysis.plot_first_strike_quality_campaign as quality_plot
+from evaluation.analysis import fq4x8_manifests as campaign_manifests
 from evaluation.analysis.first_strike_quality_campaign import (
     FROZEN_QUALITY_CAMPAIGN_MATRIX,
     _d0_mechanism,
@@ -270,6 +271,7 @@ def _trace(
             "event_cumulative_transverse_impulse_n_s": [0.0, 0.001, 0.002],
         },
         "payout_semantics": {
+            "F": "actual_event_linear",
             "F8": "actual_event_linear",
             "F0": "actual_event_linear_speed_disabled",
             "D0": "actual_event_linear_delivered_disabled",
@@ -415,7 +417,7 @@ def _campaign_rows(tmp_path: Path) -> tuple[list[dict], list[dict]]:
         treatment_sha = _treatment_digest(
             frozen,
             {
-                "F8": "actual_event_linear",
+                "F": "actual_event_linear",
                 "F0": "actual_event_linear_speed_disabled",
                 "D0": "actual_event_linear_delivered_disabled",
                 "FQ": "actual_event_quality_bounded",
@@ -475,19 +477,37 @@ def _campaign_rows(tmp_path: Path) -> tuple[list[dict], list[dict]]:
         training_config = hashlib.sha256(f"train-{label}".encode()).hexdigest()
         evaluation_config = hashlib.sha256(f"eval-{label}".encode()).hexdigest()
         accepted = {
-            **frozen,
             "campaign": "fq4x8",
-            "evaluation_attempt": "attempt1",
             "disposition": "accepted",
+            "arm": label,
+            "short": frozen["short"],
+            "task": frozen["task"],
+            "training_seed": seed,
+            "checkpoint_path": row["checkpoint_path"],
             "checkpoint_sha256": checkpoint_sha,
-            "campaign_config_sha256": row["campaign_config_sha256"],
-            "treatment_config_sha256": treatment_sha,
+            "code_revision": row["training_code_revision"],
+            "asset_revision": row["training_asset_revision"],
+            "campaign_config_sha256": hashlib.sha256(
+                b"training-campaign"
+            ).hexdigest(),
+            "treatment_config_sha256": (
+                campaign_manifests.EXPECTED_TREATMENT_CONFIG_SHA256[label]
+            ),
+            "fixed_action_signature_sha256": frozen[
+                "fixed_action_signature_sha256"
+            ],
+            "fixed_impedance_signature_sha256": frozen[
+                "fixed_impedance_signature_sha256"
+            ],
+            "cap_signature_sha256": (
+                campaign_manifests.EXPECTED_CAP_SIGNATURE_SHA256
+            ),
+            "clean_state": True,
             "accepted_training_manifest_sha256": "e" * 64,
-            "nail_asset_sha256": "c" * 64,
-            "git_revision": "a" * 40,
-            "git_dirty": False,
-            "asset_git_revision": "b" * 40,
-            "asset_git_dirty": False,
+            "evaluation_attempt": "attempt2",
+            "evaluation_retry_history": (
+                "attempt1:infra_failure;attempt2:accepted"
+            ),
             "training_config_sha256": training_config,
             "evaluation_config_sha256": evaluation_config,
             "training_policy_observation_sha256": "1" * 64,
@@ -497,6 +517,10 @@ def _campaign_rows(tmp_path: Path) -> tuple[list[dict], list[dict]]:
             "action_rng_seed": row["action_rng_seed"],
             "reset_rng_seed": row["reset_rng_seed"],
             "observation_rng_seed": row["observation_rng_seed"],
+            "sampled_trace_digest": "2" * 64,
+            "sampled_trace_artifact_sha256": "3" * 64,
+            "num_envs": 256,
+            "episodes_per_env_sampled": 2,
             "n_episodes_sampled": 512,
             **{sentinel: 0 for sentinel in SENTINELS},
         }
@@ -506,8 +530,8 @@ def _campaign_rows(tmp_path: Path) -> tuple[list[dict], list[dict]]:
 
 
 def _write_artifact(path: Path, row: dict, accepted: dict) -> None:
-    label = accepted["treatment"]
-    raw = accepted["raw_treatment"]
+    label = accepted["arm"]
+    raw = row["treatment"]
     seed = accepted["training_seed"]
     offset = 0.005 * (seed - 8)
     quality = {"F8": 0.55, "F0": 0.70, "D0": 0.60, "FQ-min": 0.75}[label] + offset
@@ -546,7 +570,7 @@ def _write_artifact(path: Path, row: dict, accepted: dict) -> None:
         {
             "success_rate_sampled": 1.0,
             "worst_ratio_max_sampled": float(
-                np.max(peaks / np.asarray(accepted["impulse_limits_n_m_s"]))
+                np.max(peaks / np.asarray(quality_analysis.IMPULSE_LIMITS))
             ),
             "delivered_mean_sampled": float(delivered_values.mean()),
         }
@@ -565,7 +589,7 @@ def _write_artifact(path: Path, row: dict, accepted: dict) -> None:
             "delivered_impulse": row["delivered_weight"],
         },
         "event_i_ref_n_s": 0.3088,
-        "impulse_limits_n_m_s": list(accepted["impulse_limits_n_m_s"]),
+        "impulse_limits_n_m_s": list(quality_analysis.IMPULSE_LIMITS),
         "imp_max_p": 0.0,
         "rng_streams": {
             "reset": row["reset_rng_seed"],
@@ -1338,14 +1362,28 @@ def test_frozen_contract_maps_fq_to_fq_min_and_accepts_complete_manifest(tmp_pat
         accepted["sampled_trace_artifact_sha256"] = row[
             "sampled_trace_artifact_sha256"
         ]
-    validate_quality_campaign_contract(rows, manifest)
+    assert len(campaign_manifests.EVALUATION_FIELDS) == 39
+    serialized = campaign_manifests.serialize_evaluation_manifest(manifest)
+    parsed_manifest = campaign_manifests.parse_evaluation_manifest(serialized)
+    assert tuple(parsed_manifest[0]) == campaign_manifests.EVALUATION_FIELDS
+    for row, accepted in zip(rows, parsed_manifest, strict=True):
+        assert row["campaign_config_sha256"] != accepted["campaign_config_sha256"]
+        assert row["treatment_config_sha256"] != accepted[
+            "treatment_config_sha256"
+        ]
+    validate_quality_campaign_contract(rows, parsed_manifest)
     fq = next(item for item in manifest if item["short"] == "fq")
-    assert fq["treatment"] == "FQ-min"
-    assert fq["raw_treatment"] == "FQ"
-    assert fq["delivered_weight"] == 0.0
-    assert fq["impact_reader"] == "FirstStrikeQualityImpactRewardTerm"
-    assert fq["delivered_reader"] == "FirstStrikeDeliveredRewardTerm"
-    assert fq["speed_normalizer_m_s"] == pytest.approx(1.4598331451416016)
+    assert fq["arm"] == "FQ-min"
+    frozen_fq = next(
+        item
+        for item in FROZEN_QUALITY_CAMPAIGN_MATRIX
+        if item["treatment"] == "FQ-min"
+    )
+    assert frozen_fq["raw_treatment"] == "FQ"
+    assert frozen_fq["delivered_weight"] == 0.0
+    assert frozen_fq["impact_reader"] == "FirstStrikeQualityImpactRewardTerm"
+    assert frozen_fq["delivered_reader"] == "FirstStrikeDeliveredRewardTerm"
+    assert frozen_fq["speed_normalizer_m_s"] == pytest.approx(1.4598331451416016)
     tasks = {
         item["treatment"]: item["task"]
         for item in FROZEN_QUALITY_CAMPAIGN_MATRIX
@@ -1398,9 +1436,15 @@ def test_frozen_contract_maps_fq_to_fq_min_and_accepts_complete_manifest(tmp_pat
         ),
         (
             lambda rows, manifest: manifest[0].__setitem__(
-                "asset_git_revision", "f" * 40
+                "asset_revision", "f" * 40
             ),
             "revision",
+        ),
+        (
+            lambda rows, manifest: manifest[0].__setitem__(
+                "code_revision", "9" * 40
+            ),
+            "training code revision",
         ),
         (
             lambda rows, manifest: (
@@ -1482,12 +1526,12 @@ def test_self_consistent_wrong_reader_reward_hash_is_rejected(
 ) -> None:
     rows, manifest = complete_campaign
     accepted = copy.deepcopy(
-        next(item for item in manifest if item["treatment"] == label)
+        next(item for item in manifest if item["arm"] == label)
     )
     row = next(
         item
         for item in rows
-        if item["treatment"] == accepted["raw_treatment"]
+        if item["treatment"] == quality_analysis.RAW_TREATMENT[accepted["arm"]]
         and item["training_seed"] == accepted["training_seed"]
     )
     payload = legacy._sampled_payload_from_bytes(
@@ -1511,7 +1555,7 @@ def test_self_consistent_fq_wrong_speed_normalizer_hash_is_rejected(
 ) -> None:
     rows, manifest = complete_campaign
     accepted = copy.deepcopy(
-        next(item for item in manifest if item["treatment"] == "FQ-min")
+        next(item for item in manifest if item["arm"] == "FQ-min")
     )
     row = next(
         item
@@ -1544,17 +1588,7 @@ def test_self_consistent_fq_wrong_speed_normalizer_hash_is_rejected(
         ),
         (lambda r, m: m[-1].__setitem__("short", "fq-min"), "short"),
         (lambda r, m: r[-1].__setitem__("task", "wrong"), "task"),
-        (lambda r, m: m[-1].__setitem__("delivered_weight", 2.0), "weights"),
-        (
-            lambda r, m: m[-1].__setitem__(
-                "delivered_reader", "FirstStrikeQualityDeliveredRewardTerm"
-            ),
-            "reader",
-        ),
-        (
-            lambda r, m: m[-1].__setitem__("speed_normalizer_m_s", 1.0),
-            "normalizer",
-        ),
+        (lambda r, m: r[-1].__setitem__("delivered_weight", 2.0), "weights"),
         (
             lambda r, m: m[0].__setitem__(
                 "fixed_impedance_signature_sha256", "f" * 64
@@ -1562,19 +1596,32 @@ def test_self_consistent_fq_wrong_speed_normalizer_hash_is_rejected(
             "gains",
         ),
         (
-            lambda r, m: m[0].__setitem__("impulse_limits_n_m_s", [1.0] * 6),
+            lambda r, m: m[0].__setitem__("cap_signature_sha256", "f" * 64),
             "caps",
         ),
         (lambda r, m: r[0].__setitem__("imp_max_p", 0.1), "imp_max_p"),
         (
-            lambda r, m: m[0].__setitem__("training_iterations", 499),
-            "training budget",
-        ),
-        (
-            lambda r, m: m[0].__setitem__("checkpoint_filename", "model_500.pt"),
+            lambda r, m: m[0].__setitem__(
+                "checkpoint_path", "/accepted/f8-seed8/model_500.pt"
+            ),
             "checkpoint",
         ),
         (lambda r, m: r[0].__setitem__("num_envs", 128), "quota"),
+        (lambda r, m: m[0].__setitem__("num_envs", 128), "quota"),
+        (
+            lambda r, m: m[0].__setitem__("episodes_per_env_sampled", 1),
+            "quota",
+        ),
+        (lambda r, m: m[0].__setitem__("n_episodes_sampled", 511), "quota"),
+        (
+            lambda r, m: m[0].update(
+                {
+                    "evaluation_attempt": "attempt99",
+                    "evaluation_retry_history": "attempt99:accepted",
+                }
+            ),
+            "evaluation attempt",
+        ),
         (lambda r, m: r[0].__setitem__("git_dirty", True), "dirty"),
         (
             lambda r, m: m[0].__setitem__(
@@ -1582,14 +1629,21 @@ def test_self_consistent_fq_wrong_speed_normalizer_hash_is_rejected(
             ),
             "binding",
         ),
-        (
-            lambda r, m: m[0].__setitem__(
-                "decision_fields", ["first_contact_quality"]
-            ),
-            r"\*_sampled",
-        ),
+        (lambda r, m: m[0].__setitem__("clean_state", False), "clean_state"),
         (
             lambda r, m: m[0].__setitem__("liveness_failure_n", 1),
+            "sentinel",
+        ),
+        (
+            lambda r, m: m[0].__setitem__("quality_overflow_n", 0.5),
+            "sentinel",
+        ),
+        (
+            lambda r, m: m[0].__setitem__("quality_nonfinite_n", -0.5),
+            "sentinel",
+        ),
+        (
+            lambda r, m: m[0].__setitem__("quota_failure_n", False),
             "sentinel",
         ),
         (lambda r, m: m.pop(), "accepted-evaluation"),
@@ -1622,10 +1676,10 @@ def test_contract_accepts_training_code_revision_that_differs_from_eval_git_revi
     """Provenance over-constraint fix: training and evaluation code
     revisions are independently pinned, not required to be equal -- a
     persistence/provenance-only fix can land in the evaluation checkout
-    after training froze. git_revision must still match the accepted
-    attempt's pinned revision (row/accepted binding, unchanged), and the
-    asset revision equality (training vs. evaluation) is untouched and
-    still required -- only the code side is decoupled."""
+    after training froze. Canonical code_revision still binds the row's
+    training_code_revision, and the asset revision equality (training vs.
+    evaluation) is untouched and still required -- only the code side is
+    decoupled."""
     rows, manifest = _campaign_rows(tmp_path)
     new_training_code_revision = "9" * 40
     for row, accepted in zip(rows, manifest, strict=True):
@@ -1643,10 +1697,10 @@ def test_contract_accepts_training_code_revision_that_differs_from_eval_git_revi
             "sampled_trace_artifact_sha256"
         ]
         row["training_code_revision"] = new_training_code_revision
-        # git_revision (the evaluation checkout, on both the row and the
-        # accepted manifest) is deliberately left at the fixture baseline
-        # ("a" * 40) -- the whole point is that it differs from the
-        # training revision.
+        accepted["code_revision"] = new_training_code_revision
+        # git_revision (the evaluation checkout) is deliberately left at the
+        # fixture baseline ("a" * 40): canonical code_revision binds the
+        # training checkout, not the later persistence-only evaluator fix.
 
     validate_quality_campaign_contract(rows, manifest)  # must not raise
 
@@ -1654,7 +1708,7 @@ def test_contract_accepts_training_code_revision_that_differs_from_eval_git_revi
 def test_analysis_uses_one_mwu_holm_family_and_sign_flip_is_sensitivity(
     analysis,
 ) -> None:
-    assert analysis["valid"] is True
+    assert analysis["valid"] is True, analysis
     assert set(analysis["primary_contrasts"]) == {
         "F0_minus_F8",
         "D0_minus_F8",

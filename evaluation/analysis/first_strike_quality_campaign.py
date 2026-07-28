@@ -24,7 +24,10 @@ from evaluation.analysis import first_strike_campaign as legacy
 CAMPAIGN_NAME = "fq4x8"
 LABELS = ("F8", "F0", "D0", "FQ-min")
 SEEDS = tuple(range(8, 16))
-RAW_TREATMENT = {"F8": "F8", "F0": "F0", "D0": "D0", "FQ-min": "FQ"}
+RAW_TREATMENT = {"F8": "F", "F0": "F0", "D0": "D0", "FQ-min": "FQ"}
+_LABEL_BY_RAW_TREATMENT = {
+    raw_treatment: label for label, raw_treatment in RAW_TREATMENT.items()
+}
 SHORT = {"F8": "f8", "F0": "f0", "D0": "d0", "FQ-min": "fq"}
 TASKS = {
     "F8": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear",
@@ -81,7 +84,7 @@ STRICT_CONFIG_IDENTITY_KEYS = (
     "evaluation_treatment_reward_sha256",
 )
 PAYOUT_SEMANTICS = {
-    "F8": "actual_event_linear",
+    "F": "actual_event_linear",
     "F0": "actual_event_linear_speed_disabled",
     "D0": "actual_event_linear_delivered_disabled",
     "FQ": "actual_event_quality_bounded",
@@ -287,19 +290,32 @@ def validate_quality_campaign_contract(
 ) -> None:
     """Fail closed on any drift from the registered 32-row campaign."""
 
+    # Local import avoids the module-import cycle: fq4x8_manifests derives its
+    # frozen identities from this module.
+    from evaluation.analysis import fq4x8_manifests as manifests
+
     rows = list(rows)
     manifest = list(accepted_evaluation_manifest)
     if len(rows) != 32:
         raise ValueError("quality campaign requires exactly 32 evaluation rows")
     if len(manifest) != 32:
         raise ValueError("quality campaign requires 32 accepted-evaluation rows")
+    canonical_fields = set(manifests.EVALUATION_FIELDS)
+    for accepted in manifest:
+        if set(accepted) != canonical_fields:
+            missing = sorted(canonical_fields - set(accepted))
+            unexpected = sorted(set(accepted) - canonical_fields)
+            raise ValueError(
+                "accepted-evaluation row does not match the canonical 39-field "
+                f"schema (missing={missing}, unexpected={unexpected})"
+            )
 
     row_index = {
         (str(row.get("treatment")), int(row.get("training_seed", -1))): row
         for row in rows
     }
     manifest_index = {
-        (str(row.get("treatment")), int(row.get("training_seed", -1))): row
+        (str(row.get("arm")), int(row.get("training_seed", -1))): row
         for row in manifest
     }
     expected_rows = {
@@ -330,46 +346,47 @@ def validate_quality_campaign_contract(
             raise ValueError(f"{prefix}: disposition must be accepted")
         if not str(accepted.get("evaluation_attempt", "")).strip():
             raise ValueError(f"{prefix}: accepted evaluation attempt is missing")
-        for key in (
-            "treatment",
-            "raw_treatment",
-            "short",
-            "task",
-            "training_seed",
-            "impact_weight",
-            "delivered_weight",
-            "impact_reader",
-            "delivered_reader",
-            "speed_normalizer_m_s",
-            "fixed_impedance_signature_sha256",
-            "fixed_action_signature_sha256",
-            "impulse_limits_n_m_s",
-            "training_iterations",
-            "training_num_envs",
-            "checkpoint_filename",
-            "evaluation_num_envs",
-            "evaluation_episodes_per_env",
-            "decision_fields",
+        if (
+            accepted.get("evaluation_attempt")
+            != manifests.EXPECTED_EVALUATION_ATTEMPT
+            or accepted.get("evaluation_retry_history")
+            != manifests.EXPECTED_EVALUATION_RETRY_HISTORY
         ):
-            if accepted.get(key) != frozen[key]:
-                category = {
-                    "raw_treatment": "treatment",
-                    "impact_weight": "weights",
-                    "delivered_weight": "weights",
-                    "impact_reader": "reader",
-                    "delivered_reader": "reader",
-                    "speed_normalizer_m_s": "normalizer",
-                    "fixed_impedance_signature_sha256": "gains",
-                    "fixed_action_signature_sha256": "action",
-                    "impulse_limits_n_m_s": "caps",
-                    "training_iterations": "training budget",
-                    "training_num_envs": "training budget",
-                    "checkpoint_filename": "checkpoint",
-                    "evaluation_num_envs": "quota",
-                    "evaluation_episodes_per_env": "quota",
-                    "decision_fields": "decision fields must use *_sampled",
-                }.get(key, key)
+            raise ValueError(f"{prefix}: frozen evaluation attempt mismatch")
+        manifests._validate_retry_history(
+            accepted.get("evaluation_retry_history"),
+            accepted_attempt=accepted["evaluation_attempt"],
+            prefix=prefix,
+        )
+        for key, expected, category in (
+            ("arm", label, "arm"),
+            ("short", frozen["short"], "short"),
+            ("task", frozen["task"], "task"),
+            ("training_seed", seed, "training seed"),
+            (
+                "fixed_impedance_signature_sha256",
+                frozen["fixed_impedance_signature_sha256"],
+                "gains",
+            ),
+            (
+                "fixed_action_signature_sha256",
+                frozen["fixed_action_signature_sha256"],
+                "action",
+            ),
+            (
+                "cap_signature_sha256",
+                manifests.EXPECTED_CAP_SIGNATURE_SHA256,
+                "caps",
+            ),
+        ):
+            if accepted.get(key) != expected:
                 raise ValueError(f"{prefix}: frozen {category} mismatch")
+        try:
+            clean_state = legacy._parse_bool(accepted.get("clean_state"))
+        except ValueError as error:
+            raise ValueError(f"{prefix}: invalid clean_state") from error
+        if not clean_state:
+            raise ValueError(f"{prefix}: clean_state must be true")
 
         _require_equal(row.get("task"), frozen["task"], f"{prefix}: task mismatch")
         _require_equal(
@@ -392,27 +409,45 @@ def validate_quality_campaign_contract(
             frozen["delivered_weight"],
             f"{prefix}: weights mismatch",
         )
-        quota = (
+        raw_quota = (
             row.get("num_envs"),
             row.get("episodes_per_env_sampled"),
             row.get("n_episodes_sampled"),
         )
-        if quota != (256, 2, 512):
+        manifest_quota = (
+            accepted.get("num_envs"),
+            accepted.get("episodes_per_env_sampled"),
+            accepted.get("n_episodes_sampled"),
+        )
+        if raw_quota != (256, 2, 512) or manifest_quota != (256, 2, 512):
             raise ValueError(f"{prefix}: strict 256x2 quota mismatch")
         if float(row.get("imp_max_p", np.nan)) != 0.0:
             raise ValueError(f"{prefix}: imp_max_p must be zero")
-        if Path(str(row.get("checkpoint_path", ""))).name != "model_499.pt":
+        checkpoint_path = str(row.get("checkpoint_path", ""))
+        if Path(checkpoint_path).name != "model_499.pt":
             raise ValueError(f"{prefix}: checkpoint mismatch")
+        if accepted.get("checkpoint_path") != checkpoint_path:
+            raise ValueError(f"{prefix}: checkpoint path binding mismatch")
         for dirty_key in ("git_dirty", "asset_git_dirty"):
             try:
                 row_dirty = legacy._parse_bool(row.get(dirty_key))
-                accepted_dirty = legacy._parse_bool(accepted.get(dirty_key))
             except ValueError as error:
                 raise ValueError(f"{prefix}: invalid dirty provenance") from error
-            if row_dirty or accepted_dirty:
+            if row_dirty:
                 raise ValueError(f"{prefix}: dirty provenance is forbidden")
         for sentinel in SENTINELS:
-            if int(accepted.get(sentinel, -1)) != 0:
+            try:
+                sentinel_value = manifests._exact_int(
+                    accepted.get(sentinel),
+                    label=f"sentinel {sentinel}",
+                    prefix=prefix,
+                )
+            except ValueError as error:
+                raise ValueError(
+                    f"{prefix}: sentinel {sentinel} is not an exact "
+                    "nonnegative integer"
+                ) from error
+            if sentinel_value != 0:
                 raise ValueError(f"{prefix}: sentinel {sentinel} is nonzero")
         for key, expected in (
             ("action_rng_seed", legacy.CAMPAIGN_EVALUATOR_RNG["action"]),
@@ -437,9 +472,6 @@ def validate_quality_campaign_contract(
             raise ValueError(f"{prefix}: accepted checkpoint binding mismatch")
         for key in (
             "checkpoint_sha256",
-            "campaign_config_sha256",
-            "treatment_config_sha256",
-            "nail_asset_sha256",
             "sampled_trace_digest",
             "sampled_trace_artifact_sha256",
         ):
@@ -447,6 +479,9 @@ def validate_quality_campaign_contract(
                 raise ValueError(f"{prefix}: invalid manifest hash for {key}")
             if accepted[key] != row[key]:
                 raise ValueError(f"{prefix}: manifest binding mismatch for {key}")
+        for key in ("campaign_config_sha256", "treatment_config_sha256"):
+            if not legacy._is_hex_digest(accepted.get(key), 64):
+                raise ValueError(f"{prefix}: invalid manifest hash for {key}")
         if not legacy._is_hex_digest(
             accepted.get("accepted_training_manifest_sha256"), 64
         ) or accepted["accepted_training_manifest_sha256"] != row[
@@ -470,29 +505,39 @@ def validate_quality_campaign_contract(
             EXPECTED_TREATMENT_REWARD_SHA256[label]
         ):
             raise ValueError(f"{prefix}: frozen reward semantics mismatch")
-        # Code revision is independently pinned, not required to equal the
-        # training revision: a persistence/provenance-only fix can land in
-        # the evaluation checkout after training froze. The evaluation
-        # checkout itself must still match the accepted attempt's pinned
-        # revision (revision == accepted_revision) for BOTH code and asset;
-        # only code additionally may differ from the training checkout --
-        # asset (nail/scene geometry) may not.
-        for prefix_key, training_key, require_training_match in (
-            ("git", "training_code_revision", False),
-            ("asset_git", "training_asset_revision", True),
+        evaluation_code_revision = row.get("git_revision")
+        training_code_revision = row.get("training_code_revision")
+        manifest_code_revision = accepted.get("code_revision")
+        if not all(
+            legacy._is_hex_digest(value, 40)
+            for value in (
+                evaluation_code_revision,
+                training_code_revision,
+                manifest_code_revision,
+            )
         ):
-            revision = row.get(f"{prefix_key}_revision")
-            training_revision = row.get(training_key)
-            accepted_revision = accepted.get(f"{prefix_key}_revision")
-            if not all(
-                legacy._is_hex_digest(value, 40)
-                for value in (revision, training_revision, accepted_revision)
-            ):
-                raise ValueError(f"{prefix}: invalid {prefix_key} revision")
-            if revision != accepted_revision:
-                raise ValueError(f"{prefix}: {prefix_key} revision binding mismatch")
-            if require_training_match and revision != training_revision:
-                raise ValueError(f"{prefix}: {prefix_key} revision binding mismatch")
+            raise ValueError(f"{prefix}: invalid git revision")
+        if manifest_code_revision != training_code_revision:
+            raise ValueError(f"{prefix}: training code revision binding mismatch")
+
+        evaluation_asset_revision = row.get("asset_git_revision")
+        training_asset_revision = row.get("training_asset_revision")
+        manifest_asset_revision = accepted.get("asset_revision")
+        if not all(
+            legacy._is_hex_digest(value, 40)
+            for value in (
+                evaluation_asset_revision,
+                training_asset_revision,
+                manifest_asset_revision,
+            )
+        ):
+            raise ValueError(f"{prefix}: invalid asset_git revision")
+        if not (
+            evaluation_asset_revision
+            == training_asset_revision
+            == manifest_asset_revision
+        ):
+            raise ValueError(f"{prefix}: asset_git revision binding mismatch")
         if row["treatment_config_sha256"] != _treatment_digest(frozen):
             raise ValueError(f"{prefix}: treatment configuration binding mismatch")
         artifact = Path(str(row.get("sampled_trace_path", "")))
@@ -525,9 +570,13 @@ def validate_quality_campaign_contract(
     ):
         if len({str(item.get(key)) for item in manifest}) != 1:
             raise ValueError(f"campaign: treatment-shared {key} mismatch")
+    if len({str(item.get("campaign_config_sha256")) for item in manifest}) != 1:
+        raise ValueError(
+            "campaign: canonical training campaign_config_sha256 mismatch"
+        )
     for label in LABELS:
         accepted_arm = [
-            item for item in manifest if item.get("treatment") == label
+            item for item in manifest if item.get("arm") == label
         ]
         raw_arm = [
             row for row in rows if row.get("treatment") == RAW_TREATMENT[label]
@@ -537,15 +586,30 @@ def validate_quality_campaign_contract(
             "evaluation_config_sha256",
             "training_treatment_reward_sha256",
             "evaluation_treatment_reward_sha256",
-            "campaign_config_sha256",
-            "treatment_config_sha256",
         ):
-            source = (
-                raw_arm
-                if key in {"campaign_config_sha256", "treatment_config_sha256"}
-                else accepted_arm
+            if len({str(item.get(key)) for item in accepted_arm}) != 1:
+                raise ValueError(
+                    f"{label}: per-treatment {key} identity mismatch"
+                )
+        if (
+            len(
+                {
+                    str(item.get("treatment_config_sha256"))
+                    for item in accepted_arm
+                }
             )
-            if len({str(item.get(key)) for item in source}) != 1:
+            != 1
+            or accepted_arm[0].get("treatment_config_sha256")
+            != manifests.EXPECTED_TREATMENT_CONFIG_SHA256[label]
+        ):
+            raise ValueError(
+                f"{label}: canonical treatment_config_sha256 identity mismatch"
+            )
+        # The raw evaluator and canonical training manifest derive these two
+        # identities differently. Each derivation must be internally stable
+        # across an arm, but equality between the two sources is not meaningful.
+        for key in ("campaign_config_sha256", "treatment_config_sha256"):
+            if len({str(item.get(key)) for item in raw_arm}) != 1:
                 raise ValueError(
                     f"{label}: per-treatment {key} identity mismatch"
                 )
@@ -556,7 +620,7 @@ def _quality_payload_identity_reasons(
 ) -> list[str]:
     """Cross-bind schema-v3 payload identities to row and accepted manifest."""
 
-    prefix = f"{accepted.get('treatment')}/seed{accepted.get('training_seed')}"
+    prefix = f"{accepted.get('arm')}/seed{accepted.get('training_seed')}"
     reasons: list[str] = []
     evaluation = payload.get("evaluation_contract", {})
     strict = evaluation.get("strict_config_identities", {})
@@ -580,7 +644,7 @@ def _quality_payload_identity_reasons(
         ]:
             reasons.append(f"{prefix}: reward identity mismatch")
         expected_reward = EXPECTED_TREATMENT_REWARD_SHA256.get(
-            str(accepted.get("treatment"))
+            str(accepted.get("arm"))
         )
         if strict["training_treatment_reward_sha256"] != expected_reward:
             reasons.append(f"{prefix}: frozen reward semantics mismatch")
@@ -1766,7 +1830,7 @@ def analyze_quality_campaign(
     rows = list(rows)
     manifest = list(accepted_evaluation_manifest)
     manifest_index = {
-        (str(item["treatment"]), int(item["training_seed"])): item
+        (str(item["arm"]), int(item["training_seed"])): item
         for item in manifest
     }
     try:
@@ -1784,7 +1848,7 @@ def analyze_quality_campaign(
         identity_reasons = []
         for row, payload in zip(rows, raw_payloads, strict=True):
             raw = str(row["treatment"])
-            label = "FQ-min" if raw == "FQ" else raw
+            label = _LABEL_BY_RAW_TREATMENT[raw]
             accepted = manifest_index[(label, int(row["training_seed"]))]
             identity_reasons.extend(
                 _quality_payload_identity_reasons(row, accepted, payload)
@@ -1799,7 +1863,7 @@ def analyze_quality_campaign(
     invalid_reasons: list[str] = []
     for row, payload in zip(rows, payloads, strict=True):
         raw = str(row["treatment"])
-        label = "FQ-min" if raw == "FQ" else raw
+        label = _LABEL_BY_RAW_TREATMENT[raw]
         accepted = manifest_index[(label, int(row["training_seed"]))]
         if tuple(payload.get("impulse_limits_n_m_s", ())) != tuple(IMPULSE_LIMITS):
             invalid_reasons.append(
