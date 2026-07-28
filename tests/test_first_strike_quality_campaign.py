@@ -58,6 +58,7 @@ WRONG_READER_HASHES = {
 FQ_WRONG_NORMALIZER_HASH = (
     "35985aeb3420b7c58a38fcf850be655690564703478427b603645d50505d46ac"
 )
+QUALITY_SENSOR_SLOT_COUNT = 8
 
 
 def _digest(value: dict) -> str:
@@ -87,6 +88,17 @@ def _trace(
     contact = [False, True, dwell_two_substeps]
     force = [0.0, 10.0, 8.0 if dwell_two_substeps else 0.0]
     quality_normal = [float(np.sqrt(1.0 - 0.9**2)), 0.0, -0.9]
+    zero_vector = [0.0, 0.0, 0.0]
+    raw_position_first = [
+        zero_vector,
+        point,
+        point if dwell_two_substeps else zero_vector,
+    ]
+    raw_normal_first = [
+        zero_vector,
+        quality_normal,
+        quality_normal if dwell_two_substeps else zero_vector,
+    ]
     start = [point[0] + 0.002, -0.001, 0.104]
     qvel = [[3.0] * 6 for _ in contact]
     trace = {
@@ -111,21 +123,29 @@ def _trace(
             "joint_speed_rad_s": qvel,
             "post_step_joint_speed_rad_s": copy.deepcopy(qvel),
             "tracker_depth_post_integration_m": [0.0, 0.0, 0.005],
-            "quality_found_count": [[int(value)] for value in contact],
-            "quality_normal_force_n": [[value] for value in force],
+            "quality_found_count": [
+                [int(value)] + [0] * (QUALITY_SENSOR_SLOT_COUNT - 1)
+                for value in contact
+            ],
+            "quality_normal_force_n": [
+                [value] + [0.0] * (QUALITY_SENSOR_SLOT_COUNT - 1)
+                for value in force
+            ],
             "quality_contact_position_m": [
-                [[0.0, 0.0, 0.0]],
-                [point],
-                [point if dwell_two_substeps else [0.0, 0.0, 0.0]],
+                [list(value)]
+                + [
+                    [0.0, 0.0, 0.0]
+                    for _ in range(QUALITY_SENSOR_SLOT_COUNT - 1)
+                ]
+                for value in raw_position_first
             ],
             "quality_contact_normal": [
-                [[0.0, 0.0, 0.0]],
-                [quality_normal],
-                [
-                    quality_normal
-                    if dwell_two_substeps
-                    else [0.0, 0.0, 0.0]
-                ],
+                [list(value)]
+                + [
+                    [0.0, 0.0, 0.0]
+                    for _ in range(QUALITY_SENSOR_SLOT_COUNT - 1)
+                ]
+                for value in raw_normal_first
             ],
         },
         "event_trace": {
@@ -189,8 +209,20 @@ def _no_contact_trace() -> dict:
     n = 3
     trace["physical"]["contact"] = [False] * n
     trace["physical"]["net_axial_force_n"] = [0.0] * n
-    trace["physical"]["quality_found_count"] = [[0]] * n
-    trace["physical"]["quality_normal_force_n"] = [[0.0]] * n
+    trace["physical"]["quality_found_count"] = [
+        [0] * QUALITY_SENSOR_SLOT_COUNT for _ in range(n)
+    ]
+    trace["physical"]["quality_normal_force_n"] = [
+        [0.0] * QUALITY_SENSOR_SLOT_COUNT for _ in range(n)
+    ]
+    trace["physical"]["quality_contact_position_m"] = [
+        [[0.0, 0.0, 0.0] for _ in range(QUALITY_SENSOR_SLOT_COUNT)]
+        for _ in range(n)
+    ]
+    trace["physical"]["quality_contact_normal"] = [
+        [[0.0, 0.0, 0.0] for _ in range(QUALITY_SENSOR_SLOT_COUNT)]
+        for _ in range(n)
+    ]
     trace["event_trace"].update(
         {
             "tracker_started": [False] * n,
@@ -231,6 +263,23 @@ def _no_contact_trace() -> dict:
     trace["episode_peak_lambda"] = [0.0] * 6
     trace["episode_delivered_accumulator_n_s"] = 0.0
     return trace
+
+
+def _resize_raw_quality_slots(trace: dict, width: int) -> None:
+    """Keep the first raw slot while changing the instrument signature."""
+
+    physical = trace["physical"]
+    for key in ("quality_found_count", "quality_normal_force_n"):
+        zero = 0 if key == "quality_found_count" else 0.0
+        physical[key] = [
+            [row[0]] + [zero] * (width - 1) for row in physical[key]
+        ]
+    for key in ("quality_contact_position_m", "quality_contact_normal"):
+        physical[key] = [
+            [list(row[0])]
+            + [[0.0, 0.0, 0.0] for _ in range(width - 1)]
+            for row in physical[key]
+        ]
 
 
 def _treatment_digest(row: dict, payout_semantics: str) -> str:
@@ -609,7 +658,9 @@ def test_no_contact_and_zero_force_are_zero_but_instrumentation_failures_reject(
     assert no_contact["first_contact_quality_sampled"] == 0.0
     assert no_contact["first_contact_radial_error_m_sampled"] == 0.0
     zero_force = _trace()
-    zero_force["physical"]["quality_normal_force_n"][1] = [0.0]
+    zero_force["physical"]["quality_normal_force_n"][1] = [
+        0.0
+    ] * QUALITY_SENSOR_SLOT_COUNT
     zero_force["first_strike"]["contact_quality_valid"] = False
     zero_force["first_strike"]["contact_quality"] = 0.0
     zero_force["first_strike"]["contact_error_m"] = 0.0
@@ -658,6 +709,24 @@ def test_quality_recomputes_from_positive_contact_normal_force_not_axial_force()
 
 
 @pytest.mark.parametrize(
+    "width",
+    [
+        pytest.param(1, id="missing-sensor-one-slot-fallback"),
+        pytest.param(7, id="undersized-seven-slot"),
+        pytest.param(9, id="oversized-nine-slot"),
+    ],
+)
+def test_analyze_quality_episode_requires_exactly_eight_raw_slots(width) -> None:
+    """Task 9 must reject a raw sensor signature other than eight slots."""
+
+    trace = _trace()
+    _resize_raw_quality_slots(trace, width)
+
+    with pytest.raises(ValueError, match=r"exactly 8 slots"):
+        analyze_quality_episode(trace, nail_geometry=GEOMETRY)
+
+
+@pytest.mark.parametrize(
     ("mutation", "message"),
     [
         (
@@ -668,7 +737,7 @@ def test_quality_recomputes_from_positive_contact_normal_force_not_axial_force()
         ),
         (
             lambda trace: trace["physical"]["quality_found_count"][1].__setitem__(
-                0, 2
+                0, 9
             ),
             "overflow",
         ),
@@ -697,6 +766,17 @@ def test_raw_quality_slots_and_latches_fail_closed(mutation, message) -> None:
     mutation(trace)
     with pytest.raises(ValueError, match=message):
         analyze_quality_episode(trace, nail_geometry=GEOMETRY)
+
+
+def test_quality_overflow_scope_is_only_the_tracker_accepted_onset() -> None:
+    """Later raw/event overflow cannot rewrite the immutable onset snapshot."""
+    trace = _trace()
+    trace["physical"]["quality_found_count"][2][0] = 9
+    trace["event_trace"]["tracker_contact_quality_overflow"][2] = True
+
+    metrics = analyze_quality_episode(trace, nail_geometry=GEOMETRY)
+
+    assert metrics["first_contact_quality_sampled"] == pytest.approx(0.55)
 
 
 def test_mechanism_delivered_endpoint_excludes_post_window_tail_contact() -> None:

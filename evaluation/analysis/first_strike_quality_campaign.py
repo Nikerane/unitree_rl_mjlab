@@ -91,6 +91,10 @@ PRIMARY_CONTRASTS = (
     ("FQ-min_minus_D0", "FQ-min", "D0"),
 )
 IMPULSE_LIMITS = legacy.EXPECTED_IMPULSE_LIMITS_N_M_S
+# Frozen in the pinned evaluator configuration. This is an outcome-blind
+# instrument-identity/readability prerequisite, not an inferred performance
+# threshold or evidence that eight slots are universally sufficient.
+EXPECTED_QUALITY_SENSOR_SLOTS = 8
 
 
 def _frozen_row(label: str, seed: int) -> dict:
@@ -686,6 +690,246 @@ def _nail_plane(
     return x, y, float(np.hypot(x, y))
 
 
+class QualityOverflowError(ValueError):
+    """All genuine accepted-onset overflow representations agree True."""
+
+
+def _numeric_quality_array(value: object, *, label: str) -> np.ndarray:
+    """Decode a JSON numeric array without accepting bool/string coercions."""
+
+    try:
+        raw = np.asarray(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{label} is malformed") from error
+    if raw.dtype.kind not in "iuf":
+        raise ValueError(f"{label} must contain only JSON numbers")
+    values = raw.astype(float, copy=False)
+    if not np.isfinite(values).all():
+        raise ValueError(f"{label} contains nonfinite values")
+    return values
+
+
+def _quality_bool_stream(
+    value: object, *, label: str, sample_count: int
+) -> list[bool]:
+    if (
+        not isinstance(value, list)
+        or len(value) != sample_count
+        or any(type(item) is not bool for item in value)
+    ):
+        raise ValueError(
+            f"{label} must be one JSON boolean per physical substep"
+        )
+    return value
+
+
+def _finite_quality_scalar(value: object, *, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(
+        value, (int, float, np.integer, np.floating)
+    ):
+        raise ValueError(f"{label} must be a finite JSON number")
+    parsed = float(value)
+    if not np.isfinite(parsed):
+        raise ValueError(f"{label} must be a finite JSON number")
+    return parsed
+
+
+def validate_first_contact_snapshot(
+    trace: Mapping, *, physical_sample_count: int | None = None
+) -> int | None:
+    """Validate required immutable snapshot fields without dense trace data."""
+
+    first = trace.get("first_strike")
+    if not isinstance(first, Mapping):
+        raise ValueError("first-strike quality snapshot is missing")
+    if "started" not in first or type(first["started"]) is not bool:
+        raise ValueError("first_strike.started must be a JSON boolean")
+    if "accepted_onset_index" not in first:
+        raise ValueError("accepted_onset_index is missing")
+    onset_raw = first["accepted_onset_index"]
+    if onset_raw is None:
+        onset = None
+    elif isinstance(onset_raw, bool) or not isinstance(onset_raw, int):
+        raise ValueError("quality onset index is malformed")
+    else:
+        onset = onset_raw
+    if onset is not None and (
+        onset < 0
+        or (
+            physical_sample_count is not None
+            and onset >= physical_sample_count
+        )
+    ):
+        raise ValueError("quality onset index is malformed")
+    if first["started"] != (onset is not None):
+        raise ValueError("quality snapshot started/onset mismatch")
+
+    if "contact_quality_overflow" not in first:
+        raise ValueError("missing contact_quality_overflow snapshot")
+    snapshot_overflow = first["contact_quality_overflow"]
+    if type(snapshot_overflow) is not bool:
+        raise ValueError(
+            "contact_quality_overflow snapshot must be a JSON boolean"
+        )
+    if onset is None and snapshot_overflow:
+        raise ValueError(
+            "contact_quality_overflow cannot be true without an accepted onset"
+        )
+
+    required = (
+        "contact_point_w",
+        "contact_error_m",
+        "contact_quality",
+        "contact_quality_valid",
+        "first_contact_time_s",
+        "contact_normal_axiality",
+    )
+    missing = [key for key in required if key not in first]
+    if missing:
+        raise ValueError(f"missing quality field: {missing[0]}")
+    point = _numeric_quality_array(
+        first["contact_point_w"], label="contact_point_w"
+    )
+    if point.shape != (3,):
+        raise ValueError("contact_point_w must contain three finite values")
+    for key in (
+        "contact_error_m",
+        "contact_quality",
+        "first_contact_time_s",
+        "contact_normal_axiality",
+    ):
+        _finite_quality_scalar(first[key], label=key)
+    if type(first["contact_quality_valid"]) is not bool:
+        raise ValueError("contact_quality_valid must be a JSON boolean")
+    return onset
+
+
+def _validated_raw_quality_arrays(
+    physical: Mapping, *, physical_sample_count: int | None
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    try:
+        found = _numeric_quality_array(
+            physical["quality_found_count"], label="quality_found_count"
+        )
+        forces = _numeric_quality_array(
+            physical["quality_normal_force_n"],
+            label="quality_normal_force_n",
+        )
+        positions = _numeric_quality_array(
+            physical["quality_contact_position_m"],
+            label="quality_contact_position_m",
+        )
+        normals = _numeric_quality_array(
+            physical["quality_contact_normal"],
+            label="quality_contact_normal",
+        )
+    except KeyError as error:
+        raise ValueError(f"missing raw quality slot: {error.args[0]}") from error
+    if (
+        found.ndim != 2
+        or found.shape[0] < 1
+        or (
+            physical_sample_count is not None
+            and found.shape[0] != physical_sample_count
+        )
+        or forces.shape != found.shape
+        or positions.shape != (*found.shape, 3)
+        or normals.shape != (*found.shape, 3)
+    ):
+        raise ValueError("raw quality slot shape mismatch")
+    if found.shape[1] != EXPECTED_QUALITY_SENSOR_SLOTS:
+        raise ValueError(
+            "raw quality sensor must have exactly "
+            f"{EXPECTED_QUALITY_SENSOR_SLOTS} slots"
+        )
+    if (
+        np.any(found < 0.0)
+        or not np.equal(found, np.floor(found)).all()
+    ):
+        raise ValueError("raw quality slots contain nonfinite or invalid values")
+    return found, forces, positions, normals
+
+
+def validate_first_contact_raw_quality(
+    trace: Mapping, *, physical_sample_count: int | None = None
+) -> int:
+    """Validate raw quality geometry and return its dense sample count."""
+
+    physical = trace.get("physical")
+    if not isinstance(physical, Mapping):
+        raise ValueError("physical quality channels are missing")
+    found, _, _, _ = _validated_raw_quality_arrays(
+        physical, physical_sample_count=physical_sample_count
+    )
+    return int(found.shape[0])
+
+
+def _quality_overflow_at_onset(
+    physical: Mapping,
+    event: Mapping,
+    first: Mapping,
+    *,
+    onset: int | None,
+    sample_count: int,
+    found: np.ndarray,
+) -> bool:
+    try:
+        event_overflow = _quality_bool_stream(
+            event["tracker_contact_quality_overflow"],
+            label="tracker_contact_quality_overflow",
+            sample_count=sample_count,
+        )
+    except KeyError as error:
+        raise ValueError("missing event quality overflow stream") from error
+    snapshot_overflow = first["contact_quality_overflow"]
+    # ``found`` stores the sensor-reported contact count. Compare it with the
+    # actual, already-validated slot width; ``>`` is intentional because a
+    # count equal to capacity still fits without overflow.
+    raw_onset_overflow = (
+        False
+        if onset is None
+        else bool(np.any(found[onset] > found.shape[1]))
+    )
+    event_onset_overflow = False if onset is None else event_overflow[onset]
+    if onset is not None and not (
+        raw_onset_overflow == event_onset_overflow == snapshot_overflow
+    ):
+        raise ValueError(
+            "raw/event/snapshot overflow disagree at the accepted onset"
+        )
+    return onset is not None and snapshot_overflow
+
+
+def first_contact_overflow_at_onset(
+    trace: Mapping, *, physical_sample_count: int
+) -> bool:
+    """Return genuine aligned accepted-onset overflow, independently of liveness."""
+
+    physical = trace.get("physical")
+    event = trace.get("event_trace")
+    first = trace.get("first_strike")
+    if not isinstance(physical, Mapping):
+        raise ValueError("physical quality channels are missing")
+    if not isinstance(event, Mapping):
+        raise ValueError("event quality channels are missing")
+    if not isinstance(first, Mapping):
+        raise ValueError("first-strike quality snapshot is missing")
+    onset = validate_first_contact_snapshot(
+        trace, physical_sample_count=physical_sample_count
+    )
+    found, _, _, _ = _validated_raw_quality_arrays(
+        physical, physical_sample_count=physical_sample_count
+    )
+    return _quality_overflow_at_onset(
+        physical,
+        event,
+        first,
+        onset=onset,
+        sample_count=physical_sample_count,
+        found=found,
+    )
+
+
 def _quality_snapshot_from_raw_slots(
     physical: Mapping,
     event: Mapping,
@@ -697,47 +941,19 @@ def _quality_snapshot_from_raw_slots(
 ) -> dict:
     """Validate raw slots and recompute the immutable onset-quality snapshot."""
 
-    try:
-        found = np.asarray(physical["quality_found_count"], dtype=float)
-        forces = np.asarray(physical["quality_normal_force_n"], dtype=float)
-        positions = np.asarray(
-            physical["quality_contact_position_m"], dtype=float
-        )
-        normals = np.asarray(physical["quality_contact_normal"], dtype=float)
-    except KeyError as error:
-        raise ValueError(f"missing raw quality slot: {error.args[0]}") from error
-    if (
-        found.ndim != 2
-        or found.shape[0] != sample_count
-        or forces.shape != found.shape
-        or positions.shape != (*found.shape, 3)
-        or normals.shape != (*found.shape, 3)
-    ):
-        raise ValueError("raw quality slot shape mismatch")
-    if (
-        not np.isfinite(found).all()
-        or not np.isfinite(forces).all()
-        or not np.isfinite(positions).all()
-        or not np.isfinite(normals).all()
-        or np.any(found < 0.0)
-        or not np.equal(found, np.floor(found)).all()
-    ):
-        raise ValueError("raw quality slots contain nonfinite or invalid values")
-    slot_count = found.shape[1]
-    try:
-        event_overflow = np.asarray(
-            event["tracker_contact_quality_overflow"], dtype=bool
-        )
-    except KeyError as error:
-        raise ValueError("missing event quality overflow stream") from error
-    overflow = (
-        bool(np.any(found > slot_count))
-        or event_overflow.shape != (sample_count,)
-        or bool(np.any(event_overflow))
-        or bool(first.get("contact_quality_overflow", False))
+    found, forces, positions, normals = _validated_raw_quality_arrays(
+        physical, physical_sample_count=sample_count
     )
-    if overflow:
-        raise ValueError("quality instrumentation overflow")
+    if _quality_overflow_at_onset(
+        physical,
+        event,
+        first,
+        onset=onset,
+        sample_count=sample_count,
+        found=found,
+    ):
+        raise QualityOverflowError("quality instrumentation overflow")
+
     empty = {
         "valid": False,
         "point": np.zeros(3),
@@ -746,37 +962,55 @@ def _quality_snapshot_from_raw_slots(
         "normal_axiality": 0.0,
     }
     if onset is None:
-        return empty
-
-    weights = np.where(
-        found[onset] > 0.0, np.maximum(forces[onset], 0.0), 0.0
-    )
-    total_weight = float(weights.sum())
-    if total_weight <= 0.0:
         recomputed = empty
     else:
-        point = np.sum(positions[onset] * weights[:, None], axis=0) / total_weight
-        _, _, error = _nail_plane(point, nail_geometry)
-        radius = float(nail_geometry["nail_radius_m"])
-        quality = float(np.clip(1.0 - (error / radius) ** 2, 0.0, 1.0))
-        weighted_normal = np.sum(
-            normals[onset] * weights[:, None], axis=0
+        weights = np.where(
+            found[onset] > 0.0, np.maximum(forces[onset], 0.0), 0.0
         )
-        normal_norm = float(np.linalg.norm(weighted_normal))
-        axis = np.asarray(nail_geometry["nail_axis"], dtype=float)
-        axis /= np.linalg.norm(axis)
-        axiality = (
-            float(np.clip(np.dot(weighted_normal / normal_norm, axis), 0.0, 1.0))
-            if normal_norm > 0.0
-            else 0.0
-        )
-        recomputed = {
-            "valid": True,
-            "point": point,
-            "error": error,
-            "quality": quality,
-            "normal_axiality": axiality,
-        }
+        total_weight = float(weights.sum())
+        if total_weight <= 0.0:
+            recomputed = empty
+        else:
+            point = (
+                np.sum(positions[onset] * weights[:, None], axis=0)
+                / total_weight
+            )
+            _, _, error = _nail_plane(point, nail_geometry)
+            radius = _finite_quality_scalar(
+                nail_geometry.get("nail_radius_m"),
+                label="nail_radius_m",
+            )
+            if radius <= 0.0:
+                raise ValueError("nail_radius_m must be positive")
+            quality = float(
+                np.clip(1.0 - (error / radius) ** 2, 0.0, 1.0)
+            )
+            weighted_normal = np.sum(
+                normals[onset] * weights[:, None], axis=0
+            )
+            normal_norm = float(np.linalg.norm(weighted_normal))
+            axis = _numeric_quality_array(
+                nail_geometry.get("nail_axis"), label="nail_axis"
+            )
+            if axis.shape != (3,) or np.linalg.norm(axis) <= 0.0:
+                raise ValueError("nail_axis is malformed")
+            axis /= np.linalg.norm(axis)
+            axiality = (
+                float(
+                    np.clip(
+                        np.dot(weighted_normal / normal_norm, axis), 0.0, 1.0
+                    )
+                )
+                if normal_norm > 0.0
+                else 0.0
+            )
+            recomputed = {
+                "valid": True,
+                "point": point,
+                "error": error,
+                "quality": quality,
+                "normal_axiality": axiality,
+            }
 
     scalar_streams = {
         "contact_error_m": "tracker_contact_error_m",
@@ -785,30 +1019,38 @@ def _quality_snapshot_from_raw_slots(
     }
     event_values: dict[str, object] = {}
     for first_key, event_key in scalar_streams.items():
-        values = np.asarray(event.get(event_key), dtype=float)
-        if values.shape != (sample_count,) or not np.isfinite(values).all():
+        values = _numeric_quality_array(
+            event.get(event_key), label=event_key
+        )
+        if values.shape != (sample_count,):
             raise ValueError(f"event quality stream shape mismatch: {event_key}")
-        event_values[first_key] = float(values[onset])
-    event_points = np.asarray(event.get("tracker_contact_point_w"), dtype=float)
-    event_valid = np.asarray(
-        event.get("tracker_contact_quality_valid"), dtype=bool
+        if onset is not None:
+            event_values[first_key] = float(values[onset])
+    event_points = _numeric_quality_array(
+        event.get("tracker_contact_point_w"), label="tracker_contact_point_w"
     )
-    if (
-        event_points.shape != (sample_count, 3)
-        or not np.isfinite(event_points).all()
-        or event_valid.shape != (sample_count,)
-    ):
-        raise ValueError("event quality stream shape mismatch")
-    event_values["contact_point_w"] = event_points[onset]
-    event_values["contact_quality_valid"] = bool(event_valid[onset])
-    event_time = np.asarray(
-        event.get("tracker_first_contact_time_s"), dtype=float
+    event_valid = _quality_bool_stream(
+        event.get("tracker_contact_quality_valid"),
+        label="tracker_contact_quality_valid",
+        sample_count=sample_count,
     )
-    if event_time.shape != (sample_count,) or not np.isfinite(event_time).all():
+    if event_points.shape != (sample_count, 3):
         raise ValueError("event quality stream shape mismatch")
-    first_time = float(first.get("first_contact_time_s", np.nan))
-    if not np.isfinite(first_time) or not np.isclose(
-        event_time[onset], first_time, rtol=0.0, atol=1e-12
+    if onset is not None:
+        event_values["contact_point_w"] = event_points[onset]
+        event_values["contact_quality_valid"] = event_valid[onset]
+    event_time = _numeric_quality_array(
+        event.get("tracker_first_contact_time_s"),
+        label="tracker_first_contact_time_s",
+    )
+    if event_time.shape != (sample_count,):
+        raise ValueError("event quality stream shape mismatch")
+    first_time = _finite_quality_scalar(
+        first.get("first_contact_time_s"), label="first_contact_time_s"
+    )
+    expected_time = 0.0 if onset is None else float(event_time[onset])
+    if not np.isclose(
+        expected_time, first_time, rtol=0.0, atol=1e-12
     ):
         raise ValueError("quality event/snapshot mismatch for first_contact_time_s")
     expected = {
@@ -819,36 +1061,104 @@ def _quality_snapshot_from_raw_slots(
         "contact_normal_axiality": recomputed["normal_axiality"],
     }
     for key, expected_value in expected.items():
-        first_value = first.get(key)
-        event_value = event_values[key]
+        if key not in first:
+            raise ValueError(f"missing quality field: {key}")
+        first_value = first[key]
+        event_value = event_values.get(key)
         if isinstance(expected_value, np.ndarray):
+            parsed_first = _numeric_quality_array(first_value, label=key)
             matches_recomputed = np.allclose(
-                np.asarray(first_value, dtype=float),
+                parsed_first,
                 expected_value,
                 rtol=0.0,
                 atol=1e-9,
             )
-            matches_event = np.allclose(
-                np.asarray(event_value, dtype=float),
-                np.asarray(first_value, dtype=float),
-                rtol=0.0,
-                atol=1e-9,
+            matches_event = (
+                onset is None
+                or np.allclose(
+                    np.asarray(event_value, dtype=float),
+                    parsed_first,
+                    rtol=0.0,
+                    atol=1e-9,
+                )
             )
         elif isinstance(expected_value, bool):
+            if type(first_value) is not bool:
+                raise ValueError(f"{key} must be a JSON boolean")
             matches_recomputed = first_value is expected_value
-            matches_event = event_value is first_value
+            matches_event = onset is None or event_value is first_value
         else:
+            parsed_first = _finite_quality_scalar(first_value, label=key)
             matches_recomputed = np.isclose(
-                float(first_value), expected_value, rtol=0.0, atol=1e-9
+                parsed_first, expected_value, rtol=0.0, atol=1e-9
             )
-            matches_event = np.isclose(
-                float(event_value), float(first_value), rtol=0.0, atol=1e-9
+            matches_event = (
+                onset is None
+                or np.isclose(
+                    float(event_value),
+                    parsed_first,
+                    rtol=0.0,
+                    atol=1e-9,
+                )
             )
         if not matches_recomputed:
             raise ValueError(f"quality snapshot differs from recomputed {key}")
         if not matches_event:
             raise ValueError(f"quality event/snapshot mismatch for {key}")
     return recomputed
+
+
+def validate_first_contact_quality(
+    trace: Mapping, *, nail_geometry: Mapping
+) -> tuple[int | None, dict]:
+    """Pure validation/recomputation of one immutable first-contact snapshot."""
+
+    physical = trace.get("physical")
+    event = trace.get("event_trace")
+    first = trace.get("first_strike")
+    if not isinstance(physical, Mapping):
+        raise ValueError("physical quality channels are missing")
+    if not isinstance(event, Mapping):
+        raise ValueError("event quality channels are missing")
+
+    contact = physical.get("contact")
+    if (
+        not isinstance(contact, list)
+        or not contact
+        or any(type(value) is not bool for value in contact)
+    ):
+        raise ValueError("contact must be a nonempty JSON-boolean series")
+    sample_count = len(contact)
+    onset = validate_first_contact_snapshot(
+        trace, physical_sample_count=sample_count
+    )
+
+    event_started = _quality_bool_stream(
+        event.get("tracker_started"),
+        label="tracker_started",
+        sample_count=sample_count,
+    )
+    started_indices = [
+        index for index, started in enumerate(event_started) if started
+    ]
+    event_onset = started_indices[0] if started_indices else None
+    if event_onset != onset:
+        raise ValueError("quality event/snapshot onset mismatch")
+    if onset is None:
+        if any(contact):
+            raise ValueError("raw contact exists without an accepted onset")
+    elif not contact[onset] or any(contact[:onset]):
+        raise ValueError("raw/event/snapshot onset mismatch")
+
+    snapshot = _quality_snapshot_from_raw_slots(
+        physical,
+        event,
+        first,
+        onset=onset,
+        sample_count=sample_count,
+        nail_geometry=nail_geometry,
+    )
+    return onset, snapshot
 
 
 def analyze_quality_episode(
@@ -866,20 +1176,8 @@ def analyze_quality_episode(
             raise ValueError(f"nonfinite physical quality channel: {error}") from error
         raise
     physical = trace.get("physical", {})
-    first = trace.get("first_strike", {})
     event = trace.get("event_trace", {})
-    required = (
-        "contact_error_m",
-        "contact_quality",
-        "contact_quality_valid",
-        "contact_quality_overflow",
-        "contact_point_w",
-        "first_contact_time_s",
-        "contact_normal_axiality",
-    )
-    missing = [key for key in required if key not in first]
-    if missing:
-        raise ValueError(f"missing quality field: {missing[0]}")
+    first = trace.get("first_strike", {})
     contact = np.asarray(physical.get("contact"), dtype=bool)
     position = np.asarray(physical.get("head_position_m"), dtype=float)
     depth = np.asarray(
@@ -897,17 +1195,8 @@ def analyze_quality_episode(
     ):
         raise ValueError("physical quality channels are nonfinite or malformed")
     dt_s = float(trace.get("physics_dt_s", 0.0))
-    onset_raw = first.get("accepted_onset_index")
-    onset = None if onset_raw is None else int(onset_raw)
-    if onset is not None and (onset < 0 or onset >= contact.size):
-        raise ValueError("quality onset index is malformed")
-    snapshot = _quality_snapshot_from_raw_slots(
-        physical,
-        event,
-        first,
-        onset=onset,
-        sample_count=contact.size,
-        nail_geometry=nail_geometry,
+    onset, snapshot = validate_first_contact_quality(
+        trace, nail_geometry=nail_geometry
     )
     quality = float(snapshot["quality"])
     plane_x = plane_y = radial = 0.0
