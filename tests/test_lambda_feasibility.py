@@ -18,6 +18,7 @@ from evaluation.whip.lambda_feasibility import (
     RESET_BANK_SIZE,
     RESET_BANK_SEED,
     _assert_authoritative_outside_repositories,
+    _apply_contact_signal_diagnostics,
     _continuation_label,
     _determinism_qualification,
     _git_provenance,
@@ -41,6 +42,7 @@ from evaluation.whip.lambda_feasibility import (
     load_saved_tapes,
     onset_window_impulses,
     reset_bank_digest,
+    raw_physics_equivalence_report,
     run_isolated_replay,
     sliding_window_impulses,
     stage0_action_sequence,
@@ -697,6 +699,7 @@ def test_aggregate_sentinels_exclude_reference_and_do_not_count_resets_as_indepe
     aggregate = aggregate_results([fixed, robust, reference])
     assert aggregate["impossible_success_n"] == 0
     assert aggregate["lambda_dead_n"] == 0
+    assert aggregate["contact_signal_alignment_failure_n"] == 0
     assert aggregate["fixed_reset_existence"]["dual_bind_n"] == 1
     assert aggregate["fixed_reset_existence"]["denominator_n"] == 1
     assert aggregate["reference_control_n"] == 1
@@ -975,6 +978,8 @@ def test_reference_calibration_is_non_numeric_and_fails_if_impact_eligible() -> 
         exact_live_contact_substeps=2,
         object_live_contact_substeps=2,
         aligned_live_contact_substeps=2,
+        object_axial_live_contact_substeps=2,
+        aligned_axial_live_contact_substeps=2,
         release_by_28ms=False,
         quality_valid=True,
         quality_overflow=False,
@@ -1010,6 +1015,16 @@ def test_reference_calibration_is_non_numeric_and_fails_if_impact_eligible() -> 
     overflowed_quality = _reference_calibration_qualification(reference)
     assert overflowed_quality["status"] == "error"
     assert "quality overflow" in overflowed_quality["error"]
+
+    reference.update(
+        quality_overflow=False,
+        object_axial_live_contact_substeps=0,
+        aligned_axial_live_contact_substeps=0,
+        non_axial_contact=True,
+    )
+    non_axial_reference = _reference_calibration_qualification(reference)
+    assert non_axial_reference["status"] == "error"
+    assert "axial" in non_axial_reference["error"]
 
 
 def test_ordinary_shadow_prefix_parity_is_exact_through_success() -> None:
@@ -1203,31 +1218,41 @@ def test_contact_signal_liveness_requires_aligned_but_not_equal_signals() -> Non
     exact = np.zeros((4, 6))
     exact[2, 0] = 1.0
     object_total = np.array([0.0, 0.0, 100.0, 0.0])
+    object_axial = np.array([0.0, 0.0, 2.0, 0.0])
     liveness = contact_signal_liveness(
         contact=contact,
         exact_contrib=exact,
-        object_axial_contrib=object_total,
+        object_total_contrib=object_total,
+        object_axial_contrib=object_axial,
         onset=1,
     )
     assert liveness == {
         "exact_live_contact_substeps": 1,
         "object_live_contact_substeps": 1,
         "aligned_live_contact_substeps": 1,
+        "object_axial_live_contact_substeps": 1,
+        "aligned_axial_live_contact_substeps": 1,
+        "non_axial_contact": False,
+        "contact_signal_alignment_failure": False,
+        "lambda_dead": False,
     }
 
 
-def test_contact_signal_liveness_fails_when_channels_never_overlap() -> None:
+def test_contact_signal_liveness_marks_channels_that_never_overlap() -> None:
     contact = np.array([False, True, True, False])
     exact = np.zeros((4, 6))
     exact[1, 0] = 1.0
     object_total = np.array([0.0, 0.0, 2.0, 0.0])
-    with pytest.raises(RuntimeError, match="never live on the same"):
-        contact_signal_liveness(
-            contact=contact,
-            exact_contrib=exact,
-            object_axial_contrib=object_total,
-            onset=1,
-        )
+    liveness = contact_signal_liveness(
+        contact=contact,
+        exact_contrib=exact,
+        object_total_contrib=object_total,
+        object_axial_contrib=object_total,
+        onset=1,
+    )
+    assert liveness["contact_signal_alignment_failure"] is True
+    assert liveness["lambda_dead"] is False
+    assert liveness["aligned_live_contact_substeps"] == 0
 
 
 def test_contact_signal_liveness_cannot_use_a_later_recontact() -> None:
@@ -1235,16 +1260,207 @@ def test_contact_signal_liveness_cannot_use_a_later_recontact() -> None:
     exact = np.zeros((7, 6))
     exact[1, 0] = 1.0
     exact[5, 0] = 1.0
-    object_axial = np.zeros(7)
-    object_axial[5] = 2.0
-    with pytest.raises(RuntimeError, match="object-side.*dead"):
+    object_total = np.zeros(7)
+    object_total[5] = 2.0
+    liveness = contact_signal_liveness(
+        contact=contact,
+        exact_contrib=exact,
+        object_total_contrib=object_total,
+        object_axial_contrib=object_total,
+        onset=1,
+        stop_exclusive=3,
+    )
+    assert liveness["contact_signal_alignment_failure"] is True
+    assert liveness["object_live_contact_substeps"] == 0
+
+
+def test_lateral_contact_is_live_but_not_lambda_dead() -> None:
+    contact = np.array([False, True, True, False])
+    exact = np.zeros((4, 6))
+    exact[1:3, 0] = [0.2, 0.3]
+    object_total = np.array([0.0, 0.4, 0.5, 0.0])
+    object_axial = np.zeros(4)
+    liveness = contact_signal_liveness(
+        contact=contact,
+        exact_contrib=exact,
+        object_total_contrib=object_total,
+        object_axial_contrib=object_axial,
+        onset=1,
+    )
+    assert liveness["contact_signal_alignment_failure"] is False
+    assert liveness["aligned_live_contact_substeps"] == 2
+    assert liveness["aligned_axial_live_contact_substeps"] == 0
+    assert liveness["non_axial_contact"] is True
+    assert liveness["lambda_dead"] is False
+
+
+def test_axial_delivery_without_joint_lambda_is_true_lambda_dead() -> None:
+    contact = np.array([False, True, True, False])
+    exact = np.zeros((4, 6))
+    object_total = np.array([0.0, 0.4, 0.5, 0.0])
+    object_axial = np.array([0.0, 0.2, 0.3, 0.0])
+    liveness = contact_signal_liveness(
+        contact=contact,
+        exact_contrib=exact,
+        object_total_contrib=object_total,
+        object_axial_contrib=object_axial,
+        onset=1,
+    )
+    assert liveness["contact_signal_alignment_failure"] is True
+    assert liveness["lambda_dead"] is True
+
+
+def test_axial_on_a_different_sample_cannot_make_candidate_eligible() -> None:
+    contact = np.array([False, True, True, False])
+    exact = np.zeros((4, 6))
+    exact[1, 0] = 0.2
+    object_total = np.array([0.0, 0.4, 0.5, 0.0])
+    object_axial = np.array([0.0, 0.0, 0.3, 0.0])
+    liveness = contact_signal_liveness(
+        contact=contact,
+        exact_contrib=exact,
+        object_total_contrib=object_total,
+        object_axial_contrib=object_axial,
+        onset=1,
+    )
+    assert liveness["contact_signal_alignment_failure"] is False
+    assert liveness["object_axial_live_contact_substeps"] == 1
+    assert liveness["aligned_axial_live_contact_substeps"] == 0
+    assert liveness["non_axial_contact"] is False
+    updated = _apply_contact_signal_diagnostics(
+        {"status": "ok", "eligible": True, "binding_class": "dual_bind"},
+        liveness,
+    )
+    assert updated["status"] == "ok"
+    assert updated["eligible"] is False
+    assert updated["binding_class"] == BindingClass.INELIGIBLE.value
+
+
+def test_object_axial_projection_cannot_exceed_total_force_magnitude() -> None:
+    with pytest.raises(ValueError, match="cannot exceed"):
         contact_signal_liveness(
-            contact=contact,
-            exact_contrib=exact,
-            object_axial_contrib=object_axial,
+            contact=np.array([False, True, False]),
+            exact_contrib=np.array([[0.0] * 6, [0.1] * 6, [0.0] * 6]),
+            object_total_contrib=np.array([0.0, 0.2, 0.0]),
+            object_axial_contrib=np.array([0.0, 0.3, 0.0]),
             onset=1,
-            stop_exclusive=3,
         )
+
+
+def test_apply_contact_signal_diagnostics_preserves_status_but_rejects_lateral() -> None:
+    result = {"status": "ok", "eligible": True, "binding_class": "dual_bind"}
+    updated = _apply_contact_signal_diagnostics(
+        result,
+        {
+            "contact_signal_alignment_failure": False,
+            "non_axial_contact": True,
+            "aligned_axial_live_contact_substeps": 0,
+            "lambda_dead": False,
+        },
+    )
+    assert updated["status"] == "ok"
+    assert updated["eligible"] is False
+    assert updated["binding_class"] == BindingClass.INELIGIBLE.value
+
+
+def test_apply_contact_signal_diagnostics_fails_alignment_but_preserves_valid_impact() -> None:
+    failed = _apply_contact_signal_diagnostics(
+        {"status": "ok", "eligible": True, "binding_class": "dual_bind"},
+        {
+            "contact_signal_alignment_failure": True,
+            "non_axial_contact": False,
+            "aligned_axial_live_contact_substeps": 1,
+            "lambda_dead": False,
+        },
+    )
+    assert failed["status"] == "error"
+    assert failed["eligible"] is False
+
+    valid = _apply_contact_signal_diagnostics(
+        {"status": "ok", "eligible": True, "binding_class": "dual_bind"},
+        {
+            "contact_signal_alignment_failure": False,
+            "non_axial_contact": False,
+            "aligned_axial_live_contact_substeps": 1,
+            "lambda_dead": False,
+        },
+    )
+    assert valid == {
+        "status": "ok",
+        "eligible": True,
+        "binding_class": "dual_bind",
+        "contact_signal_alignment_failure": False,
+        "non_axial_contact": False,
+        "aligned_axial_live_contact_substeps": 1,
+        "lambda_dead": False,
+    }
+
+
+def test_raw_physics_equivalence_ignores_derived_status_but_catches_trace_change() -> None:
+    identity = {
+        "source_kind": "legacy",
+        "source_id": "tape",
+        "source_path": "tape.json",
+        "source_field": "best_actions",
+        "source_aliases": [["tape.json", "best_actions"]],
+        "delta": 0.15,
+        "action_digest": "a" * 64,
+        "reset_digest": "b" * 64,
+        "reset_role": "fixed",
+        "solref_scale": 1.0,
+    }
+    previous = _new_result(identity, status="error")
+    current = _new_result(identity, status="ok")
+    for row in (previous, current):
+        row.update(
+            qvel_trace_rad_s=[[0.0] * 6],
+            qvel_pre_trace_rad_s=[[0.0] * 6],
+            qvel_post_trace_rad_s=[[0.0] * 6],
+            qpos_trace_rad=[[0.0] * 6],
+            qpos_pre_trace_rad=[[0.0] * 6],
+            qpos_post_trace_rad=[[0.0] * 6],
+            realized_action_tape=[[0.0, 0.0, 0.0]] * 30,
+        )
+    report = raw_physics_equivalence_report([previous], [current])
+    assert report["identity_match"] is True
+    assert report["mismatch_n"] == 0
+
+    current["qvel_trace_rad_s"][0][0] = 0.1
+    changed = raw_physics_equivalence_report([previous], [current])
+    assert changed["mismatch_n"] == 1
+
+
+@pytest.mark.parametrize(
+    ("field", "changed_value"),
+    (
+        ("raw_face_contact", [True]),
+        ("exact_contrib_perjoint_trace", [[0.1] * 6]),
+        ("object_total_contrib_n_s_trace", [0.1]),
+        ("realized_action_tape", [[0.1, 0.0, 0.0]] * 30),
+        ("compiled_solref", {"contact": [0.01, 1.0]}),
+    ),
+)
+def test_raw_physics_equivalence_covers_contact_action_and_model_fields(
+    field: str, changed_value: object
+) -> None:
+    identity = {
+        "source_kind": "legacy",
+        "source_id": "tape",
+        "source_path": "tape.json",
+        "source_field": "best_actions",
+        "source_aliases": [["tape.json", "best_actions"]],
+        "delta": 0.15,
+        "action_digest": "a" * 64,
+        "reset_digest": "b" * 64,
+        "reset_role": "fixed",
+        "solref_scale": 1.0,
+    }
+    previous = _new_result(identity, status="error")
+    current = _new_result(identity, status="ok")
+    current[field] = changed_value
+    report = raw_physics_equivalence_report([previous], [current])
+    assert report["identity_match"] is True
+    assert report["mismatch_n"] == 1
 
 
 def test_trace_summary_requires_short_releasing_productive_legal_impact() -> None:

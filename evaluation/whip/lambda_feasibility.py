@@ -140,6 +140,10 @@ _RESULT_DEFAULTS: dict[str, object] = {
     "exact_live_contact_substeps": None,
     "object_live_contact_substeps": None,
     "aligned_live_contact_substeps": None,
+    "object_axial_live_contact_substeps": None,
+    "aligned_axial_live_contact_substeps": None,
+    "non_axial_contact": False,
+    "contact_signal_alignment_failure": False,
     "n_substeps": None,
     "n_state_samples": None,
     "post_tape_zero_actions": POST_TAPE_ZERO_ACTIONS,
@@ -190,6 +194,59 @@ _DETERMINISTIC_TRACE_FIELDS = (
     "production_peak_perjoint",
     "realized_action_tape",
     "compiled_solref",
+)
+
+AMENDMENT_ID = "A1"
+SUPERSEDES_FAILED_OUTPUT_SHA256 = (
+    "6755cdefb74aebfb704f2271af4b020dcfc1d83bba045c5b1a997922d7b21414"
+)
+SUPERSEDES_FAILED_INPUT_SHA256 = (
+    "86deebf186ef8360f515574b388cd52a834369f4d25f6246eaed4abfd848d588"
+)
+_RAW_PHYSICS_IDENTITY_FIELDS = (
+    "source_kind",
+    "source_id",
+    "source_path",
+    "source_field",
+    "source_aliases",
+    "delta",
+    "action_digest",
+    "reset_digest",
+    "reset_role",
+    "solref_scale",
+)
+_RAW_PHYSICS_TRACE_FIELDS = (
+    "qvel_trace_rad_s",
+    "qvel_pre_trace_rad_s",
+    "qvel_post_trace_rad_s",
+    "qpos_trace_rad",
+    "qpos_pre_trace_rad",
+    "qpos_post_trace_rad",
+    "head_pose_m_quat",
+    "head_position_m",
+    "head_twist_linear_angular",
+    "nail_depth_m",
+    "raw_face_contact",
+    "nonface_efc_force_trace",
+    "exact_contrib_perjoint_trace",
+    "shipped_rolling_perjoint_trace",
+    "shipped_contrib_perjoint_trace",
+    "object_axial_force_n_trace",
+    "object_axial_contrib_n_s_trace",
+    "object_total_contrib_n_s_trace",
+    "tracker_started_trace",
+    "quality",
+    "quality_valid",
+    "quality_overflow",
+    "quality_contact_point_w",
+    "quality_error_m",
+    "quality_first_contact_time_s",
+    "quality_normal_axiality",
+    "realized_action_tape",
+    "realized_action_digest",
+    "compiled_solref",
+    "n_substeps",
+    "n_state_samples",
 )
 
 
@@ -254,6 +311,62 @@ def deterministic_trace_digest(result: dict[str, object]) -> str:
     """Digest only deterministic physics/classifier fields, not worker metadata."""
     payload = {key: result.get(key) for key in _DETERMINISTIC_TRACE_FIELDS}
     return hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
+
+
+def _raw_physics_digest(result: dict[str, object]) -> str:
+    payload = {key: result.get(key) for key in _RAW_PHYSICS_TRACE_FIELDS}
+    return hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
+
+
+def raw_physics_equivalence_report(
+    previous: list[dict[str, object]],
+    current: list[dict[str, object]],
+) -> dict[str, object]:
+    """Compare only identities and raw physics, excluding amended classifications."""
+
+    def indexed(
+        rows: list[dict[str, object]],
+    ) -> dict[str, tuple[dict[str, object], str]]:
+        result: dict[str, tuple[dict[str, object], str]] = {}
+        for row in rows:
+            identity = {
+                key: row.get(key) for key in _RAW_PHYSICS_IDENTITY_FIELDS
+            }
+            key = _canonical_json_bytes(identity).decode("utf-8")
+            if key in result:
+                raise ValueError(f"duplicate raw-physics identity: {identity}")
+            result[key] = (identity, _raw_physics_digest(row))
+        return result
+
+    before = indexed(previous)
+    after = indexed(current)
+    identity_match = set(before) == set(after)
+    mismatches: list[dict[str, object]] = []
+    for key in sorted(set(before) | set(after)):
+        old = before.get(key)
+        new = after.get(key)
+        if old is None or new is None or old[1] != new[1]:
+            identity = old[0] if old is not None else new[0]  # type: ignore[index]
+            mismatches.append(
+                {
+                    "identity": identity,
+                    "previous_raw_sha256": None if old is None else old[1],
+                    "current_raw_sha256": None if new is None else new[1],
+                }
+            )
+    return {
+        "schema": "lambda-feasibility-raw-equivalence-v1",
+        "amendment_id": AMENDMENT_ID,
+        "supersedes_failed_output_sha256": (
+            SUPERSEDES_FAILED_OUTPUT_SHA256
+        ),
+        "previous_result_n": len(previous),
+        "current_result_n": len(current),
+        "identity_match": identity_match,
+        "mismatch_n": len(mismatches),
+        "mismatches": mismatches,
+        "raw_physics_fields": list(_RAW_PHYSICS_TRACE_FIELDS),
+    }
 
 
 def validate_reset_bank(
@@ -724,6 +837,8 @@ def _reference_calibration_qualification(
         failures.append("qpos illegal")
     if int(reference.get("aligned_live_contact_substeps") or 0) < 1:
         failures.append("contact instruments not aligned/live")
+    if int(reference.get("aligned_axial_live_contact_substeps") or 0) < 1:
+        failures.append("reference has no aligned axial contact impulse")
     if not isinstance(reference.get("solref_comparison"), dict):
         failures.append("fixed reference solref*2 calibration missing")
     if not bool(reference.get("quality_valid")):
@@ -858,21 +973,23 @@ def contact_signal_liveness(
     *,
     contact: np.ndarray,
     exact_contrib: np.ndarray,
+    object_total_contrib: np.ndarray,
     object_axial_contrib: np.ndarray,
     onset: int,
     stop_exclusive: int | None = None,
     tol: float = 1e-12,
-) -> dict[str, int]:
-    """Require both contact instruments to be live on at least one shared sample."""
+) -> dict[str, int | bool]:
+    """Diagnose instrument alignment separately from physical force direction."""
     face = np.asarray(contact, dtype=bool)
     exact = np.asarray(exact_contrib, dtype=np.float64)
+    object_total = np.asarray(object_total_contrib, dtype=np.float64)
     object_axial = np.asarray(object_axial_contrib, dtype=np.float64)
     if face.ndim != 1:
         raise ValueError(f"contact must be one-dimensional, got {face.shape}")
     if exact.ndim != 2 or exact.shape[0] != len(face):
         raise ValueError("exact_contrib must have shape [substep,joint]")
-    if object_axial.shape != face.shape:
-        raise ValueError("object_axial_contrib must match contact trace")
+    if object_total.shape != face.shape or object_axial.shape != face.shape:
+        raise ValueError("object-side contributions must match contact trace")
     if not 0 <= onset < len(face) or not face[onset]:
         raise ValueError(f"accepted onset {onset} is outside contact")
     stop = len(face) if stop_exclusive is None else int(stop_exclusive)
@@ -883,32 +1000,66 @@ def contact_signal_liveness(
     if (
         not np.isfinite(exact).all()
         or np.any(exact < 0.0)
+        or not np.isfinite(object_total).all()
+        or np.any(object_total < 0.0)
         or not np.isfinite(object_axial).all()
         or np.any(object_axial < 0.0)
     ):
         raise ValueError("contact impulse contributions must be finite and non-negative")
     if not np.isfinite(tol) or tol < 0.0:
         raise ValueError(f"tol must be finite and non-negative, got {tol}")
+    if np.any(object_axial > object_total + tol):
+        raise ValueError(
+            "object axial projection cannot exceed total force magnitude"
+        )
 
     in_event = face.copy()
     in_event[:onset] = False
     in_event[stop:] = False
     exact_live = exact.sum(axis=1) > tol
-    object_live = object_axial > tol
+    object_live = object_total > tol
+    object_axial_live = object_axial > tol
     exact_n = int(np.count_nonzero(in_event & exact_live))
     object_n = int(np.count_nonzero(in_event & object_live))
     aligned_n = int(np.count_nonzero(in_event & exact_live & object_live))
-    if exact_n == 0:
-        raise RuntimeError("exact joint-space contact-row signal is dead on face contact")
-    if object_n == 0:
-        raise RuntimeError("object-side contact signal is dead on face contact")
-    if aligned_n == 0:
-        raise RuntimeError("contact instruments are never live on the same face-contact sample")
+    object_axial_n = int(np.count_nonzero(in_event & object_axial_live))
+    aligned_axial_n = int(
+        np.count_nonzero(in_event & exact_live & object_axial_live)
+    )
     return {
         "exact_live_contact_substeps": exact_n,
         "object_live_contact_substeps": object_n,
         "aligned_live_contact_substeps": aligned_n,
+        "object_axial_live_contact_substeps": object_axial_n,
+        "aligned_axial_live_contact_substeps": aligned_axial_n,
+        "non_axial_contact": object_axial_n == 0,
+        "contact_signal_alignment_failure": (
+            exact_n == 0 or object_n == 0 or aligned_n == 0
+        ),
+        # Established campaign direction: axial delivery with no robot-side
+        # Lambda is impossible.  The reverse is a legitimate lateral graze.
+        "lambda_dead": object_axial_n > 0 and exact_n == 0,
     }
+
+
+def _apply_contact_signal_diagnostics(
+    result: dict[str, object],
+    diagnostics: dict[str, int | bool],
+) -> dict[str, object]:
+    """Apply liveness diagnostics without turning a lateral graze into an error."""
+    result.update(diagnostics)
+    if bool(diagnostics["contact_signal_alignment_failure"]):
+        result["status"] = "error"
+        result["error"] = (
+            "exact contact-row and object total-force instruments are not "
+            "live on an overlapping first-event face-contact sample"
+        )
+        result["eligible"] = False
+        result["binding_class"] = BindingClass.INELIGIBLE.value
+    elif int(diagnostics["aligned_axial_live_contact_substeps"]) < 1:
+        result["eligible"] = False
+        result["binding_class"] = BindingClass.INELIGIBLE.value
+    return result
 
 
 def classify_binding(
@@ -951,6 +1102,7 @@ def aggregate_results(results: list[dict[str, object]]) -> dict[str, object]:
     ] = {}
     impossible_success_n = 0
     lambda_dead_n = 0
+    contact_signal_alignment_failure_n = 0
     operational_failure_n = 0
     fixed_baseline_failure_n = 0
     for row in results:
@@ -1012,6 +1164,9 @@ def aggregate_results(results: list[dict[str, object]]) -> dict[str, object]:
             )
         impossible_success_n += int(bool(row.get("impossible_success")))
         lambda_dead_n += int(bool(row.get("lambda_dead")))
+        contact_signal_alignment_failure_n += int(
+            bool(row.get("contact_signal_alignment_failure"))
+        )
 
     fixed = [
         row
@@ -1030,6 +1185,9 @@ def aggregate_results(results: list[dict[str, object]]) -> dict[str, object]:
         "fixed_baseline_failure_n": fixed_baseline_failure_n,
         "impossible_success_n": impossible_success_n,
         "lambda_dead_n": lambda_dead_n,
+        "contact_signal_alignment_failure_n": (
+            contact_signal_alignment_failure_n
+        ),
         "fixed_reset_existence": {
             "denominator_n": len(fixed),
             "eligible_n": sum(bool(row.get("eligible")) for row in fixed),
@@ -1912,6 +2070,7 @@ def collect_provenance(
         "nonface_force_tolerance": NONFACE_FORCE_TOL,
         "reset_bank_seed": RESET_BANK_SEED,
         "reset_bank_size": RESET_BANK_SIZE,
+        "contact_liveness_semantics": "exact-plus-object-total-v2",
     }
     return {
         "code": code,
@@ -2484,22 +2643,18 @@ def _replay_action_request(request: dict[str, object]) -> dict[str, object]:
         result["status"] = "ok"
         release = result["release_index"]
         stop = int(release) if release is not None else len(arrays["contact"])
-        try:
-            result.update(
-                contact_signal_liveness(
-                    contact=arrays["contact"],
-                    exact_contrib=arrays["exact"],
-                    object_axial_contrib=arrays["object_axial"],
-                    onset=onset,
-                    stop_exclusive=stop,
-                )
-            )
-        except RuntimeError as exc:
-            result["status"] = "error"
-            result["error"] = str(exc)
-            result["lambda_dead"] = True
-            result["eligible"] = False
-            result["binding_class"] = BindingClass.INELIGIBLE.value
+        diagnostics = contact_signal_liveness(
+            contact=arrays["contact"],
+            exact_contrib=arrays["exact"],
+            object_total_contrib=arrays["object_total"],
+            object_axial_contrib=arrays["object_axial"],
+            onset=onset,
+            stop_exclusive=stop,
+        )
+        _apply_contact_signal_diagnostics(
+            result,
+            diagnostics,
+        )
         event_end = (
             int(release)
             if release is not None
@@ -2960,12 +3115,36 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", type=Path, default=Path("evaluation/whip/data"))
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument(
+        "--supersedes-failed-artifact",
+        type=Path,
+        help="required authoritative A1 input: immutable failed attempt-1 JSON",
+    )
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--timeout", type=float, default=180.0)
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parents[2]
+    previous_payload: dict[str, object] | None = None
     if not args.smoke:
+        if args.supersedes_failed_artifact is None:
+            raise RuntimeError(
+                "authoritative A1 requires --supersedes-failed-artifact"
+            )
+        previous_path = args.supersedes_failed_artifact.resolve()
+        previous_sha = _file_sha256(previous_path)
+        if previous_sha != SUPERSEDES_FAILED_OUTPUT_SHA256:
+            raise RuntimeError(
+                "failed-attempt artifact SHA mismatch: "
+                f"{previous_sha} != {SUPERSEDES_FAILED_OUTPUT_SHA256}"
+            )
+        previous_payload = json.loads(previous_path.read_text())
+        prior_input = previous_payload.get("inputs_artifact")
+        if (
+            not isinstance(prior_input, dict)
+            or prior_input.get("sha256") != SUPERSEDES_FAILED_INPUT_SHA256
+        ):
+            raise RuntimeError("failed-attempt input SHA is not the frozen A1 parent")
         from src.assets.robots.unitree_z1.z1_constants import Z1_HAMMER_XML
 
         asset_root = Path(Z1_HAMMER_XML).resolve().parents[2]
@@ -3008,7 +3187,23 @@ def main() -> None:
         for source in sources
     ]
     input_envelope = {
-        "schema": "lambda-feasibility-stage0-inputs-v1",
+        "schema": "lambda-feasibility-stage0-inputs-v2",
+        "amendment": {
+            "amendment_id": AMENDMENT_ID,
+            "supersedes_failed_output_sha256": (
+                SUPERSEDES_FAILED_OUTPUT_SHA256
+            ),
+            "supersedes_failed_input_sha256": SUPERSEDES_FAILED_INPUT_SHA256,
+            "no_change_to": [
+                "plant",
+                "actions",
+                "resets",
+                "caps",
+                "rewards",
+                "contact_model",
+                "eligibility_numeric_thresholds",
+            ],
+        },
         "provenance": provenance_before,
         "sources": source_manifest,
         "resets": reset_envelope,
@@ -3185,6 +3380,32 @@ def main() -> None:
             run_isolated_replay(parity_request, timeout_s=args.timeout)
         )
 
+    raw_equivalence_artifact: dict[str, object] | None = None
+    if not args.smoke:
+        assert previous_payload is not None
+        previous_results = previous_payload.get("results")
+        if not isinstance(previous_results, list):
+            raise RuntimeError("failed-attempt artifact has no result list")
+        raw_report = raw_physics_equivalence_report(previous_results, results)
+        raw_report_path = args.out.with_name(
+            f"{args.out.stem}_raw_equivalence.json"
+        )
+        raw_report_sha = write_frozen_json(raw_report_path, raw_report)
+        raw_equivalence_artifact = {
+            "path": str(raw_report_path),
+            "sha256": raw_report_sha,
+            "mismatch_n": raw_report["mismatch_n"],
+            "identity_match": raw_report["identity_match"],
+        }
+        if (
+            not bool(raw_report["identity_match"])
+            or int(raw_report["mismatch_n"]) != 0
+        ):
+            raise RuntimeError(
+                "attempt-2 raw physics differs from immutable attempt 1; "
+                f"report={raw_report_path}"
+            )
+
     aggregate = aggregate_results(results)
     aggregate["mandatory_solref_failure_n"] = len(
         _mandatory_solref_failures(results)
@@ -3202,7 +3423,9 @@ def main() -> None:
             "code/asset/tape provenance changed during Stage-0 replay"
         )
     payload = {
-        "schema": "lambda-feasibility-stage0-v2",
+        "schema": "lambda-feasibility-stage0-v3",
+        "amendment": input_envelope["amendment"],
+        "raw_physics_equivalence_artifact": raw_equivalence_artifact,
         "authoritative": not args.smoke,
         "git_hash": provenance_before["code"]["revision"],
         "asset_hash": provenance_before["asset"]["revision"],
@@ -3257,6 +3480,7 @@ def main() -> None:
         if (
             aggregate["impossible_success_n"] != 0
             or aggregate["lambda_dead_n"] != 0
+            or aggregate["contact_signal_alignment_failure_n"] != 0
             or aggregate["operational_failure_n"] != 0
             or aggregate["mandatory_solref_failure_n"] != 0
             or qualification_failure_n != 0
@@ -3265,6 +3489,8 @@ def main() -> None:
                 "Stage-0 evidence was frozen but failed acceptance sentinels: "
                 f"impossible_success_n={aggregate['impossible_success_n']}, "
                 f"lambda_dead_n={aggregate['lambda_dead_n']}, "
+                "contact_signal_alignment_failure_n="
+                f"{aggregate['contact_signal_alignment_failure_n']}, "
                 f"operational_failure_n={aggregate['operational_failure_n']}, "
                 "mandatory_solref_failure_n="
                 f"{aggregate['mandatory_solref_failure_n']}, "

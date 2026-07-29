@@ -6,6 +6,36 @@
 **Enforcement:** off (`imp_max_p=0.0`)  
 **Plant:** fixed impedance; no gain commands or `set_gains`
 
+## Amendment A1 — contact-signal liveness (post-attempt-1, pre-attempt-2)
+
+Authoritative attempt 1 was frozen read-only at SHA-256
+`6755cdefb74aebfb704f2271af4b020dcfc1d83bba045c5b1a997922d7b21414`
+and then failed closed. Five lateral/upward rim contacts had live, aligned
+joint contact-row and object total-force signals but zero downward axial
+projection. The original Stage-0 sentinel incorrectly called the reverse
+direction `lambda_dead`, conflicting with the established campaign invariant
+in `scripts/eval_impulse.py`.
+
+Before any attempt-2 outcome is opened, freeze this narrow correction:
+
+- instrument liveness means overlapping exact contact-row and object
+  **total-force magnitude** on the accepted first face-contact event;
+- object axial-positive overlap remains required for an eligible candidate,
+  and zero axial delivery is recorded as `non_axial_contact`;
+- true `lambda_dead` retains the established direction: positive object-side
+  axial delivery with zero robot-side Lambda;
+- missing or non-overlapping exact/total signals set the separate fatal
+  `contact_signal_alignment_failure` sentinel;
+- the scripted-reference calibration still requires axial-positive alignment.
+
+No action, reset, cap, plant, reward, contact model, timeout, or numeric
+eligibility threshold changes. The axial-positive criterion moves from the
+erroneous global failure sentinel to per-candidate eligibility. Attempt 1
+remains immutable failed evidence. Attempt 2 must use a new clean code revision
+and output directory, and its separately frozen raw-physics equivalence report
+must show the identical 154-row identity set and zero raw mismatches before
+aggregate interpretation.
+
 ## 1. Question
 
 Can a productive fixed-impedance strike, using the legal DiffIK action path,
@@ -186,10 +216,12 @@ hidden by a max-over-joints scalar.
   shared-tape robustness characterization; these are not independent rows,
   a confirmatory held-out bank, or a veto on a fixed-reset existence result.
 - Cross-check production rolling Lambda against its episode-peak latch.
-- Require the exact contact-row and object-side **axial delivered-impulse**
+- Require the exact contact-row and object-side **total-force magnitude**
   signals to both be live on at least one shared face-contact substep. This is
   an alignment/liveness check only: the joint-space and object-side quantities
   have different units and must never be tested for numerical equality.
+  Bank axial-positive overlap separately; a zero value is a physical
+  non-axial contact and cannot be eligible.
 - Re-run **every Stage-0 eligible tape** under `solref*2`, not only the
   highest-ratio tape.
 - Re-run the fixed-reset scripted reference under `solref*2` regardless of
@@ -310,9 +342,11 @@ Before accepting any result:
   loaded asset scope fails authority;
 - `impossible_success_n==0`, where an impossible success is 30 mm depth
   without an accepted face-contact event in the same replay;
-- `lambda_dead_n==0`, where Lambda-dead means an accepted face event without
-  overlapping live exact-contact-row and object-side axial signals before the
-  first release;
+- `lambda_dead_n==0`, where Lambda-dead retains the campaign definition:
+  positive object-side axial delivery with zero robot-side Lambda;
+- `contact_signal_alignment_failure_n==0`, where alignment failure means the
+  exact contact-row and object total-force signals are absent or never live on
+  the same accepted first-event face-contact sample;
 - zero non-finite qvel/Lambda and zero contact-row overflow;
 - deterministic replay of an identical action/reset pair;
 - no post-success auto-reset contamination;

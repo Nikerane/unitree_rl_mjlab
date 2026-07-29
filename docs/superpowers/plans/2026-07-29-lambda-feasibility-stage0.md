@@ -4,6 +4,17 @@
 > `docs/superpowers/specs/2026-07-29-lambda-feasibility-design.md`.
 > Do not add the CEM search until replay evidence and a separate review justify it.
 
+## Attempt-2 amendment
+
+Attempt 1 (SHA-256 `6755cdef…`) failed closed because the evaluator used
+downward axial force as an instrument-liveness check and therefore mislabeled
+five lateral/upward grazes as dead sensors. Preserve attempt 1 unchanged.
+Attempt 2 uses exact contact-row plus object total-force overlap for liveness,
+banks axial overlap separately, retains the established one-way
+`lambda_dead` invariant, and adds a fatal signal-alignment sentinel. TDD and
+independent review precede the clean full rerun; raw physics traces must match
+attempt 1 before attempt-2 outcomes are interpreted.
+
 ## Goal
 
 Build the smallest standalone CPU evaluator needed to replay the existing
@@ -115,9 +126,11 @@ Fail closed unless:
 - all signals are finite;
 - production rolling maximum equals `_episode_peak_perjoint`;
 - exact contact-row is zero before hammer-nail contact;
-- contact-row and object-side axial delivered-impulse signals are both live
-  on at least one shared face-contact substep (liveness/alignment only; never
-  assert numerical equality between the different physical quantities);
+- contact-row and object-side total-force signals are both live on at least
+  one shared face-contact substep (liveness/alignment only; never assert
+  numerical equality between the different physical quantities);
+- axial-positive overlap is banked separately and is required for an eligible
+  candidate; zero axial delivery is a non-axial outcome, not sensor death;
 - identical action/reset replay gives identical CPU metrics within the frozen
   tolerance;
 - ordinary-task and shadow-task state/action histories match through the
@@ -242,8 +255,15 @@ mkdir -p "$OUT"
 PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python \
   evaluation/whip/lambda_feasibility.py \
   --timeout 180 \
+  --supersedes-failed-artifact \
+    /private/tmp/lambda_feasibility_stage0_authoritative_534244bd10d6/lambda_feasibility_stage0.json \
   --out "$OUT/lambda_feasibility_stage0.json"
 ```
+
+The accepted attempt-2 directory must contain three immutable JSON artifacts,
+each with a SHA-256 sidecar: the amended input envelope, the raw-physics
+equivalence report, and the final Stage-0 result. The raw-equivalence report
+must show the identical 154-row identity set and `mismatch_n==0`.
 
 Do not run that command until the evaluator is committed, the code and loaded
 asset scope are clean, and the exact-hash independent review is approved.
