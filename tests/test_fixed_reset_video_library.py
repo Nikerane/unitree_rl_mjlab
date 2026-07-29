@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 
 import imageio.v3 as iio
@@ -20,6 +21,9 @@ from evaluation.analysis.fixed_reset_video_library import (
     load_fixed_reset,
     validate_inventory,
     validate_policy_artifacts,
+    write_campaign_trajectory_grid,
+    write_library_index,
+    write_trajectory_png,
 )
 
 
@@ -111,6 +115,10 @@ def write_complete_fake_library(root: Path, *, reset_digest: str) -> None:
             head_position_m=np.zeros((1, 3)),
             contact=np.zeros(1),
             action=np.zeros((0, 3)),
+            reference_polyline_m=np.array(
+                [[0.0, 0.0, 0.0], [0.0, 0.0, 0.1], [0.0, 0.0, -0.1]]
+            ),
+            nail_top_m=np.array([0.0, 0.0, 0.0]),
         )
         metadata = {
             **row,
@@ -708,3 +716,84 @@ def test_final_validation_prints_the_six_required_counters():
         "invalid_video=0\n"
         "second_episode_contamination=0"
     )
+
+
+def test_artifact_validator_requires_the_anchored_reference_polyline(tmp_path):
+    """Every trajectory must preserve the three supplied reference vertices."""
+    write_complete_fake_library(tmp_path, reset_digest=FIXED_DIGEST)
+    trace_path = next(tmp_path.glob("*/*/*/trace.npz"))
+    with np.load(trace_path) as trace:
+        np.savez(
+            trace_path,
+            head_position_m=trace["head_position_m"],
+            contact=trace["contact"],
+            action=trace["action"],
+            nail_top_m=trace["nail_top_m"],
+        )
+    metadata_path = trace_path.with_name("metadata.json")
+    metadata = json.loads(metadata_path.read_text())
+    metadata["artifacts"]["trace.npz"] = _sha256(trace_path)
+    del metadata["metadata_payload_sha256"]
+    _write_metadata(metadata_path, metadata)
+
+    with pytest.raises(ValueError, match="reference_polyline_m"):
+        validate_policy_artifacts(tmp_path, expected_rows())
+
+
+def test_trajectory_plot_draws_the_reference_as_a_dashed_observation_line(tmp_path, monkeypatch):
+    """The reference is visibly distinct from the realized, reward-free path."""
+    observed: list[dict] = []
+    from matplotlib.axes import Axes
+
+    original_plot = Axes.plot
+
+    def capture_plot(self, *args, **kwargs):
+        observed.append(kwargs)
+        return original_plot(self, *args, **kwargs)
+
+    monkeypatch.setattr(Axes, "plot", capture_plot)
+    write_trajectory_png(
+        {
+            "head_position_m": np.array([[0.0, 0.0, 0.0], [0.1, 0.0, -0.1]]),
+            "contact": np.array([False, True]),
+            "reference_polyline_m": np.array(
+                [[0.0, 0.0, 0.0], [0.0, 0.0, 0.1], [0.0, 0.0, -0.1]]
+            ),
+            "nail_top_m": np.array([0.0, 0.0, 0.0]),
+        },
+        tmp_path / "trajectory.png",
+    )
+
+    assert any(
+        call.get("label") == "SingleStrikeReference (observation only)"
+        and call.get("color") == "black"
+        and call.get("linestyle") == "--"
+        for call in observed
+    )
+
+
+def test_campaign_grids_and_index_cover_each_registered_policy_once(tmp_path):
+    """Campaign artifacts provide common side-view limits and resolvable policy links."""
+    write_complete_fake_library(tmp_path, reset_digest=FIXED_DIGEST)
+    rows = expected_rows()
+    fq4 = write_campaign_trajectory_grid(
+        tmp_path, "fq4x8", tmp_path / "fq4x8_trajectories_grid.png"
+    )
+    fq3 = write_campaign_trajectory_grid(
+        tmp_path, "fq3x8", tmp_path / "fq3x8_trajectories_grid.png"
+    )
+    index = write_library_index(tmp_path, rows)
+
+    assert fq4["common_xlim"] and fq4["common_zlim"]
+    assert fq3["common_xlim"] and fq3["common_zlim"]
+    assert iio.imread(tmp_path / "fq4x8_trajectories_grid.png").size > 0
+    assert iio.imread(tmp_path / "fq3x8_trajectories_grid.png").size > 0
+    text = index.read_text()
+    for relative in re.findall(r"\]\(([^)]+)\)", text):
+        assert (index.parent / relative).is_file()
+    for row in rows:
+        identity = f"{row['campaign']}/{row['arm']}/{row['training_seed']}"
+        assert text.count(f"| {identity} |") == 1
+        assert text.count(row["checkpoint_sha256"]) == 1
+        for artifact in ("policy.mp4", "montage.png", "trajectory.png", "trace.npz"):
+            assert (tmp_path / row["campaign"] / row["arm"] / str(row["training_seed"]) / artifact).is_file()

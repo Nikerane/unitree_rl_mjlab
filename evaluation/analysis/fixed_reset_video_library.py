@@ -14,6 +14,7 @@ import numpy as np
 
 matplotlib.use("Agg")
 from matplotlib import pyplot as plt
+from matplotlib.collections import LineCollection
 
 
 EXPECTED = {
@@ -137,8 +138,8 @@ def first_episode_frame_count(episode_lengths: Sequence[int]) -> int:
     return len(episode_lengths)
 
 
-def write_trajectory_png(trace: Mapping[str, Any], path: str | Path) -> None:
-    """Write a shared-axis x-z / x-y hammer-head trajectory diagnostic."""
+def _trace_geometry(trace: Mapping[str, Any]) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return the sampled path plus fixed-reset geometry needed to interpret it."""
     positions = np.asarray(trace["head_position_m"], dtype=float)
     if positions.ndim != 2 or positions.shape[1] != 3 or len(positions) == 0:
         raise ValueError("trace head_position_m must have shape [steps, 3]")
@@ -147,22 +148,189 @@ def write_trajectory_png(trace: Mapping[str, Any], path: str | Path) -> None:
     contact = np.asarray(trace.get("contact", np.zeros(len(positions), dtype=bool)), dtype=bool)
     if contact.shape != (len(positions),):
         raise ValueError("trace contact must have one value per head position")
+    reference = np.asarray(trace.get("reference_polyline_m"), dtype=float)
+    if reference.shape != (3, 3) or not np.isfinite(reference).all():
+        raise ValueError("trace reference_polyline_m must be finite with shape (3, 3)")
+    nail_top = np.asarray(trace.get("nail_top_m"), dtype=float)
+    if nail_top.shape != (3,) or not np.isfinite(nail_top).all():
+        raise ValueError("trace nail_top_m must be finite with shape (3,)")
+    return positions, contact, reference, nail_top
+
+
+def _draw_trajectory(
+    axis: Any,
+    positions: np.ndarray,
+    contact: np.ndarray,
+    reference: np.ndarray,
+    nail_top: np.ndarray,
+    ordinate: int,
+) -> None:
+    """Draw one view; the reference is contextual evidence, never a reward claim."""
+    axis.plot(
+        reference[:, 0],
+        reference[:, ordinate],
+        color="black",
+        linestyle="--",
+        linewidth=0.8,
+        label="SingleStrikeReference (observation only)",
+        zorder=1,
+    )
+    if len(positions) > 1:
+        points = positions[:, [0, ordinate]].reshape(-1, 1, 2)
+        segments = np.concatenate([points[:-1], points[1:]], axis=1)
+        axis.add_collection(
+            LineCollection(
+                segments,
+                cmap="viridis",
+                array=np.linspace(0.0, 1.0, len(segments)),
+                linewidth=1.5,
+                zorder=2,
+            )
+        )
+    axis.scatter(positions[0, 0], positions[0, ordinate], c="#2ca02c", s=24, zorder=4)
+    if contact.any():
+        axis.scatter(positions[contact, 0], positions[contact, ordinate], c="#d62728", s=15, zorder=5)
+    if ordinate == 2:
+        axis.plot(
+            [nail_top[0], nail_top[0]],
+            [nail_top[2], nail_top[2] - 0.06],
+            color="#8c564b",
+            linewidth=2.0,
+            zorder=0,
+        )
+    else:
+        axis.scatter(nail_top[0], nail_top[1], c="#8c564b", marker="+", s=40, zorder=3)
+
+
+def write_trajectory_png(trace: Mapping[str, Any], path: str | Path) -> None:
+    """Write x-z and x-y diagnostics with the anchored reference as context only."""
+    positions, contact, reference, nail_top = _trace_geometry(trace)
 
     fig, axes = plt.subplots(1, 2, figsize=(8, 4), sharex=True, sharey=False, layout="constrained")
     for axis, ordinate, label in ((axes[0], 2, "z (m)"), (axes[1], 1, "y (m)")):
-        axis.plot(positions[:, 0], positions[:, ordinate], color="#1f77b4", linewidth=1.5)
-        if contact.any():
-            axis.scatter(positions[contact, 0], positions[contact, ordinate], c="#d62728", s=15, label="contact")
-            axis.legend(loc="best")
+        _draw_trajectory(axis, positions, contact, reference, nail_top, ordinate)
         axis.set_xlabel("x (m)")
         axis.set_ylabel(label)
         axis.set_aspect("equal", adjustable="box")
         axis.grid(alpha=0.25)
+    axes[0].legend(loc="best", fontsize=7)
     axes[0].set_title("x-z trajectory")
     axes[1].set_title("x-y trajectory")
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=160)
     plt.close(fig)
+
+
+def _grid_limits(traces: Sequence[Mapping[str, Any]]) -> tuple[tuple[float, float], tuple[float, float]]:
+    xz = np.concatenate(
+        [
+            np.vstack((
+                np.asarray(trace["head_position_m"], dtype=float)[:, [0, 2]],
+                np.asarray(trace["reference_polyline_m"], dtype=float)[:, [0, 2]],
+                np.asarray(trace["nail_top_m"], dtype=float)[None, [0, 2]],
+            ))
+            for trace in traces
+        ]
+    )
+    span = np.ptp(xz, axis=0)
+    padding = np.maximum(span * 0.05, 0.01)
+    return (
+        (float(xz[:, 0].min() - padding[0]), float(xz[:, 0].max() + padding[0])),
+        (float(xz[:, 1].min() - padding[1]), float(xz[:, 1].max() + padding[1])),
+    )
+
+
+def write_campaign_trajectory_grid(
+    root: str | Path, campaign: str, path: str | Path
+) -> dict[str, tuple[float, float]]:
+    """Write one common-axis x-z panel per registered arm/seed in a campaign."""
+    if campaign not in EXPECTED:
+        raise ValueError(f"unregistered campaign: {campaign}")
+    root = Path(root)
+    panels: list[tuple[str, int, dict[str, np.ndarray]]] = []
+    for arm, seeds in EXPECTED[campaign].items():
+        for seed in seeds:
+            trace_path = root / campaign / arm / str(seed) / "trace.npz"
+            try:
+                with np.load(trace_path) as loaded:
+                    trace = {key: np.asarray(loaded[key]) for key in loaded.files}
+            except (OSError, ValueError, KeyError) as error:
+                raise ValueError(f"campaign trace unreadable: {trace_path}") from error
+            _trace_geometry(trace)
+            panels.append((arm, seed, trace))
+    xlim, zlim = _grid_limits([trace for _, _, trace in panels])
+    arms = tuple(EXPECTED[campaign])
+    seeds = tuple(next(iter(EXPECTED[campaign].values())))
+    fig, axes = plt.subplots(
+        len(arms), len(seeds), figsize=(2.0 * len(seeds), 2.0 * len(arms)), sharex=True, sharey=True
+    )
+    for row, arm in enumerate(arms):
+        for column, seed in enumerate(seeds):
+            axis = axes[row, column]
+            trace = next(value for panel_arm, panel_seed, value in panels if (panel_arm, panel_seed) == (arm, seed))
+            positions, contact, reference, nail_top = _trace_geometry(trace)
+            _draw_trajectory(axis, positions, contact, reference, nail_top, 2)
+            axis.set_xlim(xlim)
+            axis.set_ylim(zlim)
+            axis.set_aspect("equal", adjustable="box")
+            axis.grid(alpha=0.2)
+            axis.set_title(f"{arm} · seed {seed}", fontsize=7)
+            axis.tick_params(labelsize=6)
+    fig.suptitle(
+        f"{campaign}: fixed-reset hammer-head trajectories (x-z)\n"
+        "green=start · viridis=normalized time · red=contact · brown=nail axis",
+        fontsize=10,
+    )
+    fig.tight_layout(rect=[0, 0, 1, 0.94])
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+    return {"common_xlim": xlim, "common_zlim": zlim}
+
+
+def write_library_index(root: str | Path, rows: Sequence[Mapping[str, Any]]) -> Path:
+    """Write the clickable, hash-bound index for a fully rendered library."""
+    validate_inventory(rows)
+    root = Path(root)
+    for grid in ("fq4x8_trajectories_grid.png", "fq3x8_trajectories_grid.png"):
+        if not (root / grid).is_file():
+            raise ValueError(f"index grid link is missing: {root / grid}")
+    lines = [
+        "# Fixed-reset 56-policy video library",
+        "",
+        "Fixed-reset qualitative comparison only; this is neither a reward/impulse causal analysis nor a best-episode selection.",
+        "",
+        "The dashed `SingleStrikeReference (observation only)` line in each trajectory was available as an observation, but none of these 56 arms enabled the separate `r_imit` tracking reward. It is neither an optimal path nor a rewarded path.",
+        "Each policy's `trajectory.png` contains the corresponding x-y top view beside the x-z side view.",
+        "",
+        "- [FQ4×8 trajectory grid](fq4x8_trajectories_grid.png)",
+        "- [FQ3×8 trajectory grid](fq3x8_trajectories_grid.png)",
+        "",
+        "| policy | checkpoint SHA-256 | artifacts |",
+        "| --- | --- | --- |",
+    ]
+    for row in rows:
+        leaf = policy_artifact_dir(root, row)
+        metadata_path = leaf / "metadata.json"
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError(f"artifact metadata is unreadable: {metadata_path}") from error
+        if metadata.get("checkpoint_sha256") != row["checkpoint_sha256"]:
+            raise ValueError(f"artifact checkpoint hash mismatch: {leaf}")
+        for name in ARTIFACT_FILENAMES:
+            if not (leaf / name).is_file():
+                raise ValueError(f"index artifact link is missing: {leaf / name}")
+        relative = leaf.relative_to(root).as_posix()
+        links = " · ".join(
+            f"[{name}]({relative}/{name})" for name in ARTIFACT_FILENAMES
+        )
+        lines.append(
+            f"| {row['campaign']}/{row['arm']}/{row['training_seed']} | {row['checkpoint_sha256']} | {links} |"
+        )
+    index = root / "README.md"
+    index.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return index
 
 
 def _metadata_digest(metadata: Mapping[str, Any]) -> str:
@@ -196,12 +364,9 @@ def _readable_artifact(path: Path) -> None:
                 raise ValueError("empty video")
         elif path.suffix == ".npz":
             with np.load(path) as trace:
-                positions = np.asarray(trace["head_position_m"])
-                contact = np.asarray(trace["contact"])
-                if positions.ndim != 2 or positions.shape[1] != 3 or contact.shape != (len(positions),):
-                    raise ValueError("invalid trace arrays")
+                _trace_geometry({key: np.asarray(trace[key]) for key in trace.files})
     except (OSError, StopIteration, ValueError, KeyError) as error:
-        raise ValueError(f"artifact is unreadable: {path}") from error
+        raise ValueError(f"artifact is unreadable: {path}: {error}") from error
 
 
 def _validate_library_tree(root: Path) -> None:

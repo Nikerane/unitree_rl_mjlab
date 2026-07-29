@@ -46,6 +46,7 @@ from evaluation.analysis.fixed_reset_video_library import (
 )
 from scripts.eval_impulse import restore_reset_state
 from src.assets.robots.unitree_z1.z1_constants import HAMMER_HEAD_SITE_NAME
+from src.tasks.hammer.mdp.references import get_strike_reference
 
 
 @dataclass(frozen=True)
@@ -138,10 +139,21 @@ def main(cfg: Cfg) -> None:
   nail = base_env.scene["nail_block"]
   sensor = base_env.scene["hammer_nail_contact"]
   head_cfg = SceneEntityCfg("robot", site_names=(HAMMER_HEAD_SITE_NAME,))
+  nail_cfg = SceneEntityCfg("nail_block", site_names=("nail_top",))
   head_cfg.resolve(base_env.scene)
+  nail_cfg.resolve(base_env.scene)
   robot = base_env.scene["robot"]
   head = lambda: (
     robot.data.site_pos_w[0, head_cfg.site_ids]
+    .squeeze(0)
+    .detach()
+    .cpu()
+    .numpy()
+    .astype(np.float64)
+    .copy()
+  )
+  nail_top = lambda: (
+    nail.data.site_pos_w[0, nail_cfg.site_ids]
     .squeeze(0)
     .detach()
     .cpu()
@@ -159,6 +171,23 @@ def main(cfg: Cfg) -> None:
   base_env.sim.sense()
   base_env.obs_buf = base_env.observation_manager.compute(update_history=True)
   obs = env.get_observations()
+  # Observation construction owns the task's shared reference and anchors it
+  # against this restored state.  Preserve its analytical phi vertices, not a
+  # realized playback trace or a start-to-contact chord.
+  reference = get_strike_reference(base_env)
+  if not bool(reference._anchored[0]):
+    raise RuntimeError("SingleStrikeReference was not anchored by reset observations")
+  reference_polyline = np.stack(
+    [
+      reference.waypoint(torch.tensor([phi], device=base_env.device))
+      .squeeze(0)
+      .detach()
+      .cpu()
+      .numpy()
+      .astype(np.float64)
+      for phi in (0.0, 0.5, 1.0)
+    ]
+  )
   frames: list[np.ndarray] = []
   head_positions = [head()]
   contacts = [bool((sensor.data.found[0] > 0).any())]
@@ -208,6 +237,8 @@ def main(cfg: Cfg) -> None:
     "contact_live_at_control_boundary": np.asarray(contacts, dtype=bool),
     "control_step": np.arange(len(head_positions), dtype=np.int64),
     "action": np.asarray(actions_recorded[: len(head_positions) - 1], dtype=np.float32),
+    "reference_polyline_m": reference_polyline,
+    "nail_top_m": nail_top(),
   }
   np.savez(out / "trace.npz", **trace)
   write_trajectory_png(trace, out / "trajectory.png")
