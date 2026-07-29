@@ -240,6 +240,23 @@ def _grid_limits(traces: Sequence[Mapping[str, Any]]) -> tuple[tuple[float, floa
     )
 
 
+def _library_grid_limits(root: Path) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Compute the one x/z limit pair shared by all 56 comparison panels."""
+    traces: list[dict[str, np.ndarray]] = []
+    for campaign, arms in EXPECTED.items():
+        for arm, seeds in arms.items():
+            for seed in seeds:
+                trace_path = root / campaign / arm / str(seed) / "trace.npz"
+                try:
+                    with np.load(trace_path) as loaded:
+                        trace = {key: np.asarray(loaded[key]) for key in loaded.files}
+                except (OSError, ValueError, KeyError) as error:
+                    raise ValueError(f"campaign trace unreadable: {trace_path}") from error
+                _trace_geometry(trace)
+                traces.append(trace)
+    return _grid_limits(traces)
+
+
 def write_campaign_trajectory_grid(
     root: str | Path, campaign: str, path: str | Path
 ) -> dict[str, Any]:
@@ -258,7 +275,7 @@ def write_campaign_trajectory_grid(
                 raise ValueError(f"campaign trace unreadable: {trace_path}") from error
             _trace_geometry(trace)
             panels.append((arm, seed, trace))
-    xlim, zlim = _grid_limits([trace for _, _, trace in panels])
+    xlim, zlim = _library_grid_limits(root)
     arms = tuple(EXPECTED[campaign])
     seeds = tuple(next(iter(EXPECTED[campaign].values())))
     fig, axes = plt.subplots(

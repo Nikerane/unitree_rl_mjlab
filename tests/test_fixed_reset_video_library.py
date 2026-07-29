@@ -872,3 +872,22 @@ def test_campaign_grids_and_index_cover_each_registered_policy_once(tmp_path, mo
         assert _sha256(tmp_path / identity / "metadata.json") in text
         for artifact in ("policy.mp4", "montage.png", "trajectory.png", "trace.npz"):
             assert (tmp_path / row["campaign"] / row["arm"] / str(row["training_seed"]) / artifact).is_file()
+
+
+def test_both_campaign_grids_use_one_limit_pair_from_all_56_traces(tmp_path):
+    """A campaign-specific outlier must expand every panel in both comparison grids."""
+    write_complete_fake_library(tmp_path, reset_digest=FIXED_DIGEST)
+    outlier_path = tmp_path / "fq3x8" / "FQ" / "23" / "trace.npz"
+    with np.load(outlier_path) as trace:
+        outlier = {key: trace[key] for key in trace.files}
+    outlier["head_position_m"] = np.array([[2.0, 0.0, 0.0]])
+    np.savez(outlier_path, **outlier)
+
+    fq4 = write_campaign_trajectory_grid(tmp_path, "fq4x8", tmp_path / "fq4.png")
+    fq3 = write_campaign_trajectory_grid(tmp_path, "fq3x8", tmp_path / "fq3.png")
+
+    shared = (fq4["common_xlim"], fq4["common_zlim"])
+    assert shared == (fq3["common_xlim"], fq3["common_zlim"])
+    assert len(fq4["panel_limits"]) == 32
+    assert len(fq3["panel_limits"]) == 24
+    assert all(limits == shared for limits in (*fq4["panel_limits"], *fq3["panel_limits"]))
