@@ -40,11 +40,11 @@ from evaluation.analysis.fixed_reset_video_library import (
     validate_policy_artifacts,
     write_metadata,
 )
-from src.assets.robots.unitree_z1.z1_constants import Z1_HAMMER_XML
+from src.assets.robots.unitree_z1 import z1_constants
 
 
 SOURCE_ROOT = Path(__file__).resolve().parents[2]
-ASSET_ROOT = Z1_HAMMER_XML.resolve().parents[2]
+ASSET_ROOT = z1_constants.Z1_HAMMER_XML.resolve().parents[2]
 OUTPUT_ROOT = SOURCE_ROOT / "docs/results/assets/2026-07-29_56_policy_fixed_reset_library"
 FIXED_RESET_PATH = SOURCE_ROOT / FIXED_RESET_ENVELOPE
 EXPECTED_MANIFEST_SHA256 = {
@@ -327,11 +327,57 @@ def write_inventory(rows: Sequence[Mapping[str, Any]], path: str | Path) -> Path
     return sidecar
 
 
+def _child_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = str(SOURCE_ROOT)
+    return environment
+
+
+def verify_project_import_roots() -> None:
+    """Fail if this driver or the renderer child resolves project code elsewhere."""
+    driver_paths = (
+        Path(__file__),
+        Path(policy_artifact_dir.__code__.co_filename),
+        Path(z1_constants.__file__),
+    )
+    if any(not path.resolve().is_relative_to(SOURCE_ROOT) for path in driver_paths):
+        raise ValueError("driver project import resolved outside checked source root")
+    probe = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import json\n"
+                "import evaluation.analysis.fixed_reset_video_library as contracts\n"
+                "import evaluation.analysis.render_fixed_reset_video_library as driver\n"
+                "import scripts.render_policy as renderer\n"
+                "import src.tasks as tasks\n"
+                "print('PROJECT_IMPORT_PATHS=' + json.dumps([\n"
+                "  contracts.__file__, driver.__file__, renderer.__file__, tasks.__file__\n"
+                "]))\n"
+            ),
+        ],
+        cwd=SOURCE_ROOT,
+        env=_child_environment(),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    marker = "PROJECT_IMPORT_PATHS="
+    line = next((line for line in probe.stdout.splitlines() if line.startswith(marker)), None)
+    if line is None:
+        raise ValueError("child project import probe produced no path record")
+    paths = json.loads(line.removeprefix(marker))
+    if any(not Path(path).resolve().is_relative_to(SOURCE_ROOT) for path in paths):
+        raise ValueError("child project import resolved outside checked source root")
+
+
 def run_renderer_process(arguments: Sequence[str]) -> None:
     """Execute the renderer from the checkout whose source was provenance-checked."""
     subprocess.run(
         [sys.executable, str(SOURCE_ROOT / "scripts/render_policy.py"), *arguments],
         cwd=SOURCE_ROOT,
+        env=_child_environment(),
         check=True,
     )
 
@@ -545,6 +591,7 @@ def render_library(
     write_inventory(rows, output_root / "checkpoint_inventory.tsv")
     fixed_reset = load_fixed_reset(FIXED_RESET_PATH)
     render_provenance = capture_render_provenance()
+    verify_project_import_roots()
     reused = 0
     try:
         for row in rows:

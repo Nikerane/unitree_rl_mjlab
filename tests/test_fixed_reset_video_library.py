@@ -529,23 +529,44 @@ def test_driver_binds_source_and_assets_to_the_paths_imported_by_the_checkout():
     assert library_driver.ASSET_ROOT == Z1_HAMMER_XML.resolve().parents[2]
 
 
-def test_renderer_process_uses_absolute_script_and_source_cwd(tmp_path, monkeypatch):
-    """Relative caller cwd cannot change which renderer or task package executes."""
+def test_renderer_process_uses_checked_source_for_script_cwd_and_pythonpath(
+    tmp_path, monkeypatch
+):
+    """A caller PYTHONPATH cannot make the checked renderer import another repo."""
     source = tmp_path / "source"
+    checked_probe = source / "src" / "project_probe.py"
+    checked_probe.parent.mkdir(parents=True)
+    (checked_probe.parent / "__init__.py").write_text("")
+    checked_probe.write_text("ORIGIN = __file__\n")
+    rogue = tmp_path / "rogue"
+    rogue_probe = rogue / "src" / "project_probe.py"
+    rogue_probe.parent.mkdir(parents=True)
+    (rogue_probe.parent / "__init__.py").write_text("")
+    rogue_probe.write_text("ORIGIN = __file__\n")
     script = source / "scripts" / "render_policy.py"
     script.parent.mkdir(parents=True)
     script.write_text(
         "import os, pathlib, sys\n"
-        "pathlib.Path(sys.argv[1]).write_text(os.getcwd() + '\\n' + __file__)\n"
+        "from src import project_probe\n"
+        "pathlib.Path(sys.argv[1]).write_text(\n"
+        "    os.getcwd() + '\\n' + __file__ + '\\n' + project_probe.ORIGIN\n"
+        ")\n"
     )
     monkeypatch.setattr(library_driver, "SOURCE_ROOT", source)
+    monkeypatch.setenv("PYTHONPATH", str(rogue))
     observed = tmp_path / "observed.txt"
 
     library_driver.run_renderer_process([str(observed)])
 
-    cwd, executed = observed.read_text().splitlines()
+    cwd, executed, imported = observed.read_text().splitlines()
     assert Path(cwd) == source
     assert Path(executed) == script
+    assert Path(imported) == checked_probe
+
+
+def test_child_project_import_preflight_resolves_beneath_checked_source():
+    """The real child import graph must resolve its project modules in this worktree."""
+    library_driver.verify_project_import_roots()
 
 
 def test_inventory_is_portable_lf_only_and_runtime_path_is_not_serialized(tmp_path):
