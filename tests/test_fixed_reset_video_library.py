@@ -12,6 +12,7 @@ import imageio.v3 as iio
 import numpy as np
 import pytest
 
+from evaluation.analysis import render_fixed_reset_video_library as library_driver
 from evaluation.analysis.fixed_reset_video_library import (
     EXPECTED,
     first_episode_frame_count,
@@ -264,3 +265,147 @@ def test_artifact_validator_rejects_wrong_task_without_row_task_field(tmp_path):
     _write_metadata(metadata_path, metadata)
     with pytest.raises(ValueError, match="task"):
         validate_policy_artifacts(tmp_path, expected_rows())
+
+
+def _write_accepted_checkpoint_manifests(tmp_path: Path) -> tuple[Path, Path, dict[str, Path]]:
+    """Create byte-verified, schema-complete accepted manifests for the real builder."""
+    import csv
+
+    roots = {campaign: tmp_path / "checkpoints" / campaign for campaign in EXPECTED}
+    manifests = {
+        "fq4x8": tmp_path / "fq4x8_accepted.tsv",
+        "fq3x8": tmp_path / "fq3x8_accepted.tsv",
+    }
+    rows_by_campaign: dict[str, list[dict[str, str]]] = {campaign: [] for campaign in EXPECTED}
+    for row in expected_rows():
+        campaign = row["campaign"]
+        checkpoint = (
+            roots[campaign]
+            / f"{campaign}_{row['arm'].lower()}_seed{row['training_seed']}"
+            / "model_499.pt"
+        )
+        checkpoint.parent.mkdir(parents=True, exist_ok=True)
+        checkpoint.write_bytes(
+            f"{campaign}/{row['arm']}/{row['training_seed']}".encode("utf-8")
+        )
+        checkpoint_sha256 = _sha256(checkpoint)
+        manifest_row = {
+            "campaign": campaign,
+            "disposition": "accepted",
+            "arm": row["arm"],
+            "short": row["arm"].lower().replace("-min", ""),
+            "task": TASKS[(campaign, row["arm"])],
+            "training_seed": str(row["training_seed"]),
+            "checkpoint_path": f"/vega/frozen/{checkpoint.parent.name}/model_499.pt",
+            "checkpoint_sha256": checkpoint_sha256,
+            "retry_history": "none",
+        }
+        if campaign == "fq4x8":
+            manifest_row.update(
+                code_revision="1" * 40,
+                asset_revision="2" * 40,
+                clean_state="true",
+            )
+        else:
+            manifest_row.update(
+                training_code_revision="3" * 40,
+                training_asset_revision="4" * 40,
+            )
+        rows_by_campaign[campaign].append(manifest_row)
+    for campaign, manifest in manifests.items():
+        fieldnames = list(rows_by_campaign[campaign][0])
+        with manifest.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter="\t")
+            writer.writeheader()
+            writer.writerows(rows_by_campaign[campaign])
+    return manifests["fq4x8"], manifests["fq3x8"], roots
+
+
+def _fixture_manifest_hashes(fq4: Path, fq3: Path) -> dict[str, str]:
+    return {"fq4x8": _sha256(fq4), "fq3x8": _sha256(fq3)}
+
+
+def test_inventory_builder_freezes_verified_training_provenance_in_deterministic_order(tmp_path):
+    """Changing source rows or checkpoint bytes cannot yield a different eligible inventory."""
+    fq4, fq3, roots = _write_accepted_checkpoint_manifests(tmp_path)
+    rows = library_driver.build_inventory(
+        fq4, fq3, roots, expected_manifest_sha256=_fixture_manifest_hashes(fq4, fq3)
+    )
+
+    assert len(rows) == 56
+    assert [(row["campaign"], row["arm"], row["training_seed"]) for row in rows] == [
+        (row["campaign"], row["arm"], row["training_seed"]) for row in expected_rows()
+    ]
+    assert rows[0]["training_code_revision"] == "1" * 40
+    assert rows[0]["training_asset_revision"] == "2" * 40
+    assert rows[-1]["training_code_revision"] == "3" * 40
+    assert rows[-1]["training_asset_revision"] == "4" * 40
+    assert all(Path(row["checkpoint_file"]).is_file() for row in rows)
+
+    inventory = tmp_path / "checkpoint_inventory.tsv"
+    library_driver.write_inventory(rows, inventory)
+    assert _sha256(inventory) == inventory.with_suffix(".tsv.sha256").read_text().split()[0]
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message", "refresh_manifest_hashes"),
+    [
+        (
+            lambda fq4, fq3, roots: fq4.write_text(fq4.read_text() + "\n"),
+            "manifest SHA-256",
+            False,
+        ),
+        (
+            lambda fq4, fq3, roots: _replace_tsv_cell(fq3, 1, "training_seed", "16"),
+            "membership",
+            True,
+        ),
+        (
+            lambda fq4, fq3, roots: _replace_tsv_cell(fq4, 1, "task", "wrong-task"),
+            "task",
+            True,
+        ),
+        (
+            lambda fq4, fq3, roots: next(roots["fq4x8"].rglob("model_499.pt")).unlink(),
+            "checkpoint",
+            False,
+        ),
+        (
+            lambda fq4, fq3, roots: _replace_tsv_cell(fq3, 1, "arm", "unexpected"),
+            "arm",
+            True,
+        ),
+        (
+            lambda fq4, fq3, roots: _replace_tsv_cell(fq4, 1, "clean_state", "false"),
+            "clean",
+            True,
+        ),
+    ],
+)
+def test_inventory_builder_rejects_unfrozen_or_ineligible_manifest_input(
+    tmp_path, mutation, message, refresh_manifest_hashes
+):
+    """A wrong hash, identity, task, file, arm, or dirty training state must stop rendering."""
+    fq4, fq3, roots = _write_accepted_checkpoint_manifests(tmp_path)
+    expected_hashes = _fixture_manifest_hashes(fq4, fq3)
+    mutation(fq4, fq3, roots)
+    if refresh_manifest_hashes:
+        expected_hashes = _fixture_manifest_hashes(fq4, fq3)
+
+    with pytest.raises(ValueError, match=message):
+        library_driver.build_inventory(
+            fq4, fq3, roots, expected_manifest_sha256=expected_hashes
+        )
+
+
+def _replace_tsv_cell(path: Path, row_index: int, field: str, value: str) -> None:
+    import csv
+
+    with path.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle, delimiter="\t"))
+        fieldnames = tuple(rows[0])
+    rows[row_index][field] = value
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter="\t")
+        writer.writeheader()
+        writer.writerows(rows)
