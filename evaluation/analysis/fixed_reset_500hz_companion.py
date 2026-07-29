@@ -1270,22 +1270,30 @@ def _csv_value(value: object) -> object:
     return value
 
 
-def _write_csv(path: str | Path, rows: Sequence[Mapping[str, object]]) -> None:
+def _write_csv(
+    path: str | Path,
+    rows: Sequence[Mapping[str, object]],
+    *,
+    fieldnames: Sequence[str] | None = None,
+) -> list[str]:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    if not rows:
+    if not rows and fieldnames is None:
         output.write_text("", encoding="utf-8")
-        return
-    identity = [
-        "campaign",
-        "arm",
-        "training_seed",
-        "task",
-        "checkpoint_sha256",
-    ]
-    fields = identity + sorted(
-        set().union(*(row.keys() for row in rows)) - set(identity)
-    )
+        return []
+    if fieldnames is None:
+        identity = [
+            "campaign",
+            "arm",
+            "training_seed",
+            "task",
+            "checkpoint_sha256",
+        ]
+        fields = identity + sorted(
+            set().union(*(row.keys() for row in rows)) - set(identity)
+        )
+    else:
+        fields = list(fieldnames)
     temporary = output.with_name(f".{output.name}.tmp")
     with temporary.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
@@ -1295,6 +1303,7 @@ def _write_csv(path: str | Path, rows: Sequence[Mapping[str, object]]) -> None:
                 {field: _csv_value(row.get(field)) for field in fields}
             )
     temporary.replace(output)
+    return fields
 
 
 class BatchFailure(RuntimeError):
@@ -1688,13 +1697,14 @@ def write_analysis_outputs(
     root.mkdir(parents=True, exist_ok=True)
     _write_csv(root / "summary.csv", summaries)
     ranked = rank_and_pair_fq(summaries, population_covariates)
-    _write_csv(
+    ranking_fields = _write_csv(
         root / "fq_simulation_ranking.csv",
         ranked["simulation_ranking"],
     )
     _write_csv(
         root / "fq_hardware_ranking.csv",
         ranked["hardware_ranking"],
+        fieldnames=ranking_fields,
     )
     (root / "fq_pairing.json").write_text(
         json.dumps(

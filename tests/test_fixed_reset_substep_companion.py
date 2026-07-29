@@ -800,6 +800,39 @@ def test_hardware_ranking_retains_unsupported_descent_geometry() -> None:
     )
 
 
+def test_empty_hardware_ranking_csv_keeps_simulation_schema(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    summaries = [
+        _rank_row(seed, float(seed), eligible=False)
+        for seed in range(16, 20)
+    ]
+    monkeypatch.setattr(
+        companion, "_write_diagnostic_grids", lambda *_args: None
+    )
+
+    companion.write_analysis_outputs(
+        summaries,
+        [],
+        rows=[],
+        population_covariates=_covariates(),
+        output_root=tmp_path,
+    )
+
+    with (tmp_path / "fq_simulation_ranking.csv").open(
+        encoding="utf-8", newline=""
+    ) as handle:
+        simulation_reader = csv.DictReader(handle)
+        simulation_fields = simulation_reader.fieldnames
+        assert len(list(simulation_reader)) == 4
+    with (tmp_path / "fq_hardware_ranking.csv").open(
+        encoding="utf-8", newline=""
+    ) as handle:
+        hardware_reader = csv.DictReader(handle)
+        assert hardware_reader.fieldnames == simulation_fields
+        assert list(hardware_reader) == []
+
+
 def test_odd_eligible_median_is_unassigned_before_pairing() -> None:
     rows = [
         _rank_row(seed, 0.01 * float(seed - 15))
