@@ -1695,11 +1695,18 @@ def write_analysis_outputs(
 
     root = Path(output_root)
     root.mkdir(parents=True, exist_ok=True)
-    _write_csv(root / "summary.csv", summaries)
+    summary_fields = _write_csv(root / "summary.csv", summaries)
     ranked = rank_and_pair_fq(summaries, population_covariates)
-    ranking_fields = _write_csv(
+    ranking_fields = [
+        *summary_fields,
+        "simulation_rank",
+        "hardware_rank",
+        "selection_exclusion_reason",
+    ]
+    _write_csv(
         root / "fq_simulation_ranking.csv",
         ranked["simulation_ranking"],
+        fieldnames=ranking_fields,
     )
     _write_csv(
         root / "fq_hardware_ranking.csv",

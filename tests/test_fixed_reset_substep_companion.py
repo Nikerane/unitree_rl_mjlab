@@ -800,36 +800,92 @@ def test_hardware_ranking_retains_unsupported_descent_geometry() -> None:
     )
 
 
-def test_empty_hardware_ranking_csv_keeps_simulation_schema(
+def test_fq_ranking_csv_uses_union_schema_for_populated_and_empty_hardware(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    summaries = [
-        _rank_row(seed, float(seed), eligible=False)
+    populated_summaries = [
+        _rank_row(seed, float(seed))
         for seed in range(16, 20)
+    ]
+    for row in populated_summaries:
+        row["descent_geometry_invalid_reason"] = ""
+        row["hardware_eligible"] = True
+        row["hardware_ineligibility_reasons"] = ""
+    unsupported = populated_summaries[1]
+    unsupported["descent_geometry_valid"] = False
+    unsupported["descent_geometry_invalid_reason"] = (
+        "fewer_than_3_distinct_samples"
+    )
+    for field in (
+        "descent_c_rms",
+        "descent_b_rms_m",
+        "descent_c_max",
+        "descent_tortuosity",
+    ):
+        unsupported[field] = None
+    empty_summaries = [
+        {**row, "qvel_violation": True}
+        for row in populated_summaries
     ]
     monkeypatch.setattr(
         companion, "_write_diagnostic_grids", lambda *_args: None
     )
 
     companion.write_analysis_outputs(
-        summaries,
+        populated_summaries,
         [],
         rows=[],
         population_covariates=_covariates(),
-        output_root=tmp_path,
+        output_root=tmp_path / "populated",
     )
-
-    with (tmp_path / "fq_simulation_ranking.csv").open(
+    with (tmp_path / "populated" / "fq_simulation_ranking.csv").open(
         encoding="utf-8", newline=""
     ) as handle:
         simulation_reader = csv.DictReader(handle)
-        simulation_fields = simulation_reader.fieldnames
+        populated_fields = simulation_reader.fieldnames
         assert len(list(simulation_reader)) == 4
-    with (tmp_path / "fq_hardware_ranking.csv").open(
+    with (tmp_path / "populated" / "fq_hardware_ranking.csv").open(
         encoding="utf-8", newline=""
     ) as handle:
         hardware_reader = csv.DictReader(handle)
-        assert hardware_reader.fieldnames == simulation_fields
+        assert hardware_reader.fieldnames == populated_fields
+        hardware_rows = list(hardware_reader)
+    assert populated_fields is not None
+    assert {
+        "simulation_rank",
+        "hardware_rank",
+        "selection_exclusion_reason",
+    } <= set(populated_fields)
+    ranked = next(
+        row for row in hardware_rows if row["training_seed"] == "16"
+    )
+    assert ranked["hardware_rank"] == "1"
+    excluded = next(
+        row for row in hardware_rows if row["training_seed"] == "17"
+    )
+    assert excluded["hardware_rank"] == ""
+    assert excluded["selection_exclusion_reason"] == (
+        "unsupported_descent_phenotype:fewer_than_3_distinct_samples"
+    )
+
+    companion.write_analysis_outputs(
+        empty_summaries,
+        [],
+        rows=[],
+        population_covariates=_covariates(),
+        output_root=tmp_path / "empty",
+    )
+    with (tmp_path / "empty" / "fq_simulation_ranking.csv").open(
+        encoding="utf-8", newline=""
+    ) as handle:
+        empty_simulation_reader = csv.DictReader(handle)
+        assert empty_simulation_reader.fieldnames == populated_fields
+        assert len(list(empty_simulation_reader)) == 4
+    with (tmp_path / "empty" / "fq_hardware_ranking.csv").open(
+        encoding="utf-8", newline=""
+    ) as handle:
+        hardware_reader = csv.DictReader(handle)
+        assert hardware_reader.fieldnames == populated_fields
         assert list(hardware_reader) == []
 
 
