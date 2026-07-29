@@ -37,6 +37,8 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 from evaluation.analysis.fixed_reset_video_library import (
   ARTIFACT_FILENAMES,
   FIXED_RESET_ENVELOPE,
+  RENDERER_CONTRACT,
+  TIMING_CONTRACT,
   load_fixed_reset,
   write_metadata,
   write_trajectory_png,
@@ -57,22 +59,18 @@ class Cfg:
   """Training seed for this checkpoint."""
   checkpoint_sha256: str
   """Expected SHA-256 of checkpoint_file, recorded in metadata."""
+  code_revision: str
+  """Immutable source revision used to render this policy."""
+  asset_revision: str
+  """Immutable hammer asset revision used to render this policy."""
   task: str = "Unitree-Z1-Hammer"
   """Gym task id: Unitree-Z1-Hammer (A-BASE) or Unitree-Z1-Hammer-Track (A-TRACK)."""
   out_dir: str = "/tmp/hammer_policy"
   steps: int = 80
-  width: int = 640
-  height: int = 480
-  # Camera overrides (None = keep the env's ViewerConfig). Smaller distance = zoom in.
-  distance: float | None = 0.85
-  elevation: float | None = -25.0
-  azimuth: float | None = None
   fixed_reset_envelope: str = str(FIXED_RESET_ENVELOPE)
   """Stage-0 envelope containing the canonical shared fixed reset."""
   metadata_provenance: str = ""
   """Free-form immutable provenance note for this rendering invocation."""
-  fps: int = 10
-  """Frames per second for policy.mp4."""
   device: str = "cpu"
 
 
@@ -86,6 +84,10 @@ def main(cfg: Cfg) -> None:
   ckpt = Path(cfg.checkpoint_file)
   if not ckpt.exists():
     raise FileNotFoundError(f"checkpoint not found: {ckpt}")
+  if not cfg.code_revision or not cfg.asset_revision:
+    raise ValueError("code_revision and asset_revision are required")
+  if cfg.steps <= 0:
+    raise ValueError("steps must be positive")
   checkpoint_sha256 = _sha256(ckpt)
   if checkpoint_sha256 != cfg.checkpoint_sha256:
     raise ValueError(
@@ -99,18 +101,27 @@ def main(cfg: Cfg) -> None:
   # Keep the terminal strike state readable; auto-reset would replace it with
   # the next episode before its trajectory/contact/frame could be recorded.
   env_cfg.auto_reset = False
-  env_cfg.viewer.width = cfg.width
-  env_cfg.viewer.height = cfg.height
-  if cfg.distance is not None:
-    env_cfg.viewer.distance = cfg.distance
-  if cfg.elevation is not None:
-    env_cfg.viewer.elevation = cfg.elevation
-  if cfg.azimuth is not None:
-    env_cfg.viewer.azimuth = cfg.azimuth
+  env_cfg.viewer.width = RENDERER_CONTRACT["frame_width_px"]
+  env_cfg.viewer.height = RENDERER_CONTRACT["frame_height_px"]
+  env_cfg.viewer.distance = RENDERER_CONTRACT["camera_distance_m"]
+  env_cfg.viewer.elevation = RENDERER_CONTRACT["camera_elevation_deg"]
+  env_cfg.viewer.azimuth = RENDERER_CONTRACT["camera_azimuth_deg"]
 
   agent_cfg = load_rl_cfg(cfg.task)
   base_env = ManagerBasedRlEnv(cfg=env_cfg, device=cfg.device, render_mode="rgb_array")
   env = RslRlVecEnvWrapper(base_env, clip_actions=agent_cfg.clip_actions)
+  physics_dt_s = float(base_env.physics_dt)
+  control_decimation = int(env_cfg.decimation)
+  control_dt_s = physics_dt_s * control_decimation
+  if (
+    abs(physics_dt_s - TIMING_CONTRACT["physics_dt_s"]) > 1e-12
+    or control_decimation != TIMING_CONTRACT["control_decimation"]
+    or abs(control_dt_s - TIMING_CONTRACT["control_dt_s"]) > 1e-12
+  ):
+    raise RuntimeError(
+      "renderer timing contract mismatch: "
+      f"dt={physics_dt_s}, decimation={control_decimation}, control_dt={control_dt_s}"
+    )
 
   runner_cls = load_runner_cls(cfg.task) or MjlabOnPolicyRunner
   runner = runner_cls(env, asdict(agent_cfg), device=cfg.device)
@@ -145,6 +156,7 @@ def main(cfg: Cfg) -> None:
   head_positions = [head()]
   contacts = [bool((sensor.data.found[0] > 0).any())]
   actions_recorded: list[np.ndarray] = []
+  terminal_boundary = {"detected": False, "step": None, "reason": "step_limit"}
   rows = [f"{'step':>4} {'nail_mm':>8} {'contact':>8} {'reward':>9}"]
   f0 = base_env.render()
   if f0 is not None:
@@ -165,6 +177,15 @@ def main(cfg: Cfg) -> None:
     if fr is not None:
       frames.append(np.asarray(fr))
     if bool(dones[0]):
+      terminal_boundary = {
+        "detected": True,
+        "step": k,
+        "reason": (
+          "terminated" if bool(base_env.reset_terminated[0])
+          else "timeout" if bool(base_env.reset_time_outs[0])
+          else "done"
+        ),
+      }
       rows.append(f"  -- episode boundary after step {k}; terminal frame retained --")
       break
   if not frames:
@@ -173,7 +194,7 @@ def main(cfg: Cfg) -> None:
   iio.imwrite(out / "montage.png", np.concatenate([frames[i] for i in idx], axis=1))
   for j, i in enumerate(idx):
     iio.imwrite(out / f"frame_{j}_idx{int(i):03d}.png", frames[i])
-  iio.imwrite(out / "policy.mp4", np.stack(frames), fps=cfg.fps)
+  iio.imwrite(out / "policy.mp4", np.stack(frames), fps=RENDERER_CONTRACT["fps"])
   trace = {
     "head_position_m": np.asarray(head_positions, dtype=np.float64),
     "contact": np.asarray(contacts, dtype=bool),
@@ -189,11 +210,28 @@ def main(cfg: Cfg) -> None:
       "campaign": cfg.campaign,
       "arm": cfg.arm,
       "training_seed": cfg.training_seed,
+      "task": cfg.task,
       "checkpoint_sha256": checkpoint_sha256,
       "checkpoint_file": str(ckpt),
+      "code_revision": cfg.code_revision,
+      "asset_revision": cfg.asset_revision,
       "reset_state_digest": fixed_reset["reset_state_digest"],
       "reset_envelope": str(cfg.fixed_reset_envelope),
-      "fps": cfg.fps,
+      "renderer_contract": RENDERER_CONTRACT,
+      "timing": TIMING_CONTRACT,
+      "rollout": {
+        "requested_control_steps": cfg.steps,
+        "executed_control_steps": len(actions_recorded),
+        "frame_count": len(frames),
+        "terminal_boundary": terminal_boundary,
+      },
+      "output_dimensions_px": {
+        "frame": [RENDERER_CONTRACT["frame_width_px"], RENDERER_CONTRACT["frame_height_px"]],
+        "montage": [
+          RENDERER_CONTRACT["frame_width_px"] * min(6, len(frames)),
+          RENDERER_CONTRACT["frame_height_px"],
+        ],
+      },
       "metadata_provenance": cfg.metadata_provenance,
       "contact_semantics": "live hammer_head_0/nail contact at control boundary",
       "artifacts": {name: _sha256(out / name) for name in ARTIFACT_FILENAMES},

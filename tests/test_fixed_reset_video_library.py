@@ -21,6 +21,20 @@ from evaluation.analysis.fixed_reset_video_library import (
 
 
 FIXED_DIGEST = "bde511ec2adc42e5365e1e46f45ff1fb43223a93c31c6fbfb4580352e445e319"
+RENDER_CONTRACT = {
+    "version": 1,
+    "frame_width_px": 960,
+    "frame_height_px": 720,
+    "camera_distance_m": 0.85,
+    "camera_elevation_deg": -25.0,
+    "camera_azimuth_deg": 135.0,
+    "fps": 10,
+}
+TIMING = {
+    "physics_dt_s": 0.002,
+    "control_decimation": 10,
+    "control_dt_s": 0.02,
+}
 
 
 def _sha256(path: Path) -> str:
@@ -62,6 +76,13 @@ def _write_mp4(path: Path) -> None:
     iio.imwrite(path, np.zeros((2, 2, 2, 3), dtype=np.uint8), fps=10)
 
 
+def _write_metadata(path: Path, metadata: dict) -> None:
+    metadata["metadata_payload_sha256"] = hashlib.sha256(
+        json.dumps(metadata, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    ).hexdigest()
+    path.write_text(json.dumps(metadata, sort_keys=True))
+
+
 def write_complete_fake_library(root: Path, *, reset_digest: str) -> None:
     for row in expected_rows():
         leaf = root / row["campaign"] / row["arm"] / str(row["training_seed"])
@@ -69,19 +90,37 @@ def write_complete_fake_library(root: Path, *, reset_digest: str) -> None:
         _write_mp4(leaf / "policy.mp4")
         _write_png(leaf / "montage.png")
         _write_png(leaf / "trajectory.png")
-        np.savez(leaf / "trace.npz", head_position_m=np.zeros((1, 3)), contact=np.zeros(1))
+        np.savez(
+            leaf / "trace.npz",
+            head_position_m=np.zeros((1, 3)),
+            contact=np.zeros(1),
+            action=np.zeros((0, 3)),
+        )
         metadata = {
             **row,
+            "task": "Unitree-Z1-Hammer",
+            "code_revision": "c" * 40,
+            "asset_revision": "a" * 40,
             "reset_state_digest": reset_digest,
+            "renderer_contract": RENDER_CONTRACT,
+            "timing": TIMING,
+            "rollout": {
+                "requested_control_steps": 80,
+                "executed_control_steps": 0,
+                "frame_count": 1,
+                "terminal_boundary": {
+                    "detected": False,
+                    "step": None,
+                    "reason": "step_limit",
+                },
+            },
+            "output_dimensions_px": {"frame": [960, 720], "montage": [960, 720]},
             "artifacts": {
                 name: _sha256(leaf / name)
                 for name in ("policy.mp4", "montage.png", "trajectory.png", "trace.npz")
             },
         }
-        metadata["metadata_payload_sha256"] = hashlib.sha256(
-            json.dumps(metadata, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
-        ).hexdigest()
-        (leaf / "metadata.json").write_text(json.dumps(metadata, sort_keys=True))
+        _write_metadata(leaf / "metadata.json", metadata)
 
 
 def corrupt_one_metadata_reset_digest(root: Path) -> None:
@@ -89,10 +128,7 @@ def corrupt_one_metadata_reset_digest(root: Path) -> None:
     payload = json.loads(path.read_text())
     payload["reset_state_digest"] = "0" * 64
     del payload["metadata_payload_sha256"]
-    payload["metadata_payload_sha256"] = hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
-    ).hexdigest()
-    path.write_text(json.dumps(payload, sort_keys=True))
+    _write_metadata(path, payload)
 
 
 def test_inventory_requires_exact_56_members():
@@ -125,4 +161,50 @@ def test_artifact_validator_rejects_mixed_reset_digest(tmp_path):
     write_complete_fake_library(tmp_path, reset_digest=FIXED_DIGEST)
     corrupt_one_metadata_reset_digest(tmp_path)
     with pytest.raises(ValueError, match="reset"):
+        validate_policy_artifacts(tmp_path, expected_rows())
+
+
+def test_artifact_validator_rejects_noncanonical_render_contract(tmp_path):
+    """A 640 px rendering cannot be mixed into the frozen 960 px library."""
+    write_complete_fake_library(tmp_path, reset_digest=FIXED_DIGEST)
+    path = next(tmp_path.glob("*/*/*/metadata.json"))
+    metadata = json.loads(path.read_text())
+    metadata["renderer_contract"]["frame_width_px"] = 640
+    del metadata["metadata_payload_sha256"]
+    _write_metadata(path, metadata)
+    with pytest.raises(ValueError, match="renderer contract"):
+        validate_policy_artifacts(tmp_path, expected_rows())
+
+
+def test_artifact_validator_requires_auditable_rollout_metadata(tmp_path):
+    """A video without task, revision, timing, and terminal evidence is ineligible."""
+    write_complete_fake_library(tmp_path, reset_digest=FIXED_DIGEST)
+    path = next(tmp_path.glob("*/*/*/metadata.json"))
+    metadata = json.loads(path.read_text())
+    del metadata["rollout"]
+    del metadata["metadata_payload_sha256"]
+    _write_metadata(path, metadata)
+    with pytest.raises(ValueError, match="rollout"):
+        validate_policy_artifacts(tmp_path, expected_rows())
+
+
+def test_artifact_validator_rejects_unexpected_policy_leaf(tmp_path):
+    """An unregistered seed directory must not silently evade the exact-56 check."""
+    write_complete_fake_library(tmp_path, reset_digest=FIXED_DIGEST)
+    (tmp_path / "fq4x8" / "F8" / "999").mkdir()
+    with pytest.raises(ValueError, match="unexpected"):
+        validate_policy_artifacts(tmp_path, expected_rows())
+
+
+def test_artifact_validator_rejects_rollout_counts_inconsistent_with_trace(tmp_path):
+    """Metadata cannot claim a rendered control step absent from trace.npz."""
+    write_complete_fake_library(tmp_path, reset_digest=FIXED_DIGEST)
+    path = next(tmp_path.glob("*/*/*/metadata.json"))
+    metadata = json.loads(path.read_text())
+    metadata["rollout"]["executed_control_steps"] = 1
+    metadata["rollout"]["frame_count"] = 2
+    metadata["output_dimensions_px"]["montage"] = [1920, 720]
+    del metadata["metadata_payload_sha256"]
+    _write_metadata(path, metadata)
+    with pytest.raises(ValueError, match="rollout"):
         validate_policy_artifacts(tmp_path, expected_rows())

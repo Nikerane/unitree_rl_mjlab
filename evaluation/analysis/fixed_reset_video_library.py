@@ -35,6 +35,20 @@ FIXED_RESET_ENVELOPE = Path(
     "lambda_feasibility_stage0_inputs.json"
 )
 ARTIFACT_FILENAMES = ("policy.mp4", "montage.png", "trajectory.png", "trace.npz")
+RENDERER_CONTRACT = {
+    "version": 1,
+    "frame_width_px": 960,
+    "frame_height_px": 720,
+    "camera_distance_m": 0.85,
+    "camera_elevation_deg": -25.0,
+    "camera_azimuth_deg": 135.0,
+    "fps": 10,
+}
+TIMING_CONTRACT = {
+    "physics_dt_s": 0.002,
+    "control_decimation": 10,
+    "control_dt_s": 0.02,
+}
 
 
 def _canonical_json(value: object) -> bytes:
@@ -173,12 +187,110 @@ def _readable_artifact(path: Path) -> None:
         raise ValueError(f"artifact is unreadable: {path}") from error
 
 
+def _validate_library_tree(root: Path) -> None:
+    """Reject unregistered policy directories while permitting campaign files."""
+    for child in root.iterdir():
+        if child.is_dir() and child.name not in EXPECTED:
+            raise ValueError(f"unexpected campaign directory: {child}")
+    for campaign, arms in EXPECTED.items():
+        campaign_dir = root / campaign
+        if not campaign_dir.is_dir():
+            raise ValueError(f"missing campaign directory: {campaign_dir}")
+        for arm_dir in campaign_dir.iterdir():
+            if not arm_dir.is_dir():  # documented campaign-level files are allowed.
+                continue
+            if arm_dir.name not in arms:
+                raise ValueError(f"unexpected arm directory: {arm_dir}")
+            expected_seeds = {str(seed) for seed in arms[arm_dir.name]}
+            for leaf in arm_dir.iterdir():
+                if leaf.is_dir() and leaf.name not in expected_seeds:
+                    raise ValueError(f"unexpected policy leaf directory: {leaf}")
+        for arm, seeds in arms.items():
+            arm_dir = campaign_dir / arm
+            if not arm_dir.is_dir():
+                raise ValueError(f"missing arm directory: {arm_dir}")
+            for seed in seeds:
+                leaf = arm_dir / str(seed)
+                if not leaf.is_dir():
+                    raise ValueError(f"missing policy leaf directory: {leaf}")
+                if any(child.is_dir() for child in leaf.iterdir()):
+                    raise ValueError(f"unexpected nested policy directory: {leaf}")
+
+
+def _validate_metadata_contract(
+    metadata: Mapping[str, Any], row: Mapping[str, Any], leaf: Path
+) -> None:
+    for key in ("task", "code_revision", "asset_revision"):
+        if not isinstance(metadata.get(key), str) or not metadata[key]:
+            raise ValueError(f"artifact metadata missing {key}: {leaf}")
+    for key in ("task", "code_revision", "asset_revision"):
+        if key in row and metadata[key] != row[key]:
+            raise ValueError(f"artifact {key} mismatch: {leaf}")
+    if metadata.get("renderer_contract") != RENDERER_CONTRACT:
+        raise ValueError(f"artifact renderer contract mismatch: {leaf}")
+    if metadata.get("timing") != TIMING_CONTRACT:
+        raise ValueError(f"artifact timing contract mismatch: {leaf}")
+    rollout = metadata.get("rollout")
+    if not isinstance(rollout, Mapping):
+        raise ValueError(f"artifact rollout metadata missing: {leaf}")
+    try:
+        requested = int(rollout["requested_control_steps"])
+        executed = int(rollout["executed_control_steps"])
+        frame_count = int(rollout["frame_count"])
+        boundary = rollout["terminal_boundary"]
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(f"artifact rollout metadata malformed: {leaf}") from error
+    if requested < executed or executed < 0 or frame_count != executed + 1:
+        raise ValueError(f"artifact rollout counts mismatch: {leaf}")
+    if not isinstance(boundary, Mapping) or not isinstance(boundary.get("detected"), bool):
+        raise ValueError(f"artifact terminal boundary metadata malformed: {leaf}")
+    if boundary["detected"]:
+        if boundary.get("step") != executed or not isinstance(boundary.get("reason"), str):
+            raise ValueError(f"artifact terminal boundary mismatch: {leaf}")
+    elif boundary.get("step") is not None or boundary.get("reason") != "step_limit":
+        raise ValueError(f"artifact terminal boundary mismatch: {leaf}")
+    dimensions = metadata.get("output_dimensions_px")
+    expected_dimensions = {
+        "frame": [RENDERER_CONTRACT["frame_width_px"], RENDERER_CONTRACT["frame_height_px"]],
+        "montage": [
+            RENDERER_CONTRACT["frame_width_px"] * min(6, frame_count),
+            RENDERER_CONTRACT["frame_height_px"],
+        ],
+    }
+    if dimensions != expected_dimensions:
+        raise ValueError(f"artifact output dimensions mismatch: {leaf}")
+
+
+def _validate_trace_rollout(trace_path: Path, rollout: Mapping[str, Any]) -> None:
+    """Cross-bind declared frame/control counts to the recorded control trace."""
+    try:
+        with np.load(trace_path) as trace:
+            positions = np.asarray(trace["head_position_m"])
+            contact = np.asarray(trace["contact"])
+            actions = np.asarray(trace["action"])
+    except (OSError, ValueError, KeyError) as error:
+        raise ValueError(f"artifact rollout trace unreadable: {trace_path}") from error
+    executed = int(rollout["executed_control_steps"])
+    if (
+        positions.shape != (executed + 1, 3)
+        or contact.shape != (executed + 1,)
+        or actions.ndim != 2
+        or len(actions) != executed
+    ):
+        raise ValueError(f"artifact rollout trace counts mismatch: {trace_path}")
+
+
 def validate_policy_artifacts(root: str | Path, rows: Sequence[Mapping[str, Any]]) -> dict:
     """Validate a complete, uniformly reset, hash-bound fixed-reset video library."""
     validate_inventory(rows)
+    root = Path(root)
+    _validate_library_tree(root)
     fixed_reset = load_fixed_reset(FIXED_RESET_ENVELOPE)
     fixed_digest = fixed_reset["reset_state_digest"]
     validated: list[dict] = []
+    requested_steps: set[int] = set()
+    code_revisions: set[str] = set()
+    asset_revisions: set[str] = set()
     for row in rows:
         leaf = policy_artifact_dir(root, row)
         metadata_path = leaf / "metadata.json"
@@ -195,6 +307,7 @@ def validate_policy_artifacts(root: str | Path, rows: Sequence[Mapping[str, Any]
             raise ValueError(f"artifact reset digest mismatch: {leaf}")
         if metadata.get("metadata_payload_sha256") != _metadata_digest(metadata):
             raise ValueError(f"artifact metadata digest mismatch: {leaf}")
+        _validate_metadata_contract(metadata, row, leaf)
         artifact_hashes = metadata.get("artifacts")
         if not isinstance(artifact_hashes, Mapping):
             raise ValueError(f"artifact hashes missing: {leaf}")
@@ -203,5 +316,13 @@ def validate_policy_artifacts(root: str | Path, rows: Sequence[Mapping[str, Any]
             _readable_artifact(artifact_path)
             if artifact_hashes.get(filename) != _sha256(artifact_path):
                 raise ValueError(f"artifact SHA-256 mismatch: {artifact_path}")
+        _validate_trace_rollout(leaf / "trace.npz", metadata["rollout"])
+        requested_steps.add(int(metadata["rollout"]["requested_control_steps"]))
+        code_revisions.add(str(metadata["code_revision"]))
+        asset_revisions.add(str(metadata["asset_revision"]))
         validated.append(dict(metadata))
+    if len(requested_steps) != 1:
+        raise ValueError("artifact rollout requested control steps differ")
+    if len(code_revisions) != 1 or len(asset_revisions) != 1:
+        raise ValueError("artifact code or asset revision differs")
     return {"fixed_reset": fixed_reset, "artifacts": validated}
