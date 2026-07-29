@@ -39,6 +39,7 @@ from evaluation.analysis.fixed_reset_video_library import (
   FIXED_RESET_ENVELOPE,
   RENDERER_CONTRACT,
   TIMING_CONTRACT,
+  expected_task,
   load_fixed_reset,
   write_metadata,
   write_trajectory_png,
@@ -88,6 +89,12 @@ def main(cfg: Cfg) -> None:
     raise ValueError("code_revision and asset_revision are required")
   if cfg.steps <= 0:
     raise ValueError("steps must be positive")
+  registered_task = expected_task(cfg.campaign, cfg.arm)
+  if cfg.task != registered_task:
+    raise ValueError(
+      f"task identity mismatch: {cfg.campaign}/{cfg.arm} requires {registered_task}, "
+      f"got {cfg.task}"
+    )
   checkpoint_sha256 = _sha256(ckpt)
   if checkpoint_sha256 != cfg.checkpoint_sha256:
     raise ValueError(

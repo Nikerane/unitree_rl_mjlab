@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import imageio.v3 as iio
@@ -34,6 +35,15 @@ TIMING = {
     "physics_dt_s": 0.002,
     "control_decimation": 10,
     "control_dt_s": 0.02,
+}
+TASKS = {
+    ("fq4x8", "F8"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear",
+    ("fq4x8", "F0"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0",
+    ("fq4x8", "D0"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0",
+    ("fq4x8", "FQ-min"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Quality",
+    ("fq3x8", "F8"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear",
+    ("fq3x8", "B8"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Bounded",
+    ("fq3x8", "FQ"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Quality",
 }
 
 
@@ -68,12 +78,12 @@ def canonical_fixed_reset_payload() -> dict:
     return copy.deepcopy(payload["resets"]["fixed_reset"])
 
 
-def _write_png(path: Path) -> None:
-    iio.imwrite(path, np.zeros((2, 2, 3), dtype=np.uint8))
+def _write_png(path: Path, *, width: int = 960, height: int = 720) -> None:
+    iio.imwrite(path, np.zeros((height, width, 3), dtype=np.uint8))
 
 
-def _write_mp4(path: Path) -> None:
-    iio.imwrite(path, np.zeros((2, 2, 2, 3), dtype=np.uint8), fps=10)
+def _write_mp4(path: Path, *, frame_count: int = 1, fps: int = 10) -> None:
+    iio.imwrite(path, np.zeros((frame_count, 720, 960, 3), dtype=np.uint8), fps=fps)
 
 
 def _write_metadata(path: Path, metadata: dict) -> None:
@@ -84,11 +94,15 @@ def _write_metadata(path: Path, metadata: dict) -> None:
 
 
 def write_complete_fake_library(root: Path, *, reset_digest: str) -> None:
+    fixture_mp4 = root / "fixture_policy.mp4"
+    fixture_montage = root / "fixture_montage.png"
+    _write_mp4(fixture_mp4)
+    _write_png(fixture_montage)
     for row in expected_rows():
         leaf = root / row["campaign"] / row["arm"] / str(row["training_seed"])
         leaf.mkdir(parents=True)
-        _write_mp4(leaf / "policy.mp4")
-        _write_png(leaf / "montage.png")
+        os.link(fixture_mp4, leaf / "policy.mp4")
+        os.link(fixture_montage, leaf / "montage.png")
         _write_png(leaf / "trajectory.png")
         np.savez(
             leaf / "trace.npz",
@@ -98,7 +112,7 @@ def write_complete_fake_library(root: Path, *, reset_digest: str) -> None:
         )
         metadata = {
             **row,
-            "task": "Unitree-Z1-Hammer",
+            "task": TASKS[(row["campaign"], row["arm"])],
             "code_revision": "c" * 40,
             "asset_revision": "a" * 40,
             "reset_state_digest": reset_digest,
@@ -207,4 +221,46 @@ def test_artifact_validator_rejects_rollout_counts_inconsistent_with_trace(tmp_p
     del metadata["metadata_payload_sha256"]
     _write_metadata(path, metadata)
     with pytest.raises(ValueError, match="rollout"):
+        validate_policy_artifacts(tmp_path, expected_rows())
+
+
+def test_artifact_validator_rejects_actual_mp4_metadata_mismatch(tmp_path):
+    """A 9 FPS/two-frame MP4 cannot claim the canonical 10 FPS/one-frame rollout."""
+    write_complete_fake_library(tmp_path, reset_digest=FIXED_DIGEST)
+    video = next(tmp_path.glob("*/*/*/policy.mp4"))
+    video.unlink()
+    _write_mp4(video, frame_count=2, fps=9)
+    metadata_path = video.with_name("metadata.json")
+    metadata = json.loads(metadata_path.read_text())
+    metadata["artifacts"]["policy.mp4"] = _sha256(video)
+    del metadata["metadata_payload_sha256"]
+    _write_metadata(metadata_path, metadata)
+    with pytest.raises(ValueError, match="media"):
+        validate_policy_artifacts(tmp_path, expected_rows())
+
+
+def test_artifact_validator_rejects_actual_montage_dimensions_mismatch(tmp_path):
+    """A montage whose real width differs from the contract cannot be admitted."""
+    write_complete_fake_library(tmp_path, reset_digest=FIXED_DIGEST)
+    montage = next(tmp_path.glob("*/*/*/montage.png"))
+    montage.unlink()
+    _write_png(montage, width=959)
+    metadata_path = montage.with_name("metadata.json")
+    metadata = json.loads(metadata_path.read_text())
+    metadata["artifacts"]["montage.png"] = _sha256(montage)
+    del metadata["metadata_payload_sha256"]
+    _write_metadata(metadata_path, metadata)
+    with pytest.raises(ValueError, match="media"):
+        validate_policy_artifacts(tmp_path, expected_rows())
+
+
+def test_artifact_validator_rejects_wrong_task_without_row_task_field(tmp_path):
+    """The campaign/arm contract, not an optional manifest field, pins the task."""
+    write_complete_fake_library(tmp_path, reset_digest=FIXED_DIGEST)
+    metadata_path = tmp_path / "fq4x8" / "F8" / "8" / "metadata.json"
+    metadata = json.loads(metadata_path.read_text())
+    metadata["task"] = "Unitree-Z1-Hammer-CaT-Impulse-Event-Quality"
+    del metadata["metadata_payload_sha256"]
+    _write_metadata(metadata_path, metadata)
+    with pytest.raises(ValueError, match="task"):
         validate_policy_artifacts(tmp_path, expected_rows())

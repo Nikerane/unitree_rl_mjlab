@@ -49,6 +49,15 @@ TIMING_CONTRACT = {
     "control_decimation": 10,
     "control_dt_s": 0.02,
 }
+TASK_BY_CAMPAIGN_ARM = {
+    ("fq4x8", "F8"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear",
+    ("fq4x8", "F0"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0",
+    ("fq4x8", "D0"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0",
+    ("fq4x8", "FQ-min"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Quality",
+    ("fq3x8", "F8"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear",
+    ("fq3x8", "B8"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Bounded",
+    ("fq3x8", "FQ"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Quality",
+}
 
 
 def _canonical_json(value: object) -> bytes:
@@ -63,6 +72,14 @@ def _sha256(path: str | Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def expected_task(campaign: str, arm: str) -> str:
+    """Return the single task allowed for a registered campaign/treatment arm."""
+    try:
+        return TASK_BY_CAMPAIGN_ARM[(campaign, arm)]
+    except KeyError as error:
+        raise ValueError(f"unregistered campaign/arm task identity: {campaign}/{arm}") from error
 
 
 def _reset_record(payload: Mapping[str, Any]) -> dict:
@@ -223,7 +240,9 @@ def _validate_metadata_contract(
     for key in ("task", "code_revision", "asset_revision"):
         if not isinstance(metadata.get(key), str) or not metadata[key]:
             raise ValueError(f"artifact metadata missing {key}: {leaf}")
-    for key in ("task", "code_revision", "asset_revision"):
+    if metadata["task"] != expected_task(str(row["campaign"]), str(row["arm"])):
+        raise ValueError(f"artifact task mismatch: {leaf}")
+    for key in ("code_revision", "asset_revision"):
         if key in row and metadata[key] != row[key]:
             raise ValueError(f"artifact {key} mismatch: {leaf}")
     if metadata.get("renderer_contract") != RENDERER_CONTRACT:
@@ -280,6 +299,33 @@ def _validate_trace_rollout(trace_path: Path, rollout: Mapping[str, Any]) -> Non
         raise ValueError(f"artifact rollout trace counts mismatch: {trace_path}")
 
 
+def _validate_media_properties(leaf: Path, rollout: Mapping[str, Any]) -> None:
+    """Measure MP4/PNG properties rather than trusting declared metadata."""
+    video_path = leaf / "policy.mp4"
+    montage_path = leaf / "montage.png"
+    try:
+        video_metadata = iio.immeta(video_path)
+        fps = float(video_metadata["fps"])
+        width, height = tuple(video_metadata["size"])
+        frame_count = sum(1 for _ in iio.imiter(video_path))
+        montage = np.asarray(iio.imread(montage_path))
+    except (KeyError, OSError, TypeError, ValueError) as error:
+        raise ValueError(f"artifact media properties unavailable: {leaf}") from error
+    expected_width = RENDERER_CONTRACT["frame_width_px"]
+    expected_height = RENDERER_CONTRACT["frame_height_px"]
+    expected_frames = int(rollout["frame_count"])
+    if (
+        (width, height) != (expected_width, expected_height)
+        or not np.isfinite(fps)
+        or abs(fps - RENDERER_CONTRACT["fps"]) > 1e-9
+        or frame_count != expected_frames
+        or montage.ndim < 2
+        or montage.shape[:2]
+        != (expected_height, expected_width * min(6, expected_frames))
+    ):
+        raise ValueError(f"artifact media properties mismatch: {leaf}")
+
+
 def validate_policy_artifacts(root: str | Path, rows: Sequence[Mapping[str, Any]]) -> dict:
     """Validate a complete, uniformly reset, hash-bound fixed-reset video library."""
     validate_inventory(rows)
@@ -317,6 +363,7 @@ def validate_policy_artifacts(root: str | Path, rows: Sequence[Mapping[str, Any]
             if artifact_hashes.get(filename) != _sha256(artifact_path):
                 raise ValueError(f"artifact SHA-256 mismatch: {artifact_path}")
         _validate_trace_rollout(leaf / "trace.npz", metadata["rollout"])
+        _validate_media_properties(leaf, metadata["rollout"])
         requested_steps.add(int(metadata["rollout"]["requested_control_steps"]))
         code_revisions.add(str(metadata["code_revision"]))
         asset_revisions.add(str(metadata["asset_revision"]))
