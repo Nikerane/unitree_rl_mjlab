@@ -86,7 +86,7 @@
 
 - [ ] **Step 6: Extend the existing post-accumulator hook minimally**
 
-  Reuse the evaluator's established pre-integration cache contract. Pair stale derived head/contact/force channels with joint velocity and nail depth cached immediately before `sim.step`; also store post-integration qpos/qvel/depth for continuous legality. Keep `orig_substep()` first so running shipped Lambda includes the just-consumed contact sample. Store the immutable first-strike quality snapshot only when the task has quality instrumentation; zeros in F8/F0/D0 are `not_available`, not measurements. Capture action/phase/reference-error separately at control rate. Do not calculate policy-selection metrics in this script.
+  Reuse the evaluator's established pre-integration cache contract. Pair stale derived head/contact/force channels with joint velocity and nail depth cached immediately before `sim.step`; also store post-integration qpos/qvel/depth for continuous legality. Keep `orig_substep()` first so the shipped running 50 ms windowed Lambda constraint read includes the just-consumed contact sample. Store the immutable first-strike quality snapshot only when the task has quality instrumentation; zeros in F8/F0/D0 are `not_available`, not measurements. Capture action/phase/reference-error separately at control rate. Do not calculate policy-selection metrics in this script.
 
 - [ ] **Step 7: Add fail-closed NPZ/metadata serialization**
 
@@ -110,8 +110,7 @@
 ### Task 2: Exact 56-row batch contract and deterministic analysis
 
 **Files:**
-- Create: `evaluation/analysis/fixed_reset_substep_companion.py`
-- Create: `evaluation/analysis/run_fixed_reset_substep_companion.py`
+- Create: `evaluation/analysis/fixed_reset_500hz_companion.py`
 - Create: `tests/test_fixed_reset_substep_companion.py`
 
 **Interfaces:**
@@ -155,7 +154,7 @@
   2. hardware-legal ranking;
   3. either two matched lower↔higher-curvature pairs or the explicit no-quartet status.
 
-- [ ] **Step 8: Implement the thin batch driver**
+- [ ] **Step 8: Implement the thin batch driver in the same module**
 
   For each row, invoke Task 1 with the exact task/checkpoint/reset identity. Reuse only a complete, digest-valid leaf. A failed row remains present with an error status and causes the final 56-row gate to fail; never skip or replace it silently.
 

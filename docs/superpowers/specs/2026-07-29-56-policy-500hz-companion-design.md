@@ -42,7 +42,9 @@ pretending every simulator channel is sampled at the same instant:
   integration;
 - post-integration joint position/velocity and nail depth, used for the
   continuous hardware-speed legality screen;
-- running per-joint event-pulse `Lambda_j`;
+- the shipped running per-joint **50 ms windowed constraint read**
+  `Lambda_j = max(control-step latch, current rolling sum)` after its substep
+  update;
 - first-strike quality validity/overflow, centroid error and axiality;
 - policy action, phase/reference position and reference error recorded once per
   20 ms control step, linked to substeps by control-step index rather than
@@ -63,7 +65,8 @@ compute:
 5. quality validity, centroid error and axiality;
 6. productivity, first-window success and event-window depth;
 7. full-horizon maximum joint velocity;
-8. maximum and time history of `Lambda_j / IMP_J_LIMIT_j`;
+8. maximum and time history of the shipped windowed
+   `Lambda_j / IMP_J_LIMIT_j` constraint read;
 9. impact-versus-press/release timing diagnostics.
 
 The final quartet is selected only inside the confirmed FQ incumbent arm.
