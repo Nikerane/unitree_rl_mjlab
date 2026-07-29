@@ -31,6 +31,7 @@ from src.tasks.hammer.mdp.references import SingleStrikeReference
 
 
 FIXED_DIGEST = "bde511ec2adc42e5365e1e46f45ff1fb43223a93c31c6fbfb4580352e445e319"
+PRESENTATION_REVISION = "d" * 40
 RENDER_CONTRACT = {
     "version": 1,
     "frame_width_px": 960,
@@ -44,6 +45,13 @@ TIMING = {
     "physics_dt_s": 0.002,
     "control_decimation": 10,
     "control_dt_s": 0.02,
+}
+RENDER_PROVENANCE = {
+    "code_revision": "c" * 40,
+    "asset_revision": "a" * 40,
+    "source_scope": ["src", "scripts", "evaluation/analysis"],
+    "asset_scope": ["hammer_z1_env/assets"],
+    "device": "cpu",
 }
 TASKS = {
     ("fq4x8", "F8"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear",
@@ -67,9 +75,13 @@ def expected_rows() -> list[dict]:
             "campaign": campaign,
             "arm": arm,
             "training_seed": seed,
+            "checkpoint_path": f"/training/{campaign}/{arm}/{seed}/model_499.pt",
             "checkpoint_sha256": hashlib.sha256(
                 f"{campaign}/{arm}/{seed}".encode()
             ).hexdigest(),
+            "training_code_revision": "1" * 40,
+            "training_asset_revision": "2" * 40,
+            "accepted_training_manifest_sha256": "f" * 64,
         }
         for campaign, arms in EXPECTED.items()
         for arm, seeds in arms.items()
@@ -128,6 +140,7 @@ def write_complete_fake_library(root: Path, *, reset_digest: str) -> None:
             "task": TASKS[(row["campaign"], row["arm"])],
             "code_revision": "c" * 40,
             "asset_revision": "a" * 40,
+            "presentation_generator_revision": PRESENTATION_REVISION,
             "reset_state_digest": reset_digest,
             "renderer_contract": RENDER_CONTRACT,
             "timing": TIMING,
@@ -135,6 +148,7 @@ def write_complete_fake_library(root: Path, *, reset_digest: str) -> None:
                 "requested_control_steps": 80,
                 "executed_control_steps": 0,
                 "frame_count": 1,
+                "auto_reset_enabled": False,
                 "terminal_boundary": {
                     "detected": False,
                     "step": None,
@@ -145,6 +159,16 @@ def write_complete_fake_library(root: Path, *, reset_digest: str) -> None:
             "artifacts": {
                 name: _sha256(leaf / name)
                 for name in ("policy.mp4", "montage.png", "trajectory.png", "trace.npz")
+            },
+            "renderer_provenance": copy.deepcopy(RENDER_PROVENANCE),
+            "training_provenance": {
+                key: row[key]
+                for key in (
+                    "checkpoint_path",
+                    "training_code_revision",
+                    "training_asset_revision",
+                    "accepted_training_manifest_sha256",
+                )
             },
         }
         _write_metadata(leaf / "metadata.json", metadata)
@@ -176,6 +200,32 @@ def test_fixed_reset_digest_is_verified(tmp_path):
     path.write_text(json.dumps(payload))
     with pytest.raises(ValueError, match="digest"):
         load_fixed_reset(path)
+
+
+def test_fixed_reset_rejects_self_consistent_alternate_realized_state(tmp_path):
+    """Recomputing the inner digest cannot redefine the approved library reset."""
+    payload = canonical_fixed_reset_payload()
+    payload["reset_state"]["realized"]["robot_joint_pos"][0] += 0.01
+    payload["reset_state_digest"] = hashlib.sha256(
+        json.dumps(
+            payload["reset_state"]["realized"],
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode()
+    ).hexdigest()
+    path = tmp_path / "alternate-reset.json"
+    path.write_text(json.dumps(payload))
+
+    with pytest.raises(ValueError, match="approved"):
+        load_fixed_reset(path)
+
+
+def test_default_fixed_reset_path_is_independent_of_caller_cwd(tmp_path, monkeypatch):
+    """The library's default reset envelope belongs to its source checkout."""
+    monkeypatch.chdir(tmp_path)
+
+    assert load_fixed_reset()["reset_state_digest"] == FIXED_DIGEST
 
 
 def test_episode_boundary_excludes_the_auto_reset_frame():
@@ -277,6 +327,73 @@ def test_artifact_validator_rejects_wrong_task_without_row_task_field(tmp_path):
     _write_metadata(metadata_path, metadata)
     with pytest.raises(ValueError, match="task"):
         validate_policy_artifacts(tmp_path, expected_rows())
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda metadata: metadata.pop("renderer_provenance"), "renderer provenance"),
+        (
+            lambda metadata: metadata["renderer_provenance"].update(
+                {"code_revision": "e" * 40}
+            ),
+            "renderer provenance",
+        ),
+        (
+            lambda metadata: metadata["renderer_provenance"].update({"device": "cuda"}),
+            "CPU",
+        ),
+        (
+            lambda metadata: metadata["training_provenance"].update(
+                {"training_code_revision": "e" * 40}
+            ),
+            "training provenance",
+        ),
+    ],
+)
+def test_final_validator_cross_binds_renderer_and_training_provenance(
+    tmp_path, monkeypatch, mutation, message
+):
+    """Final admission must enforce the same frozen provenance as resume."""
+    write_complete_fake_library(tmp_path, reset_digest=FIXED_DIGEST)
+    metadata_path = tmp_path / "fq4x8" / "F8" / "8" / "metadata.json"
+    metadata = json.loads(metadata_path.read_text())
+    mutation(metadata)
+    del metadata["metadata_payload_sha256"]
+    _write_metadata(metadata_path, metadata)
+    monkeypatch.setattr(
+        "evaluation.analysis.fixed_reset_video_library._readable_artifact",
+        lambda _path: None,
+    )
+    monkeypatch.setattr(
+        "evaluation.analysis.fixed_reset_video_library._validate_media_properties",
+        lambda _leaf, _rollout: None,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        validate_policy_artifacts(tmp_path, expected_rows())
+
+
+@pytest.mark.parametrize("malformed_artifacts", [None, [], "not-a-map"])
+def test_malformed_artifact_map_invalidates_resume_without_raising(
+    tmp_path, malformed_artifacts
+):
+    """A malformed metadata map is an invalid leaf that can be rerendered."""
+    write_complete_fake_library(tmp_path, reset_digest=FIXED_DIGEST)
+    row = expected_rows()[0]
+    leaf = library_driver.policy_artifact_dir(tmp_path, row)
+    metadata_path = leaf / "metadata.json"
+    metadata = json.loads(metadata_path.read_text())
+    metadata["artifacts"] = malformed_artifacts
+    del metadata["metadata_payload_sha256"]
+    _write_metadata(metadata_path, metadata)
+
+    assert not library_driver._policy_artifact_is_valid(
+        tmp_path,
+        row,
+        canonical_fixed_reset_payload(),
+        render_provenance=RENDER_PROVENANCE,
+    )
 
 
 def _write_accepted_checkpoint_manifests(tmp_path: Path) -> tuple[Path, Path, dict[str, Path]]:
@@ -691,6 +808,68 @@ def test_renderer_scratch_is_removed_and_staged_leaf_replaces_final_atomically(t
     assert not staged_leaf.exists()
 
 
+def test_resume_restores_one_interrupted_replacement_backup_before_validation(
+    tmp_path, monkeypatch
+):
+    """A crash after parking the old leaf must reuse that complete backup."""
+    row = {
+        **expected_rows()[0],
+        "_checkpoint_file": "unused-model_499.pt",
+        "task": TASKS[("fq4x8", "F8")],
+    }
+    final_leaf = library_driver.policy_artifact_dir(tmp_path, row)
+    backup = final_leaf.with_name(f".{final_leaf.name}.backup-interrupted")
+    backup.mkdir(parents=True)
+    (backup / "sentinel").write_text("old leaf")
+    monkeypatch.setattr(
+        library_driver,
+        "_policy_artifact_is_valid",
+        lambda output_root, candidate, fixed_reset, *, render_provenance: (
+            library_driver.policy_artifact_dir(output_root, candidate) / "sentinel"
+        ).is_file(),
+    )
+    monkeypatch.setattr(
+        library_driver,
+        "run_renderer_process",
+        lambda _arguments: pytest.fail("restored backup should be validated before rendering"),
+    )
+
+    reused = library_driver.run_single_policy_renderer(
+        row,
+        canonical_fixed_reset_payload(),
+        tmp_path,
+        render_provenance=RENDER_PROVENANCE,
+    )
+
+    assert reused
+    assert (final_leaf / "sentinel").read_text() == "old leaf"
+    assert not backup.exists()
+
+
+def test_resume_removes_one_stale_generated_backup_when_final_leaf_exists(tmp_path):
+    """A completed replacement may leave one generated backup to clean up."""
+    final_leaf = tmp_path / "fq4x8" / "F8" / "8"
+    final_leaf.mkdir(parents=True)
+    backup = final_leaf.with_name(f".{final_leaf.name}.backup-stale")
+    backup.mkdir()
+
+    library_driver.recover_policy_leaf_backup(final_leaf)
+
+    assert final_leaf.is_dir()
+    assert not backup.exists()
+
+
+def test_resume_fails_closed_on_ambiguous_replacement_backups(tmp_path):
+    """Two interrupted candidates cannot be selected without inventing history."""
+    final_leaf = tmp_path / "fq4x8" / "F8" / "8"
+    final_leaf.parent.mkdir(parents=True)
+    for suffix in ("one", "two"):
+        final_leaf.with_name(f".{final_leaf.name}.backup-{suffix}").mkdir()
+
+    with pytest.raises(ValueError, match="ambiguous"):
+        library_driver.recover_policy_leaf_backup(final_leaf)
+
+
 def test_policy_staging_root_is_a_sibling_of_the_library(tmp_path):
     """A killed render may leave a sibling scratch root, never an unexpected library child."""
     library = tmp_path / "library"
@@ -707,7 +886,10 @@ def test_final_validation_prints_the_six_required_counters():
     rows = expected_rows()
     validation = {
         "artifacts": [
-            {"reset_state_digest": FIXED_DIGEST}
+            {
+                "reset_state_digest": FIXED_DIGEST,
+                "rollout": {"auto_reset_enabled": False},
+            }
             for _ in rows
         ]
     }
@@ -719,6 +901,123 @@ def test_final_validation_prints_the_six_required_counters():
         "invalid_video=0\n"
         "second_episode_contamination=0"
     )
+
+
+def test_validation_counter_is_derived_from_auto_reset_evidence():
+    """The contamination count must be computed from admitted rollout metadata."""
+    rows = expected_rows()
+    validation = {
+        "artifacts": [
+            {
+                "reset_state_digest": FIXED_DIGEST,
+                "rollout": {"auto_reset_enabled": index == 0},
+            }
+            for index, _row in enumerate(rows)
+        ]
+    }
+
+    assert library_driver.format_validation_counters(rows, validation).endswith(
+        "second_episode_contamination=1"
+    )
+
+
+def test_metadata_contract_rejects_auto_reset_enabled_rollout(tmp_path):
+    """A rollout with automatic episode replacement cannot enter the library."""
+    row = expected_rows()[0]
+    metadata = {
+        "task": TASKS[(row["campaign"], row["arm"])],
+        "code_revision": RENDER_PROVENANCE["code_revision"],
+        "asset_revision": RENDER_PROVENANCE["asset_revision"],
+        "presentation_generator_revision": PRESENTATION_REVISION,
+        "renderer_contract": RENDER_CONTRACT,
+        "timing": TIMING,
+        "rollout": {
+            "requested_control_steps": 80,
+            "executed_control_steps": 0,
+            "frame_count": 1,
+            "auto_reset_enabled": True,
+            "terminal_boundary": {
+                "detected": False,
+                "step": None,
+                "reason": "step_limit",
+            },
+        },
+        "output_dimensions_px": {"frame": [960, 720], "montage": [960, 720]},
+        "renderer_provenance": copy.deepcopy(RENDER_PROVENANCE),
+        "training_provenance": {
+            key: row[key]
+            for key in (
+                "checkpoint_path",
+                "training_code_revision",
+                "training_asset_revision",
+                "accepted_training_manifest_sha256",
+            )
+        },
+    }
+
+    with pytest.raises(ValueError, match="auto-reset"):
+        library_driver._validate_metadata_contract(metadata, row, tmp_path / "leaf")
+
+
+def test_metadata_contract_requires_valid_presentation_revision(tmp_path):
+    """Every trajectory presentation must name its own 40-hex generator revision."""
+    row = expected_rows()[0]
+    metadata = {
+        "task": TASKS[(row["campaign"], row["arm"])],
+        "code_revision": RENDER_PROVENANCE["code_revision"],
+        "asset_revision": RENDER_PROVENANCE["asset_revision"],
+        "presentation_generator_revision": "not-a-revision",
+        "renderer_contract": RENDER_CONTRACT,
+        "timing": TIMING,
+        "rollout": {
+            "requested_control_steps": 80,
+            "executed_control_steps": 0,
+            "frame_count": 1,
+            "auto_reset_enabled": False,
+            "terminal_boundary": {
+                "detected": False,
+                "step": None,
+                "reason": "step_limit",
+            },
+        },
+        "output_dimensions_px": {"frame": [960, 720], "montage": [960, 720]},
+        "renderer_provenance": copy.deepcopy(RENDER_PROVENANCE),
+        "training_provenance": {
+            key: row[key]
+            for key in (
+                "checkpoint_path",
+                "training_code_revision",
+                "training_asset_revision",
+                "accepted_training_manifest_sha256",
+            )
+        },
+    }
+
+    with pytest.raises(ValueError, match="presentation"):
+        library_driver._validate_metadata_contract(metadata, row, tmp_path / "leaf")
+
+
+def test_final_validator_requires_one_presentation_revision_across_library(
+    tmp_path, monkeypatch
+):
+    """A mixed trajectory-presentation generation cannot be reported as one library."""
+    write_complete_fake_library(tmp_path, reset_digest=FIXED_DIGEST)
+    metadata_path = tmp_path / "fq4x8" / "F8" / "8" / "metadata.json"
+    metadata = json.loads(metadata_path.read_text())
+    metadata["presentation_generator_revision"] = "e" * 40
+    del metadata["metadata_payload_sha256"]
+    _write_metadata(metadata_path, metadata)
+    monkeypatch.setattr(
+        "evaluation.analysis.fixed_reset_video_library._readable_artifact",
+        lambda _path: None,
+    )
+    monkeypatch.setattr(
+        "evaluation.analysis.fixed_reset_video_library._validate_media_properties",
+        lambda _leaf, _rollout: None,
+    )
+
+    with pytest.raises(ValueError, match="presentation"):
+        validate_policy_artifacts(tmp_path, expected_rows())
 
 
 def test_artifact_validator_requires_the_anchored_reference_polyline(tmp_path):

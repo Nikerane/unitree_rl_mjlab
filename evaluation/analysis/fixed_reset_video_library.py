@@ -32,9 +32,13 @@ EXPECTED = {
     },
 }
 
-FIXED_RESET_ENVELOPE = Path(
+SOURCE_ROOT = Path(__file__).resolve().parents[2]
+FIXED_RESET_ENVELOPE = SOURCE_ROOT / (
     "docs/results/assets/2026-07-29_lambda_feasibility_stage0/"
     "lambda_feasibility_stage0_inputs.json"
+)
+APPROVED_FIXED_RESET_DIGEST = (
+    "bde511ec2adc42e5365e1e46f45ff1fb43223a93c31c6fbfb4580352e445e319"
 )
 ARTIFACT_FILENAMES = ("policy.mp4", "montage.png", "trajectory.png", "trace.npz")
 RENDERER_CONTRACT = {
@@ -93,7 +97,7 @@ def _reset_record(payload: Mapping[str, Any]) -> dict:
     return dict(payload)
 
 
-def load_fixed_reset(path: str | Path) -> dict:
+def load_fixed_reset(path: str | Path = FIXED_RESET_ENVELOPE) -> dict:
     """Load the shared reset record and fail closed if its realized-state digest drifts."""
     try:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -106,6 +110,8 @@ def load_fixed_reset(path: str | Path) -> dict:
     if not isinstance(reset_state, Mapping) or not isinstance(reset_state.get("realized"), Mapping):
         raise ValueError("fixed reset record has no realized reset state")
     digest = hashlib.sha256(_canonical_json(reset_state["realized"])).hexdigest()
+    if digest != APPROVED_FIXED_RESET_DIGEST:
+        raise ValueError("fixed reset state digest is not the approved digest")
     if record.get("reset_state_digest") != digest:
         raise ValueError("fixed reset state digest mismatch")
     return record
@@ -351,6 +357,12 @@ def write_library_index(
         "black dashed=SingleStrikeReference (observation only; r_imit disabled/not rewarded)",
         "Each policy's `trajectory.png` contains the corresponding x-y top view beside the x-z side view.",
         "",
+        "Rollout identity (`code_revision` and `renderer_provenance`) is recorded separately from `presentation_generator_revision`, which identifies the code that generated `trajectory.png`.",
+        "",
+        "The accepted historical FQ3×8 manifest has no `clean_state` field, so source-tree cleanliness is unavailable and is not retroactively certified for those 24 rows. Their checkpoint, training revision, asset revision, manifest, and content-hash identities remain frozen.",
+        "",
+        "Large MP4 and per-policy media remain local and untracked under the repository's existing no-tracked-MP4 convention. This README and the two compact comparison grids are intended for named-file banking.",
+        "",
         "- [FQ4×8 trajectory grid](fq4x8_trajectories_grid.png)",
         "- [FQ3×8 trajectory grid](fq3x8_trajectories_grid.png)",
         "",
@@ -460,8 +472,51 @@ def _validate_library_tree(root: Path) -> None:
                     raise ValueError(f"unexpected nested policy directory: {leaf}")
 
 
+def _is_revision(value: object) -> bool:
+    text = str(value)
+    return len(text) == 40 and all(character in "0123456789abcdef" for character in text)
+
+
+def _validate_metadata_provenance(
+    metadata: Mapping[str, Any],
+    row: Mapping[str, Any],
+    leaf: Path,
+    *,
+    expected_renderer_provenance: Mapping[str, Any] | None = None,
+) -> None:
+    """Cross-bind rollout and training identities for final and resume validation."""
+    renderer = metadata.get("renderer_provenance")
+    if not isinstance(renderer, Mapping):
+        raise ValueError(f"artifact renderer provenance missing: {leaf}")
+    for key in ("code_revision", "asset_revision"):
+        if not _is_revision(renderer.get(key)) or renderer.get(key) != metadata.get(key):
+            raise ValueError(f"artifact renderer provenance {key} mismatch: {leaf}")
+    if renderer.get("device") != "cpu":
+        raise ValueError(f"artifact renderer provenance must use CPU: {leaf}")
+    if expected_renderer_provenance is not None and dict(renderer) != dict(
+        expected_renderer_provenance
+    ):
+        raise ValueError(f"artifact renderer provenance mismatch: {leaf}")
+
+    training = metadata.get("training_provenance")
+    fields = (
+        "checkpoint_path",
+        "training_code_revision",
+        "training_asset_revision",
+        "accepted_training_manifest_sha256",
+    )
+    if not isinstance(training, Mapping) or any(
+        training.get(key) != row.get(key) for key in fields
+    ):
+        raise ValueError(f"artifact training provenance mismatch: {leaf}")
+
+
 def _validate_metadata_contract(
-    metadata: Mapping[str, Any], row: Mapping[str, Any], leaf: Path
+    metadata: Mapping[str, Any],
+    row: Mapping[str, Any],
+    leaf: Path,
+    *,
+    expected_renderer_provenance: Mapping[str, Any] | None = None,
 ) -> None:
     for key in ("task", "code_revision", "asset_revision"):
         if not isinstance(metadata.get(key), str) or not metadata[key]:
@@ -471,6 +526,14 @@ def _validate_metadata_contract(
     for key in ("code_revision", "asset_revision"):
         if key in row and metadata[key] != row[key]:
             raise ValueError(f"artifact {key} mismatch: {leaf}")
+    if not _is_revision(metadata.get("presentation_generator_revision")):
+        raise ValueError(f"artifact presentation generator revision invalid: {leaf}")
+    _validate_metadata_provenance(
+        metadata,
+        row,
+        leaf,
+        expected_renderer_provenance=expected_renderer_provenance,
+    )
     if metadata.get("renderer_contract") != RENDERER_CONTRACT:
         raise ValueError(f"artifact renderer contract mismatch: {leaf}")
     if metadata.get("timing") != TIMING_CONTRACT:
@@ -482,11 +545,14 @@ def _validate_metadata_contract(
         requested = int(rollout["requested_control_steps"])
         executed = int(rollout["executed_control_steps"])
         frame_count = int(rollout["frame_count"])
+        auto_reset_enabled = rollout["auto_reset_enabled"]
         boundary = rollout["terminal_boundary"]
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError(f"artifact rollout metadata malformed: {leaf}") from error
     if requested < executed or executed < 0 or frame_count != executed + 1:
         raise ValueError(f"artifact rollout counts mismatch: {leaf}")
+    if auto_reset_enabled is not False:
+        raise ValueError(f"artifact rollout auto-reset must be disabled: {leaf}")
     if not isinstance(boundary, Mapping) or not isinstance(boundary.get("detected"), bool):
         raise ValueError(f"artifact terminal boundary metadata malformed: {leaf}")
     if boundary["detected"]:
@@ -563,6 +629,7 @@ def validate_policy_artifacts(root: str | Path, rows: Sequence[Mapping[str, Any]
     requested_steps: set[int] = set()
     code_revisions: set[str] = set()
     asset_revisions: set[str] = set()
+    presentation_revisions: set[str] = set()
     reference_polyline: np.ndarray | None = None
     nail_top: np.ndarray | None = None
     for row in rows:
@@ -606,9 +673,12 @@ def validate_policy_artifacts(root: str | Path, rows: Sequence[Mapping[str, Any]
         requested_steps.add(int(metadata["rollout"]["requested_control_steps"]))
         code_revisions.add(str(metadata["code_revision"]))
         asset_revisions.add(str(metadata["asset_revision"]))
+        presentation_revisions.add(str(metadata["presentation_generator_revision"]))
         validated.append(dict(metadata))
     if len(requested_steps) != 1:
         raise ValueError("artifact rollout requested control steps differ")
     if len(code_revisions) != 1 or len(asset_revisions) != 1:
         raise ValueError("artifact code or asset revision differs")
+    if len(presentation_revisions) != 1:
+        raise ValueError("artifact presentation generator revision differs")
     return {"fixed_reset": fixed_reset, "artifacts": validated}

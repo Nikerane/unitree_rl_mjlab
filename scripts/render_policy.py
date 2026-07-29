@@ -260,6 +260,7 @@ def main(cfg: Cfg) -> None:
       "checkpoint_file": str(ckpt),
       "code_revision": cfg.code_revision,
       "asset_revision": cfg.asset_revision,
+      "presentation_generator_revision": cfg.code_revision,
       "reset_state_digest": fixed_reset["reset_state_digest"],
       "reset_envelope": str(cfg.fixed_reset_envelope),
       "renderer_contract": RENDERER_CONTRACT,
@@ -268,6 +269,7 @@ def main(cfg: Cfg) -> None:
         "requested_control_steps": cfg.steps,
         "executed_control_steps": len(actions_recorded),
         "frame_count": len(frames),
+        "auto_reset_enabled": False,
         "terminal_boundary": terminal_boundary,
       },
       "output_dimensions_px": {

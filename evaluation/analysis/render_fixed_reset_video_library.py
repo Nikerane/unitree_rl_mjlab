@@ -420,6 +420,23 @@ def replace_policy_leaf(staged_leaf: str | Path, final_leaf: str | Path) -> None
         shutil.rmtree(backup)
 
 
+def recover_policy_leaf_backup(final_leaf: str | Path) -> None:
+    """Recover one interrupted generated replacement, failing closed if ambiguous."""
+    final_leaf = Path(final_leaf)
+    backups = tuple(final_leaf.parent.glob(f".{final_leaf.name}.backup-*"))
+    if len(backups) > 1:
+        raise ValueError(f"ambiguous policy replacement backups: {final_leaf}")
+    if not backups:
+        return
+    backup = backups[0]
+    if not backup.is_dir():
+        raise ValueError(f"invalid policy replacement backup: {backup}")
+    if final_leaf.exists():
+        shutil.rmtree(backup)
+    else:
+        os.replace(backup, final_leaf)
+
+
 def make_policy_staging_root(output_root: str | Path) -> Path:
     """Create same-filesystem scratch beside, never inside, the library root."""
     output_root = Path(output_root).resolve()
@@ -445,7 +462,13 @@ def format_validation_counters(
         ),
         ("missing_artifacts", 0),
         ("invalid_video", 0),
-        ("second_episode_contamination", 0),
+        (
+            "second_episode_contamination",
+            sum(
+                bool(artifact["rollout"]["auto_reset_enabled"])
+                for artifact in artifacts
+            ),
+        ),
     )
     return "\n".join(f"{name}={value}" for name, value in counters)
 
@@ -472,28 +495,19 @@ def _policy_artifact_is_valid(
             return False
         if metadata.get("metadata_payload_sha256") != _metadata_digest(metadata):
             return False
-        _validate_metadata_contract(metadata, row, leaf)
-        if metadata.get("code_revision") != render_provenance["code_revision"]:
-            return False
-        if metadata.get("asset_revision") != render_provenance["asset_revision"]:
-            return False
-        if metadata.get("renderer_provenance") != dict(render_provenance):
-            return False
-        training = metadata.get("training_provenance")
-        if not isinstance(training, Mapping) or any(
-            training.get(key) != row[key]
-            for key in (
-                "checkpoint_path",
-                "training_code_revision",
-                "training_asset_revision",
-                "accepted_training_manifest_sha256",
-            )
-        ):
+        _validate_metadata_contract(
+            metadata,
+            row,
+            leaf,
+            expected_renderer_provenance=render_provenance,
+        )
+        artifact_hashes = metadata.get("artifacts")
+        if not isinstance(artifact_hashes, Mapping):
             return False
         for filename in ARTIFACT_FILENAMES:
             artifact = leaf / filename
             _readable_artifact(artifact)
-            if metadata.get("artifacts", {}).get(filename) != _sha256(artifact):
+            if artifact_hashes.get(filename) != _sha256(artifact):
                 return False
         _validate_trace_rollout(leaf / "trace.npz", metadata["rollout"])
         _validate_media_properties(leaf, metadata["rollout"])
@@ -512,6 +526,8 @@ def run_single_policy_renderer(
 ) -> bool:
     """Render one policy, returning True only when a fully validated leaf was reused."""
     output_root = Path(output_root).resolve()
+    final_leaf = policy_artifact_dir(output_root, row)
+    recover_policy_leaf_backup(final_leaf)
     if _policy_artifact_is_valid(
         output_root,
         row,
@@ -525,7 +541,6 @@ def run_single_policy_renderer(
     staging_root = make_policy_staging_root(output_root)
     staged_leaf = policy_artifact_dir(staging_root, row)
     staged_leaf.mkdir(parents=True)
-    final_leaf = policy_artifact_dir(output_root, row)
     try:
         arguments = [
             "--checkpoint-file", row["_checkpoint_file"],
