@@ -452,6 +452,14 @@ def test_exact_onset_apex_chord_contact_and_descriptor_metrics() -> None:
         1.0 / np.sqrt(3.0)
     )
     assert metrics["apex_to_onset_chord_max_m"] == pytest.approx(1.0)
+    assert metrics["descent_geometry_valid"] is True
+    assert metrics["descent_c_rms"] == pytest.approx(1.0 / np.sqrt(2.0))
+    assert metrics["descent_b_rms_m"] == pytest.approx(
+        1.0 / np.sqrt(2.0)
+    )
+    assert metrics["descent_c_max"] == pytest.approx(1.0)
+    assert metrics["descent_tortuosity"] == pytest.approx(np.sqrt(5.0))
+    assert metrics["descent_progress_sign_changes"] == 0
     assert metrics["accepted_contact_run_duration_s"] == pytest.approx(0.004)
     assert metrics["post_event_recontact"] is True
     assert metrics["onset_downward_axial_velocity_m_s"] == pytest.approx(2.0)
@@ -466,6 +474,56 @@ def test_exact_onset_apex_chord_contact_and_descriptor_metrics() -> None:
     assert metrics["descriptor_contact_duty_first_strike_window"] == pytest.approx(
         2.0 / 3.0
     )
+
+
+def test_descent_phenotype_requires_three_distinct_samples_and_50mm_chord() -> None:
+    duplicate = _metric_trace()
+    duplicate["head_position_m"][2] = duplicate["head_position_m"][1]
+    metrics = companion.derive_episode_metrics(duplicate, dt_s=0.002)
+    assert metrics["descent_geometry_valid"] is False
+    assert metrics["descent_geometry_invalid_reason"] == (
+        "fewer_than_three_distinct_samples"
+    )
+    assert metrics["descent_c_rms"] is None
+
+    short = _metric_trace()
+    short["head_position_m"][:4] *= 0.01
+    metrics = companion.derive_episode_metrics(short, dt_s=0.002)
+    assert metrics["descent_geometry_valid"] is False
+    assert metrics["descent_geometry_invalid_reason"] == "chord_below_0.050m"
+    # The legacy unweighted absolute output remains available, but is not the
+    # primary normalized curvature phenotype.
+    assert metrics["apex_to_onset_chord_rms_m"] is not None
+    assert metrics["descent_c_rms"] is None
+
+
+def test_descent_progress_sign_changes_ignore_zero_progress() -> None:
+    trace = _metric_trace(sample_count=9)
+    trace["tracker_started"][:] = False
+    trace["tracker_started"][5:] = True
+    trace["contact"][:] = False
+    trace["contact"][5:7] = True
+    trace["tracker_finalized"][:] = False
+    trace["tracker_finalized"][7:] = True
+    trace["tracker_productive"][:] = False
+    trace["tracker_productive"][7:] = True
+    trace["tracker_reason"][:] = 0
+    trace["tracker_reason"][7:] = 1
+    trace["tracker_contact_quality_valid"][:] = False
+    trace["tracker_contact_quality_valid"][5:] = True
+    trace["head_position_m"][:6] = [
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0],
+        [0.1, 0.0, 0.6],
+        [0.1, 0.0, 0.6],
+        [0.1, 0.0, 0.8],
+        [0.0, 0.0, 0.0],
+    ]
+
+    metrics = companion.derive_episode_metrics(trace, dt_s=0.002)
+
+    assert metrics["descent_geometry_valid"] is True
+    assert metrics["descent_progress_sign_changes"] == 2
 
 
 def test_accepted_onset_must_be_live_first_raw_contact() -> None:
@@ -578,7 +636,14 @@ def _rank_row(seed: int, curvature: float, eligible: bool = True) -> dict:
         "campaign": "fq3x8",
         "arm": "FQ",
         "training_seed": seed,
+        "checkpoint_sha256": f"{seed:064x}",
         "apex_to_onset_path_ratio_3d": curvature,
+        "descent_geometry_valid": True,
+        "descent_c_rms": curvature,
+        "descent_b_rms_m": curvature,
+        "descent_c_max": curvature,
+        "descent_tortuosity": 1.0 + curvature / 10.0,
+        "descent_progress_sign_changes": 0,
         "accepted_onset_index": 10,
         "tracker_finalized": True,
         "tracker_productive": True,
@@ -592,9 +657,20 @@ def _rank_row(seed: int, curvature: float, eligible: bool = True) -> dict:
 
 
 def _covariates() -> dict:
-    values = {16: 0.0, 17: 1.0, 18: 1.0, 19: 0.0}
+    values = {
+        16: 0.0,
+        17: 1.0,
+        18: 1.0,
+        19: 0.0,
+        20: 0.5,
+        21: 0.5,
+        22: 0.5,
+        23: 0.5,
+    }
     return {
+        "schema_version": 1,
         "campaign": "fq3x8",
+        "seeds": list(range(16, 24)),
         "seed_metrics": {
             "FQ": {
                 str(seed): {
@@ -602,6 +678,7 @@ def _covariates() -> dict:
                     "first_window_useful_speed_mean_sampled": value,
                     "event_window_depth_gain_mean_sampled": value * 0.001,
                     "first_window_success_rate_sampled": value * 0.05,
+                    "overall_success_rate_sampled": 1.0,
                 }
                 for seed, value in values.items()
             }
@@ -610,7 +687,10 @@ def _covariates() -> dict:
 
 
 def test_ranking_and_standardized_margin_pairing_are_deterministic() -> None:
-    rows = [_rank_row(seed, float(seed - 15)) for seed in range(16, 20)]
+    rows = [
+        _rank_row(seed, 0.01 * float(seed - 15))
+        for seed in range(16, 20)
+    ]
     first = companion.rank_and_pair_fq(rows, _covariates())
     second = companion.rank_and_pair_fq(list(reversed(rows)), _covariates())
 
@@ -632,6 +712,9 @@ def test_ranking_and_standardized_margin_pairing_are_deterministic() -> None:
         (pair["lower_seed"], pair["higher_seed"])
         for pair in first["pairing"]["pairs"]
     } == {(16, 19), (17, 18)}
+    assert first["pairing"]["population_covariates_sha256"] == (
+        companion.POPULATION_COVARIATES_SHA256
+    )
 
 
 def test_no_hardware_quartet_is_explicit_but_simulation_ranking_is_banked() -> None:
@@ -647,6 +730,87 @@ def test_no_hardware_quartet_is_explicit_but_simulation_ranking_is_banked() -> N
         == companion.NO_HARDWARE_LEGAL_QUARTET
     )
     assert result["pairing"]["pairs"] == []
+
+
+def test_odd_eligible_median_is_unassigned_before_pairing() -> None:
+    rows = [
+        _rank_row(seed, 0.01 * float(seed - 15))
+        for seed in range(16, 21)
+    ]
+
+    result = companion.rank_and_pair_fq(rows, _covariates())
+
+    assert result["pairing"]["lower_half_seeds"] == [16, 17]
+    assert result["pairing"]["higher_half_seeds"] == [19, 20]
+    assert result["pairing"]["unassigned_middle_seeds"] == [18]
+
+
+def test_no_distinct_curvature_quartet_is_explicit() -> None:
+    rows = [_rank_row(seed, 0.01) for seed in range(16, 20)]
+    for index, row in enumerate(rows):
+        row["descent_b_rms_m"] = 0.001 * index
+
+    result = companion.rank_and_pair_fq(rows, _covariates())
+
+    assert result["pairing"]["status"] == "NO DISTINCT-CURVATURE QUARTET"
+    assert result["pairing"]["pairs"] == []
+
+
+def test_no_margin_matched_quartet_is_explicit() -> None:
+    rows = [
+        _rank_row(seed, 0.01 * float(seed - 15))
+        for seed in range(16, 20)
+    ]
+    covariates = _covariates()
+    for seed in (16, 17):
+        covariates["seed_metrics"]["FQ"][str(seed)][
+            "first_contact_quality_sampled"
+        ] = 0.0
+    for seed in (18, 19):
+        covariates["seed_metrics"]["FQ"][str(seed)][
+            "first_contact_quality_sampled"
+        ] = 0.5
+
+    result = companion.rank_and_pair_fq(rows, covariates)
+
+    assert result["pairing"]["status"] == "NO MARGIN-MATCHED QUARTET"
+    assert result["pairing"]["pairs"] == []
+
+
+def test_population_covariate_bytes_and_exact_fq_schema_are_frozen(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "covariates.json"
+    path.write_text(json.dumps(_covariates(), sort_keys=True), encoding="utf-8")
+    digest = _sha256(path)
+    loaded = companion.load_population_covariates(
+        path, expected_sha256=digest
+    )
+    assert loaded["seeds"] == list(range(16, 24))
+
+    path.write_text(path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="SHA-256"):
+        companion.load_population_covariates(path, expected_sha256=digest)
+
+    malformed = _covariates()
+    malformed["seed_metrics"]["FQ"].pop("23")
+    path.write_text(json.dumps(malformed, sort_keys=True), encoding="utf-8")
+    with pytest.raises(ValueError, match="exact FQ seeds"):
+        companion.load_population_covariates(
+            path, expected_sha256=_sha256(path)
+        )
+
+
+def test_supplied_code_revision_must_equal_current_head(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current = "a" * 40
+    monkeypatch.setattr(companion, "_git_revision", lambda: current)
+
+    assert companion.resolve_code_revision(None) == current
+    assert companion.resolve_code_revision(current) == current
+    with pytest.raises(ValueError, match="current source revision"):
+        companion.resolve_code_revision("b" * 40)
 
 
 def test_batch_command_is_exact_cpu_fixed_reset_companion(tmp_path: Path) -> None:
@@ -735,3 +899,89 @@ def test_all_56_status_rows_survive_one_child_failure(
     assert len(failed) == 1
     assert "synthetic child failure" in failed[0]["error"]
     assert sum(row["status"] == "reused" for row in status) == 55
+
+
+def test_metric_failure_marks_status_and_continues_all_56(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _inventory, _sidecar, _roots, raw_rows, _digest = _inventory_fixture(
+        tmp_path
+    )
+    rows: list[dict[str, object]] = []
+    status_rows: list[dict[str, object]] = []
+    for raw in raw_rows:
+        row: dict[str, object] = dict(raw)
+        row["training_seed"] = int(row["training_seed"])
+        row["checkpoint_file"] = str(
+            tmp_path / "checkpoints" / row["campaign"] / row[
+                "checkpoint_cache_path"
+            ]
+        )
+        rows.append(row)
+        status_rows.append(
+            {
+                "campaign": row["campaign"],
+                "arm": row["arm"],
+                "training_seed": row["training_seed"],
+                "task": row["task"],
+                "checkpoint_sha256": row["checkpoint_sha256"],
+                "status": "completed",
+                "error": "",
+                "elapsed_s": 0.0,
+            }
+        )
+    output = tmp_path / "output"
+    companion._write_csv(output / "run_status.csv", status_rows)
+    seen: list[tuple[str, str, int]] = []
+    failed_identity = ("fq4x8", "F8", 8)
+
+    monkeypatch.setattr(
+        companion, "validate_resume_leaf", lambda *_args, **_kwargs: {}
+    )
+
+    def load(leaf):
+        path = Path(leaf)
+        return {
+            "identity": (
+                path.parents[1].name,
+                path.parent.name,
+                int(path.name),
+            )
+        }
+
+    def derive(payload):
+        identity = payload["identity"]
+        seen.append(identity)
+        if identity == failed_identity:
+            raise ValueError("scientific metric failure")
+        return {}
+
+    monkeypatch.setattr(companion, "load_trace_payload", load)
+    monkeypatch.setattr(companion, "derive_episode_metrics", derive)
+
+    with pytest.raises(companion.BatchFailure, match="analysis"):
+        companion.analyze_completed_leaves(
+            rows,
+            output_root=output,
+            fixed_reset_envelope="fixed-reset.json",
+            code_revision="c" * 40,
+            asset_revision="b" * 40,
+        )
+
+    assert len(seen) == 56
+    with (output / "run_status.csv").open(
+        encoding="utf-8", newline=""
+    ) as handle:
+        status = list(csv.DictReader(handle))
+    failed = [
+        row
+        for row in status
+        if (
+            row["campaign"],
+            row["arm"],
+            int(row["training_seed"]),
+        )
+        == failed_identity
+    ]
+    assert failed[0]["status"] == "analysis_failed"
+    assert "scientific metric failure" in failed[0]["error"]

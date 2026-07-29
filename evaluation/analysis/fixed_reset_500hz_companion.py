@@ -60,6 +60,9 @@ POPULATION_COVARIATES_PATH = SOURCE_ROOT / (
     "docs/results/assets/2026-07-29_bounded_quality_3x8/"
     "fq3x8_confirmatory_analysis.json"
 )
+POPULATION_COVARIATES_SHA256 = (
+    "b28a20328db21f8945bb0eb64f3efe2713dc6d936de958336a4b97d9682d5508"
+)
 OUTPUT_ROOT = SOURCE_ROOT / (
     "docs/results/assets/2026-07-29_56_policy_500hz_companion"
 )
@@ -76,6 +79,8 @@ HARDWARE_QVEL_LIMIT_RAD_S = 3.1415
 NAIL_RADIUS_M = 0.012
 JOINT_NAMES = tuple(f"joint{index}" for index in range(1, 7))
 NO_HARDWARE_LEGAL_QUARTET = "NO_HARDWARE_LEGAL_QUARTET"
+NO_DISTINCT_CURVATURE_QUARTET = "NO DISTINCT-CURVATURE QUARTET"
+NO_MARGIN_MATCHED_QUARTET = "NO MARGIN-MATCHED QUARTET"
 ARTIFACT_INVENTORY_NAME = "ARTIFACTS.sha256"
 
 # These are the four frozen 50 Hz population margins.  Pair differences are
@@ -416,6 +421,62 @@ def _chord_distances(points: np.ndarray) -> np.ndarray:
     return np.linalg.norm(orthogonal, axis=1)
 
 
+def _descent_phenotype(points: np.ndarray) -> dict[str, object]:
+    """Return the rubric's support-gated 3-D descent curvature phenotype."""
+
+    invalid = {
+        "descent_geometry_valid": False,
+        "descent_geometry_invalid_reason": "",
+        "descent_chord_length_m": None,
+        "descent_c_rms": None,
+        "descent_b_rms_m": None,
+        "descent_c_max": None,
+        "descent_tortuosity": None,
+        "descent_progress_sign_changes": None,
+    }
+    if np.unique(points, axis=0).shape[0] < 3:
+        invalid["descent_geometry_invalid_reason"] = (
+            "fewer_than_three_distinct_samples"
+        )
+        return invalid
+    chord = points[-1] - points[0]
+    chord_length = float(np.linalg.norm(chord))
+    invalid["descent_chord_length_m"] = chord_length
+    if chord_length < 0.050:
+        invalid["descent_geometry_invalid_reason"] = "chord_below_0.050m"
+        return invalid
+
+    segment_lengths = np.linalg.norm(np.diff(points, axis=0), axis=1)
+    weights = np.empty(len(points), dtype=np.float64)
+    weights[0] = segment_lengths[0] / 2.0
+    weights[-1] = segment_lengths[-1] / 2.0
+    weights[1:-1] = (
+        segment_lengths[:-1] + segment_lengths[1:]
+    ) / 2.0
+    distances = _chord_distances(points)
+    b_rms = float(
+        np.sqrt(np.sum(weights * np.square(distances)) / np.sum(weights))
+    )
+    unit = chord / chord_length
+    progress = np.diff((points - points[0]) @ unit)
+    nonzero_signs = np.sign(progress[progress != 0.0])
+    sign_changes = int(
+        np.count_nonzero(nonzero_signs[1:] != nonzero_signs[:-1])
+    )
+    return {
+        "descent_geometry_valid": True,
+        "descent_geometry_invalid_reason": "",
+        "descent_chord_length_m": chord_length,
+        "descent_c_rms": b_rms / chord_length,
+        "descent_b_rms_m": b_rms,
+        "descent_c_max": float(np.max(distances) / chord_length),
+        "descent_tortuosity": float(
+            np.sum(segment_lengths) / chord_length
+        ),
+        "descent_progress_sign_changes": sign_changes,
+    }
+
+
 def derive_episode_metrics(
     payload: Mapping[str, Any],
     *,
@@ -556,6 +617,16 @@ def derive_episode_metrics(
     onset_lateral: float | None = None
     onset_angle: float | None = None
     terminal: dict[str, Any] | None = None
+    descent = {
+        "descent_geometry_valid": False,
+        "descent_geometry_invalid_reason": "no_accepted_onset",
+        "descent_chord_length_m": None,
+        "descent_c_rms": None,
+        "descent_b_rms_m": None,
+        "descent_c_max": None,
+        "descent_tortuosity": None,
+        "descent_progress_sign_changes": None,
+    }
     if onset is not None:
         precontact_z = positions[: onset + 1, 2]
         maximum_z = float(np.max(precontact_z))
@@ -565,6 +636,7 @@ def derive_episode_metrics(
         distances = _chord_distances(apex_window)
         chord_rms = float(np.sqrt(np.mean(np.square(distances))))
         chord_max = float(np.max(distances))
+        descent = _descent_phenotype(apex_window)
 
         onset_velocity = velocities[onset]
         onset_downward = float(-onset_velocity[2])
@@ -700,6 +772,7 @@ def derive_episode_metrics(
         "apex_to_onset_path_ratio_3d": path_ratio,
         "apex_to_onset_chord_rms_m": chord_rms,
         "apex_to_onset_chord_max_m": chord_max,
+        **descent,
         "onset_downward_axial_velocity_m_s": onset_downward,
         "onset_lateral_velocity_m_s": onset_lateral,
         "onset_approach_angle_deg": onset_angle,
@@ -772,11 +845,69 @@ def hardware_eligibility(
     return not failures, failures
 
 
+_POPULATION_SEED_FIELDS = frozenset(
+    (
+        "event_window_depth_gain_mean_sampled",
+        "first_contact_quality_sampled",
+        "first_window_success_rate_sampled",
+        "first_window_useful_speed_mean_sampled",
+        "overall_success_rate_sampled",
+    )
+)
+
+
+def _validate_population_covariates(payload: Mapping[str, Any]) -> None:
+    expected_seeds = list(range(16, 24))
+    if (
+        payload.get("schema_version") != 1
+        or payload.get("campaign") != "fq3x8"
+        or payload.get("seeds") != expected_seeds
+    ):
+        raise ValueError("population covariates have invalid fq3x8 schema")
+    try:
+        records = payload["seed_metrics"]["FQ"]
+    except (KeyError, TypeError) as error:
+        raise ValueError("population covariates have no FQ seed metrics") from error
+    if not isinstance(records, Mapping) or set(records) != {
+        str(seed) for seed in expected_seeds
+    }:
+        raise ValueError("population covariates must contain exact FQ seeds 16-23")
+    for seed in expected_seeds:
+        record = records[str(seed)]
+        if not isinstance(record, Mapping) or set(record) != _POPULATION_SEED_FIELDS:
+            raise ValueError(
+                f"population covariates have invalid FQ seed {seed} schema"
+            )
+        values = np.asarray(list(record.values()), dtype=np.float64)
+        if not np.isfinite(values).all():
+            raise ValueError(f"nonfinite population covariates for seed {seed}")
+
+
+def load_population_covariates(
+    path: str | Path,
+    *,
+    expected_sha256: str = POPULATION_COVARIATES_SHA256,
+) -> dict[str, Any]:
+    """Load the byte-frozen FQ population covariates and exact seed schema."""
+
+    expected = _lower_hex(
+        expected_sha256, 64, label="population covariate SHA-256"
+    )
+    actual = _sha256(path)
+    if actual != expected:
+        raise ValueError(
+            "population covariate SHA-256 drift: "
+            f"expected {expected}, got {actual}"
+        )
+    payload = _load_json_object(path)
+    _validate_population_covariates(payload)
+    return payload
+
+
 def _covariates_for_seeds(
     payload: Mapping[str, Any], seeds: Sequence[int]
 ) -> dict[int, dict[str, float]]:
-    if payload.get("campaign") != "fq3x8":
-        raise ValueError("population covariates are not the frozen fq3x8 audit")
+    _validate_population_covariates(payload)
     try:
         records = payload["seed_metrics"]["FQ"]
     except (KeyError, TypeError) as error:
@@ -823,6 +954,7 @@ def rank_and_pair_fq(
 ) -> dict[str, object]:
     """Rank fq3x8/FQ and select two deterministic cross-curvature pairs."""
 
+    _validate_population_covariates(population_covariates)
     fq_rows = [
         dict(row)
         for row in rows
@@ -832,13 +964,26 @@ def rank_and_pair_fq(
     if len(identities) != len(set(identities)):
         raise ValueError("duplicate fq3x8/FQ training seed")
 
-    def curvature_key(row: Mapping[str, object]) -> tuple[bool, float, int]:
-        value = row.get("apex_to_onset_path_ratio_3d")
-        valid = value is not None and np.isfinite(float(value))
+    def has_phenotype(row: Mapping[str, object]) -> bool:
+        values = (
+            row.get("descent_c_rms"),
+            row.get("descent_b_rms_m"),
+            row.get("descent_tortuosity"),
+        )
+        return bool(row.get("descent_geometry_valid")) and all(
+            value is not None and np.isfinite(float(value))
+            for value in values
+        )
+
+    def curvature_key(
+        row: Mapping[str, object],
+    ) -> tuple[bool, float, float, str]:
+        valid = has_phenotype(row)
         return (
             not valid,
-            float(value) if valid else math.inf,
-            int(row["training_seed"]),
+            float(row["descent_c_rms"]) if valid else math.inf,
+            float(row["descent_tortuosity"]) if valid else math.inf,
+            str(row["checkpoint_sha256"]),
         )
 
     ordered = sorted(fq_rows, key=curvature_key)
@@ -851,7 +996,9 @@ def rank_and_pair_fq(
         output["hardware_ineligibility_reasons"] = ";".join(failures)
         simulation.append(output)
     hardware_source = [
-        row for row in ordered if hardware_eligibility(row)[0]
+        row
+        for row in ordered
+        if hardware_eligibility(row)[0] and has_phenotype(row)
     ]
     hardware: list[dict[str, object]] = []
     for rank, row in enumerate(hardware_source, start=1):
@@ -861,12 +1008,58 @@ def rank_and_pair_fq(
         output["hardware_ineligibility_reasons"] = ""
         hardware.append(output)
 
-    if len(hardware) < 4:
-        pairing: dict[str, object] = {
-            "status": NO_HARDWARE_LEGAL_QUARTET,
-            "eligible_count": len(hardware),
-            "curvature_metric": "apex_to_onset_path_ratio_3d",
-            "matching_semantics": "euclidean differences standardized by frozen 50 Hz margins",
+    formal_hardware_count = sum(
+        hardware_eligibility(row)[0] for row in ordered
+    )
+
+    def no_pairing(status: str) -> dict[str, object]:
+        return {
+            "status": status,
+            "eligible_count": formal_hardware_count,
+            "geometry_eligible_count": len(hardware),
+            "curvature_metric": "descent_c_rms",
+            "population_covariates_sha256": POPULATION_COVARIATES_SHA256,
+            "matching_semantics": (
+                "each absolute covariate difference standardized by its "
+                "frozen 50 Hz margin must be <= 1"
+            ),
+            "pairs": [],
+        }
+
+    if formal_hardware_count < 4:
+        pairing = no_pairing(NO_HARDWARE_LEGAL_QUARTET)
+        return {
+            "simulation_ranking": simulation,
+            "hardware_ranking": hardware,
+            "pairing": pairing,
+        }
+
+    m = len(hardware) // 2
+    lower = hardware[:m]
+    higher = hardware[-m:] if m else []
+    middle = hardware[m : len(hardware) - m]
+    base_pairing = {
+        "eligible_count": formal_hardware_count,
+        "geometry_eligible_count": len(hardware),
+        "curvature_metric": "descent_c_rms",
+        "population_covariates_sha256": POPULATION_COVARIATES_SHA256,
+        "lower_half_seeds": [int(row["training_seed"]) for row in lower],
+        "higher_half_seeds": [int(row["training_seed"]) for row in higher],
+        "unassigned_middle_seeds": [
+            int(row["training_seed"]) for row in middle
+        ],
+        "matching_semantics": (
+            "each absolute covariate difference standardized by its frozen "
+            "50 Hz margin must be <= 1"
+        ),
+        "matching_margins": {
+            label: margin for _field, label, margin in MATCHING_FIELDS
+        },
+    }
+    if len(lower) < 2 or len(higher) < 2:
+        pairing = {
+            **base_pairing,
+            "status": NO_DISTINCT_CURVATURE_QUARTET,
             "pairs": [],
         }
         return {
@@ -875,19 +1068,18 @@ def rank_and_pair_fq(
             "pairing": pairing,
         }
 
-    split = len(hardware) // 2
-    lower = hardware[:split]
-    higher = hardware[split:]
     covariates = _covariates_for_seeds(
         population_covariates,
         [int(row["training_seed"]) for row in hardware],
     )
+    distinct_count = 0
     candidates: list[tuple[tuple[Any, ...], list[dict[str, object]]]] = []
     for lower_pair in itertools.combinations(lower, 2):
         for higher_pair in itertools.combinations(higher, 2):
             for ordered_higher in itertools.permutations(higher_pair):
                 pairs: list[dict[str, object]] = []
-                total = 0.0
+                standardized_values: list[float] = []
+                separations: list[float] = []
                 for low, high in zip(
                     lower_pair, ordered_higher, strict=True
                 ):
@@ -896,50 +1088,96 @@ def rank_and_pair_fq(
                     distance, standardized = _pair_distance(
                         low_seed, high_seed, covariates
                     )
-                    total += distance
+                    b_separation = abs(
+                        float(high["descent_b_rms_m"])
+                        - float(low["descent_b_rms_m"])
+                    )
+                    standardized_values.extend(standardized.values())
+                    separations.append(
+                        float(high["descent_c_rms"])
+                        - float(low["descent_c_rms"])
+                    )
                     pairs.append(
                         {
                             "lower_seed": low_seed,
                             "higher_seed": high_seed,
                             "lower_curvature": float(
-                                low["apex_to_onset_path_ratio_3d"]
+                                low["descent_c_rms"]
                             ),
                             "higher_curvature": float(
-                                high["apex_to_onset_path_ratio_3d"]
+                                high["descent_c_rms"]
                             ),
+                            "lower_b_rms_m": float(
+                                low["descent_b_rms_m"]
+                            ),
+                            "higher_b_rms_m": float(
+                                high["descent_b_rms_m"]
+                            ),
+                            "b_rms_separation_m": b_separation,
                             "standardized_margin_distance": distance,
                             "standardized_differences": standardized,
+                            "lower_checkpoint_sha256": str(
+                                low["checkpoint_sha256"]
+                            ),
+                            "higher_checkpoint_sha256": str(
+                                high["checkpoint_sha256"]
+                            ),
                         }
                     )
-                pairs.sort(
-                    key=lambda pair: (
-                        int(pair["lower_seed"]),
-                        int(pair["higher_seed"]),
-                    )
-                )
-                seed_key = tuple(
-                    (
-                        int(pair["lower_seed"]),
-                        int(pair["higher_seed"]),
-                    )
+                if not all(
+                    float(pair["b_rms_separation_m"]) >= 0.006
                     for pair in pairs
+                ):
+                    continue
+                distinct_count += 1
+                if any(abs(value) > 1.0 for value in standardized_values):
+                    continue
+                pairs.sort(
+                    key=lambda pair: str(pair["lower_checkpoint_sha256"])
                 )
-                candidates.append(((total, seed_key), pairs))
-    _key, selected_pairs = min(candidates, key=lambda item: item[0])
+                sha_key = "".join(
+                    str(pair[field])
+                    for pair in pairs
+                    for field in (
+                        "lower_checkpoint_sha256",
+                        "higher_checkpoint_sha256",
+                    )
+                )
+                objective = (
+                    max(abs(value) for value in standardized_values),
+                    sum(value * value for value in standardized_values),
+                    -float(np.mean(separations)),
+                    sha_key,
+                )
+                candidates.append((objective, pairs))
+    if distinct_count == 0:
+        pairing = {
+            **base_pairing,
+            "status": NO_DISTINCT_CURVATURE_QUARTET,
+            "pairs": [],
+        }
+        return {
+            "simulation_ranking": simulation,
+            "hardware_ranking": hardware,
+            "pairing": pairing,
+        }
+    if not candidates:
+        pairing = {
+            **base_pairing,
+            "status": NO_MARGIN_MATCHED_QUARTET,
+            "pairs": [],
+        }
+        return {
+            "simulation_ranking": simulation,
+            "hardware_ranking": hardware,
+            "pairing": pairing,
+        }
+
+    objective, selected_pairs = min(candidates, key=lambda item: item[0])
     pairing = {
+        **base_pairing,
         "status": "SELECTED",
-        "eligible_count": len(hardware),
-        "curvature_metric": "apex_to_onset_path_ratio_3d",
-        "lower_half_seeds": [
-            int(row["training_seed"]) for row in lower
-        ],
-        "higher_half_seeds": [
-            int(row["training_seed"]) for row in higher
-        ],
-        "matching_semantics": "euclidean differences standardized by frozen 50 Hz margins",
-        "matching_margins": {
-            label: margin for _field, label, margin in MATCHING_FIELDS
-        },
+        "selection_objective": list(objective),
         "pairs": selected_pairs,
     }
     return {
@@ -1195,8 +1433,31 @@ def analyze_completed_leaves(
 
     validate_inventory(rows)
     root = Path(output_root)
+    status_path = root / "run_status.csv"
+    try:
+        with status_path.open(encoding="utf-8", newline="") as handle:
+            status_rows = list(csv.DictReader(handle))
+    except OSError as error:
+        raise ValueError(f"cannot read all-56 status table: {status_path}") from error
+
+    def identity(row: Mapping[str, object]) -> tuple[str, str, int]:
+        return (
+            str(row["campaign"]),
+            str(row["arm"]),
+            int(row["training_seed"]),
+        )
+
+    status_by_identity = {identity(row): row for row in status_rows}
+    expected_identities = {identity(row) for row in rows}
+    if (
+        len(status_rows) != 56
+        or set(status_by_identity) != expected_identities
+    ):
+        raise ValueError("run_status.csv does not preserve the exact 56 identities")
+
     summaries: list[dict[str, object]] = []
     traces: list[dict[str, np.ndarray]] = []
+    analysis_failures = 0
     for row in rows:
         leaf = (
             root
@@ -1211,8 +1472,15 @@ def analyze_completed_leaves(
             code_revision=code_revision,
             asset_revision=asset_revision,
         )
-        payload = load_trace_payload(leaf)
-        metrics = derive_episode_metrics(payload)
+        try:
+            payload = load_trace_payload(leaf)
+            metrics = derive_episode_metrics(payload)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            analysis_failures += 1
+            status = status_by_identity[identity(row)]
+            status["status"] = "analysis_failed"
+            status["error"] = f"scientific analysis failed: {error}"
+            continue
         eligible, failures = hardware_eligibility(metrics)
         summary = {
             "campaign": str(row["campaign"]),
@@ -1226,6 +1494,12 @@ def analyze_completed_leaves(
         }
         summaries.append(summary)
         traces.append(payload)
+    if analysis_failures:
+        _write_csv(status_path, status_rows)
+        raise BatchFailure(
+            f"{analysis_failures} of 56 companion rows failed scientific "
+            f"analysis; see {status_path}"
+        )
     return summaries, traces
 
 
@@ -1450,6 +1724,18 @@ def _git_revision() -> str:
     )
 
 
+def resolve_code_revision(supplied: str | None) -> str:
+    """Use only the current repository HEAD as rollout source identity."""
+
+    current = _git_revision()
+    if supplied is not None and supplied != current:
+        raise ValueError(
+            "--code-revision must equal the current source revision "
+            f"{current}, got {supplied}"
+        )
+    return current
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run the exact-56 fixed-reset 500 Hz companion"
@@ -1500,8 +1786,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     asset_revision = args.asset_revision or frozen_asset_revision
     if asset_revision != frozen_asset_revision:
         raise SystemExit("requested asset revision differs from frozen inventory")
-    code_revision = args.code_revision or _git_revision()
-    _lower_hex(code_revision, 40, label="source revision")
+    try:
+        code_revision = resolve_code_revision(args.code_revision)
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
     _lower_hex(asset_revision, 40, label="asset revision")
 
     run_batch(
@@ -1524,7 +1812,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         summaries,
         traces,
         rows=rows,
-        population_covariates=_load_json_object(
+        population_covariates=load_population_covariates(
             args.population_covariates
         ),
         output_root=args.output_root,
