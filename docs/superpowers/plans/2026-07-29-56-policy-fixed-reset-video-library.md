@@ -204,6 +204,7 @@ Commit the driver, tests, and small inventory/sidecar. Do not commit the large m
 
 **Files:**
 - Modify: `evaluation/analysis/fixed_reset_video_library.py`
+- Modify: `scripts/render_policy.py`
 - Modify: `tests/test_fixed_reset_video_library.py`
 - Create: `docs/results/assets/2026-07-29_56_policy_fixed_reset_library/fq4x8_trajectories_grid.png`
 - Create: `docs/results/assets/2026-07-29_56_policy_fixed_reset_library/fq3x8_trajectories_grid.png`
@@ -216,10 +217,26 @@ Commit the driver, tests, and small inventory/sidecar. Do not commit the large m
 - [ ] **Step 1: Add RED tests for grid/index completeness**
 
 Tests must assert that all 56 identities appear once in the index, all relative links resolve, grid axes are common across panels, and each arm/seed maps to the correct checkpoint hash.
+Tests must also require every `trace.npz` to contain a finite
+`reference_polyline_m` array with shape `(3, 3)` and require each trajectory
+plot to draw that array as one thin dashed black line labelled
+`SingleStrikeReference (observation only)`.
 
 - [ ] **Step 2: Implement grid and index generation**
 
-Generate the familiar x-z side-view grid style: green start, normalized-time color, red contact, brown nail axis, policy/seed title, and fixed global x/z limits. Generate a corresponding x-y top-view link per policy through `trajectory.png`; keep campaign grids uncluttered.
+At reset, obtain the shared `SingleStrikeReference` after it has anchored and
+store its exact `phi={0, 0.5, 1}` waypoint vertices in `trace.npz` as
+`reference_polyline_m`. Do not substitute a start-to-contact chord or the
+physically lagged open-loop playback trace.
+
+Generate the familiar x-z side-view grid style: green start, normalized-time
+color, red contact, brown nail axis, policy/seed title, and fixed global x/z
+limits. Draw `reference_polyline_m` behind the realized policy trace as a thin
+dashed black line. Label it `SingleStrikeReference (observation only)` and
+state in the README that none of these 56 arms enabled the separate `r_imit`
+tracking reward; the line is neither an optimal path nor a rewarded path.
+Generate a corresponding x-y top-view link per policy through
+`trajectory.png`; keep campaign grids uncluttered.
 
 - [ ] **Step 3: Verify outputs**
 
@@ -232,4 +249,3 @@ Give a fresh reviewer the design, implementation diff, inventory, validator outp
 - [ ] **Step 5: Bank the result**
 
 Update the library README with honest scope: fixed-reset qualitative comparison only; no reward/impulse causality and no best-episode claim. Record output hashes and exact commands. Stage only named small source/docs files; handle large media according to the repository’s existing result-asset convention.
-
