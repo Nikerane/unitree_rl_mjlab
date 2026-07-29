@@ -13,6 +13,7 @@ import subprocess
 import imageio.v3 as iio
 import numpy as np
 import pytest
+import torch
 
 from evaluation.analysis import render_fixed_reset_video_library as library_driver
 from evaluation.analysis.fixed_reset_video_library import (
@@ -25,6 +26,8 @@ from evaluation.analysis.fixed_reset_video_library import (
     write_library_index,
     write_trajectory_png,
 )
+from scripts import render_policy
+from src.tasks.hammer.mdp.references import SingleStrikeReference
 
 
 FIXED_DIGEST = "bde511ec2adc42e5365e1e46f45ff1fb43223a93c31c6fbfb4580352e445e319"
@@ -740,6 +743,44 @@ def test_artifact_validator_requires_the_anchored_reference_polyline(tmp_path):
         validate_policy_artifacts(tmp_path, expected_rows())
 
 
+def test_artifact_validator_requires_identical_reference_geometry_for_the_frozen_reset(tmp_path):
+    """A different valid-looking three-vertex reference cannot enter the shared-reset library."""
+    write_complete_fake_library(tmp_path, reset_digest=FIXED_DIGEST)
+    trace_path = next(tmp_path.glob("*/*/*/trace.npz"))
+    with np.load(trace_path) as trace:
+        mutated = {key: trace[key] for key in trace.files}
+    mutated["reference_polyline_m"] = mutated["reference_polyline_m"].copy()
+    mutated["reference_polyline_m"][1, 0] += 0.01
+    np.savez(trace_path, **mutated)
+    metadata_path = trace_path.with_name("metadata.json")
+    metadata = json.loads(metadata_path.read_text())
+    metadata["artifacts"]["trace.npz"] = _sha256(trace_path)
+    del metadata["metadata_payload_sha256"]
+    _write_metadata(metadata_path, metadata)
+
+    with pytest.raises(ValueError, match="reference geometry differs"):
+        validate_policy_artifacts(tmp_path, expected_rows())
+
+
+def test_renderer_reference_vertices_match_the_anchored_phi_waypoints():
+    """The renderer saves the exact analytical phi={0, .5, 1} vertices, not a chord."""
+    reference = SingleStrikeReference(1, "cpu", approach_height=0.10, overshoot=0.02)
+    head = torch.tensor([[0.50, 0.01, 0.12]])
+    nail = torch.tensor([[0.48, -0.02, 0.10]])
+    reference.update(head, nail, torch.zeros(1, dtype=torch.long))
+
+    assert callable(getattr(render_policy, "_reference_polyline_m", None))
+    actual = render_policy._reference_polyline_m(reference, "cpu")
+    expected = np.array(
+        [
+            head.numpy()[0],
+            [0.48, -0.02, 0.20],
+            [0.48, -0.02, 0.08],
+        ]
+    )
+    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-7)
+
+
 def test_trajectory_plot_draws_the_reference_as_a_dashed_observation_line(tmp_path, monkeypatch):
     """The reference is visibly distinct from the realized, reward-free path."""
     observed: list[dict] = []
@@ -772,8 +813,18 @@ def test_trajectory_plot_draws_the_reference_as_a_dashed_observation_line(tmp_pa
     )
 
 
-def test_campaign_grids_and_index_cover_each_registered_policy_once(tmp_path):
+def test_campaign_grids_and_index_cover_each_registered_policy_once(tmp_path, monkeypatch):
     """Campaign artifacts provide common side-view limits and resolvable policy links."""
+    from matplotlib.figure import Figure
+
+    subtitles: list[str] = []
+    original_suptitle = Figure.suptitle
+
+    def capture_suptitle(self, text, *args, **kwargs):
+        subtitles.append(str(text))
+        return original_suptitle(self, text, *args, **kwargs)
+
+    monkeypatch.setattr(Figure, "suptitle", capture_suptitle)
     write_complete_fake_library(tmp_path, reset_digest=FIXED_DIGEST)
     rows = expected_rows()
     fq4 = write_campaign_trajectory_grid(
@@ -782,18 +833,42 @@ def test_campaign_grids_and_index_cover_each_registered_policy_once(tmp_path):
     fq3 = write_campaign_trajectory_grid(
         tmp_path, "fq3x8", tmp_path / "fq3x8_trajectories_grid.png"
     )
-    index = write_library_index(tmp_path, rows)
+    index = write_library_index(
+        tmp_path,
+        rows,
+        generation_command="python generate_fixed_reset_library.py --frozen-inventory",
+        validation_command="python validate_fixed_reset_library.py --all-56",
+    )
 
     assert fq4["common_xlim"] and fq4["common_zlim"]
     assert fq3["common_xlim"] and fq3["common_zlim"]
+    assert len(fq4["panel_limits"]) == 32
+    assert len(fq3["panel_limits"]) == 24
+    assert all(limits == (fq4["common_xlim"], fq4["common_zlim"]) for limits in fq4["panel_limits"])
+    assert all(limits == (fq3["common_xlim"], fq3["common_zlim"]) for limits in fq3["panel_limits"])
+    assert all(
+        "black dashed=SingleStrikeReference (observation only; r_imit disabled/not rewarded)"
+        in subtitle
+        for subtitle in subtitles
+    )
     assert iio.imread(tmp_path / "fq4x8_trajectories_grid.png").size > 0
     assert iio.imread(tmp_path / "fq3x8_trajectories_grid.png").size > 0
     text = index.read_text()
+    assert "black dashed=SingleStrikeReference (observation only; r_imit disabled/not rewarded)" in text
+    assert "## Reproduction" in text
+    assert "Generation command:" in text
+    assert "Validation command:" in text
+    assert "`python generate_fixed_reset_library.py --frozen-inventory`" in text
+    assert "`python validate_fixed_reset_library.py --all-56`" in text
+    assert _sha256(tmp_path / "fq4x8_trajectories_grid.png") in text
+    assert _sha256(tmp_path / "fq3x8_trajectories_grid.png") in text
     for relative in re.findall(r"\]\(([^)]+)\)", text):
         assert (index.parent / relative).is_file()
     for row in rows:
         identity = f"{row['campaign']}/{row['arm']}/{row['training_seed']}"
         assert text.count(f"| {identity} |") == 1
         assert text.count(row["checkpoint_sha256"]) == 1
+        assert f"[metadata.json]({identity}/metadata.json)" in text
+        assert _sha256(tmp_path / identity / "metadata.json") in text
         for artifact in ("policy.mp4", "montage.png", "trajectory.png", "trace.npz"):
             assert (tmp_path / row["campaign"] / row["arm"] / str(row["training_seed"]) / artifact).is_file()

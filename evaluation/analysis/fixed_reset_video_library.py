@@ -242,7 +242,7 @@ def _grid_limits(traces: Sequence[Mapping[str, Any]]) -> tuple[tuple[float, floa
 
 def write_campaign_trajectory_grid(
     root: str | Path, campaign: str, path: str | Path
-) -> dict[str, tuple[float, float]]:
+) -> dict[str, Any]:
     """Write one common-axis x-z panel per registered arm/seed in a campaign."""
     if campaign not in EXPECTED:
         raise ValueError(f"unregistered campaign: {campaign}")
@@ -264,6 +264,7 @@ def write_campaign_trajectory_grid(
     fig, axes = plt.subplots(
         len(arms), len(seeds), figsize=(2.0 * len(seeds), 2.0 * len(arms)), sharex=True, sharey=True
     )
+    panel_limits: list[tuple[tuple[float, float], tuple[float, float]]] = []
     for row, arm in enumerate(arms):
         for column, seed in enumerate(seeds):
             axis = axes[row, column]
@@ -272,27 +273,42 @@ def write_campaign_trajectory_grid(
             _draw_trajectory(axis, positions, contact, reference, nail_top, 2)
             axis.set_xlim(xlim)
             axis.set_ylim(zlim)
+            panel_limits.append((tuple(axis.get_xlim()), tuple(axis.get_ylim())))
             axis.set_aspect("equal", adjustable="box")
             axis.grid(alpha=0.2)
             axis.set_title(f"{arm} · seed {seed}", fontsize=7)
             axis.tick_params(labelsize=6)
     fig.suptitle(
         f"{campaign}: fixed-reset hammer-head trajectories (x-z)\n"
-        "green=start · viridis=normalized time · red=contact · brown=nail axis",
+        "green=start · viridis=normalized time · red=contact · brown=nail axis\n"
+        "black dashed=SingleStrikeReference (observation only; r_imit disabled/not rewarded)",
         fontsize=10,
     )
-    fig.tight_layout(rect=[0, 0, 1, 0.94])
+    fig.tight_layout(rect=[0, 0, 1, 0.90])
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=160)
     plt.close(fig)
-    return {"common_xlim": xlim, "common_zlim": zlim}
+    return {
+        "common_xlim": xlim,
+        "common_zlim": zlim,
+        "panel_limits": tuple(panel_limits),
+    }
 
 
-def write_library_index(root: str | Path, rows: Sequence[Mapping[str, Any]]) -> Path:
+def write_library_index(
+    root: str | Path,
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    generation_command: str,
+    validation_command: str,
+) -> Path:
     """Write the clickable, hash-bound index for a fully rendered library."""
     validate_inventory(rows)
+    if not generation_command or not validation_command:
+        raise ValueError("generation and validation commands are required")
     root = Path(root)
-    for grid in ("fq4x8_trajectories_grid.png", "fq3x8_trajectories_grid.png"):
+    grids = ("fq4x8_trajectories_grid.png", "fq3x8_trajectories_grid.png")
+    for grid in grids:
         if not (root / grid).is_file():
             raise ValueError(f"index grid link is missing: {root / grid}")
     lines = [
@@ -301,13 +317,24 @@ def write_library_index(root: str | Path, rows: Sequence[Mapping[str, Any]]) -> 
         "Fixed-reset qualitative comparison only; this is neither a reward/impulse causal analysis nor a best-episode selection.",
         "",
         "The dashed `SingleStrikeReference (observation only)` line in each trajectory was available as an observation, but none of these 56 arms enabled the separate `r_imit` tracking reward. It is neither an optimal path nor a rewarded path.",
+        "black dashed=SingleStrikeReference (observation only; r_imit disabled/not rewarded)",
         "Each policy's `trajectory.png` contains the corresponding x-y top view beside the x-z side view.",
         "",
         "- [FQ4×8 trajectory grid](fq4x8_trajectories_grid.png)",
         "- [FQ3×8 trajectory grid](fq3x8_trajectories_grid.png)",
         "",
-        "| policy | checkpoint SHA-256 | artifacts |",
-        "| --- | --- | --- |",
+        "## Reproduction",
+        "",
+        f"Generation command: `{generation_command}`",
+        "",
+        f"Validation command: `{validation_command}`",
+        "",
+        "## Output SHA-256",
+        "",
+        *[f"- `{grid}`: `{_sha256(root / grid)}`" for grid in grids],
+        "",
+        "| policy | checkpoint SHA-256 | output SHA-256 | artifacts and provenance |",
+        "| --- | --- | --- | --- |",
     ]
     for row in rows:
         leaf = policy_artifact_dir(root, row)
@@ -318,15 +345,18 @@ def write_library_index(root: str | Path, rows: Sequence[Mapping[str, Any]]) -> 
             raise ValueError(f"artifact metadata is unreadable: {metadata_path}") from error
         if metadata.get("checkpoint_sha256") != row["checkpoint_sha256"]:
             raise ValueError(f"artifact checkpoint hash mismatch: {leaf}")
-        for name in ARTIFACT_FILENAMES:
+        output_names = (*ARTIFACT_FILENAMES, "metadata.json")
+        for name in output_names:
             if not (leaf / name).is_file():
                 raise ValueError(f"index artifact link is missing: {leaf / name}")
         relative = leaf.relative_to(root).as_posix()
         links = " · ".join(
-            f"[{name}]({relative}/{name})" for name in ARTIFACT_FILENAMES
+            f"[{name}]({relative}/{name})" for name in output_names
         )
+        hashes = "<br>".join(f"{name}: `{_sha256(leaf / name)}`" for name in output_names)
         lines.append(
-            f"| {row['campaign']}/{row['arm']}/{row['training_seed']} | {row['checkpoint_sha256']} | {links} |"
+            f"| {row['campaign']}/{row['arm']}/{row['training_seed']} | "
+            f"{row['checkpoint_sha256']} | {hashes} | {links} |"
         )
     index = root / "README.md"
     index.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -502,6 +532,8 @@ def validate_policy_artifacts(root: str | Path, rows: Sequence[Mapping[str, Any]
     requested_steps: set[int] = set()
     code_revisions: set[str] = set()
     asset_revisions: set[str] = set()
+    reference_polyline: np.ndarray | None = None
+    nail_top: np.ndarray | None = None
     for row in rows:
         leaf = policy_artifact_dir(root, row)
         metadata_path = leaf / "metadata.json"
@@ -528,6 +560,17 @@ def validate_policy_artifacts(root: str | Path, rows: Sequence[Mapping[str, Any]
             if artifact_hashes.get(filename) != _sha256(artifact_path):
                 raise ValueError(f"artifact SHA-256 mismatch: {artifact_path}")
         _validate_trace_rollout(leaf / "trace.npz", metadata["rollout"])
+        with np.load(leaf / "trace.npz") as trace:
+            _, _, current_reference, current_nail_top = _trace_geometry(
+                {key: np.asarray(trace[key]) for key in trace.files}
+            )
+        if reference_polyline is None:
+            reference_polyline = current_reference
+            nail_top = current_nail_top
+        elif not np.array_equal(current_reference, reference_polyline):
+            raise ValueError(f"artifact reference geometry differs: {leaf}")
+        elif not np.array_equal(current_nail_top, nail_top):
+            raise ValueError(f"artifact nail geometry differs: {leaf}")
         _validate_media_properties(leaf, metadata["rollout"])
         requested_steps.add(int(metadata["rollout"]["requested_control_steps"]))
         code_revisions.add(str(metadata["code_revision"]))

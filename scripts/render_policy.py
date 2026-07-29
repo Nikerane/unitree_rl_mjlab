@@ -80,6 +80,21 @@ def _sha256(path: Path) -> str:
   return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _reference_polyline_m(reference, device: str) -> np.ndarray:
+  """Return the three analytical vertices of the already anchored reference."""
+  return np.stack(
+    [
+      reference.waypoint(torch.tensor([phi], device=device))
+      .squeeze(0)
+      .detach()
+      .cpu()
+      .numpy()
+      .astype(np.float64)
+      for phi in (0.0, 0.5, 1.0)
+    ]
+  )
+
+
 def main(cfg: Cfg) -> None:
   out = Path(cfg.out_dir)
   out.mkdir(parents=True, exist_ok=True)
@@ -171,23 +186,15 @@ def main(cfg: Cfg) -> None:
   base_env.sim.sense()
   base_env.obs_buf = base_env.observation_manager.compute(update_history=True)
   obs = env.get_observations()
+  # Freeze target geometry before policy inference can drive the nail.
+  nail_top_m = nail_top()
   # Observation construction owns the task's shared reference and anchors it
   # against this restored state.  Preserve its analytical phi vertices, not a
   # realized playback trace or a start-to-contact chord.
   reference = get_strike_reference(base_env)
   if not bool(reference._anchored[0]):
     raise RuntimeError("SingleStrikeReference was not anchored by reset observations")
-  reference_polyline = np.stack(
-    [
-      reference.waypoint(torch.tensor([phi], device=base_env.device))
-      .squeeze(0)
-      .detach()
-      .cpu()
-      .numpy()
-      .astype(np.float64)
-      for phi in (0.0, 0.5, 1.0)
-    ]
-  )
+  reference_polyline = _reference_polyline_m(reference, base_env.device)
   frames: list[np.ndarray] = []
   head_positions = [head()]
   contacts = [bool((sensor.data.found[0] > 0).any())]
@@ -238,7 +245,7 @@ def main(cfg: Cfg) -> None:
     "control_step": np.arange(len(head_positions), dtype=np.int64),
     "action": np.asarray(actions_recorded[: len(head_positions) - 1], dtype=np.float32),
     "reference_polyline_m": reference_polyline,
-    "nail_top_m": nail_top(),
+    "nail_top_m": nail_top_m,
   }
   np.savez(out / "trace.npz", **trace)
   write_trajectory_png(trace, out / "trajectory.png")
