@@ -996,27 +996,38 @@ def rank_and_pair_fq(
         output["hardware_ineligibility_reasons"] = ";".join(failures)
         simulation.append(output)
     hardware_source = [
-        row
-        for row in ordered
-        if hardware_eligibility(row)[0] and has_phenotype(row)
+        row for row in ordered if hardware_eligibility(row)[0]
     ]
     hardware: list[dict[str, object]] = []
-    for rank, row in enumerate(hardware_source, start=1):
+    geometry: list[dict[str, object]] = []
+    geometry_rank = 0
+    for row in hardware_source:
         output = dict(row)
-        output["hardware_rank"] = rank
         output["hardware_eligible"] = True
         output["hardware_ineligibility_reasons"] = ""
+        if has_phenotype(row):
+            geometry_rank += 1
+            output["hardware_rank"] = geometry_rank
+            output["selection_exclusion_reason"] = ""
+            geometry.append(output)
+        else:
+            output["hardware_rank"] = None
+            invalid_reason = str(
+                row.get("descent_geometry_invalid_reason")
+                or "invalid_or_nonfinite_metrics"
+            )
+            output["selection_exclusion_reason"] = (
+                f"unsupported_descent_phenotype:{invalid_reason}"
+            )
         hardware.append(output)
 
-    formal_hardware_count = sum(
-        hardware_eligibility(row)[0] for row in ordered
-    )
+    formal_hardware_count = len(hardware)
 
     def no_pairing(status: str) -> dict[str, object]:
         return {
             "status": status,
             "eligible_count": formal_hardware_count,
-            "geometry_eligible_count": len(hardware),
+            "geometry_eligible_count": len(geometry),
             "curvature_metric": "descent_c_rms",
             "population_covariates_sha256": POPULATION_COVARIATES_SHA256,
             "matching_semantics": (
@@ -1034,13 +1045,13 @@ def rank_and_pair_fq(
             "pairing": pairing,
         }
 
-    m = len(hardware) // 2
-    lower = hardware[:m]
-    higher = hardware[-m:] if m else []
-    middle = hardware[m : len(hardware) - m]
+    m = len(geometry) // 2
+    lower = geometry[:m]
+    higher = geometry[-m:] if m else []
+    middle = geometry[m : len(geometry) - m]
     base_pairing = {
         "eligible_count": formal_hardware_count,
-        "geometry_eligible_count": len(hardware),
+        "geometry_eligible_count": len(geometry),
         "curvature_metric": "descent_c_rms",
         "population_covariates_sha256": POPULATION_COVARIATES_SHA256,
         "lower_half_seeds": [int(row["training_seed"]) for row in lower],
@@ -1070,7 +1081,7 @@ def rank_and_pair_fq(
 
     covariates = _covariates_for_seeds(
         population_covariates,
-        [int(row["training_seed"]) for row in hardware],
+        [int(row["training_seed"]) for row in geometry],
     )
     distinct_count = 0
     candidates: list[tuple[tuple[Any, ...], list[dict[str, object]]]] = []
@@ -1133,21 +1144,23 @@ def rank_and_pair_fq(
                 if any(abs(value) > 1.0 for value in standardized_values):
                     continue
                 pairs.sort(
-                    key=lambda pair: str(pair["lower_checkpoint_sha256"])
-                )
-                sha_key = "".join(
-                    str(pair[field])
-                    for pair in pairs
-                    for field in (
-                        "lower_checkpoint_sha256",
-                        "higher_checkpoint_sha256",
+                    key=lambda pair: (
+                        int(pair["lower_seed"]),
+                        int(pair["higher_seed"]),
                     )
+                )
+                seed_key = tuple(
+                    (
+                        int(pair["lower_seed"]),
+                        int(pair["higher_seed"]),
+                    )
+                    for pair in pairs
                 )
                 objective = (
                     max(abs(value) for value in standardized_values),
                     sum(value * value for value in standardized_values),
                     -float(np.mean(separations)),
-                    sha_key,
+                    seed_key,
                 )
                 candidates.append((objective, pairs))
     if distinct_count == 0:
@@ -1465,14 +1478,14 @@ def analyze_completed_leaves(
             / str(row["arm"])
             / str(int(row["training_seed"]))
         )
-        validate_resume_leaf(
-            leaf,
-            row,
-            fixed_reset_envelope=fixed_reset_envelope,
-            code_revision=code_revision,
-            asset_revision=asset_revision,
-        )
         try:
+            validate_resume_leaf(
+                leaf,
+                row,
+                fixed_reset_envelope=fixed_reset_envelope,
+                code_revision=code_revision,
+                asset_revision=asset_revision,
+            )
             payload = load_trace_payload(leaf)
             metrics = derive_episode_metrics(payload)
         except (OSError, ValueError, KeyError, TypeError) as error:

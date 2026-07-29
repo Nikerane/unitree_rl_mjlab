@@ -717,6 +717,38 @@ def test_ranking_and_standardized_margin_pairing_are_deterministic() -> None:
     )
 
 
+def test_pairing_objective_tie_breaks_by_paired_seed_tuples() -> None:
+    rows = [
+        _rank_row(seed, 0.01 * float(seed - 15))
+        for seed in range(16, 20)
+    ]
+    checkpoint_hashes = {
+        16: "a" * 64,
+        17: "b" * 64,
+        18: "f" * 64,
+        19: "0" * 64,
+    }
+    for row in rows:
+        row["checkpoint_sha256"] = checkpoint_hashes[
+            int(row["training_seed"])
+        ]
+    covariates = _covariates()
+    for record in covariates["seed_metrics"]["FQ"].values():
+        for field in record:
+            record[field] = 0.0
+
+    result = companion.rank_and_pair_fq(rows, covariates)
+
+    assert [
+        (pair["lower_seed"], pair["higher_seed"])
+        for pair in result["pairing"]["pairs"]
+    ] == [(16, 18), (17, 19)]
+    assert result["pairing"]["selection_objective"][3] == (
+        (16, 18),
+        (17, 19),
+    )
+
+
 def test_no_hardware_quartet_is_explicit_but_simulation_ranking_is_banked() -> None:
     rows = [_rank_row(seed, float(seed)) for seed in range(16, 20)]
     rows[-1]["qvel_violation"] = True
@@ -730,6 +762,42 @@ def test_no_hardware_quartet_is_explicit_but_simulation_ranking_is_banked() -> N
         == companion.NO_HARDWARE_LEGAL_QUARTET
     )
     assert result["pairing"]["pairs"] == []
+
+
+def test_hardware_ranking_retains_unsupported_descent_geometry() -> None:
+    rows = [_rank_row(seed, float(seed)) for seed in range(16, 20)]
+    unsupported = rows[1]
+    unsupported["descent_geometry_valid"] = False
+    unsupported["descent_geometry_invalid_reason"] = (
+        "fewer_than_3_distinct_samples"
+    )
+    for field in (
+        "descent_c_rms",
+        "descent_b_rms_m",
+        "descent_c_max",
+        "descent_tortuosity",
+    ):
+        unsupported[field] = None
+
+    result = companion.rank_and_pair_fq(rows, _covariates())
+
+    assert len(result["hardware_ranking"]) == 4
+    retained = next(
+        row
+        for row in result["hardware_ranking"]
+        if row["training_seed"] == 17
+    )
+    assert retained["hardware_eligible"] is True
+    assert retained["hardware_rank"] is None
+    assert retained["descent_c_rms"] is None
+    assert retained["selection_exclusion_reason"] == (
+        "unsupported_descent_phenotype:fewer_than_3_distinct_samples"
+    )
+    assert result["pairing"]["geometry_eligible_count"] == 3
+    assert (
+        result["pairing"]["status"]
+        == companion.NO_DISTINCT_CURVATURE_QUARTET
+    )
 
 
 def test_odd_eligible_median_is_unassigned_before_pairing() -> None:
@@ -985,3 +1053,93 @@ def test_metric_failure_marks_status_and_continues_all_56(
     ]
     assert failed[0]["status"] == "analysis_failed"
     assert "scientific metric failure" in failed[0]["error"]
+
+
+def test_leaf_revalidation_failure_marks_status_and_continues_all_56(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _inventory, _sidecar, _roots, raw_rows, _digest = _inventory_fixture(
+        tmp_path
+    )
+    rows: list[dict[str, object]] = []
+    status_rows: list[dict[str, object]] = []
+    for raw in raw_rows:
+        row: dict[str, object] = dict(raw)
+        row["training_seed"] = int(row["training_seed"])
+        row["checkpoint_file"] = str(
+            tmp_path / "checkpoints" / row["campaign"] / row[
+                "checkpoint_cache_path"
+            ]
+        )
+        rows.append(row)
+        status_rows.append(
+            {
+                "campaign": row["campaign"],
+                "arm": row["arm"],
+                "training_seed": row["training_seed"],
+                "task": row["task"],
+                "checkpoint_sha256": row["checkpoint_sha256"],
+                "status": "completed",
+                "error": "",
+                "elapsed_s": 0.0,
+            }
+        )
+    output = tmp_path / "output"
+    companion._write_csv(output / "run_status.csv", status_rows)
+    validated: list[tuple[str, str, int]] = []
+    loaded: list[tuple[str, str, int]] = []
+    failed_identity = ("fq4x8", "F8", 8)
+
+    def identity_from_leaf(leaf) -> tuple[str, str, int]:
+        path = Path(leaf)
+        return (
+            path.parents[1].name,
+            path.parent.name,
+            int(path.name),
+        )
+
+    def validate(leaf, *_args, **_kwargs):
+        identity = identity_from_leaf(leaf)
+        validated.append(identity)
+        if identity == failed_identity:
+            raise ValueError("resume identity drift")
+        return {}
+
+    def load(leaf):
+        identity = identity_from_leaf(leaf)
+        loaded.append(identity)
+        return {}
+
+    monkeypatch.setattr(companion, "validate_resume_leaf", validate)
+    monkeypatch.setattr(companion, "load_trace_payload", load)
+    monkeypatch.setattr(
+        companion, "derive_episode_metrics", lambda _payload: {}
+    )
+
+    with pytest.raises(companion.BatchFailure, match="analysis"):
+        companion.analyze_completed_leaves(
+            rows,
+            output_root=output,
+            fixed_reset_envelope="fixed-reset.json",
+            code_revision="c" * 40,
+            asset_revision="b" * 40,
+        )
+
+    assert len(validated) == 56
+    assert len(loaded) == 55
+    with (output / "run_status.csv").open(
+        encoding="utf-8", newline=""
+    ) as handle:
+        status = list(csv.DictReader(handle))
+    failed = [
+        row
+        for row in status
+        if (
+            row["campaign"],
+            row["arm"],
+            int(row["training_seed"]),
+        )
+        == failed_identity
+    ]
+    assert failed[0]["status"] == "analysis_failed"
+    assert "resume identity drift" in failed[0]["error"]
