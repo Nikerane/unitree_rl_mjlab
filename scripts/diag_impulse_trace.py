@@ -657,6 +657,56 @@ def _payload_sha256(payload: Mapping[str, np.ndarray]) -> str:
   return digest.hexdigest()
 
 
+def _require_lower_hex(
+  identity: Mapping[str, object],
+  field: str,
+  length: int,
+) -> str:
+  value = identity.get(field)
+  if (
+    not isinstance(value, str)
+    or len(value) != length
+    or any(character not in "0123456789abcdef" for character in value)
+  ):
+    raise ValueError(f"invalid companion {field}")
+  return value
+
+
+def _validate_companion_identity(identity: Mapping[str, object]) -> None:
+  if identity.get("mode") != "checkpoint":
+    raise ValueError("invalid companion mode")
+  campaign = identity.get("campaign")
+  arm = identity.get("arm")
+  if not isinstance(campaign, str) or not campaign:
+    raise ValueError("invalid companion campaign")
+  if not isinstance(arm, str) or not arm:
+    raise ValueError("invalid companion arm")
+  training_seed = identity.get("training_seed")
+  if (
+    isinstance(training_seed, bool)
+    or not isinstance(training_seed, int)
+    or training_seed < 0
+  ):
+    raise ValueError("invalid companion training_seed")
+  task = identity.get("task")
+  if not isinstance(task, str) or task != expected_task(campaign, arm):
+    raise ValueError("invalid companion task identity")
+  _require_lower_hex(identity, "checkpoint_sha256", 64)
+  _require_lower_hex(identity, "reset_state_digest", 64)
+  _require_lower_hex(identity, "code_revision", 40)
+  _require_lower_hex(identity, "asset_revision", 40)
+  reset_envelope = identity.get("fixed_reset_envelope")
+  if not isinstance(reset_envelope, str) or not reset_envelope:
+    raise ValueError("invalid companion fixed_reset_envelope")
+  if identity.get("terminal_reason") not in {
+    "terminated",
+    "timeout",
+    "done",
+    "step_limit",
+  }:
+    raise ValueError("invalid companion terminal_reason")
+
+
 def validate_trace_leaf(path: str | Path) -> dict:
   """Fail closed unless a published trace leaf is complete and hash-bound."""
   leaf = Path(path)
@@ -670,13 +720,8 @@ def validate_trace_leaf(path: str | Path) -> dict:
     raise ValueError(f"invalid trace metadata: {metadata_path}") from error
   if not isinstance(metadata, dict):
     raise ValueError("trace metadata must be a JSON object")
+  _validate_companion_identity(metadata)
   required_metadata = {
-    "task",
-    "checkpoint_sha256",
-    "reset_state_digest",
-    "code_revision",
-    "asset_revision",
-    "terminal_reason",
     "timing",
     "schema",
     "payload_sha256",
@@ -732,6 +777,23 @@ def _publish_staged_leaf(staged: Path, final: Path) -> None:
     _remove_path(backup)
 
 
+def recover_trace_leaf_backup(final_leaf: str | Path) -> None:
+  """Recover one interrupted leaf replacement, failing on ambiguity."""
+  final = Path(final_leaf)
+  backups = tuple(final.parent.glob(f".{final.name}.backup-*"))
+  if len(backups) > 1:
+    raise ValueError(f"ambiguous trace replacement backups: {final}")
+  if not backups:
+    return
+  backup = backups[0]
+  if not backup.is_dir():
+    raise ValueError(f"invalid trace replacement backup: {backup}")
+  if final.exists():
+    _remove_path(backup)
+  else:
+    os.replace(backup, final)
+
+
 def _write_trace_leaf(
   out_dir: str | Path,
   payload: Mapping[str, np.ndarray],
@@ -740,26 +802,11 @@ def _write_trace_leaf(
   physics_dt: float,
 ) -> dict:
   """Validate, stage, hash, and publish one trace/metadata leaf."""
+  _validate_companion_identity(identity)
   schema = _validate_trace_payload(payload, physics_dt=physics_dt)
-  required_identity = {
-    "mode",
-    "campaign",
-    "arm",
-    "training_seed",
-    "task",
-    "checkpoint_sha256",
-    "reset_state_digest",
-    "code_revision",
-    "asset_revision",
-    "terminal_reason",
-  }
-  missing_identity = required_identity - set(identity)
-  if missing_identity:
-    raise ValueError(
-      f"trace identity missing fields: {sorted(missing_identity)}"
-    )
   leaf = Path(out_dir).resolve()
   leaf.parent.mkdir(parents=True, exist_ok=True)
+  recover_trace_leaf_backup(leaf)
   staged = Path(
     tempfile.mkdtemp(
       prefix=f".{leaf.name}.staging-",
@@ -1047,6 +1094,49 @@ def _make_plot(
   )
 
 
+def _write_outputs(
+  out_dir: str | Path,
+  payload: Mapping[str, np.ndarray],
+  *,
+  physics_dt: float,
+  j_limit: list[float] | None,
+  companion_identity: Mapping[str, object] | None,
+) -> dict | None:
+  """Publish a rich companion leaf or preserve the historical two-file output."""
+  out = Path(out_dir)
+  if companion_identity is None:
+    _make_plot(payload, physics_dt, j_limit, out)
+    substeps = len(np.asarray(payload["t_s"]))
+    np.savez(
+      out / "trace.npz",
+      t=np.arange(substeps) * physics_dt,
+      qfrc=np.asarray(payload["qfrc_constraint_abs"]),
+      f_axial=np.asarray(payload["axial_force_n"]),
+      impulse=np.asarray(
+        payload["lambda_windowed_constraint_read_n_m_s"]
+      ),
+      delivered=np.asarray(payload["delivered_impulse_n_s"]),
+      contact=np.asarray(payload["contact"], dtype=bool),
+      qv=np.abs(np.asarray(payload["joint_velocity_rad_s"])),
+      delta=np.asarray(payload.get("cat_delta", np.zeros(substeps))),
+      j_limit=(
+        np.asarray(j_limit, dtype=np.float64)
+        if j_limit is not None
+        else np.array([])
+      ),
+    )
+    return None
+
+  metadata = _write_trace_leaf(
+    out,
+    payload,
+    identity=companion_identity,
+    physics_dt=physics_dt,
+  )
+  _make_plot(payload, physics_dt, j_limit, out)
+  return metadata
+
+
 def _build_arg_parser() -> argparse.ArgumentParser:
   ap = argparse.ArgumentParser()
   ap.add_argument("--ckpt", default=None, help="trained checkpoint (.pt); XOR with --reference")
@@ -1173,35 +1263,36 @@ def main() -> None:
   payload, dt, terminal_reason, reset_digest = (
     _run_reference(args) if args.reference else _run_ckpt(args)
   )
-  identity = {
-    "mode": "reference" if args.reference else "checkpoint",
-    "campaign": args.campaign,
-    "arm": args.arm,
-    "training_seed": args.training_seed,
-    "task": args.task,
-    "checkpoint_file": (
-      None if args.ckpt is None else str(Path(args.ckpt).resolve())
-    ),
-    "checkpoint_sha256": checkpoint_sha256,
-    "fixed_reset_envelope": args.fixed_reset_envelope,
-    "reset_state_digest": reset_digest,
-    "code_revision": args.code_revision,
-    "asset_revision": args.asset_revision,
-    "terminal_reason": terminal_reason,
-    "j_limit_n_m_s": j_limit,
-  }
+  companion_identity = None
+  if args.fixed_reset_envelope is not None:
+    companion_identity = {
+      "mode": "checkpoint",
+      "campaign": args.campaign,
+      "arm": args.arm,
+      "training_seed": args.training_seed,
+      "task": args.task,
+      "checkpoint_file": str(Path(args.ckpt).resolve()),
+      "checkpoint_sha256": checkpoint_sha256,
+      "fixed_reset_envelope": args.fixed_reset_envelope,
+      "reset_state_digest": reset_digest,
+      "code_revision": args.code_revision,
+      "asset_revision": args.asset_revision,
+      "terminal_reason": terminal_reason,
+      "j_limit_n_m_s": j_limit,
+    }
   out_dir = Path(args.out)
-  _write_trace_leaf(
+  _write_outputs(
     out_dir,
     payload,
-    identity=identity,
     physics_dt=dt,
+    j_limit=j_limit,
+    companion_identity=companion_identity,
   )
-  _make_plot(payload, dt, j_limit, out_dir)
-  print(
-    f"[diag_impulse_trace] wrote {out_dir / 'trace.npz'} and "
-    f"{out_dir / 'metadata.json'}"
-  )
+  if companion_identity is not None:
+    print(
+      f"[diag_impulse_trace] wrote {out_dir / 'trace.npz'} and "
+      f"{out_dir / 'metadata.json'}"
+    )
 
 
 if __name__ == "__main__":

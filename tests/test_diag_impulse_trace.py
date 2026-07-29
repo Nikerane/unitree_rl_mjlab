@@ -208,6 +208,7 @@ def _identity() -> dict[str, object]:
     "training_seed": 23,
     "task": "Unitree-Z1-Hammer-CaT-Impulse-Event-Quality",
     "checkpoint_sha256": "a" * 64,
+    "fixed_reset_envelope": "fixed-reset.json",
     "reset_state_digest": "b" * 64,
     "code_revision": "c" * 40,
     "asset_revision": "d" * 40,
@@ -454,3 +455,176 @@ def test_atomic_leaf_publish_binds_hashes_and_preserves_old_leaf_on_failure(
   np.savez(partial / "trace.npz", **_valid_payload())
   with pytest.raises(ValueError, match="incomplete"):
     diag.validate_trace_leaf(partial)
+
+
+def test_interrupted_publish_recovers_the_single_parked_backup(
+  tmp_path,
+  monkeypatch,
+):
+  """A restart must restore the good leaf parked before the publish rename."""
+  final = tmp_path / "FQ" / "23"
+  final.mkdir(parents=True)
+  (final / "old-sentinel").write_text("old", encoding="utf-8")
+  staged = tmp_path / ".staged" / "FQ" / "23"
+  staged.mkdir(parents=True)
+  (staged / "new-sentinel").write_text("new", encoding="utf-8")
+  real_replace = diag.os.replace
+
+  def interrupt_after_parking(source, destination):
+    real_replace(source, destination)
+    if Path(source) == final and ".backup-" in Path(destination).name:
+      raise SystemExit("simulated process interruption")
+
+  monkeypatch.setattr(diag.os, "replace", interrupt_after_parking)
+  with pytest.raises(SystemExit, match="simulated process interruption"):
+    diag._publish_staged_leaf(staged, final)
+
+  assert not final.exists()
+  assert len(tuple(final.parent.glob(f".{final.name}.backup-*"))) == 1
+
+  monkeypatch.setattr(diag.os, "replace", real_replace)
+  diag.recover_trace_leaf_backup(final)
+
+  assert (final / "old-sentinel").read_text(encoding="utf-8") == "old"
+  assert not tuple(final.parent.glob(f".{final.name}.backup-*"))
+  assert (staged / "new-sentinel").is_file()
+
+
+def test_backup_recovery_fails_closed_when_multiple_candidates_exist(tmp_path):
+  final = tmp_path / "FQ" / "23"
+  final.parent.mkdir(parents=True)
+  for suffix in ("first", "second"):
+    final.with_name(f".{final.name}.backup-{suffix}").mkdir()
+
+  with pytest.raises(ValueError, match="ambiguous"):
+    diag.recover_trace_leaf_backup(final)
+
+
+def test_noncompanion_output_preserves_exact_legacy_npz_and_directory(
+  tmp_path,
+):
+  """Historical runs overwrite their two files without replacing the directory."""
+  out = tmp_path / "historical"
+  out.mkdir()
+  (out / "unrelated.txt").write_text("keep", encoding="utf-8")
+  (out / "metadata.json").write_text("pre-existing", encoding="utf-8")
+  payload = _valid_payload()
+  payload["qfrc_constraint_abs"][:] = 2.0
+  payload["axial_force_n"][:] = 3.0
+  payload["lambda_windowed_constraint_read_n_m_s"][:] = 4.0
+  payload["delivered_impulse_n_s"][:] = 5.0
+  payload["joint_velocity_rad_s"][:] = -6.0
+  payload["cat_delta"] = np.full(20, 0.25)
+  j_limit = [1.64, 3.28, 1.64, 1.64, 1.64, 1.64]
+
+  result = diag._write_outputs(
+    out,
+    payload,
+    physics_dt=0.002,
+    j_limit=j_limit,
+    companion_identity=None,
+  )
+
+  assert result is None
+  assert (out / "trace.png").is_file()
+  assert (out / "unrelated.txt").read_text(encoding="utf-8") == "keep"
+  assert (out / "metadata.json").read_text(encoding="utf-8") == "pre-existing"
+  with np.load(out / "trace.npz") as trace:
+    assert trace.files == [
+      "t",
+      "qfrc",
+      "f_axial",
+      "impulse",
+      "delivered",
+      "contact",
+      "qv",
+      "delta",
+      "j_limit",
+    ]
+    np.testing.assert_array_equal(trace["t"], np.arange(20) * 0.002)
+    np.testing.assert_array_equal(trace["qfrc"], np.full((20, 6), 2.0))
+    np.testing.assert_array_equal(trace["f_axial"], np.full(20, 3.0))
+    np.testing.assert_array_equal(trace["impulse"], np.full((20, 6), 4.0))
+    np.testing.assert_array_equal(trace["delivered"], np.full(20, 5.0))
+    np.testing.assert_array_equal(trace["contact"], np.zeros(20, dtype=bool))
+    np.testing.assert_array_equal(trace["qv"], np.full((20, 6), 6.0))
+    np.testing.assert_array_equal(trace["delta"], np.full(20, 0.25))
+    np.testing.assert_array_equal(trace["j_limit"], np.asarray(j_limit))
+
+
+def _resign_metadata(path: Path, mutation) -> None:
+  metadata = json.loads(path.read_text(encoding="utf-8"))
+  mutation(metadata)
+  metadata.pop("metadata_sha256", None)
+  encoded = json.dumps(
+    metadata,
+    sort_keys=True,
+    separators=(",", ":"),
+    allow_nan=False,
+  ).encode("utf-8")
+  metadata["metadata_sha256"] = hashlib.sha256(encoded).hexdigest()
+  path.write_text(
+    json.dumps(metadata, indent=2, sort_keys=True) + "\n",
+    encoding="utf-8",
+  )
+
+
+@pytest.mark.parametrize(
+  ("mutation", "message"),
+  [
+    (lambda value: value.pop("mode"), "mode"),
+    (lambda value: value.__setitem__("mode", "reference"), "mode"),
+    (lambda value: value.__setitem__("campaign", None), "campaign"),
+    (lambda value: value.__setitem__("arm", ""), "arm"),
+    (lambda value: value.__setitem__("training_seed", None), "training_seed"),
+    (
+      lambda value: value.__setitem__("checkpoint_sha256", "a" * 63),
+      "checkpoint_sha256",
+    ),
+    (
+      lambda value: value.__setitem__("reset_state_digest", None),
+      "reset_state_digest",
+    ),
+    (
+      lambda value: value.__setitem__("code_revision", "c" * 39),
+      "code_revision",
+    ),
+    (
+      lambda value: value.__setitem__("asset_revision", "g" * 40),
+      "asset_revision",
+    ),
+    (
+      lambda value: value.__setitem__("fixed_reset_envelope", None),
+      "fixed_reset_envelope",
+    ),
+    (
+      lambda value: value.__setitem__("terminal_reason", None),
+      "terminal_reason",
+    ),
+  ],
+)
+def test_companion_identity_mutations_fail_on_write_and_resume(
+  tmp_path,
+  mutation,
+  message,
+):
+  bad_identity = _identity()
+  mutation(bad_identity)
+  with pytest.raises(ValueError, match=message):
+    diag._write_trace_leaf(
+      tmp_path / "rejected",
+      _valid_payload(),
+      identity=bad_identity,
+      physics_dt=0.002,
+    )
+
+  leaf = tmp_path / "published"
+  diag._write_trace_leaf(
+    leaf,
+    _valid_payload(),
+    identity=_identity(),
+    physics_dt=0.002,
+  )
+  _resign_metadata(leaf / "metadata.json", mutation)
+  with pytest.raises(ValueError, match=message):
+    diag.validate_trace_leaf(leaf)
