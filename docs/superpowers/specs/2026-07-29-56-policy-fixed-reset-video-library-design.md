@@ -39,7 +39,12 @@ For each policy:
 1. `policy.mp4` — the fixed-reset first strike;
 2. `montage.png` — six evenly spaced frames;
 3. `trajectory.png` — aligned x-z side and x-y top views of the hammer head,
-   with start, time progression, first contact, and nail axis marked;
+   with start, time progression, first contact, and nail axis marked. A thin
+   dashed black line shows the ideal waypoint geometry from the task's
+   `SingleStrikeReference`, anchored to the same frozen reset and nail pose:
+   start to wind-up apex, then apex down the nail axis to the follow-through
+   target. It is labelled `scripted reference`; it is neither an optimal path
+   nor the physically lagged open-loop playback trace;
 4. `metadata.json` — campaign, arm, seed, task, checkpoint path/hash, code and
    asset revision, reset contract/digest, camera, timing, and output hashes.
 
@@ -52,6 +57,13 @@ Campaign-level outputs:
 
 Axes and visual conventions are shared within and across grids so curvature
 and terminal alignment can be compared directly.
+
+The colored policy trace is the realized simulator trajectory. The dashed
+black reference is the path the policy could infer from its `strike_phase` and
+`strike_ref_error` observations. The seven arms in this 56-policy library did
+not enable the separate `r_imit` tracking reward, so the overlay must not be
+interpreted as a trajectory-following objective that those policies were paid
+to satisfy.
 
 ## Implementation constraints
 
