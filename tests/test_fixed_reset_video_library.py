@@ -813,6 +813,51 @@ def test_trajectory_plot_draws_the_reference_as_a_dashed_observation_line(tmp_pa
     )
 
 
+def test_trajectory_plot_uses_readable_figure_level_layout(tmp_path, monkeypatch):
+    """Near-vertical traces must fill both panels without data-overlay annotations."""
+    from evaluation.analysis import fixed_reset_video_library as video_contract
+
+    original_close = video_contract.plt.close
+    monkeypatch.setattr(video_contract.plt, "close", lambda _figure: None)
+    before = set(video_contract.plt.get_fignums())
+    write_trajectory_png(
+        {
+            "head_position_m": np.array(
+                [
+                    [0.500, 0.010, 0.300],
+                    [0.503, 0.006, 0.235],
+                    [0.497, -0.002, 0.165],
+                    [0.501, -0.006, 0.100],
+                ]
+            ),
+            "contact": np.array([False, False, False, True]),
+            "reference_polyline_m": np.array(
+                [[0.500, 0.010, 0.300], [0.500, 0.000, 0.350], [0.500, 0.000, 0.080]]
+            ),
+            "nail_top_m": np.array([0.500, 0.000, 0.100]),
+        },
+        tmp_path / "trajectory.png",
+    )
+    figure_number = (set(video_contract.plt.get_fignums()) - before).pop()
+    figure = video_contract.plt.figure(figure_number)
+    figure.canvas.draw()
+    renderer = figure.canvas.get_renderer()
+
+    assert len(figure.axes) == 2
+    assert all(axis.get_aspect() == "auto" for axis in figure.axes)
+    assert all(axis.get_legend() is None for axis in figure.axes)
+    annotation = next(
+        text for text in figure.texts
+        if text.get_text() == "SingleStrikeReference (observation only) · black dashed · not rewarded"
+    )
+    annotation_box = annotation.get_window_extent(renderer)
+    for axis in figure.axes:
+        assert len(axis.get_xticklabels()) <= 6
+        assert len(axis.get_yticklabels()) <= 6
+        assert not annotation_box.overlaps(axis.get_tightbbox(renderer))
+    original_close(figure)
+
+
 def test_campaign_grids_and_index_cover_each_registered_policy_once(tmp_path, monkeypatch):
     """Campaign artifacts provide common side-view limits and resolvable policy links."""
     from matplotlib.figure import Figure

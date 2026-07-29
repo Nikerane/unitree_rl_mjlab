@@ -15,6 +15,7 @@ import numpy as np
 matplotlib.use("Agg")
 from matplotlib import pyplot as plt
 from matplotlib.collections import LineCollection
+from matplotlib.ticker import FormatStrFormatter, MaxNLocator
 
 
 EXPECTED = {
@@ -206,16 +207,29 @@ def write_trajectory_png(trace: Mapping[str, Any], path: str | Path) -> None:
     """Write x-z and x-y diagnostics with the anchored reference as context only."""
     positions, contact, reference, nail_top = _trace_geometry(trace)
 
-    fig, axes = plt.subplots(1, 2, figsize=(8, 4), sharex=True, sharey=False, layout="constrained")
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.8), sharex=True, sharey=False)
     for axis, ordinate, label in ((axes[0], 2, "z (m)"), (axes[1], 1, "y (m)")):
         _draw_trajectory(axis, positions, contact, reference, nail_top, ordinate)
         axis.set_xlabel("x (m)")
         axis.set_ylabel(label)
-        axis.set_aspect("equal", adjustable="box")
+        axis.set_aspect("auto")
+        axis.xaxis.set_major_locator(MaxNLocator(nbins=5))
+        axis.yaxis.set_major_locator(MaxNLocator(nbins=5))
+        axis.xaxis.set_major_formatter(FormatStrFormatter("%.3f"))
+        axis.yaxis.set_major_formatter(FormatStrFormatter("%.3f"))
+        axis.tick_params(labelsize=8)
         axis.grid(alpha=0.25)
-    axes[0].legend(loc="best", fontsize=7)
     axes[0].set_title("x-z trajectory")
     axes[1].set_title("x-y trajectory")
+    fig.suptitle("Hammer-head trajectory · green=start · viridis=normalized time · red=contact")
+    fig.text(
+        0.5,
+        0.035,
+        "SingleStrikeReference (observation only) · black dashed · not rewarded",
+        ha="center",
+        fontsize=8,
+    )
+    fig.tight_layout(rect=[0.02, 0.11, 0.98, 0.90])
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=160)
     plt.close(fig)
