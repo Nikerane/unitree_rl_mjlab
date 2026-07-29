@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import subprocess
 
 import imageio.v3 as iio
 import numpy as np
@@ -289,28 +290,46 @@ def _write_accepted_checkpoint_manifests(tmp_path: Path) -> tuple[Path, Path, di
             f"{campaign}/{row['arm']}/{row['training_seed']}".encode("utf-8")
         )
         checkpoint_sha256 = _sha256(checkpoint)
-        manifest_row = {
-            "campaign": campaign,
-            "disposition": "accepted",
-            "arm": row["arm"],
-            "short": row["arm"].lower().replace("-min", ""),
-            "task": TASKS[(campaign, row["arm"])],
-            "training_seed": str(row["training_seed"]),
-            "checkpoint_path": f"/vega/frozen/{checkpoint.parent.name}/model_499.pt",
-            "checkpoint_sha256": checkpoint_sha256,
-            "retry_history": "none",
-        }
         if campaign == "fq4x8":
-            manifest_row.update(
-                code_revision="1" * 40,
-                asset_revision="2" * 40,
-                clean_state="true",
-            )
+            manifest_row = {
+                "campaign": campaign,
+                "disposition": "accepted",
+                "arm": row["arm"],
+                "short": row["arm"].lower().replace("-min", ""),
+                "task": TASKS[(campaign, row["arm"])],
+                "training_seed": str(row["training_seed"]),
+                "checkpoint_path": f"/vega/frozen/{checkpoint.parent.name}/model_499.pt",
+                "checkpoint_sha256": checkpoint_sha256,
+                "training_attempt": "attempt1",
+                "retry_history": "none",
+                "code_revision": "1" * 40,
+                "asset_revision": "2" * 40,
+                "campaign_config_sha256": "5" * 64,
+                "treatment_config_sha256": "6" * 64,
+                "reader_sha256": "7" * 64,
+                "normalizer_sha256": "8" * 64,
+                "treatment_reward_sha256": "9" * 64,
+                "fixed_action_signature_sha256": "a" * 64,
+                "fixed_impedance_signature_sha256": "b" * 64,
+                "cap_signature_sha256": "c" * 64,
+                "clean_state": "true",
+            }
         else:
-            manifest_row.update(
-                training_code_revision="3" * 40,
-                training_asset_revision="4" * 40,
-            )
+            manifest_row = {
+                "campaign": campaign,
+                "disposition": "accepted",
+                "arm": row["arm"],
+                "short": row["arm"].lower(),
+                "task": TASKS[(campaign, row["arm"])],
+                "training_seed": str(row["training_seed"]),
+                "run_name": f"{campaign}_{row['arm'].lower()}_seed{row['training_seed']}",
+                "checkpoint_path": f"/vega/frozen/{checkpoint.parent.name}/model_499.pt",
+                "checkpoint_sha256": checkpoint_sha256,
+                "training_code_revision": "3" * 40,
+                "training_asset_revision": "4" * 40,
+                "slurm_array_id": "1_0",
+                "retry_history": "none",
+            }
         rows_by_campaign[campaign].append(manifest_row)
     for campaign, manifest in manifests.items():
         fieldnames = list(rows_by_campaign[campaign][0])
@@ -340,7 +359,7 @@ def test_inventory_builder_freezes_verified_training_provenance_in_deterministic
     assert rows[0]["training_asset_revision"] == "2" * 40
     assert rows[-1]["training_code_revision"] == "3" * 40
     assert rows[-1]["training_asset_revision"] == "4" * 40
-    assert all(Path(row["checkpoint_file"]).is_file() for row in rows)
+    assert all(Path(row["_checkpoint_file"]).is_file() for row in rows)
 
     inventory = tmp_path / "checkpoint_inventory.tsv"
     library_driver.write_inventory(rows, inventory)
@@ -409,3 +428,177 @@ def _replace_tsv_cell(path: Path, row_index: int, field: str, value: str) -> Non
         writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter="\t")
         writer.writeheader()
         writer.writerows(rows)
+
+
+def _commit_fixture_repo(root: Path, files: dict[str, str]) -> str:
+    for relative, content in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.com"], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "fixture"], check=True)
+    return subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def _provenance_repositories(tmp_path: Path) -> tuple[Path, Path, str, str]:
+    source = tmp_path / "source"
+    asset = tmp_path / "asset"
+    source_revision = _commit_fixture_repo(
+        source,
+        {
+            "src/task.py": "TASK = 1\n",
+            "scripts/render_policy.py": "RENDER = 1\n",
+            "evaluation/analysis/contract.py": "CONTRACT = 1\n",
+            "docs/results/ignored.md": "result\n",
+        },
+    )
+    asset_revision = _commit_fixture_repo(
+        asset,
+        {
+            "hammer_z1_env/assets/hammer.xml": "<mujoco/>\n",
+            "notes/ignored.md": "note\n",
+        },
+    )
+    return source, asset, source_revision, asset_revision
+
+
+def test_render_provenance_derives_revisions_and_ignores_unimported_dirty_files(tmp_path):
+    """Caller labels and unrelated docs cannot define or block renderer provenance."""
+    source, asset, source_revision, asset_revision = _provenance_repositories(tmp_path)
+    (source / "docs/results/ignored.md").write_text("dirty result\n")
+    (asset / "notes/ignored.md").write_text("dirty note\n")
+
+    provenance = library_driver.capture_render_provenance(source, asset)
+
+    assert provenance["code_revision"] == source_revision
+    assert provenance["asset_revision"] == asset_revision
+
+
+@pytest.mark.parametrize(
+    ("repository", "relative", "message"),
+    [
+        ("source", "src/task.py", "source scope"),
+        ("asset", "hammer_z1_env/assets/hammer.xml", "asset scope"),
+    ],
+)
+def test_render_provenance_rejects_dirty_import_or_hammer_asset_scope(
+    tmp_path, repository, relative, message
+):
+    """Any tracked or untracked mutation that can affect rendering must fail closed."""
+    source, asset, _, _ = _provenance_repositories(tmp_path)
+    root = source if repository == "source" else asset
+    (root / relative).write_text("dirty\n")
+
+    with pytest.raises(ValueError, match=message):
+        library_driver.capture_render_provenance(source, asset)
+
+
+def test_render_provenance_is_rechecked_after_batch(tmp_path):
+    """A source mutation during rendering must invalidate the recorded revision."""
+    source, asset, _, _ = _provenance_repositories(tmp_path)
+    before = library_driver.capture_render_provenance(source, asset)
+    (source / "evaluation/analysis/contract.py").write_text("changed during batch\n")
+
+    with pytest.raises(ValueError, match="source scope"):
+        library_driver.require_unchanged_render_provenance(before, source, asset)
+
+
+def test_inventory_is_portable_lf_only_and_runtime_path_is_not_serialized(tmp_path):
+    """Frozen inventory bytes must not bind consumers to the transfer machine."""
+    fq4, fq3, roots = _write_accepted_checkpoint_manifests(tmp_path)
+    rows = library_driver.build_inventory(
+        fq4, fq3, roots, expected_manifest_sha256=_fixture_manifest_hashes(fq4, fq3)
+    )
+    inventory = tmp_path / "checkpoint_inventory.tsv"
+    library_driver.write_inventory(rows, inventory)
+
+    payload = inventory.read_bytes()
+    assert b"\r\n" not in payload
+    assert str(tmp_path).encode() not in payload
+    assert b"checkpoint_cache_path" in payload.splitlines()[0]
+    assert all(not Path(row["checkpoint_cache_path"]).is_absolute() for row in rows)
+
+
+def test_existing_inventory_and_sidecar_must_be_byte_identical(tmp_path):
+    """Resume must stop if the committed membership bytes were edited or replaced."""
+    fq4, fq3, roots = _write_accepted_checkpoint_manifests(tmp_path)
+    rows = library_driver.build_inventory(
+        fq4, fq3, roots, expected_manifest_sha256=_fixture_manifest_hashes(fq4, fq3)
+    )
+    inventory = tmp_path / "checkpoint_inventory.tsv"
+    library_driver.write_inventory(rows, inventory)
+    inventory.write_bytes(inventory.read_bytes() + b"tampered\n")
+
+    with pytest.raises(ValueError, match="existing inventory"):
+        library_driver.write_inventory(rows, inventory)
+
+
+def test_manifest_headers_and_registered_short_are_exact(tmp_path):
+    """Schema additions and short-label drift cannot enter the frozen inventory."""
+    fq4, fq3, roots = _write_accepted_checkpoint_manifests(tmp_path)
+    _replace_tsv_cell(fq3, 0, "short", "not-f8")
+    with pytest.raises(ValueError, match="short"):
+        library_driver.build_inventory(
+            fq4,
+            fq3,
+            roots,
+            expected_manifest_sha256=_fixture_manifest_hashes(fq4, fq3),
+        )
+
+    fq4, fq3, roots = _write_accepted_checkpoint_manifests(tmp_path / "header")
+    text = fq4.read_text().splitlines()
+    text[0] += "\textra"
+    text[1] += "\tvalue"
+    fq4.write_text("\n".join(text) + "\n")
+    with pytest.raises(ValueError, match="header"):
+        library_driver.build_inventory(
+            fq4,
+            fq3,
+            roots,
+            expected_manifest_sha256=_fixture_manifest_hashes(fq4, fq3),
+        )
+
+
+def test_resume_contract_requires_horizon_80_and_exact_five_files(tmp_path):
+    """Short rollouts or renderer scratch files cannot be reused as final leaves."""
+    leaf = tmp_path / "leaf"
+    leaf.mkdir()
+    for filename in (*library_driver.ARTIFACT_FILENAMES, "metadata.json"):
+        (leaf / filename).write_text("x")
+    metadata = {"rollout": {"requested_control_steps": 80}}
+    assert library_driver.resume_leaf_shape_is_valid(leaf, metadata)
+
+    metadata["rollout"]["requested_control_steps"] = 79
+    assert not library_driver.resume_leaf_shape_is_valid(leaf, metadata)
+    metadata["rollout"]["requested_control_steps"] = 80
+    (leaf / "frame_0_idx000.png").write_text("scratch")
+    assert not library_driver.resume_leaf_shape_is_valid(leaf, metadata)
+
+
+def test_renderer_scratch_is_removed_and_staged_leaf_replaces_final_atomically(tmp_path):
+    """Finalization must publish only the staged five-file leaf and remove scratch."""
+    final_leaf = tmp_path / "fq4x8" / "F8" / "8"
+    final_leaf.mkdir(parents=True)
+    (final_leaf / "old.txt").write_text("old")
+    staged_leaf = tmp_path / ".staging" / "fq4x8" / "F8" / "8"
+    staged_leaf.mkdir(parents=True)
+    for filename in (*library_driver.ARTIFACT_FILENAMES, "metadata.json"):
+        (staged_leaf / filename).write_text("new")
+    (staged_leaf / "step_000_reset.png").write_text("scratch")
+    (staged_leaf / "frame_0_idx000.png").write_text("scratch")
+
+    library_driver.remove_renderer_scratch(staged_leaf)
+    library_driver.replace_policy_leaf(staged_leaf, final_leaf)
+
+    assert {path.name for path in final_leaf.iterdir()} == set(
+        (*library_driver.ARTIFACT_FILENAMES, "metadata.json")
+    )
+    assert not staged_leaf.exists()

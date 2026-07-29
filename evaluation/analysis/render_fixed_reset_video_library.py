@@ -8,9 +8,15 @@ rendered once from the shared Stage-0 reset or the run fails closed.
 from __future__ import annotations
 
 import csv
+import hashlib
+import io
 import json
+import os
+import shutil
 import subprocess
 import sys
+import tempfile
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -48,16 +54,38 @@ INVENTORY_FIELDS = (
     "task",
     "training_seed",
     "checkpoint_path",
-    "checkpoint_file",
+    "checkpoint_cache_path",
     "checkpoint_sha256",
     "training_code_revision",
     "training_asset_revision",
     "accepted_training_manifest_sha256",
 )
-
-
-def _sha256_text(path: Path) -> str:
-    return _sha256(path)
+FQ4_MANIFEST_FIELDS = tuple(
+    """campaign disposition arm short task training_seed checkpoint_path
+    checkpoint_sha256 training_attempt retry_history code_revision asset_revision
+    campaign_config_sha256 treatment_config_sha256 reader_sha256 normalizer_sha256
+    treatment_reward_sha256 fixed_action_signature_sha256
+    fixed_impedance_signature_sha256 cap_signature_sha256 clean_state""".split()
+)
+FQ3_MANIFEST_FIELDS = tuple(
+    """campaign disposition arm short task training_seed run_name checkpoint_path
+    checkpoint_sha256 training_code_revision training_asset_revision slurm_array_id
+    retry_history""".split()
+)
+MANIFEST_FIELDS = {"fq4x8": FQ4_MANIFEST_FIELDS, "fq3x8": FQ3_MANIFEST_FIELDS}
+SHORT_BY_CAMPAIGN_ARM = {
+    ("fq4x8", "F8"): "f8",
+    ("fq4x8", "F0"): "f0",
+    ("fq4x8", "D0"): "d0",
+    ("fq4x8", "FQ-min"): "fq",
+    ("fq3x8", "F8"): "f8",
+    ("fq3x8", "B8"): "b8",
+    ("fq3x8", "FQ"): "fq",
+}
+SOURCE_SCOPE = ("src", "scripts", "evaluation/analysis")
+ASSET_SCOPE = ("hammer_z1_env/assets",)
+FINALIZED_FILES = frozenset((*ARTIFACT_FILENAMES, "metadata.json"))
+ROLLOUT_CONTROL_STEPS = 80
 
 
 def _require_sha256(value: object, *, field: str) -> str:
@@ -74,12 +102,14 @@ def _require_revision(value: object, *, field: str) -> str:
     return text
 
 
-def _read_tsv(path: Path) -> list[dict[str, str]]:
+def _read_tsv(path: Path, campaign: str) -> list[dict[str, str]]:
     try:
         with path.open(newline="", encoding="utf-8") as handle:
             reader = csv.DictReader(handle, delimiter="\t")
             if not reader.fieldnames:
                 raise ValueError("missing TSV header")
+            if tuple(reader.fieldnames) != MANIFEST_FIELDS[campaign]:
+                raise ValueError(f"{campaign} accepted manifest header mismatch")
             rows = list(reader)
     except OSError as error:
         raise ValueError(f"cannot read accepted training manifest: {path}") from error
@@ -91,7 +121,7 @@ def _read_tsv(path: Path) -> list[dict[str, str]]:
 def _manifest_training_revisions(campaign: str, raw: Mapping[str, str]) -> tuple[str, str]:
     if campaign == "fq4x8":
         if raw.get("clean_state", "").lower() != "true":
-            raise ValueError("manifest records inherited dirty training provenance")
+            raise ValueError("manifest clean_state records dirty training provenance")
         code = raw.get("code_revision", "")
         asset = raw.get("asset_revision", "")
     elif campaign == "fq3x8":
@@ -121,6 +151,55 @@ def _checkpoint_file(root: Path, checkpoint_path: str) -> Path:
     return root / original.parent.name / original.name
 
 
+def capture_render_provenance(
+    source_repository_root: str | Path, asset_repository_root: str | Path
+) -> dict[str, Any]:
+    """Derive immutable revisions after checking every render-affecting repo path."""
+    def inspect(path: str | Path, scope: Sequence[str], label: str) -> str:
+        root = Path(path).resolve()
+
+        def git(*arguments: str) -> str:
+            try:
+                return subprocess.run(
+                    ["git", "-C", str(root), *arguments],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+            except subprocess.CalledProcessError as error:
+                raise ValueError(f"git provenance check failed for {root}") from error
+
+        if root != Path(git("rev-parse", "--show-toplevel")).resolve():
+            raise ValueError(f"{label} repository root is not its git top-level")
+        status = git(
+            "status", "--porcelain=v1", "--untracked-files=all", "--", *scope
+        )
+        if status:
+            raise ValueError(
+                f"renderer {label} scope is dirty: {status.splitlines()[0]}"
+            )
+        return _require_revision(git("rev-parse", "HEAD"), field=f"renderer {label}")
+
+    return {
+        "code_revision": inspect(source_repository_root, SOURCE_SCOPE, "source"),
+        "asset_revision": inspect(asset_repository_root, ASSET_SCOPE, "asset"),
+        "source_scope": list(SOURCE_SCOPE),
+        "asset_scope": list(ASSET_SCOPE),
+        "device": "cpu",
+    }
+
+
+def require_unchanged_render_provenance(
+    before: Mapping[str, Any],
+    source_repository_root: str | Path,
+    asset_repository_root: str | Path,
+) -> None:
+    """Fail if a render-affecting revision or worktree path changed during the batch."""
+    after = capture_render_provenance(source_repository_root, asset_repository_root)
+    if dict(before) != after:
+        raise ValueError("renderer source or asset revision changed during batch")
+
+
 def build_inventory(
     fq4_manifest: str | Path,
     fq3_manifest: str | Path,
@@ -134,13 +213,13 @@ def build_inventory(
         raise ValueError("checkpoint roots must name exactly fq4x8 and fq3x8")
     rows: list[dict[str, Any]] = []
     for campaign, manifest_path in manifests.items():
-        actual_manifest_sha256 = _sha256_text(manifest_path)
+        actual_manifest_sha256 = _sha256(manifest_path)
         expected_manifest_digest = _require_sha256(
             expected_manifest_sha256.get(campaign, ""), field=f"{campaign} manifest"
         )
         if actual_manifest_sha256 != expected_manifest_digest:
             raise ValueError(f"{campaign} accepted manifest SHA-256 mismatch")
-        for raw in _read_tsv(manifest_path):
+        for raw in _read_tsv(manifest_path, campaign):
             required = ("campaign", "disposition", "arm", "short", "task", "training_seed", "checkpoint_path", "checkpoint_sha256")
             if any(not raw.get(field) for field in required):
                 raise ValueError(f"manifest row is missing required identity fields: {campaign}")
@@ -151,6 +230,8 @@ def build_inventory(
             arm = raw["arm"]
             if arm not in EXPECTED[campaign]:
                 raise ValueError(f"unexpected arm in accepted manifest: {campaign}/{arm}")
+            if raw["short"] != SHORT_BY_CAMPAIGN_ARM[(campaign, arm)]:
+                raise ValueError(f"manifest short mismatch: {campaign}/{arm}")
             try:
                 training_seed = int(raw["training_seed"])
             except ValueError as error:
@@ -165,7 +246,7 @@ def build_inventory(
             checkpoint_file = _checkpoint_file(Path(checkpoint_roots[campaign]), raw["checkpoint_path"])
             if not checkpoint_file.is_file():
                 raise ValueError(f"accepted checkpoint is missing: {checkpoint_file}")
-            if _sha256_text(checkpoint_file) != checkpoint_sha256:
+            if _sha256(checkpoint_file) != checkpoint_sha256:
                 raise ValueError(f"accepted checkpoint SHA-256 mismatch: {checkpoint_file}")
             rows.append(
                 {
@@ -175,7 +256,11 @@ def build_inventory(
                     "task": task,
                     "training_seed": training_seed,
                     "checkpoint_path": raw["checkpoint_path"],
-                    "checkpoint_file": str(checkpoint_file),
+                    "checkpoint_cache_path": str(
+                        Path(Path(raw["checkpoint_path"]).parent.name)
+                        / Path(raw["checkpoint_path"]).name
+                    ),
+                    "_checkpoint_file": str(checkpoint_file),
                     "checkpoint_sha256": checkpoint_sha256,
                     "training_code_revision": training_code_revision,
                     "training_asset_revision": training_asset_revision,
@@ -191,37 +276,86 @@ def build_inventory(
     return rows
 
 
+def _inventory_bytes(rows: Sequence[Mapping[str, Any]]) -> bytes:
+    stream = io.StringIO(newline="")
+    writer = csv.DictWriter(
+        stream, fieldnames=INVENTORY_FIELDS, delimiter="\t", lineterminator="\n"
+    )
+    writer.writeheader()
+    for row in sorted(rows, key=_inventory_sort_key):
+        writer.writerow({field: row[field] for field in INVENTORY_FIELDS})
+    return stream.getvalue().encode("utf-8")
+
+
+def _atomic_write(path: Path, payload: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.", delete=False) as handle:
+        temporary = Path(handle.name)
+        handle.write(payload)
+        handle.flush()
+        os.fsync(handle.fileno())
+    try:
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
 def write_inventory(rows: Sequence[Mapping[str, Any]], path: str | Path) -> Path:
-    """Write a deterministic TSV and its SHA-256 sidecar."""
+    """Atomically create the frozen TSV, refusing any non-identical existing pair."""
     validate_inventory(rows)
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=INVENTORY_FIELDS, delimiter="\t")
-        writer.writeheader()
-        for row in sorted(rows, key=_inventory_sort_key):
-            writer.writerow({field: row[field] for field in INVENTORY_FIELDS})
-    digest = _sha256_text(path)
+    payload = _inventory_bytes(rows)
+    digest = hashlib.sha256(payload).hexdigest()
     sidecar = path.with_suffix(path.suffix + ".sha256")
-    sidecar.write_text(f"{digest}  {path.name}\n", encoding="utf-8")
+    sidecar_payload = f"{digest}  {path.name}\n".encode("utf-8")
+    if path.exists() or sidecar.exists():
+        if not path.is_file() or not sidecar.is_file():
+            raise ValueError("existing inventory and sidecar must both be regular files")
+        if path.read_bytes() != payload or sidecar.read_bytes() != sidecar_payload:
+            raise ValueError("existing inventory or sidecar differs from frozen bytes")
+        return sidecar
+    _atomic_write(path, payload)
+    _atomic_write(sidecar, sidecar_payload)
     return sidecar
 
 
-def _renderer_revision() -> str:
-    source_paths = (
-        "scripts/render_policy.py",
-        "evaluation/analysis/fixed_reset_video_library.py",
-        "evaluation/analysis/render_fixed_reset_video_library.py",
-    )
-    dirty = subprocess.run(
-        ["git", "diff", "--quiet", "HEAD", "--", *source_paths], check=False
-    )
-    if dirty.returncode != 0:
-        raise ValueError("renderer tracked source is dirty; commit it before rendering")
-    revision = subprocess.run(
-        ["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True
-    ).stdout.strip()
-    return _require_revision(revision, field="renderer code")
+def resume_leaf_shape_is_valid(leaf: str | Path, metadata: Mapping[str, Any]) -> bool:
+    """Require exactly five final files and the frozen 80-control-step horizon."""
+    leaf = Path(leaf)
+    try:
+        files = {child.name for child in leaf.iterdir() if child.is_file()}
+        no_directories = all(child.is_file() for child in leaf.iterdir())
+        requested = int(metadata["rollout"]["requested_control_steps"])
+    except (OSError, KeyError, TypeError, ValueError):
+        return False
+    return no_directories and files == FINALIZED_FILES and requested == ROLLOUT_CONTROL_STEPS
+
+
+def remove_renderer_scratch(leaf: str | Path) -> None:
+    """Remove only the Task 1 renderer's documented non-final inspection images."""
+    leaf = Path(leaf)
+    for path in (leaf / "step_000_reset.png", *leaf.glob("frame_*.png")):
+        if path.is_file():
+            path.unlink()
+
+
+def replace_policy_leaf(staged_leaf: str | Path, final_leaf: str | Path) -> None:
+    """Publish a staged leaf on the same filesystem, restoring the old leaf on failure."""
+    staged_leaf, final_leaf = Path(staged_leaf), Path(final_leaf)
+    final_leaf.parent.mkdir(parents=True, exist_ok=True)
+    backup = final_leaf.with_name(f".{final_leaf.name}.backup-{uuid.uuid4().hex}")
+    had_final = final_leaf.exists()
+    if had_final:
+        os.replace(final_leaf, backup)
+    try:
+        os.replace(staged_leaf, final_leaf)
+    except BaseException:
+        if had_final and backup.exists():
+            os.replace(backup, final_leaf)
+        raise
+    if backup.exists():
+        shutil.rmtree(backup)
 
 
 def _policy_artifact_is_valid(
@@ -229,14 +363,15 @@ def _policy_artifact_is_valid(
     row: Mapping[str, Any],
     fixed_reset: Mapping[str, Any],
     *,
-    renderer_code_revision: str,
-    renderer_asset_revision: str,
+    render_provenance: Mapping[str, Any],
 ) -> bool:
     """Check one complete policy leaf before allowing a resume skip."""
     leaf = policy_artifact_dir(output_root, row)
     try:
         metadata = json.loads((leaf / "metadata.json").read_text(encoding="utf-8"))
         if not isinstance(metadata, Mapping):
+            return False
+        if not resume_leaf_shape_is_valid(leaf, metadata):
             return False
         for field in ("campaign", "arm", "training_seed", "checkpoint_sha256"):
             if str(metadata.get(field)) != str(row[field]):
@@ -246,9 +381,11 @@ def _policy_artifact_is_valid(
         if metadata.get("metadata_payload_sha256") != _metadata_digest(metadata):
             return False
         _validate_metadata_contract(metadata, row, leaf)
-        if metadata.get("code_revision") != renderer_code_revision:
+        if metadata.get("code_revision") != render_provenance["code_revision"]:
             return False
-        if metadata.get("asset_revision") != renderer_asset_revision:
+        if metadata.get("asset_revision") != render_provenance["asset_revision"]:
+            return False
+        if metadata.get("renderer_provenance") != dict(render_provenance):
             return False
         training = metadata.get("training_provenance")
         if not isinstance(training, Mapping) or any(
@@ -264,7 +401,7 @@ def _policy_artifact_is_valid(
         for filename in ARTIFACT_FILENAMES:
             artifact = leaf / filename
             _readable_artifact(artifact)
-            if metadata.get("artifacts", {}).get(filename) != _sha256_text(artifact):
+            if metadata.get("artifacts", {}).get(filename) != _sha256(artifact):
                 return False
         _validate_trace_rollout(leaf / "trace.npz", metadata["rollout"])
         _validate_media_properties(leaf, metadata["rollout"])
@@ -278,8 +415,7 @@ def run_single_policy_renderer(
     fixed_reset: Mapping[str, Any],
     output_root: str | Path,
     *,
-    renderer_code_revision: str,
-    renderer_asset_revision: str,
+    render_provenance: Mapping[str, Any],
     device: str = "cpu",
 ) -> bool:
     """Render one policy, returning True only when a fully validated leaf was reused."""
@@ -288,51 +424,59 @@ def run_single_policy_renderer(
         output_root,
         row,
         fixed_reset,
-        renderer_code_revision=renderer_code_revision,
-        renderer_asset_revision=renderer_asset_revision,
+        render_provenance=render_provenance,
     ):
         return True
-    leaf = policy_artifact_dir(output_root, row)
-    leaf.mkdir(parents=True, exist_ok=True)
-    command = [
-        sys.executable,
-        "scripts/render_policy.py",
-        "--checkpoint-file", row["checkpoint_file"],
-        "--campaign", row["campaign"],
-        "--arm", row["arm"],
-        "--training-seed", str(row["training_seed"]),
-        "--checkpoint-sha256", row["checkpoint_sha256"],
-        "--code-revision", renderer_code_revision,
-        "--asset-revision", renderer_asset_revision,
-        "--task", row["task"],
-        "--out-dir", str(leaf),
-        "--fixed-reset-envelope", str(FIXED_RESET_ENVELOPE),
-        "--metadata-provenance", "fixed-reset 56-policy library; CPU single-env reinference",
-        "--device", device,
-    ]
-    subprocess.run(command, check=True)
-    metadata_path = leaf / "metadata.json"
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    metadata["training_provenance"] = {
-        "checkpoint_path": row["checkpoint_path"],
-        "training_code_revision": row["training_code_revision"],
-        "training_asset_revision": row["training_asset_revision"],
-        "accepted_training_manifest_sha256": row["accepted_training_manifest_sha256"],
-    }
-    metadata["renderer_provenance"] = {
-        "code_revision": renderer_code_revision,
-        "asset_revision": renderer_asset_revision,
-        "device": device,
-    }
-    write_metadata(metadata_path, metadata)
-    if not _policy_artifact_is_valid(
-        output_root,
-        row,
-        fixed_reset,
-        renderer_code_revision=renderer_code_revision,
-        renderer_asset_revision=renderer_asset_revision,
-    ):
-        raise RuntimeError(f"renderer emitted an invalid policy artifact: {leaf}")
+    if device != "cpu" or render_provenance.get("device") != "cpu":
+        raise ValueError("the fixed-reset library is restricted to CPU rendering")
+    output_root.mkdir(parents=True, exist_ok=True)
+    staging_root = Path(tempfile.mkdtemp(prefix=".policy-staging-", dir=output_root))
+    staged_leaf = policy_artifact_dir(staging_root, row)
+    staged_leaf.mkdir(parents=True)
+    final_leaf = policy_artifact_dir(output_root, row)
+    try:
+        command = [
+            sys.executable,
+            "scripts/render_policy.py",
+            "--checkpoint-file", row["_checkpoint_file"],
+            "--campaign", row["campaign"],
+            "--arm", row["arm"],
+            "--training-seed", str(row["training_seed"]),
+            "--checkpoint-sha256", row["checkpoint_sha256"],
+            "--code-revision", render_provenance["code_revision"],
+            "--asset-revision", render_provenance["asset_revision"],
+            "--task", row["task"],
+            "--out-dir", str(staged_leaf),
+            "--steps", str(ROLLOUT_CONTROL_STEPS),
+            "--fixed-reset-envelope", str(FIXED_RESET_ENVELOPE),
+            "--metadata-provenance", "fixed-reset 56-policy library; CPU single-env reinference",
+            "--device", device,
+        ]
+        subprocess.run(command, check=True)
+        metadata_path = staged_leaf / "metadata.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata["training_provenance"] = {
+            "checkpoint_path": row["checkpoint_path"],
+            "training_code_revision": row["training_code_revision"],
+            "training_asset_revision": row["training_asset_revision"],
+            "accepted_training_manifest_sha256": row[
+                "accepted_training_manifest_sha256"
+            ],
+        }
+        metadata["renderer_provenance"] = dict(render_provenance)
+        write_metadata(metadata_path, metadata)
+        remove_renderer_scratch(staged_leaf)
+        if not _policy_artifact_is_valid(
+            staging_root,
+            row,
+            fixed_reset,
+            render_provenance=render_provenance,
+        ):
+            raise RuntimeError(f"renderer emitted an invalid policy artifact: {staged_leaf}")
+        replace_policy_leaf(staged_leaf, final_leaf)
+    finally:
+        if staging_root.exists():
+            shutil.rmtree(staging_root)
     return False
 
 
@@ -342,7 +486,8 @@ def render_library(
     checkpoint_roots: Mapping[str, str | Path],
     output_root: str | Path,
     *,
-    renderer_asset_revision: str,
+    asset_repository_root: str | Path,
+    source_repository_root: str | Path = ".",
     device: str = "cpu",
     expected_manifest_sha256: Mapping[str, str] = EXPECTED_MANIFEST_SHA256,
 ) -> dict[str, Any]:
@@ -357,17 +502,22 @@ def render_library(
     output_root = Path(output_root)
     write_inventory(rows, output_root / "checkpoint_inventory.tsv")
     fixed_reset = load_fixed_reset(FIXED_RESET_ENVELOPE)
-    renderer_code_revision = _renderer_revision()
-    renderer_asset_revision = _require_revision(renderer_asset_revision, field="renderer asset")
+    render_provenance = capture_render_provenance(
+        source_repository_root, asset_repository_root
+    )
     reused = 0
-    for row in rows:
-        reused += run_single_policy_renderer(
-            row,
-            fixed_reset,
-            output_root,
-            renderer_code_revision=renderer_code_revision,
-            renderer_asset_revision=renderer_asset_revision,
-            device=device,
+    try:
+        for row in rows:
+            reused += run_single_policy_renderer(
+                row,
+                fixed_reset,
+                output_root,
+                render_provenance=render_provenance,
+                device=device,
+            )
+    finally:
+        require_unchanged_render_provenance(
+            render_provenance, source_repository_root, asset_repository_root
         )
     validated = validate_policy_artifacts(output_root, rows)
     return {"policies": len(rows), "reused": reused, "validated": validated}
@@ -379,7 +529,8 @@ class Cfg:
     fq3_manifest: str
     fq4_checkpoint_root: str
     fq3_checkpoint_root: str
-    renderer_asset_revision: str
+    asset_repository_root: str
+    source_repository_root: str = "."
     output_root: str = str(OUTPUT_ROOT)
     device: str = "cpu"
 
@@ -390,7 +541,8 @@ def main(cfg: Cfg) -> None:
         cfg.fq3_manifest,
         {"fq4x8": cfg.fq4_checkpoint_root, "fq3x8": cfg.fq3_checkpoint_root},
         cfg.output_root,
-        renderer_asset_revision=cfg.renderer_asset_revision,
+        asset_repository_root=cfg.asset_repository_root,
+        source_repository_root=cfg.source_repository_root,
         device=cfg.device,
     )
     print(f"policies={result['policies']} reused={result['reused']}")
