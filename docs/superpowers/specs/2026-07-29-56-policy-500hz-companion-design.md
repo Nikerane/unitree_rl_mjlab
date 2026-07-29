@@ -34,23 +34,27 @@ The historical FQ3×8 cleanliness limitation remains explicit; no missing
 ## Recorded evidence
 
 For every 2 ms physics substep, retain only the compact arrays required for
-analysis:
+analysis, preserving the evaluator's established phase contract rather than
+pretending every simulator channel is sampled at the same instant:
 
-- hammer-head position and velocity;
-- live contact/onset/release state;
-- nail position/depth;
-- joint positions and velocities;
+- pre-integration-derived hammer-head position, live contact and contact force,
+  paired with the joint velocity and nail depth cached immediately before
+  integration;
+- post-integration joint position/velocity and nail depth, used for the
+  continuous hardware-speed legality screen;
 - running per-joint event-pulse `Lambda_j`;
 - first-strike quality validity/overflow, centroid error and axiality;
-- policy action at the corresponding control step;
-- phase/reference position and reference error needed for trajectory metrics.
+- policy action, phase/reference position and reference error recorded once per
+  20 ms control step, linked to substeps by control-step index rather than
+  mislabeled as 500 Hz measurements.
 
 Each policy record binds campaign/arm/seed, checkpoint SHA-256, reset digest,
 task identity, rollout code/asset revisions, timing, and payload SHA-256.
 
 ## Derived analysis
 
-At the exact accepted first-contact onset, compute:
+At the exact accepted first-contact onset defined by the shipped tracker,
+compute:
 
 1. apex-to-onset 3-D path length/direct-distance ratio;
 2. RMS and maximum lateral deviation from the direct descent chord;
@@ -121,4 +125,3 @@ Run one CPU smoke policy first. If it reproduces contact and completes without
 schema failure, run all 56 sequentially on CPU. Expected simulation runtime is
 approximately 9–12 minutes; implementation, tests, analysis and review should
 fit within 45–75 minutes.
-
