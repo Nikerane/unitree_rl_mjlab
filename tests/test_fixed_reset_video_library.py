@@ -449,8 +449,8 @@ def _commit_fixture_repo(root: Path, files: dict[str, str]) -> str:
 
 
 def _provenance_repositories(tmp_path: Path) -> tuple[Path, Path, str, str]:
-    source = tmp_path / "source"
-    asset = tmp_path / "asset"
+    source = tmp_path / "unitree_rl_mjlab"
+    asset = tmp_path / "safe_impact_manipulation"
     source_revision = _commit_fixture_repo(
         source,
         {
@@ -470,13 +470,21 @@ def _provenance_repositories(tmp_path: Path) -> tuple[Path, Path, str, str]:
     return source, asset, source_revision, asset_revision
 
 
-def test_render_provenance_derives_revisions_and_ignores_unimported_dirty_files(tmp_path):
+def _bind_fixture_repositories(monkeypatch, source: Path, asset: Path) -> None:
+    monkeypatch.setattr(library_driver, "SOURCE_ROOT", source, raising=False)
+    monkeypatch.setattr(library_driver, "ASSET_ROOT", asset, raising=False)
+
+
+def test_render_provenance_derives_revisions_and_ignores_unimported_dirty_files(
+    tmp_path, monkeypatch
+):
     """Caller labels and unrelated docs cannot define or block renderer provenance."""
     source, asset, source_revision, asset_revision = _provenance_repositories(tmp_path)
+    _bind_fixture_repositories(monkeypatch, source, asset)
     (source / "docs/results/ignored.md").write_text("dirty result\n")
     (asset / "notes/ignored.md").write_text("dirty note\n")
 
-    provenance = library_driver.capture_render_provenance(source, asset)
+    provenance = library_driver.capture_render_provenance()
 
     assert provenance["code_revision"] == source_revision
     assert provenance["asset_revision"] == asset_revision
@@ -490,25 +498,54 @@ def test_render_provenance_derives_revisions_and_ignores_unimported_dirty_files(
     ],
 )
 def test_render_provenance_rejects_dirty_import_or_hammer_asset_scope(
-    tmp_path, repository, relative, message
+    tmp_path, monkeypatch, repository, relative, message
 ):
     """Any tracked or untracked mutation that can affect rendering must fail closed."""
     source, asset, _, _ = _provenance_repositories(tmp_path)
+    _bind_fixture_repositories(monkeypatch, source, asset)
     root = source if repository == "source" else asset
     (root / relative).write_text("dirty\n")
 
     with pytest.raises(ValueError, match=message):
-        library_driver.capture_render_provenance(source, asset)
+        library_driver.capture_render_provenance()
 
 
-def test_render_provenance_is_rechecked_after_batch(tmp_path):
+def test_render_provenance_is_rechecked_after_batch(tmp_path, monkeypatch):
     """A source mutation during rendering must invalidate the recorded revision."""
     source, asset, _, _ = _provenance_repositories(tmp_path)
-    before = library_driver.capture_render_provenance(source, asset)
+    _bind_fixture_repositories(monkeypatch, source, asset)
+    before = library_driver.capture_render_provenance()
     (source / "evaluation/analysis/contract.py").write_text("changed during batch\n")
 
     with pytest.raises(ValueError, match="source scope"):
-        library_driver.require_unchanged_render_provenance(before, source, asset)
+        library_driver.require_unchanged_render_provenance(before)
+
+
+def test_driver_binds_source_and_assets_to_the_paths_imported_by_the_checkout():
+    """The renderer cannot validate one checkout or asset repo and execute another."""
+    from src.assets.robots.unitree_z1.z1_constants import Z1_HAMMER_XML
+
+    assert library_driver.SOURCE_ROOT == Path(library_driver.__file__).resolve().parents[2]
+    assert library_driver.ASSET_ROOT == Z1_HAMMER_XML.resolve().parents[2]
+
+
+def test_renderer_process_uses_absolute_script_and_source_cwd(tmp_path, monkeypatch):
+    """Relative caller cwd cannot change which renderer or task package executes."""
+    source = tmp_path / "source"
+    script = source / "scripts" / "render_policy.py"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "import os, pathlib, sys\n"
+        "pathlib.Path(sys.argv[1]).write_text(os.getcwd() + '\\n' + __file__)\n"
+    )
+    monkeypatch.setattr(library_driver, "SOURCE_ROOT", source)
+    observed = tmp_path / "observed.txt"
+
+    library_driver.run_renderer_process([str(observed)])
+
+    cwd, executed = observed.read_text().splitlines()
+    assert Path(cwd) == source
+    assert Path(executed) == script
 
 
 def test_inventory_is_portable_lf_only_and_runtime_path_is_not_serialized(tmp_path):
@@ -539,6 +576,24 @@ def test_existing_inventory_and_sidecar_must_be_byte_identical(tmp_path):
 
     with pytest.raises(ValueError, match="existing inventory"):
         library_driver.write_inventory(rows, inventory)
+
+
+@pytest.mark.parametrize("missing", ["inventory", "sidecar"])
+def test_matching_partial_inventory_pair_is_recovered_atomically(tmp_path, missing):
+    """A crash between the two atomic writes must be safely resumable."""
+    fq4, fq3, roots = _write_accepted_checkpoint_manifests(tmp_path)
+    rows = library_driver.build_inventory(
+        fq4, fq3, roots, expected_manifest_sha256=_fixture_manifest_hashes(fq4, fq3)
+    )
+    inventory = tmp_path / "checkpoint_inventory.tsv"
+    sidecar = library_driver.write_inventory(rows, inventory)
+    expected_inventory, expected_sidecar = inventory.read_bytes(), sidecar.read_bytes()
+    (inventory if missing == "inventory" else sidecar).unlink()
+
+    library_driver.write_inventory(rows, inventory)
+
+    assert inventory.read_bytes() == expected_inventory
+    assert sidecar.read_bytes() == expected_sidecar
 
 
 def test_manifest_headers_and_registered_short_are_exact(tmp_path):
@@ -602,3 +657,33 @@ def test_renderer_scratch_is_removed_and_staged_leaf_replaces_final_atomically(t
         (*library_driver.ARTIFACT_FILENAMES, "metadata.json")
     )
     assert not staged_leaf.exists()
+
+
+def test_policy_staging_root_is_a_sibling_of_the_library(tmp_path):
+    """A killed render may leave a sibling scratch root, never an unexpected library child."""
+    library = tmp_path / "library"
+    staging = library_driver.make_policy_staging_root(library)
+    try:
+        assert staging.parent == library.parent
+        assert staging != library
+    finally:
+        staging.rmdir()
+
+
+def test_final_validation_prints_the_six_required_counters():
+    """Successful fail-closed validation must emit the complete review summary."""
+    rows = expected_rows()
+    validation = {
+        "artifacts": [
+            {"reset_state_digest": FIXED_DIGEST}
+            for _ in rows
+        ]
+    }
+    assert library_driver.format_validation_counters(rows, validation) == (
+        "policies=56\n"
+        "unique_checkpoint_sha256=56\n"
+        "unique_reset_state_digest=1\n"
+        "missing_artifacts=0\n"
+        "invalid_video=0\n"
+        "second_episode_contamination=0"
+    )

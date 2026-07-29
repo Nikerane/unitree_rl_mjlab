@@ -40,9 +40,13 @@ from evaluation.analysis.fixed_reset_video_library import (
     validate_policy_artifacts,
     write_metadata,
 )
+from src.assets.robots.unitree_z1.z1_constants import Z1_HAMMER_XML
 
 
-OUTPUT_ROOT = Path("docs/results/assets/2026-07-29_56_policy_fixed_reset_library")
+SOURCE_ROOT = Path(__file__).resolve().parents[2]
+ASSET_ROOT = Z1_HAMMER_XML.resolve().parents[2]
+OUTPUT_ROOT = SOURCE_ROOT / "docs/results/assets/2026-07-29_56_policy_fixed_reset_library"
+FIXED_RESET_PATH = SOURCE_ROOT / FIXED_RESET_ENVELOPE
 EXPECTED_MANIFEST_SHA256 = {
     "fq4x8": "fb55f214d6e0cb2da308e6580ef535d4823038bc8ab842a05ca4085ab346ec14",
     "fq3x8": "4692e71bf2f6d201a765f3d4cdb3646fbe37593074965c9efa8a5c6ae29d8645",
@@ -151,9 +155,7 @@ def _checkpoint_file(root: Path, checkpoint_path: str) -> Path:
     return root / original.parent.name / original.name
 
 
-def capture_render_provenance(
-    source_repository_root: str | Path, asset_repository_root: str | Path
-) -> dict[str, Any]:
+def capture_render_provenance() -> dict[str, Any]:
     """Derive immutable revisions after checking every render-affecting repo path."""
     def inspect(path: str | Path, scope: Sequence[str], label: str) -> str:
         root = Path(path).resolve()
@@ -180,9 +182,12 @@ def capture_render_provenance(
             )
         return _require_revision(git("rev-parse", "HEAD"), field=f"renderer {label}")
 
+    expected_asset_root = SOURCE_ROOT.parent / "safe_impact_manipulation"
+    if ASSET_ROOT != expected_asset_root.resolve():
+        raise ValueError("resolved task asset root is not the source checkout sibling")
     return {
-        "code_revision": inspect(source_repository_root, SOURCE_SCOPE, "source"),
-        "asset_revision": inspect(asset_repository_root, ASSET_SCOPE, "asset"),
+        "code_revision": inspect(SOURCE_ROOT, SOURCE_SCOPE, "source"),
+        "asset_revision": inspect(ASSET_ROOT, ASSET_SCOPE, "asset"),
         "source_scope": list(SOURCE_SCOPE),
         "asset_scope": list(ASSET_SCOPE),
         "device": "cpu",
@@ -191,11 +196,9 @@ def capture_render_provenance(
 
 def require_unchanged_render_provenance(
     before: Mapping[str, Any],
-    source_repository_root: str | Path,
-    asset_repository_root: str | Path,
 ) -> None:
     """Fail if a render-affecting revision or worktree path changed during the batch."""
-    after = capture_render_provenance(source_repository_root, asset_repository_root)
+    after = capture_render_provenance()
     if dict(before) != after:
         raise ValueError("renderer source or asset revision changed during batch")
 
@@ -243,7 +246,9 @@ def build_inventory(
                 campaign, raw
             )
             checkpoint_sha256 = _require_sha256(raw["checkpoint_sha256"], field="checkpoint")
-            checkpoint_file = _checkpoint_file(Path(checkpoint_roots[campaign]), raw["checkpoint_path"])
+            checkpoint_file = _checkpoint_file(
+                Path(checkpoint_roots[campaign]).resolve(), raw["checkpoint_path"]
+            )
             if not checkpoint_file.is_file():
                 raise ValueError(f"accepted checkpoint is missing: {checkpoint_file}")
             if _sha256(checkpoint_file) != checkpoint_sha256:
@@ -309,15 +314,26 @@ def write_inventory(rows: Sequence[Mapping[str, Any]], path: str | Path) -> Path
     digest = hashlib.sha256(payload).hexdigest()
     sidecar = path.with_suffix(path.suffix + ".sha256")
     sidecar_payload = f"{digest}  {path.name}\n".encode("utf-8")
-    if path.exists() or sidecar.exists():
-        if not path.is_file() or not sidecar.is_file():
-            raise ValueError("existing inventory and sidecar must both be regular files")
-        if path.read_bytes() != payload or sidecar.read_bytes() != sidecar_payload:
-            raise ValueError("existing inventory or sidecar differs from frozen bytes")
-        return sidecar
-    _atomic_write(path, payload)
-    _atomic_write(sidecar, sidecar_payload)
+    if path.exists() and (not path.is_file() or path.read_bytes() != payload):
+        raise ValueError("existing inventory differs from frozen bytes")
+    if sidecar.exists() and (
+        not sidecar.is_file() or sidecar.read_bytes() != sidecar_payload
+    ):
+        raise ValueError("existing inventory sidecar differs from frozen bytes")
+    if not path.exists():
+        _atomic_write(path, payload)
+    if not sidecar.exists():
+        _atomic_write(sidecar, sidecar_payload)
     return sidecar
+
+
+def run_renderer_process(arguments: Sequence[str]) -> None:
+    """Execute the renderer from the checkout whose source was provenance-checked."""
+    subprocess.run(
+        [sys.executable, str(SOURCE_ROOT / "scripts/render_policy.py"), *arguments],
+        cwd=SOURCE_ROOT,
+        check=True,
+    )
 
 
 def resume_leaf_shape_is_valid(leaf: str | Path, metadata: Mapping[str, Any]) -> bool:
@@ -356,6 +372,36 @@ def replace_policy_leaf(staged_leaf: str | Path, final_leaf: str | Path) -> None
         raise
     if backup.exists():
         shutil.rmtree(backup)
+
+
+def make_policy_staging_root(output_root: str | Path) -> Path:
+    """Create same-filesystem scratch beside, never inside, the library root."""
+    output_root = Path(output_root).resolve()
+    output_root.parent.mkdir(parents=True, exist_ok=True)
+    return Path(
+        tempfile.mkdtemp(
+            prefix=f".{output_root.name}.policy-staging-", dir=output_root.parent
+        )
+    )
+
+
+def format_validation_counters(
+    rows: Sequence[Mapping[str, Any]], validation: Mapping[str, Any]
+) -> str:
+    """Format the six required counters after fail-closed validation succeeds."""
+    artifacts = validation["artifacts"]
+    counters = (
+        ("policies", len(rows)),
+        ("unique_checkpoint_sha256", len({row["checkpoint_sha256"] for row in rows})),
+        (
+            "unique_reset_state_digest",
+            len({artifact["reset_state_digest"] for artifact in artifacts}),
+        ),
+        ("missing_artifacts", 0),
+        ("invalid_video", 0),
+        ("second_episode_contamination", 0),
+    )
+    return "\n".join(f"{name}={value}" for name, value in counters)
 
 
 def _policy_artifact_is_valid(
@@ -419,7 +465,7 @@ def run_single_policy_renderer(
     device: str = "cpu",
 ) -> bool:
     """Render one policy, returning True only when a fully validated leaf was reused."""
-    output_root = Path(output_root)
+    output_root = Path(output_root).resolve()
     if _policy_artifact_is_valid(
         output_root,
         row,
@@ -430,14 +476,12 @@ def run_single_policy_renderer(
     if device != "cpu" or render_provenance.get("device") != "cpu":
         raise ValueError("the fixed-reset library is restricted to CPU rendering")
     output_root.mkdir(parents=True, exist_ok=True)
-    staging_root = Path(tempfile.mkdtemp(prefix=".policy-staging-", dir=output_root))
+    staging_root = make_policy_staging_root(output_root)
     staged_leaf = policy_artifact_dir(staging_root, row)
     staged_leaf.mkdir(parents=True)
     final_leaf = policy_artifact_dir(output_root, row)
     try:
-        command = [
-            sys.executable,
-            "scripts/render_policy.py",
+        arguments = [
             "--checkpoint-file", row["_checkpoint_file"],
             "--campaign", row["campaign"],
             "--arm", row["arm"],
@@ -448,11 +492,11 @@ def run_single_policy_renderer(
             "--task", row["task"],
             "--out-dir", str(staged_leaf),
             "--steps", str(ROLLOUT_CONTROL_STEPS),
-            "--fixed-reset-envelope", str(FIXED_RESET_ENVELOPE),
+            "--fixed-reset-envelope", str(FIXED_RESET_PATH),
             "--metadata-provenance", "fixed-reset 56-policy library; CPU single-env reinference",
             "--device", device,
         ]
-        subprocess.run(command, check=True)
+        run_renderer_process(arguments)
         metadata_path = staged_leaf / "metadata.json"
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         metadata["training_provenance"] = {
@@ -486,8 +530,6 @@ def render_library(
     checkpoint_roots: Mapping[str, str | Path],
     output_root: str | Path,
     *,
-    asset_repository_root: str | Path,
-    source_repository_root: str | Path = ".",
     device: str = "cpu",
     expected_manifest_sha256: Mapping[str, str] = EXPECTED_MANIFEST_SHA256,
 ) -> dict[str, Any]:
@@ -501,10 +543,8 @@ def render_library(
     validate_inventory(rows)
     output_root = Path(output_root)
     write_inventory(rows, output_root / "checkpoint_inventory.tsv")
-    fixed_reset = load_fixed_reset(FIXED_RESET_ENVELOPE)
-    render_provenance = capture_render_provenance(
-        source_repository_root, asset_repository_root
-    )
+    fixed_reset = load_fixed_reset(FIXED_RESET_PATH)
+    render_provenance = capture_render_provenance()
     reused = 0
     try:
         for row in rows:
@@ -516,11 +556,14 @@ def render_library(
                 device=device,
             )
     finally:
-        require_unchanged_render_provenance(
-            render_provenance, source_repository_root, asset_repository_root
-        )
+        require_unchanged_render_provenance(render_provenance)
     validated = validate_policy_artifacts(output_root, rows)
-    return {"policies": len(rows), "reused": reused, "validated": validated}
+    return {
+        "policies": len(rows),
+        "reused": reused,
+        "validated": validated,
+        "counters": format_validation_counters(rows, validated),
+    }
 
 
 @dataclass(frozen=True)
@@ -529,8 +572,6 @@ class Cfg:
     fq3_manifest: str
     fq4_checkpoint_root: str
     fq3_checkpoint_root: str
-    asset_repository_root: str
-    source_repository_root: str = "."
     output_root: str = str(OUTPUT_ROOT)
     device: str = "cpu"
 
@@ -541,11 +582,9 @@ def main(cfg: Cfg) -> None:
         cfg.fq3_manifest,
         {"fq4x8": cfg.fq4_checkpoint_root, "fq3x8": cfg.fq3_checkpoint_root},
         cfg.output_root,
-        asset_repository_root=cfg.asset_repository_root,
-        source_repository_root=cfg.source_repository_root,
         device=cfg.device,
     )
-    print(f"policies={result['policies']} reused={result['reused']}")
+    print(result["counters"])
 
 
 if __name__ == "__main__":
