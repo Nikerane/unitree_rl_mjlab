@@ -182,6 +182,39 @@ def corrupt_one_metadata_reset_digest(root: Path) -> None:
     _write_metadata(path, payload)
 
 
+def _valid_contract_metadata(row: dict) -> dict:
+    return {
+        "task": TASKS[(row["campaign"], row["arm"])],
+        "code_revision": RENDER_PROVENANCE["code_revision"],
+        "asset_revision": RENDER_PROVENANCE["asset_revision"],
+        "presentation_generator_revision": PRESENTATION_REVISION,
+        "renderer_contract": RENDER_CONTRACT,
+        "timing": TIMING,
+        "rollout": {
+            "requested_control_steps": 80,
+            "executed_control_steps": 0,
+            "frame_count": 1,
+            "auto_reset_enabled": False,
+            "terminal_boundary": {
+                "detected": False,
+                "step": None,
+                "reason": "step_limit",
+            },
+        },
+        "output_dimensions_px": {"frame": [960, 720], "montage": [960, 720]},
+        "renderer_provenance": copy.deepcopy(RENDER_PROVENANCE),
+        "training_provenance": {
+            key: row[key]
+            for key in (
+                "checkpoint_path",
+                "training_code_revision",
+                "training_asset_revision",
+                "accepted_training_manifest_sha256",
+            )
+        },
+    }
+
+
 def test_inventory_requires_exact_56_members():
     """Removing one registered policy must make the artifact set ineligible."""
     rows = expected_rows()
@@ -372,6 +405,40 @@ def test_final_validator_cross_binds_renderer_and_training_provenance(
 
     with pytest.raises(ValueError, match=message):
         validate_policy_artifacts(tmp_path, expected_rows())
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda renderer: renderer.pop("source_scope"),
+        lambda renderer: renderer.update({"asset_scope": ["other/assets"]}),
+        lambda renderer: renderer.update({"unreviewed_scope": ["extra"]}),
+    ],
+)
+def test_metadata_contract_requires_complete_renderer_provenance_schema(
+    tmp_path, mutation
+):
+    """Final and resume validation must bind the same complete renderer schema."""
+    row = expected_rows()[0]
+    metadata = _valid_contract_metadata(row)
+    mutation(metadata["renderer_provenance"])
+
+    with pytest.raises(ValueError, match="renderer provenance"):
+        library_driver._validate_metadata_contract(metadata, row, tmp_path / "leaf")
+
+
+def test_metadata_contract_rejects_missing_frozen_training_inventory_fields(tmp_path):
+    """Missing metadata and row fields cannot agree merely because both read as None."""
+    complete_row = expected_rows()[0]
+    row = {
+        key: complete_row[key]
+        for key in ("campaign", "arm", "training_seed", "checkpoint_sha256")
+    }
+    metadata = _valid_contract_metadata(complete_row)
+    metadata["training_provenance"] = {}
+
+    with pytest.raises(ValueError, match="training provenance"):
+        library_driver._validate_metadata_contract(metadata, row, tmp_path / "leaf")
 
 
 @pytest.mark.parametrize("malformed_artifacts", [None, [], "not-a-map"])

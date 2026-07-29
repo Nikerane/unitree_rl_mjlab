@@ -27,6 +27,8 @@ from evaluation.analysis.fixed_reset_video_library import (
     ARTIFACT_FILENAMES,
     EXPECTED,
     FIXED_RESET_ENVELOPE,
+    RENDERER_ASSET_SCOPE,
+    RENDERER_SOURCE_SCOPE,
     _metadata_digest,
     _readable_artifact,
     _sha256,
@@ -86,8 +88,8 @@ SHORT_BY_CAMPAIGN_ARM = {
     ("fq3x8", "B8"): "b8",
     ("fq3x8", "FQ"): "fq",
 }
-SOURCE_SCOPE = ("src", "scripts", "evaluation/analysis")
-ASSET_SCOPE = ("hammer_z1_env/assets",)
+SOURCE_SCOPE = RENDERER_SOURCE_SCOPE
+ASSET_SCOPE = RENDERER_ASSET_SCOPE
 FINALIZED_FILES = frozenset((*ARTIFACT_FILENAMES, "metadata.json"))
 ROLLOUT_CONTROL_STEPS = 80
 

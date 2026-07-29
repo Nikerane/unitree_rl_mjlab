@@ -40,6 +40,11 @@ FIXED_RESET_ENVELOPE = SOURCE_ROOT / (
 APPROVED_FIXED_RESET_DIGEST = (
     "bde511ec2adc42e5365e1e46f45ff1fb43223a93c31c6fbfb4580352e445e319"
 )
+RENDERER_SOURCE_SCOPE = ("src", "scripts", "evaluation/analysis")
+RENDERER_ASSET_SCOPE = ("hammer_z1_env/assets",)
+RENDERER_PROVENANCE_FIELDS = frozenset(
+    ("code_revision", "asset_revision", "source_scope", "asset_scope", "device")
+)
 ARTIFACT_FILENAMES = ("policy.mp4", "montage.png", "trajectory.png", "trace.npz")
 RENDERER_CONTRACT = {
     "version": 1,
@@ -477,6 +482,11 @@ def _is_revision(value: object) -> bool:
     return len(text) == 40 and all(character in "0123456789abcdef" for character in text)
 
 
+def _is_sha256(value: object) -> bool:
+    text = str(value)
+    return len(text) == 64 and all(character in "0123456789abcdef" for character in text)
+
+
 def _validate_metadata_provenance(
     metadata: Mapping[str, Any],
     row: Mapping[str, Any],
@@ -488,6 +498,12 @@ def _validate_metadata_provenance(
     renderer = metadata.get("renderer_provenance")
     if not isinstance(renderer, Mapping):
         raise ValueError(f"artifact renderer provenance missing: {leaf}")
+    if (
+        set(renderer) != RENDERER_PROVENANCE_FIELDS
+        or renderer.get("source_scope") != list(RENDERER_SOURCE_SCOPE)
+        or renderer.get("asset_scope") != list(RENDERER_ASSET_SCOPE)
+    ):
+        raise ValueError(f"artifact renderer provenance scope mismatch: {leaf}")
     for key in ("code_revision", "asset_revision"):
         if not _is_revision(renderer.get(key)) or renderer.get(key) != metadata.get(key):
             raise ValueError(f"artifact renderer provenance {key} mismatch: {leaf}")
@@ -505,8 +521,18 @@ def _validate_metadata_provenance(
         "training_asset_revision",
         "accepted_training_manifest_sha256",
     )
-    if not isinstance(training, Mapping) or any(
-        training.get(key) != row.get(key) for key in fields
+    try:
+        expected_training = {key: row[key] for key in fields}
+    except KeyError as error:
+        raise ValueError(f"artifact training provenance inventory incomplete: {leaf}") from error
+    if (
+        not isinstance(training, Mapping)
+        or any(training.get(key) != expected_training[key] for key in fields)
+        or not isinstance(expected_training["checkpoint_path"], str)
+        or not expected_training["checkpoint_path"]
+        or not _is_revision(expected_training["training_code_revision"])
+        or not _is_revision(expected_training["training_asset_revision"])
+        or not _is_sha256(expected_training["accepted_training_manifest_sha256"])
     ):
         raise ValueError(f"artifact training provenance mismatch: {leaf}")
 
