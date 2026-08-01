@@ -140,6 +140,45 @@ register_mjlab_task(
     runner_cls=HammerOnPolicyRunner,
 )
 
+# Cartesian straight-waypoint study: fresh matched F8 controls share the same
+# always-on tracker and policy observations; only C-Gate enables gate progress.
+register_mjlab_task(
+    task_id="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0",
+    env_cfg=z1_hammer_env_cfg(
+        cat_impulse=True, event_correct=True, event_linear=True, guideline=True
+    ),
+    play_env_cfg=z1_hammer_env_cfg(
+        play=True,
+        cat_impulse=True,
+        event_correct=True,
+        event_linear=True,
+        guideline=True,
+    ),
+    rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+    runner_cls=HammerOnPolicyRunner,
+)
+
+register_mjlab_task(
+    task_id="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate",
+    env_cfg=z1_hammer_env_cfg(
+        cat_impulse=True,
+        event_correct=True,
+        event_linear=True,
+        guideline=True,
+        gate_reward=True,
+    ),
+    play_env_cfg=z1_hammer_env_cfg(
+        play=True,
+        cat_impulse=True,
+        event_correct=True,
+        event_linear=True,
+        guideline=True,
+        gate_reward=True,
+    ),
+    rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+    runner_cls=HammerOnPolicyRunner,
+)
+
 # F0 and D0 are fresh copies of F8 with exactly one maximize-term weight
 # removed.  They retain the linear event readers and fixed-impedance plant.
 _f0_env_cfg = z1_hammer_env_cfg(

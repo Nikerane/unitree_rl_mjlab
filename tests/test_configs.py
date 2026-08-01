@@ -6,8 +6,11 @@ No MuJoCo model compilation, no mjlab env creation needed.
 
 import copy
 import dataclasses
+import inspect
+import pickle
 
 import pytest
+import torch
 
 from mjlab.actuator import BuiltinPositionActuatorCfg
 from mjlab.envs.mdp.actions import DifferentialIKActionCfg
@@ -37,9 +40,17 @@ from src.tasks.hammer.nail_block import (
 from src.tasks.hammer.config.z1.env_cfgs import (
     I_REF_DELIVERED,
     I_REF_FIRST_STRIKE_SUCCESS,
+    _guideline_observation,
     z1_hammer_env_cfg,
 )
 from src.tasks.hammer.mdp.first_strike import FirstStrikeEventTracker
+from src.tasks.hammer.mdp.guideline import (
+    WaypointProgressTracker,
+    completed_gate_fraction,
+    guideline_perpendicular_error,
+    next_gate_vector,
+    ordered_gate_progress_reward,
+)
 from src.tasks.hammer.mdp.rewards import (
     DeliveredImpulseTerm,
     FirstStrikeDeliveredRewardTerm,
@@ -487,6 +498,249 @@ class TestArmCompositionGuards:
         )
         assert "first_strike" in cfg.metrics
         assert cfg.rewards["delivered_impulse"].params["saturate"] is True
+
+    def test_gate_reward_requires_guideline_tracker(self):
+        with pytest.raises(ValueError, match="gate_reward.*guideline"):
+            z1_hammer_env_cfg(gate_reward=True)
+
+    def test_guideline_requires_first_strike_tracker(self):
+        with pytest.raises(ValueError, match="guideline.*first_strike"):
+            z1_hammer_env_cfg(guideline=True)
+
+
+class TestCartesianGuidelineStudy:
+    _C0 = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0"
+    _C_GATE = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate"
+    _F8 = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear"
+    _GUIDELINE_OBSERVATIONS = {
+        "next_gate_vector": (next_gate_vector, 3),
+        "completed_gate_fraction": (completed_gate_fraction, 1),
+        "guideline_perpendicular_error": (guideline_perpendicular_error, 1),
+    }
+    _F8_REWARDS = {
+        "approach": 0.1,
+        "nail_driven": 0.5,
+        "nail_depth_delta": 600.0,
+        "impact_progress": 8.0,
+        "completion": 100.0,
+        "action_rate": -0.01,
+        "joint_pos_limits": -10.0,
+        "delivered_impulse": 2.0,
+    }
+    _LEGACY_FACTORY_PARAMETERS = (
+        "play",
+        "imitation",
+        "vel_penalty",
+        "cat_vel",
+        "cat_substep",
+        "vel_hard_term",
+        "cat_soft",
+        "cat_impulse",
+        "dcmotor",
+        "no_terminate",
+        "event_correct",
+        "event_linear",
+        "first_strike_legacy",
+        "event_quality",
+        "quality_instrumentation",
+    )
+    _LEGACY_TASK_IDS = {
+        "Unitree-Z1-Hammer",
+        "Unitree-Z1-Hammer-Track",
+        "Unitree-Z1-Hammer-VPenalty",
+        "Unitree-Z1-Hammer-CaT",
+        "Unitree-Z1-Hammer-DcMotor",
+        "Unitree-Z1-Hammer-CaT-Substep",
+        "Unitree-Z1-Hammer-VelHardTerm",
+        "Unitree-Z1-Hammer-CaT-Soft",
+        "Unitree-Z1-Hammer-CaT-Impulse",
+        "Unitree-Z1-Hammer-CaT-Impulse-FirstStrike-Legacy",
+        "Unitree-Z1-Hammer-CaT-Impulse-Event",
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear",
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0",
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0",
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Quality",
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Bounded",
+        "Unitree-Z1-Hammer-CaT-Impulse-Track",
+        "Unitree-Z1-Hammer-CaT-Impulse-NoTerm",
+    }
+
+    @staticmethod
+    def _actuator_signature(cfg):
+        return tuple(
+            (
+                type(act).__name__,
+                act.stiffness,
+                act.damping,
+                act.effort_limit,
+                act.armature,
+                tuple(act.target_names_expr),
+            )
+            for act in cfg.scene.entities["robot"].articulation.actuators
+        )
+
+    @staticmethod
+    def _normalize(value):
+        if dataclasses.is_dataclass(value):
+            return {
+                field.name: TestCartesianGuidelineStudy._normalize(
+                    getattr(value, field.name)
+                )
+                for field in dataclasses.fields(value)
+            }
+        if isinstance(value, dict):
+            return {
+                key: TestCartesianGuidelineStudy._normalize(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, (list, tuple)):
+            return tuple(
+                TestCartesianGuidelineStudy._normalize(item) for item in value
+            )
+        if callable(value):
+            return (value.__module__, value.__qualname__)
+        return value
+
+    def test_factory_appends_flags_without_changing_legacy_signature(self):
+        parameters = inspect.signature(z1_hammer_env_cfg).parameters
+        assert tuple(parameters) == self._LEGACY_FACTORY_PARAMETERS + (
+            "guideline",
+            "gate_reward",
+        )
+        assert all(
+            parameters[name].default is False
+            for name in self._LEGACY_FACTORY_PARAMETERS
+        )
+        assert parameters["guideline"].default is False
+        assert parameters["gate_reward"].default is False
+
+    def test_new_registration_adds_only_two_task_ids(self):
+        registered_z1 = {
+            task for task in list_tasks() if task.startswith("Unitree-Z1-Hammer")
+        }
+        assert registered_z1 == self._LEGACY_TASK_IDS | {self._C0, self._C_GATE}
+
+    @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
+    @pytest.mark.parametrize("task_id", (_C0, _C_GATE))
+    def test_both_arms_share_exact_guideline_state_and_f8_contract(
+        self, task_id, play
+    ):
+        cfg = load_env_cfg(task_id, play=play)
+        f8 = load_env_cfg(self._F8, play=play)
+
+        for group_name in ("actor", "critic"):
+            terms = cfg.observations[group_name].terms
+            added = set(terms) - set(f8.observations[group_name].terms)
+            assert added == set(self._GUIDELINE_OBSERVATIONS)
+            for name, (reader, width) in self._GUIDELINE_OBSERVATIONS.items():
+                assert terms[name].func is _guideline_observation
+                assert terms[name].params == {"reader": reader, "width": width}
+
+        added_metrics = set(cfg.metrics) - set(f8.metrics)
+        assert added_metrics == {"waypoint_progress"}
+        metric_names = list(cfg.metrics)
+        assert metric_names.index("waypoint_progress") == metric_names.index("first_strike") + 1
+        waypoint = cfg.metrics["waypoint_progress"]
+        assert waypoint.func is WaypointProgressTracker
+        assert waypoint.per_substep is True
+        assert waypoint.params["robot_cfg"].site_names == (HAMMER_HEAD_SITE_NAME,)
+        assert waypoint.params["nail_cfg"].site_names == ("nail_top",)
+
+        expected_reward_keys = set(self._F8_REWARDS)
+        if task_id == self._C_GATE:
+            expected_reward_keys.add("r_gate")
+        assert set(cfg.rewards) == expected_reward_keys
+        assert {
+            name: cfg.rewards[name].weight for name in self._F8_REWARDS
+        } == self._F8_REWARDS
+        for name in self._F8_REWARDS:
+            assert cfg.rewards[name].func is f8.rewards[name].func
+            assert cfg.rewards[name].params == f8.rewards[name].params
+        assert "r_imit" not in cfg.rewards
+
+        assert set(cfg.actions) == {"ik_hammer_head"}
+        ik = cfg.actions["ik_hammer_head"]
+        assert isinstance(ik, DifferentialIKActionCfg)
+        assert repr(cfg.actions) == repr(f8.actions)
+        assert ik.delta_pos_scale == pytest.approx(0.15)
+        assert ik.orientation_weight == pytest.approx(0.0)
+        assert self._actuator_signature(cfg) == self._actuator_signature(f8) == (
+            (
+                "BuiltinPositionActuatorCfg",
+                1000.0,
+                100.0,
+                30.0,
+                0.01,
+                ("joint1", "joint3", "joint4", "joint5", "joint6"),
+            ),
+            ("BuiltinPositionActuatorCfg", 1500.0, 150.0, 60.0, 0.02, ("joint2",)),
+            ("BuiltinPositionActuatorCfg", 100.0, 20.0, 30.0, 0.005, ("jointGripper",)),
+        )
+        assert cfg.metrics["cat_soft"].params["imp_max_p"] == 0.0
+
+    def test_constructor_probe_is_narrow_and_runtime_reader_still_fails_closed(self):
+        from types import SimpleNamespace
+
+        cfg = load_env_cfg(self._C0)
+        term = cfg.observations["actor"].terms["next_gate_vector"]
+        constructing = SimpleNamespace(num_envs=2, device="cpu")
+        assert term.func(constructing, **term.params).shape == (2, 3)
+        assert torch.count_nonzero(term.func(constructing, **term.params)) == 0
+
+        runtime_without_tracker = SimpleNamespace(
+            num_envs=2, device="cpu", observation_manager=object()
+        )
+        with pytest.raises(RuntimeError, match="needs WaypointProgressTracker"):
+            term.func(runtime_without_tracker, **term.params)
+
+    def test_guideline_observation_term_survives_pickle_round_trip(self):
+        cfg = load_env_cfg(self._C0)
+        term = cfg.observations["actor"].terms["next_gate_vector"]
+        restored = pickle.loads(pickle.dumps(term))
+        assert restored.func is term.func
+        assert restored.params["reader"] is next_gate_vector
+        assert restored.params["width"] == 3
+
+    def test_only_cgate_enables_ordered_gate_reward(self):
+        c0 = load_env_cfg(self._C0)
+        cgate = load_env_cfg(self._C_GATE)
+        assert "r_gate" not in c0.rewards
+        reward = cgate.rewards["r_gate"]
+        assert reward.func is ordered_gate_progress_reward
+        assert reward.weight == pytest.approx(8.0)
+        assert reward.params == {}
+
+    @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
+    def test_c0_and_cgate_whole_configs_differ_only_by_gate_reward(self, play):
+        c0 = load_env_cfg(self._C0, play=play)
+        cgate = load_env_cfg(self._C_GATE, play=play)
+        cgate.rewards.pop("r_gate")
+        assert self._normalize(cgate) == self._normalize(c0)
+
+    def test_legacy_f8_remains_exact(self):
+        f8 = load_env_cfg(self._F8)
+        assert set(f8.rewards) == set(self._F8_REWARDS)
+        assert {name: term.weight for name, term in f8.rewards.items()} == self._F8_REWARDS
+        assert set(f8.observations["actor"].terms) == {
+            "joint_pos",
+            "joint_vel",
+            "ee_pos",
+            "ee_vel",
+            "head_pos",
+            "head_vel",
+            "nail_top_pos",
+            "nail_depth",
+            "strike_phase",
+            "strike_ref_error",
+            "actions",
+        }
+        assert set(f8.observations["critic"].terms) == set(
+            f8.observations["actor"].terms
+        )
+        assert "waypoint_progress" not in f8.metrics
+        assert "r_gate" not in f8.rewards
+        assert "r_imit" not in f8.rewards
+        assert f8.metrics["cat_soft"].params["imp_max_p"] == 0.0
 
 
 class TestFirstStrikeEventArm:

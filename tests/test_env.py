@@ -16,6 +16,30 @@ import torch
 pytestmark = pytest.mark.integration
 
 
+_GUIDELINE_TASK_IDS = (
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0",
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate",
+)
+
+
+@pytest.fixture(scope="module")
+def guideline_envs_cpu():
+    """Construct both registered Cartesian guideline arms on CPU."""
+    from mjlab.envs import ManagerBasedRlEnv
+    from mjlab.tasks.registry import load_env_cfg
+
+    envs = {}
+    try:
+        for task_id in _GUIDELINE_TASK_IDS:
+            cfg = load_env_cfg(task_id)
+            cfg.scene.num_envs = 1
+            envs[task_id] = ManagerBasedRlEnv(cfg, device="cpu")
+        yield envs
+    finally:
+        for env in envs.values():
+            env.close()
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -77,6 +101,137 @@ class TestObservations:
             assert torch.isfinite(tensor).all(), (
                 f"Non-finite values in obs['{key}']"
             )
+
+
+class TestCartesianGuidelineConstruction:
+    @pytest.mark.parametrize("task_id", _GUIDELINE_TASK_IDS)
+    def test_registered_arm_shapes_and_finite_observations(
+        self, guideline_envs_cpu, task_id
+    ):
+        env = guideline_envs_cpu[task_id]
+        obs, _ = env.reset(seed=20260801)
+        assert env.action_manager.action.shape == (1, 3)
+        assert obs["actor"].shape == (1, 42)
+        assert obs["critic"].shape == (1, 42)
+        assert torch.isfinite(obs["actor"]).all()
+        assert torch.isfinite(obs["critic"]).all()
+
+    def test_same_seed_initial_guideline_observations_match(self, guideline_envs_cpu):
+        initial = {}
+        for task_id, env in guideline_envs_cpu.items():
+            obs, _ = env.reset(seed=20260801)
+            initial[task_id] = {
+                group: obs[group][:, -5:].clone() for group in ("actor", "critic")
+            }
+
+        c0, cgate = _GUIDELINE_TASK_IDS
+        torch.testing.assert_close(initial[c0]["actor"], initial[cgate]["actor"])
+        torch.testing.assert_close(initial[c0]["critic"], initial[cgate]["critic"])
+
+    def test_training_reset_observation_previews_post_forward_geometry(
+        self, guideline_envs_cpu
+    ):
+        env = guideline_envs_cpu[_GUIDELINE_TASK_IDS[0]]
+        obs, _ = env.reset(seed=20260802)
+        robot = env.scene["robot"]
+        nail = env.scene["nail_block"]
+        head_ids, _ = robot.find_sites(("hammer_head_site",))
+        nail_ids, _ = nail.find_sites(("nail_top",))
+        head = robot.data.site_pos_w[:, head_ids].squeeze(1)
+        nail_top = nail.data.site_pos_w[:, nail_ids].squeeze(1)
+        expected = torch.cat(
+            (
+                (nail_top - head) / 7.0,
+                torch.zeros((1, 1), device=env.device),
+                torch.zeros((1, 1), device=env.device),
+            ),
+            dim=-1,
+        )
+        torch.testing.assert_close(obs["actor"][:, -5:], expected)
+        torch.testing.assert_close(obs["critic"][:, -5:], expected)
+
+    @pytest.mark.parametrize("task_id", _GUIDELINE_TASK_IDS)
+    def test_actor_and_critic_reads_cannot_advance_tracker(
+        self, guideline_envs_cpu, task_id
+    ):
+        from src.tasks.hammer.mdp.guideline import _ENV_GUIDELINE_ATTR
+
+        env = guideline_envs_cpu[task_id]
+        env.reset(seed=20260801)
+        tracker = getattr(env, _ENV_GUIDELINE_ATTR)
+        state_names = (
+            "initialized",
+            "entry",
+            "nail",
+            "previous_head",
+            "next_gate",
+            "newly_crossed",
+            "disarmed",
+        )
+        before = {name: getattr(tracker, name).clone() for name in state_names}
+
+        for _ in range(3):
+            env.observation_manager.compute_group("actor")
+            env.observation_manager.compute_group("critic")
+
+        for name, expected in before.items():
+            torch.testing.assert_close(getattr(tracker, name), expected)
+
+    def test_runtime_observation_still_fails_closed_without_tracker(
+        self, guideline_envs_cpu
+    ):
+        from src.tasks.hammer.mdp.guideline import _ENV_GUIDELINE_ATTR
+
+        env = guideline_envs_cpu[_GUIDELINE_TASK_IDS[0]]
+        env.reset(seed=20260801)
+        tracker = getattr(env, _ENV_GUIDELINE_ATTR)
+        delattr(env, _ENV_GUIDELINE_ATTR)
+        try:
+            with pytest.raises(RuntimeError, match="needs WaypointProgressTracker"):
+                env.observation_manager.compute_group("actor")
+        finally:
+            setattr(env, _ENV_GUIDELINE_ATTR, tracker)
+
+    def test_same_action_tape_keeps_tracker_and_dynamics_treatment_invariant(
+        self, guideline_envs_cpu
+    ):
+        from src.tasks.hammer.mdp.guideline import _ENV_GUIDELINE_ATTR
+
+        state_names = (
+            "initialized",
+            "entry",
+            "nail",
+            "previous_head",
+            "next_gate",
+            "newly_crossed",
+            "disarmed",
+        )
+        action_tape = (
+            torch.zeros((1, 3)),
+            torch.tensor([[0.01, -0.02, -0.05]]),
+            torch.tensor([[-0.01, 0.01, -0.03]]),
+        )
+        traces = {}
+        for task_id, env in guideline_envs_cpu.items():
+            env.reset(seed=20260803)
+            tracker = getattr(env, _ENV_GUIDELINE_ATTR)
+            trace = []
+            for action in action_tape:
+                env.step(action)
+                trace.append(
+                    {
+                        **{name: getattr(tracker, name).clone() for name in state_names},
+                        "robot_joint_pos": env.scene["robot"].data.joint_pos.clone(),
+                        "nail_joint_pos": env.scene["nail_block"].data.joint_pos.clone(),
+                    }
+                )
+            traces[task_id] = trace
+
+        c0, cgate = _GUIDELINE_TASK_IDS
+        for c0_step, cgate_step in zip(traces[c0], traces[cgate], strict=True):
+            assert c0_step.keys() == cgate_step.keys()
+            for name in c0_step:
+                torch.testing.assert_close(c0_step[name], cgate_step[name])
 
 
 # ---------------------------------------------------------------------------

@@ -1,11 +1,13 @@
 """Unitree Z1 hammer-nail environment configurations."""
 
+import torch
+
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import DifferentialIKActionCfg
 from mjlab.envs.mdp.curriculums import reward_curriculum
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.metrics_manager import MetricsTermCfg
-from mjlab.managers.observation_manager import ObservationGroupCfg
+from mjlab.managers.observation_manager import ObservationGroupCfg, ObservationTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.managers.termination_manager import TerminationTermCfg
@@ -58,6 +60,13 @@ I_REF_DELIVERED: float = 0.6094  # N·s
 I_REF_FIRST_STRIKE_SUCCESS: float = 0.3088  # N·s
 
 
+def _guideline_observation(env, reader, width: int):
+  """Allow ObservationManager's pre-MetricsManager shape probe only."""
+  if not hasattr(env, "observation_manager") and not hasattr(env, "metrics_manager"):
+    return torch.zeros((env.num_envs, width), device=env.device)
+  return reader(env)
+
+
 def _wire_site(cfg, obs_keys: tuple[str, ...], param_key: str, site_name: str) -> None:
   """Set ``site_names=(site_name,)`` on the given obs terms' ``param_key`` SceneEntityCfg, across
   every observation group that carries the term (actor + critic share the term objects)."""
@@ -84,6 +93,8 @@ def z1_hammer_env_cfg(
   first_strike_legacy: bool = False,
   event_quality: bool = False,
   quality_instrumentation: bool = False,
+  guideline: bool = False,
+  gate_reward: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Create Z1 hammer-nail task configuration.
 
@@ -138,6 +149,10 @@ def z1_hammer_env_cfg(
     raise ValueError(
       "z1_hammer_env_cfg: first_strike_legacy cannot compose with "
       "event_correct or event_linear."
+    )
+  if gate_reward and not guideline:
+    raise ValueError(
+      "z1_hammer_env_cfg: gate_reward requires guideline=True"
     )
   cfg = make_hammer_env_cfg(imitation=imitation)
 
@@ -335,6 +350,19 @@ def z1_hammer_env_cfg(
         reduce="last",
         params=first_strike_params,
       )
+      if guideline:
+        cfg.metrics["waypoint_progress"] = MetricsTermCfg(
+          func=hammer_mdp.WaypointProgressTracker,
+          per_substep=True,
+          params={
+            "robot_cfg": SceneEntityCfg(
+              "robot", site_names=(HAMMER_HEAD_SITE_NAME,)
+            ),
+            "nail_cfg": SceneEntityCfg(
+              "nail_block", site_names=(NAIL_TOP_SITE_NAME,)
+            ),
+          },
+        )
 
     # Robot-side per-joint reaction impulse Λ_j = Σ|qfrc_constraint_j|·dt, contact-anchored, 500 Hz.
     cfg.metrics["substep_impulse"] = MetricsTermCfg(
@@ -476,6 +504,36 @@ def z1_hammer_env_cfg(
       cfg.rewards["delivered_impulse"].func = (
         hammer_mdp.FirstStrikeLegacyDeliveredRewardTerm
       )
+
+  if guideline:
+    if "first_strike" not in cfg.metrics:
+      raise ValueError(
+        "z1_hammer_env_cfg: guideline requires the existing first_strike metric"
+      )
+    guideline_observations = {
+      "next_gate_vector": ObservationTermCfg(
+        func=_guideline_observation,
+        params={"reader": hammer_mdp.next_gate_vector, "width": 3},
+      ),
+      "completed_gate_fraction": ObservationTermCfg(
+        func=_guideline_observation,
+        params={"reader": hammer_mdp.completed_gate_fraction, "width": 1},
+      ),
+      "guideline_perpendicular_error": ObservationTermCfg(
+        func=_guideline_observation,
+        params={"reader": hammer_mdp.guideline_perpendicular_error, "width": 1},
+      ),
+    }
+    for group in cfg.observations.values():
+      assert isinstance(group, ObservationGroupCfg)
+      group.terms.update(guideline_observations)
+
+  if gate_reward:
+    cfg.rewards["r_gate"] = RewardTermCfg(
+      func=hammer_mdp.ordered_gate_progress_reward,
+      weight=8.0,
+      params={},
+    )
 
   # --- Non-terminating (DAPG-style) variant: anti-parking (Option B) ---
   if no_terminate:
