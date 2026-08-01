@@ -58,6 +58,40 @@ def test_swept_crossing_consumes_multiple_ordered_gates():
   assert index.tolist() == [3]
 
 
+def test_first_gate_is_at_one_seventh_of_the_reference():
+  """Moving the first gate from 1/7 to 1/6 would miss this swept crossing."""
+  entry = torch.tensor([[0.0, 0.0, 0.7]])
+  nail = torch.tensor([[0.0, 0.0, 0.0]])
+
+  count, index = advance_ordered_gates(
+    torch.tensor([[0.0, 0.0, 0.62]]),
+    torch.tensor([[0.0, 0.0, 0.595]]),
+    entry,
+    nail,
+    torch.tensor([0]),
+  )
+
+  assert count.tolist() == [1]
+  assert index.tolist() == [1]
+
+
+def test_sixth_gate_is_at_six_sevenths_of_the_reference():
+  """Putting the sixth gate at the nail instead of 6/7 would miss this crossing."""
+  entry = torch.tensor([[0.0, 0.0, 0.7]])
+  nail = torch.tensor([[0.0, 0.0, 0.0]])
+
+  count, index = advance_ordered_gates(
+    torch.tensor([[0.0, 0.0, 0.12]]),
+    torch.tensor([[0.0, 0.0, 0.08]]),
+    entry,
+    nail,
+    torch.tensor([5]),
+  )
+
+  assert count.tolist() == [1]
+  assert index.tolist() == [6]
+
+
 def test_radial_miss_outside_gate_disk_does_not_advance():
   """Treating a gate as an infinite plane would accept an off-path 15.1 mm miss."""
   entry = torch.tensor([[0.0, 0.0, 0.6]])
@@ -116,7 +150,7 @@ def test_segment_that_never_reaches_next_gate_does_not_advance():
 
   count, index = advance_ordered_gates(
     torch.tensor([[0.0, 0.0, 0.55]]),
-    torch.tensor([[0.0, 0.0, 0.51]]),
+    torch.tensor([[0.0, 0.0, 0.52]]),
     entry,
     nail,
     torch.tensor([0]),

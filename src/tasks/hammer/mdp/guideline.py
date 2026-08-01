@@ -43,10 +43,11 @@ def advance_ordered_gates(
 ) -> tuple[torch.Tensor, torch.Tensor]:
   """Advance the next ordered gate for every swept Cartesian segment.
 
-  Gates are disks centered at fractions ``1/num_gates`` through ``num_gates/num_gates``
-  of the entry-to-nail segment. The function only recognizes forward crossings and
-  evaluates the linearly interpolated swept point at each gate plane. It is stateless:
-  callers own and supply the next unconsumed gate index.
+  Gates are disks centered at fractions ``1/(num_gates + 1)`` through
+  ``num_gates/(num_gates + 1)`` of the entry-to-nail segment. The function only
+  recognizes forward crossings and evaluates the linearly interpolated swept point
+  at each gate plane. It is stateless: callers own and supply the next unconsumed
+  gate index.
   """
   direction = nail - entry
   length_sq = torch.sum(direction * direction, dim=-1)
@@ -62,7 +63,7 @@ def advance_ordered_gates(
   count = torch.zeros_like(index)
   for _ in range(min(num_gates, GUIDELINE_NUM_GATES)):
     active = valid_reference & moving_forward & (index < num_gates)
-    gate_progress = (index + 1).to(curr_progress.dtype) / num_gates
+    gate_progress = (index + 1).to(curr_progress.dtype) / (num_gates + 1)
     crosses_plane = (prev_progress <= gate_progress) & (gate_progress <= curr_progress)
     denominator = curr_progress - prev_progress
     safe_denominator = torch.where(moving_forward, denominator, torch.ones_like(denominator))
