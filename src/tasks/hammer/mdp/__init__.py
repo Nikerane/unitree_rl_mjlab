@@ -12,6 +12,19 @@ from .first_strike import (  # noqa: F401
   FirstStrikeEventTracker,
   _ENV_FIRST_STRIKE_ATTR,
 )
+from .guideline import (  # noqa: F401
+  GUIDELINE_CORRIDOR_RADIUS_M,
+  GUIDELINE_GATE_RADIUS_M,
+  GUIDELINE_NUM_GATES,
+  WaypointProgressTracker,
+  _ENV_GUIDELINE_ATTR,
+  advance_ordered_gates,
+  completed_gate_fraction,
+  guideline_perpendicular_error,
+  next_gate_vector,
+  ordered_gate_progress_reward,
+  project_to_reference,
+)
 from .impulse_bound import (  # noqa: F401
   CatDeltaPeak,
   SubstepDeliveredImpulse,
