@@ -27,6 +27,7 @@ def guideline_envs_cpu():
     """Construct both registered Cartesian guideline arms on CPU."""
     from mjlab.envs import ManagerBasedRlEnv
     from mjlab.tasks.registry import load_env_cfg
+    import src.tasks  # noqa: F401  # populate the task registry in isolated runs
 
     envs = {}
     try:
@@ -192,7 +193,7 @@ class TestCartesianGuidelineConstruction:
         finally:
             setattr(env, _ENV_GUIDELINE_ATTR, tracker)
 
-    def test_same_action_tape_keeps_tracker_and_dynamics_treatment_invariant(
+    def test_gate_crossing_tape_changes_only_one_shot_reward_payout(
         self, guideline_envs_cpu
     ):
         from src.tasks.hammer.mdp.guideline import _ENV_GUIDELINE_ATTR
@@ -206,32 +207,115 @@ class TestCartesianGuidelineConstruction:
             "newly_crossed",
             "disarmed",
         )
-        action_tape = (
-            torch.zeros((1, 3)),
-            torch.tensor([[0.01, -0.02, -0.05]]),
-            torch.tensor([[-0.01, 0.01, -0.03]]),
-        )
+        action_tape = [torch.tensor([[0.0, 0.0, -1.0]])] * 10
         traces = {}
         for task_id, env in guideline_envs_cpu.items():
-            env.reset(seed=20260803)
+            env.reset(seed=20260811)
             tracker = getattr(env, _ENV_GUIDELINE_ATTR)
             trace = []
             for action in action_tape:
-                env.step(action)
+                obs, reward, terminated, truncated, extras = env.step(action)
+                raw_rewards = {
+                    name: env.reward_manager._step_reward[0, index].clone()
+                    for index, name in enumerate(env.reward_manager.active_terms)
+                }
                 trace.append(
                     {
-                        **{name: getattr(tracker, name).clone() for name in state_names},
+                        "actor": obs["actor"].clone(),
+                        "critic": obs["critic"].clone(),
+                        "reward": reward.clone(),
+                        "terminated": terminated.clone(),
+                        "truncated": truncated.clone(),
+                        "raw_rewards": raw_rewards,
+                        "cat_delta": extras["cat_delta"].clone(),
+                        "cat_r_pos": extras["cat_r_pos"].clone(),
+                        "tracker": {
+                            name: getattr(tracker, name).clone()
+                            for name in state_names
+                        },
                         "robot_joint_pos": env.scene["robot"].data.joint_pos.clone(),
+                        "robot_joint_vel": env.scene["robot"].data.joint_vel.clone(),
+                        "robot_joint_target": (
+                            env.scene["robot"].data.joint_pos_target.clone()
+                        ),
                         "nail_joint_pos": env.scene["nail_block"].data.joint_pos.clone(),
+                        "nail_joint_vel": env.scene["nail_block"].data.joint_vel.clone(),
                     }
                 )
             traces[task_id] = trace
 
         c0, cgate = _GUIDELINE_TASK_IDS
+        first_episode_gate_rate = 0.0
         for c0_step, cgate_step in zip(traces[c0], traces[cgate], strict=True):
-            assert c0_step.keys() == cgate_step.keys()
-            for name in c0_step:
-                torch.testing.assert_close(c0_step[name], cgate_step[name])
+            for name in (
+                "actor",
+                "critic",
+                "terminated",
+                "truncated",
+                "cat_delta",
+                "robot_joint_pos",
+                "robot_joint_vel",
+                "robot_joint_target",
+                "nail_joint_pos",
+                "nail_joint_vel",
+            ):
+                torch.testing.assert_close(
+                    c0_step[name], cgate_step[name], rtol=0.0, atol=0.0
+                )
+            for name in state_names:
+                torch.testing.assert_close(
+                    c0_step["tracker"][name],
+                    cgate_step["tracker"][name],
+                    rtol=0.0,
+                    atol=0.0,
+                )
+
+            c0_raw = c0_step["raw_rewards"]
+            cgate_raw = cgate_step["raw_rewards"]
+            assert set(cgate_raw) == set(c0_raw) | {"r_gate"}
+            for name in c0_raw:
+                torch.testing.assert_close(
+                    c0_raw[name], cgate_raw[name], rtol=0.0, atol=0.0
+                )
+
+            gate_rate = cgate_raw["r_gate"]
+            expected_delta = gate_rate * guideline_envs_cpu[cgate].step_dt
+            torch.testing.assert_close(
+                cgate_step["reward"] - c0_step["reward"],
+                expected_delta.unsqueeze(0),
+                rtol=0.0,
+                atol=2e-7,
+            )
+            torch.testing.assert_close(
+                cgate_step["cat_r_pos"] - c0_step["cat_r_pos"],
+                expected_delta.unsqueeze(0),
+                rtol=0.0,
+                atol=2e-7,
+            )
+            if not bool(cgate_step["terminated"][0] or cgate_step["truncated"][0]):
+                expected_rate = (
+                    8.0 * cgate_step["tracker"]["newly_crossed"].float() / 6.0
+                )
+                torch.testing.assert_close(gate_rate.unsqueeze(0), expected_rate)
+
+            if first_episode_gate_rate < 8.0:
+                first_episode_gate_rate += gate_rate.item()
+                assert first_episode_gate_rate <= 8.0 + 1e-6
+
+        assert first_episode_gate_rate == pytest.approx(8.0)
+        first_done = next(
+            index
+            for index, step in enumerate(traces[cgate])
+            if bool(step["terminated"][0] or step["truncated"][0])
+        )
+        first_episode_rates = [
+            step["raw_rewards"]["r_gate"].item()
+            for step in traces[cgate][: first_done + 1]
+        ]
+        assert sum(first_episode_rates) == pytest.approx(8.0)
+        assert sum(first_episode_rates) * guideline_envs_cpu[cgate].step_dt == pytest.approx(
+            0.16
+        )
 
 
 # ---------------------------------------------------------------------------

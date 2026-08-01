@@ -717,6 +717,16 @@ class TestCartesianGuidelineStudy:
         cgate.rewards.pop("r_gate")
         assert self._normalize(cgate) == self._normalize(c0)
 
+    @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
+    def test_c0_is_f8_plus_only_shared_guideline_state(self, play):
+        c0 = load_env_cfg(self._C0, play=play)
+        f8 = load_env_cfg(self._F8, play=play)
+        for group in c0.observations.values():
+            for name in self._GUIDELINE_OBSERVATIONS:
+                group.terms.pop(name)
+        c0.metrics.pop("waypoint_progress")
+        assert self._normalize(c0) == self._normalize(f8)
+
     def test_legacy_f8_remains_exact(self):
         f8 = load_env_cfg(self._F8)
         assert set(f8.rewards) == set(self._F8_REWARDS)
