@@ -560,6 +560,18 @@ def representative_plot_title(summary: dict[str, Any]) -> str:
     )
 
 
+def _configure_projection_x_ticks(ax: Any, *, centered: bool) -> None:
+    """Keep the narrow x-z projection label readable at artifact resolution."""
+    if centered:
+        left, right = ax.get_xlim()
+        ax.set_xticks([(left + right) / 2.0])
+        return
+
+    from matplotlib.ticker import MaxNLocator
+
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=2))
+
+
 def plot_representative_trace(
     trace: dict[str, Any], summary: dict[str, Any], path: Path
 ) -> None:
@@ -593,14 +605,14 @@ def plot_representative_trace(
     pre_gate_path = realized[: gate_one_path_index + 1]
     scored_path = realized[gate_one_path_index:]
 
-    from matplotlib.ticker import MaxNLocator
-
     fig, axes_array = plt.subplots(1, 2, figsize=(13, 5))
     fig.subplots_adjust(left=0.07, right=0.77, bottom=0.12, top=0.78, wspace=0.30)
-    for ax, projection, labels in zip(
-        axes_array,
-        ((0, 2), (0, 1)),
-        (("x (m)", "z (m)"), ("x (m)", "y (m)")),
+    for panel_index, (ax, projection, labels) in enumerate(
+        zip(
+            axes_array,
+            ((0, 2), (0, 1)),
+            (("x (m)", "z (m)"), ("x (m)", "y (m)")),
+        )
     ):
         polygon = _corridor_polygon(entry, nail, projection, CORRIDOR_RADIUS_M)
         if polygon is not None:
@@ -661,11 +673,11 @@ def plot_representative_trace(
         ax.scatter(nail[projection[0]], nail[projection[1]], color="black", s=22)
         ax.set_xlabel(labels[0])
         ax.set_ylabel(labels[1])
-        ax.xaxis.set_major_locator(MaxNLocator(nbins=2))
         ax.tick_params(axis="x", labelsize=8)
         ax.set_aspect("equal", adjustable="box")
         ax.grid(alpha=0.25)
         ax.autoscale_view()
+        _configure_projection_x_ticks(ax, centered=panel_index == 0)
     axes_array[1].legend(
         fontsize=8, loc="upper left", bbox_to_anchor=(1.02, 1.0), borderaxespad=0.0
     )

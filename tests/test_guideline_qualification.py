@@ -15,6 +15,7 @@ from evaluation.guideline.qualify_reference import (
     REQUIRED_SEEDS,
     RESET_POSITION_RANGE_RAD,
     TASK_ID,
+    _configure_projection_x_ticks,
     _gate_disk_points,
     canonical_qvel_trace,
     corridor_window_errors,
@@ -291,6 +292,19 @@ def test_gate_disk_projection_is_not_a_spherical_circle_shortcut() -> None:
     np.testing.assert_allclose(
         np.linalg.norm(points[:, :2] - center[:2], axis=1), 0.015, atol=1e-12
     )
+
+
+def test_xz_projection_uses_one_centered_x_tick() -> None:
+    import matplotlib.pyplot as plt
+
+    figure, axis = plt.subplots()
+    try:
+        axis.set_xlim(0.490, 0.520)
+        _configure_projection_x_ticks(axis, centered=True)
+
+        np.testing.assert_allclose(axis.get_xticks(), [0.505])
+    finally:
+        plt.close(figure)
 
 
 def test_representative_plot_title_states_fixed_seed_and_aggregate_failure() -> None:
