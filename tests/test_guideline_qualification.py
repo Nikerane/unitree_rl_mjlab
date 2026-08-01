@@ -13,6 +13,7 @@ import pytest
 
 from evaluation.guideline.qualify_reference import (
     REQUIRED_SEEDS,
+    RESET_POSITION_RANGE_RAD,
     TASK_ID,
     _gate_disk_points,
     canonical_qvel_trace,
@@ -21,6 +22,7 @@ from evaluation.guideline.qualify_reference import (
     representative_plot_title,
     run_required_seeds,
     summarize_qualification,
+    trace_numeric_is_finite,
     write_result_tables,
 )
 
@@ -157,6 +159,11 @@ def test_qualification_loads_training_cfg_and_disables_auto_reset() -> None:
             "waypoint_progress": object(),
             "first_strike": object(),
         },
+        events={
+            "reset_robot_joints": SimpleNamespace(
+                params={"position_range": (-0.05, 0.05)}
+            )
+        },
     )
     calls = []
 
@@ -170,6 +177,27 @@ def test_qualification_loads_training_cfg_and_disables_auto_reset() -> None:
     assert loaded is cfg
     assert loaded.scene.num_envs == 1
     assert loaded.auto_reset is False
+    assert RESET_POSITION_RANGE_RAD == (-0.05, 0.05)
+
+
+def test_qualification_rejects_wrong_nonzero_training_reset_range() -> None:
+    cfg = SimpleNamespace(
+        scene=SimpleNamespace(num_envs=1),
+        auto_reset=True,
+        metrics={
+            "cat_soft": SimpleNamespace(params={"imp_max_p": 0.0}),
+            "waypoint_progress": object(),
+            "first_strike": object(),
+        },
+        events={
+            "reset_robot_joints": SimpleNamespace(
+                params={"position_range": (-0.01, 0.01)}
+            )
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="reset position_range.*-0.05.*0.05"):
+        load_qualification_cfg(lambda _task_id, *, play: cfg)
 
 
 def test_canonical_qvel_trace_is_all_preintegration_states_plus_terminal_post() -> None:
@@ -192,6 +220,32 @@ def test_corridor_window_uses_gate_one_through_accepted_contact_inclusively() ->
     ]
 
     assert corridor_window_errors(samples) == [0.004, 0.003]
+
+
+def test_raw_trace_finiteness_rejects_interior_pre_gate_nan() -> None:
+    trace = {
+        "qvel_pre": [np.zeros(6), np.zeros(6)],
+        "qvel_post": [np.zeros(6), np.zeros(6)],
+        "path": [np.zeros(3), np.ones(3)],
+        "depth": [0.0, 0.03],
+        "actions": [np.zeros(3)],
+        "samples": [
+            {"gates_crossed": 0, "error_m": math.nan},
+            {"gates_crossed": 1, "error_m": 0.004},
+        ],
+        "gate_centers": {0: np.zeros(3)},
+        "contact_point": np.zeros(3),
+        "physics_dt_s": 0.002,
+    }
+
+    assert not trace_numeric_is_finite(
+        trace,
+        initial_depth=0.0,
+        reset_head=np.zeros(3),
+        reset_arm_qpos=np.zeros(6),
+        entry=np.zeros(3),
+        nail=np.ones(3),
+    )
 
 
 def test_required_seed_runner_never_selects_a_successful_subset() -> None:
@@ -221,6 +275,7 @@ def test_json_and_csv_bank_identical_rows_with_explicit_si_columns(tmp_path) -> 
         "corridor_max_m",
         "qvel_peak_rad_s",
     } <= set(csv_rows[0])
+    assert b"\r\n" not in (tmp_path / "per_reset.csv").read_bytes()
 
 
 def test_gate_disk_projection_is_not_a_spherical_circle_shortcut() -> None:
@@ -248,5 +303,5 @@ def test_representative_plot_title_states_fixed_seed_and_aggregate_failure() -> 
         "Representative 1/16, seed 1000 (chosen a priori): FAIL "
         "(7.523 mm vs 5.000 mm)\n"
         "Aggregate 4/16: FAIL | production guideline: frozen reset-head anchor "
-        "to frozen nail top"
+        "to frozen nail top | scored interval: gate 1 to accepted contact"
     )

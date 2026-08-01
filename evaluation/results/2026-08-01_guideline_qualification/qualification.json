@@ -1,7 +1,7 @@
 {
   "artifact_sha256": {
-    "per_reset.csv": "8ce0a6b456fa2382688d3b79288525a4365490caf0942bb297c2f877c13782bf",
-    "reference_xz_xy.png": "c11650fc088511b37647d2f7f33852674cc5d6106b25a69b5353fa26201143c9"
+    "per_reset.csv": "57f394a0d127f8fb5038c7277211891b89294400d0426b1109072da747d9ea32",
+    "reference_xz_xy.png": "1bccf9779926a0b0aceee524cfdab70fbeb1d0bfe54dba88812989dfbd366718"
   },
   "configuration": {
     "auto_reset": false,
@@ -9,7 +9,19 @@
     "fixed_impedance": true,
     "imp_max_p": 0.0,
     "num_envs": 1,
-    "play": false
+    "play": false,
+    "reset_arm_joint_names": [
+      "joint1",
+      "joint2",
+      "joint3",
+      "joint4",
+      "joint5",
+      "joint6"
+    ],
+    "reset_position_range_rad": [
+      -0.05,
+      0.05
+    ]
   },
   "contact_gate": "production FirstStrikeEventTracker.started accepted onset",
   "corridor_window": "production gate-1 transition through accepted onset inclusive",
@@ -413,19 +425,31 @@
     }
   ],
   "sampling": {
+    "control_decimation": 10,
     "path": "postintegration production-metrics substeps",
     "physics_dt_s": 0.002,
     "qvel_states": "preintegration[:] plus terminal postintegration[-1]"
   },
   "schema_version": 1,
   "source_identity": {
+    "external_safe_impact_manipulation": {
+      "git_revision": "b58ccd2f81fd246f27c1e8d88cf86484cd888703",
+      "tracked_dirty": false
+    },
     "git_dirty": true,
-    "git_revision": "5a1b85c8c7bf056086cda7b26b2ebad7f23c441e",
+    "git_revision": "5288131acf8162a79e165ea3ca7b296d5b9d91fb",
+    "runtime_versions": {
+      "mjlab": "1.4.0",
+      "mujoco": "3.8.1",
+      "mujoco-warp": "3.8.1",
+      "torch": "2.12.0"
+    },
     "sha256": {
+      "base_hammer_config": "da33777af4c394568faa69a01646ef6cc7fa1cee19cdfe7092c3ac817a98c634",
       "guideline_geometry": "1d8322821e0b3fde1ed2db2556d9b9e0b0fc1f92d08646a547f5ed607d23c495",
       "nail_entity": "71830019baf4f9f406ba69a9b49054a9535abc4ca067189cf8f70ad099a76136",
       "production_config": "ec9085eff10ed8c4a971dbab606de3e7f7a85df8fb374be2fcc37cf494fb0f55",
-      "qualification_script": "918de4e01848e9e6bc7a868c20aadc74e8bdcc5b9eb7e03f5bededd42fd91684",
+      "qualification_script": "5eeb11f2c2c105df7253bb21683086a645c76f612891c66c9d9b91ef4bcbd19c",
       "scripted_reference": "2ad1bd843b07b2116780257904d41b4c7611bb45dedd22faaa62c1fb2512e629",
       "z1_hammer_xml": "ce6d36a85ca04621fdf5cf8f080848e31362945b0ca796854c4c3a4e2b3298a4"
     }

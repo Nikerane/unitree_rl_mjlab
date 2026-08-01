@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import importlib.metadata
 import json
 import math
 import subprocess
@@ -19,6 +20,7 @@ from src.tasks.hammer.mdp.guideline import (
 
 TASK_ID = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0"
 REQUIRED_SEEDS = tuple(range(1000, 1016))
+RESET_POSITION_RANGE_RAD = (-0.05, 0.05)
 QVEL_LIMIT_RAD_S = 3.1415
 HOLD_STEPS = 6
 _REQUIRED_ROW_FIELDS = (
@@ -139,6 +141,14 @@ def load_qualification_cfg(loader: Callable[..., Any]) -> Any:
         raise RuntimeError("production qualification metrics are missing")
     if float(cfg.metrics["cat_soft"].params["imp_max_p"]) != 0.0:
         raise RuntimeError("qualification requires production imp_max_p=0.0")
+    reset_range = tuple(
+        cfg.events["reset_robot_joints"].params["position_range"]
+    )
+    if reset_range != RESET_POSITION_RANGE_RAD:
+        raise RuntimeError(
+            "qualification requires reset position_range "
+            f"{RESET_POSITION_RANGE_RAD}, got {reset_range}"
+        )
     cfg.scene.num_envs = 1
     cfg.auto_reset = False
     return cfg
@@ -173,6 +183,43 @@ def corridor_window_errors(samples: list[dict[str, Any]]) -> list[float]:
     return errors
 
 
+def trace_numeric_is_finite(
+    trace: dict[str, Any],
+    *,
+    initial_depth: float,
+    reset_head: Any,
+    reset_arm_qpos: Any,
+    entry: Any,
+    nail: Any,
+) -> bool:
+    """Reject any non-finite value in the complete recorded numeric tape."""
+    import numpy as np
+
+    channels = [
+        np.asarray([initial_depth, trace["physics_dt_s"]], dtype=np.float64),
+        np.asarray(reset_head, dtype=np.float64),
+        np.asarray(reset_arm_qpos, dtype=np.float64),
+        np.asarray(entry, dtype=np.float64),
+        np.asarray(nail, dtype=np.float64),
+        np.asarray(trace["qvel_pre"], dtype=np.float64),
+        np.asarray(trace["qvel_post"], dtype=np.float64),
+        np.asarray(trace["path"], dtype=np.float64),
+        np.asarray(trace["depth"], dtype=np.float64),
+        np.asarray(trace["actions"], dtype=np.float64),
+        np.asarray(
+            [
+                (sample["gates_crossed"], sample["error_m"])
+                for sample in trace["samples"]
+            ],
+            dtype=np.float64,
+        ),
+        np.asarray(list(trace["gate_centers"].values()), dtype=np.float64),
+    ]
+    if trace["contact_point"] is not None:
+        channels.append(np.asarray(trace["contact_point"], dtype=np.float64))
+    return all(np.isfinite(channel).all() for channel in channels)
+
+
 def run_required_seeds(run_one: Callable[[int], dict[str, Any]]) -> list[dict[str, Any]]:
     """Run every preregistered reset in its fixed order; never select successes."""
     return [run_one(seed) for seed in REQUIRED_SEEDS]
@@ -187,7 +234,7 @@ def write_result_tables(summary: dict[str, Any], out: Path) -> None:
     rows = summary["rows"]
     fieldnames = list(rows[0]) if rows else []
     with (out / "per_reset.csv").open("w", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=fieldnames)
+        writer = csv.DictWriter(stream, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         for row in rows:
             writer.writerow(
@@ -219,17 +266,51 @@ def _source_identity() -> dict[str, Any]:
             text=True,
         ).stdout
     )
+    external_root = Path(
+        subprocess.run(
+            ("git", "rev-parse", "--show-toplevel"),
+            cwd=Path(Z1_HAMMER_XML).parent,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    )
+    external_revision = subprocess.run(
+        ("git", "rev-parse", "HEAD"),
+        cwd=external_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    external_tracked_dirty = bool(
+        subprocess.run(
+            ("git", "status", "--porcelain", "--untracked-files=no"),
+            cwd=external_root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    )
     files = {
         "qualification_script": Path(__file__).resolve(),
         "guideline_geometry": root / "src/tasks/hammer/mdp/guideline.py",
         "scripted_reference": root / "src/tasks/hammer/mdp/references.py",
         "production_config": root / "src/tasks/hammer/config/z1/env_cfgs.py",
+        "base_hammer_config": root / "src/tasks/hammer/hammer_env_cfg.py",
         "nail_entity": root / "src/tasks/hammer/nail_block.py",
         "z1_hammer_xml": Path(Z1_HAMMER_XML),
     }
     return {
         "git_revision": revision,
         "git_dirty": dirty,
+        "external_safe_impact_manipulation": {
+            "git_revision": external_revision,
+            "tracked_dirty": external_tracked_dirty,
+        },
+        "runtime_versions": {
+            distribution: importlib.metadata.version(distribution)
+            for distribution in ("mjlab", "mujoco", "mujoco-warp", "torch")
+        },
         "sha256": {name: _sha256_file(path) for name, path in files.items()},
     }
 
@@ -357,12 +438,15 @@ def run_cpu_qualification() -> tuple[list[dict[str, Any]], dict[int, dict[str, A
             "qvel_post": [],
             "path": [reset_head],
             "depth": [],
+            "actions": [],
             "samples": [],
             "gate_centers": {},
             "contact_point": None,
             "contact_path_index": None,
             "actions_finite": True,
             "physics_dt_s": float(env.physics_dt),
+            "control_decimation": int(env.cfg.decimation),
+            "arm_joint_names": list(ARM_JOINT_NAMES),
         }
         active = trace
         for control_index in range(1, playback_length + HOLD_STEPS + 1):
@@ -370,6 +454,7 @@ def run_cpu_qualification() -> tuple[list[dict[str, Any]], dict[int, dict[str, A
             action = ((target - head_position()) / Z1_HAMMER_DELTA_POS_SCALE).clamp(
                 -1.0, 1.0
             )
+            trace["actions"].append(_as_numpy(action[0]))
             trace["actions_finite"] &= bool(torch.isfinite(action).all())
             env.step(action)
             if bool(env.reset_buf[0]):
@@ -387,17 +472,23 @@ def run_cpu_qualification() -> tuple[list[dict[str, Any]], dict[int, dict[str, A
             sample["accepted_contact"] for sample in trace["samples"]
         )
         raw_contact = any(sample["raw_contact"] for sample in trace["samples"])
-        numeric_parts = (qvel, depths, path, np.asarray(corridor_errors))
-        finite = bool(trace["actions_finite"]) and all(
-            np.isfinite(values).all() for values in numeric_parts
+        entry = _as_numpy(guideline_tracker.entry[0])
+        frozen_nail = _as_numpy(guideline_tracker.nail[0])
+        finite = trace_numeric_is_finite(
+            trace,
+            initial_depth=initial_depth,
+            reset_head=reset_head,
+            reset_arm_qpos=reset_arm_qpos,
+            entry=entry,
+            nail=frozen_nail,
         )
         qvel_peak = float(np.max(np.abs(qvel))) if qvel.size else 0.0
         nail_progress = (
             float(np.max(depths) - initial_depth) if depths.size else 0.0
         )
         corridor_max = max(corridor_errors, default=0.0)
-        trace["entry"] = _as_numpy(guideline_tracker.entry[0])
-        trace["nail"] = _as_numpy(guideline_tracker.nail[0])
+        trace["entry"] = entry
+        trace["nail"] = frozen_nail
         trace["gate_centers"] = [
             trace["gate_centers"][index]
             for index in sorted(trace["gate_centers"])
@@ -464,7 +555,8 @@ def representative_plot_title(summary: dict[str, Any]) -> str:
         f"Representative 1/16, seed 1000 (chosen a priori): {seed_status} "
         f"({row['corridor_max_m'] * 1000:.3f} mm vs 5.000 mm)\n"
         f"Aggregate {summary['qualified_resets']}/16: {aggregate_status} | "
-        "production guideline: frozen reset-head anchor to frozen nail top"
+        "production guideline: frozen reset-head anchor to frozen nail top | "
+        "scored interval: gate 1 to accepted contact"
     )
 
 
@@ -484,11 +576,27 @@ def plot_representative_trace(
     contact = trace["contact_point"]
     if len(gates) != REQUIRED_GATES:
         raise RuntimeError(f"representative plot needs six production gates, got {len(gates)}")
+    gate_one_sample = next(
+        (
+            index
+            for index, sample in enumerate(trace["samples"])
+            if int(sample["gates_crossed"]) >= 1
+        ),
+        None,
+    )
+    if gate_one_sample is None:
+        raise RuntimeError("representative plot needs a credited gate-1 transition")
+    gate_one_path_index = gate_one_sample + 1
     contact_index = trace["contact_path_index"]
     if contact_index is not None:
         realized = realized[: int(contact_index) + 1]
+    pre_gate_path = realized[: gate_one_path_index + 1]
+    scored_path = realized[gate_one_path_index:]
 
-    fig, axes_array = plt.subplots(1, 2, figsize=(11, 5), constrained_layout=True)
+    from matplotlib.ticker import MaxNLocator
+
+    fig, axes_array = plt.subplots(1, 2, figsize=(13, 5))
+    fig.subplots_adjust(left=0.07, right=0.77, bottom=0.12, top=0.78, wspace=0.30)
     for ax, projection, labels in zip(
         axes_array,
         ((0, 2), (0, 1)),
@@ -523,11 +631,19 @@ def plot_representative_trace(
                 label="production-derived gates" if index == 0 else None,
             )
         ax.plot(
-            realized[:, projection[0]],
-            realized[:, projection[1]],
+            pre_gate_path[:, projection[0]],
+            pre_gate_path[:, projection[1]],
+            color="0.6",
+            linewidth=1.2,
+            linestyle=":",
+            label="pre-gate-1 path (not scored)",
+        )
+        ax.plot(
+            scored_path[:, projection[0]],
+            scored_path[:, projection[1]],
             color="tab:blue",
-            linewidth=1.5,
-            label="500 Hz path through accepted contact",
+            linewidth=1.8,
+            label="scored gate 1 to accepted contact",
         )
         if contact is not None:
             contact_array = np.asarray(contact)
@@ -545,12 +661,16 @@ def plot_representative_trace(
         ax.scatter(nail[projection[0]], nail[projection[1]], color="black", s=22)
         ax.set_xlabel(labels[0])
         ax.set_ylabel(labels[1])
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=2))
+        ax.tick_params(axis="x", labelsize=8)
         ax.set_aspect("equal", adjustable="box")
         ax.grid(alpha=0.25)
         ax.autoscale_view()
-    axes_array[0].legend(fontsize=8, loc="best")
-    fig.suptitle(representative_plot_title(summary))
-    fig.savefig(path, dpi=180)
+    axes_array[1].legend(
+        fontsize=8, loc="upper left", bbox_to_anchor=(1.02, 1.0), borderaxespad=0.0
+    )
+    fig.suptitle(representative_plot_title(summary), y=0.97, fontsize=14)
+    fig.savefig(path, dpi=180, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -571,9 +691,12 @@ def main(argv: list[str] | None = None) -> int:
                 "auto_reset": False,
                 "fixed_impedance": True,
                 "imp_max_p": 0.0,
+                "reset_position_range_rad": list(RESET_POSITION_RANGE_RAD),
+                "reset_arm_joint_names": traces[1000]["arm_joint_names"],
             },
             "sampling": {
                 "physics_dt_s": traces[1000]["physics_dt_s"],
+                "control_decimation": traces[1000]["control_decimation"],
                 "qvel_states": "preintegration[:] plus terminal postintegration[-1]",
                 "path": "postintegration production-metrics substeps",
             },
