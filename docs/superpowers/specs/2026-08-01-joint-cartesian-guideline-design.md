@@ -1,7 +1,7 @@
 # Joint-Position and Cartesian Guideline Experiment Design
 
 **Date:** 2026-08-01
-**Status:** two independent design reviews passed; owner written approval pending
+**Status:** APPROVED by owner (2026-08-01) after two independent design reviews
 **Branch for shared design and geometry:** `waypoint-guideline` at baseline `83b050b`
 
 This specification supersedes the uncommitted drafts
