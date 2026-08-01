@@ -1,0 +1,439 @@
+{
+  "artifact_sha256": {
+    "per_reset.csv": "8ce0a6b456fa2382688d3b79288525a4365490caf0942bb297c2f877c13782bf",
+    "reference_xz_xy.png": "c11650fc088511b37647d2f7f33852674cc5d6106b25a69b5353fa26201143c9"
+  },
+  "configuration": {
+    "auto_reset": false,
+    "device": "cpu",
+    "fixed_impedance": true,
+    "imp_max_p": 0.0,
+    "num_envs": 1,
+    "play": false
+  },
+  "contact_gate": "production FirstStrikeEventTracker.started accepted onset",
+  "corridor_window": "production gate-1 transition through accepted onset inclusive",
+  "distinct_reset_arm_qpos": true,
+  "failures": [
+    "seed 1000: corridor above 0.005 m",
+    "seed 1001: corridor above 0.005 m",
+    "seed 1002: corridor above 0.005 m",
+    "seed 1003: corridor above 0.005 m",
+    "seed 1005: corridor above 0.005 m",
+    "seed 1006: corridor above 0.005 m",
+    "seed 1008: corridor above 0.005 m",
+    "seed 1009: corridor above 0.005 m",
+    "seed 1010: corridor above 0.005 m",
+    "seed 1011: corridor above 0.005 m",
+    "seed 1012: corridor above 0.005 m",
+    "seed 1013: corridor above 0.005 m"
+  ],
+  "passed": false,
+  "qualified_resets": 4,
+  "representative_plot_seed": 1000,
+  "required_resets": 16,
+  "required_seeds": [
+    1000,
+    1001,
+    1002,
+    1003,
+    1004,
+    1005,
+    1006,
+    1007,
+    1008,
+    1009,
+    1010,
+    1011,
+    1012,
+    1013,
+    1014,
+    1015
+  ],
+  "rows": [
+    {
+      "contact_seen": true,
+      "corridor_max_m": 0.0075228516943752766,
+      "failures": [
+        "corridor above 0.005 m"
+      ],
+      "finite": true,
+      "gates_crossed": 6,
+      "nail_progress_m": 0.03200000151991844,
+      "qualifies": false,
+      "qvel_peak_rad_s": 2.5576469898223877,
+      "raw_contact_seen": true,
+      "reset_arm_qpos_rad": [
+        -0.01810653880238533,
+        1.6173560619354248,
+        -0.4359223246574402,
+        -1.2217962741851807,
+        -0.024058513343334198,
+        1.5670119524002075
+      ],
+      "seed": 1000,
+      "substeps": 130
+    },
+    {
+      "contact_seen": true,
+      "corridor_max_m": 0.009283129125833511,
+      "failures": [
+        "corridor above 0.005 m"
+      ],
+      "finite": true,
+      "gates_crossed": 6,
+      "nail_progress_m": 0.03200000151991844,
+      "qualifies": false,
+      "qvel_peak_rad_s": 2.6236989498138428,
+      "raw_contact_seen": true,
+      "reset_arm_qpos_rad": [
+        -0.010456196963787079,
+        1.5719355344772339,
+        -0.3944726586341858,
+        -1.2312897443771362,
+        -0.032162345945835114,
+        1.5331122875213623
+      ],
+      "seed": 1001,
+      "substeps": 130
+    },
+    {
+      "contact_seen": true,
+      "corridor_max_m": 0.01389816403388977,
+      "failures": [
+        "corridor above 0.005 m"
+      ],
+      "finite": true,
+      "gates_crossed": 6,
+      "nail_progress_m": 0.03200000151991844,
+      "qualifies": false,
+      "qvel_peak_rad_s": 2.540367603302002,
+      "raw_contact_seen": true,
+      "reset_arm_qpos_rad": [
+        -0.04789977893233299,
+        1.6517912149429321,
+        -0.4745015799999237,
+        -1.1946662664413452,
+        0.002240754198282957,
+        1.541430950164795
+      ],
+      "seed": 1002,
+      "substeps": 130
+    },
+    {
+      "contact_seen": true,
+      "corridor_max_m": 0.01449196320027113,
+      "failures": [
+        "corridor above 0.005 m"
+      ],
+      "finite": true,
+      "gates_crossed": 6,
+      "nail_progress_m": 0.03200000151991844,
+      "qualifies": false,
+      "qvel_peak_rad_s": 2.590003490447998,
+      "raw_contact_seen": true,
+      "reset_arm_qpos_rad": [
+        -0.0461713969707489,
+        1.5804831981658936,
+        -0.4201951026916504,
+        -1.1477547883987427,
+        -0.019428133964538574,
+        1.542907476425171
+      ],
+      "seed": 1003,
+      "substeps": 120
+    },
+    {
+      "contact_seen": true,
+      "corridor_max_m": 0.004981724079698324,
+      "failures": [],
+      "finite": true,
+      "gates_crossed": 6,
+      "nail_progress_m": 0.03200000151991844,
+      "qualifies": true,
+      "qvel_peak_rad_s": 2.6047253608703613,
+      "raw_contact_seen": true,
+      "reset_arm_qpos_rad": [
+        0.047161880880594254,
+        1.5949312448501587,
+        -0.4538058638572693,
+        -1.1568937301635742,
+        -0.04089207947254181,
+        1.5080006122589111
+      ],
+      "seed": 1004,
+      "substeps": 130
+    },
+    {
+      "contact_seen": true,
+      "corridor_max_m": 0.0062134345062077045,
+      "failures": [
+        "corridor above 0.005 m"
+      ],
+      "finite": true,
+      "gates_crossed": 6,
+      "nail_progress_m": 0.03200000151991844,
+      "qualifies": false,
+      "qvel_peak_rad_s": 2.5854625701904297,
+      "raw_contact_seen": true,
+      "reset_arm_qpos_rad": [
+        0.02588941529393196,
+        1.5956562757492065,
+        -0.4675861597061157,
+        -1.2301098108291626,
+        -0.0070350696332752705,
+        1.5691726207733154
+      ],
+      "seed": 1005,
+      "substeps": 140
+    },
+    {
+      "contact_seen": true,
+      "corridor_max_m": 0.009188119322061539,
+      "failures": [
+        "corridor above 0.005 m"
+      ],
+      "finite": true,
+      "gates_crossed": 6,
+      "nail_progress_m": 0.03200000151991844,
+      "qualifies": false,
+      "qvel_peak_rad_s": 2.637190341949463,
+      "raw_contact_seen": true,
+      "reset_arm_qpos_rad": [
+        -0.025939393788576126,
+        1.578187108039856,
+        -0.3836371600627899,
+        -1.228955864906311,
+        -0.002433926332741976,
+        1.5301260948181152
+      ],
+      "seed": 1006,
+      "substeps": 130
+    },
+    {
+      "contact_seen": true,
+      "corridor_max_m": 0.0025359177961945534,
+      "failures": [],
+      "finite": true,
+      "gates_crossed": 6,
+      "nail_progress_m": 0.03200000151991844,
+      "qualifies": true,
+      "qvel_peak_rad_s": 2.6348466873168945,
+      "raw_contact_seen": true,
+      "reset_arm_qpos_rad": [
+        -0.014802586287260056,
+        1.5590121746063232,
+        -0.47123467922210693,
+        -1.1536035537719727,
+        0.005087643396109343,
+        1.5620192289352417
+      ],
+      "seed": 1007,
+      "substeps": 140
+    },
+    {
+      "contact_seen": true,
+      "corridor_max_m": 0.011792916804552078,
+      "failures": [
+        "corridor above 0.005 m"
+      ],
+      "finite": true,
+      "gates_crossed": 6,
+      "nail_progress_m": 0.03200000151991844,
+      "qualifies": false,
+      "qvel_peak_rad_s": 2.5972909927368164,
+      "raw_contact_seen": true,
+      "reset_arm_qpos_rad": [
+        -0.03153519704937935,
+        1.5663704872131348,
+        -0.47876855731010437,
+        -1.1809027194976807,
+        -0.025600653141736984,
+        1.5399607419967651
+      ],
+      "seed": 1008,
+      "substeps": 140
+    },
+    {
+      "contact_seen": true,
+      "corridor_max_m": 0.009685102850198746,
+      "failures": [
+        "corridor above 0.005 m"
+      ],
+      "finite": true,
+      "gates_crossed": 6,
+      "nail_progress_m": 0.03200000151991844,
+      "qualifies": false,
+      "qvel_peak_rad_s": 2.5854108333587646,
+      "raw_contact_seen": true,
+      "reset_arm_qpos_rad": [
+        -0.009064774960279465,
+        1.6034979820251465,
+        -0.4669896066188812,
+        -1.2100871801376343,
+        -0.04592296481132507,
+        1.5194355249404907
+      ],
+      "seed": 1009,
+      "substeps": 140
+    },
+    {
+      "contact_seen": true,
+      "corridor_max_m": 0.010855580680072308,
+      "failures": [
+        "corridor above 0.005 m"
+      ],
+      "finite": true,
+      "gates_crossed": 6,
+      "nail_progress_m": 0.03200000151991844,
+      "qualifies": false,
+      "qvel_peak_rad_s": 2.6093366146087646,
+      "raw_contact_seen": true,
+      "reset_arm_qpos_rad": [
+        0.04296591505408287,
+        1.6434125900268555,
+        -0.3849327862262726,
+        -1.1856919527053833,
+        0.009970076382160187,
+        1.5061452388763428
+      ],
+      "seed": 1010,
+      "substeps": 110
+    },
+    {
+      "contact_seen": true,
+      "corridor_max_m": 0.008661756291985512,
+      "failures": [
+        "corridor above 0.005 m"
+      ],
+      "finite": true,
+      "gates_crossed": 6,
+      "nail_progress_m": 0.03200000151991844,
+      "qualifies": false,
+      "qvel_peak_rad_s": 2.676102876663208,
+      "raw_contact_seen": true,
+      "reset_arm_qpos_rad": [
+        0.03543021157383919,
+        1.5582983493804932,
+        -0.40514087677001953,
+        -1.16681969165802,
+        -0.012589138001203537,
+        1.5252000093460083
+      ],
+      "seed": 1011,
+      "substeps": 130
+    },
+    {
+      "contact_seen": true,
+      "corridor_max_m": 0.011099596507847309,
+      "failures": [
+        "corridor above 0.005 m"
+      ],
+      "finite": true,
+      "gates_crossed": 6,
+      "nail_progress_m": 0.03200000151991844,
+      "qualifies": false,
+      "qvel_peak_rad_s": 2.650125741958618,
+      "raw_contact_seen": true,
+      "reset_arm_qpos_rad": [
+        0.03427158668637276,
+        1.598772644996643,
+        -0.38451406359672546,
+        -1.1792525053024292,
+        0.009237635880708694,
+        1.5938481092453003
+      ],
+      "seed": 1012,
+      "substeps": 120
+    },
+    {
+      "contact_seen": true,
+      "corridor_max_m": 0.005863669794052839,
+      "failures": [
+        "corridor above 0.005 m"
+      ],
+      "finite": true,
+      "gates_crossed": 6,
+      "nail_progress_m": 0.03200000151991844,
+      "qualifies": false,
+      "qvel_peak_rad_s": 2.5206055641174316,
+      "raw_contact_seen": true,
+      "reset_arm_qpos_rad": [
+        0.010187961161136627,
+        1.6383912563323975,
+        -0.467725932598114,
+        -1.1517081260681152,
+        0.0067754159681499004,
+        1.5249186754226685
+      ],
+      "seed": 1013,
+      "substeps": 120
+    },
+    {
+      "contact_seen": true,
+      "corridor_max_m": 0.001899957424029708,
+      "failures": [],
+      "finite": true,
+      "gates_crossed": 6,
+      "nail_progress_m": 0.03200000151991844,
+      "qualifies": true,
+      "qvel_peak_rad_s": 2.6011486053466797,
+      "raw_contact_seen": true,
+      "reset_arm_qpos_rad": [
+        -0.015934627503156662,
+        1.624171257019043,
+        -0.40346571803092957,
+        -1.1902894973754883,
+        0.017891105264425278,
+        1.5749813318252563
+      ],
+      "seed": 1014,
+      "substeps": 120
+    },
+    {
+      "contact_seen": true,
+      "corridor_max_m": 0.001538543147034943,
+      "failures": [],
+      "finite": true,
+      "gates_crossed": 6,
+      "nail_progress_m": 0.03200000151991844,
+      "qualifies": true,
+      "qvel_peak_rad_s": 2.523200750350952,
+      "raw_contact_seen": true,
+      "reset_arm_qpos_rad": [
+        0.01429365947842598,
+        1.6266095638275146,
+        -0.41206106543540955,
+        -1.2244609594345093,
+        -0.03898800536990166,
+        1.5589293241500854
+      ],
+      "seed": 1015,
+      "substeps": 120
+    }
+  ],
+  "sampling": {
+    "path": "postintegration production-metrics substeps",
+    "physics_dt_s": 0.002,
+    "qvel_states": "preintegration[:] plus terminal postintegration[-1]"
+  },
+  "schema_version": 1,
+  "source_identity": {
+    "git_dirty": true,
+    "git_revision": "5a1b85c8c7bf056086cda7b26b2ebad7f23c441e",
+    "sha256": {
+      "guideline_geometry": "1d8322821e0b3fde1ed2db2556d9b9e0b0fc1f92d08646a547f5ed607d23c495",
+      "nail_entity": "71830019baf4f9f406ba69a9b49054a9535abc4ca067189cf8f70ad099a76136",
+      "production_config": "ec9085eff10ed8c4a971dbab606de3e7f7a85df8fb374be2fcc37cf494fb0f55",
+      "qualification_script": "918de4e01848e9e6bc7a868c20aadc74e8bdcc5b9eb7e03f5bededd42fd91684",
+      "scripted_reference": "2ad1bd843b07b2116780257904d41b4c7611bb45dedd22faaa62c1fb2512e629",
+      "z1_hammer_xml": "ce6d36a85ca04621fdf5cf8f080848e31362945b0ca796854c4c3a4e2b3298a4"
+    }
+  },
+  "task_id": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0",
+  "thresholds": {
+    "corridor_radius_m": 0.005,
+    "qvel_limit_rad_s": 3.1415,
+    "required_gates": 6
+  }
+}
