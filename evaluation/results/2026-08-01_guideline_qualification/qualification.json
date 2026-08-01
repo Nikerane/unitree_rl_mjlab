@@ -436,8 +436,8 @@
       "git_revision": "b58ccd2f81fd246f27c1e8d88cf86484cd888703",
       "tracked_dirty": false
     },
-    "git_dirty": true,
-    "git_revision": "2f16d5172c26052a6a6c337c63d5f7763b5d4ad3",
+    "git_dirty": false,
+    "git_revision": "40b1b68863fe6aa1802311c8dd7a8459056057db",
     "runtime_versions": {
       "mjlab": "1.4.0",
       "mujoco": "3.8.1",
