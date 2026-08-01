@@ -104,6 +104,22 @@ oscillates; PID-Lagrangian is an entire paper that exists to tame that oscillati
 sidesteps by construction. Honest caveat: CaT's tuning is *less*, not *zero* (p_max curriculum + EMA).
 - Status: **CONFIRMED**. Detail: `CONSTRAINED_RL_LANDSCAPE.md` §2.
 
+**L4 — The action interface is an experimental factor, not a neutral implementation detail.**
+Varin, Grossman & Kuindersma (IROS 2019) compared torque, joint-space PD references, inverse
+dynamics, and task-space impedance references on peg insertion, hammering, and pushing with both PPO
+and SAC. Their results support the hypothesis that learning task-space impedance references can
+substantially reduce the samples needed to obtain good performance across those tasks and algorithms.
+For this thesis, that is evidence for retaining the shipped Cartesian DiffIK arm as a matched control
+when testing direct desired-joint-position actions; it is **not** evidence that Cartesian control is
+universally superior, nor that the exact Z1 ranking is known before the matched experiment. Their
+task-space controller and robot/task details differ from ours, so the defensible claim concerns
+sample-efficiency precedent and experimental design, not transferred performance.
+- Status: **CONFIRMED** (literature finding); Z1 Cartesian-versus-joint result **RESULTS-PENDING**.
+- Citation: Patrick Varin, Lev Grossman, and Scott Kuindersma, *A Comparison of Action Spaces for
+  Learning Manipulation Tasks*, IROS 2019, arXiv:1908.08659.
+- Detail/design use: `../superpowers/specs/2026-08-01-joint-cartesian-guideline-design.md` §4, §7,
+  §12.
+
 ---
 
 ## 4. Defense points (anticipated committee questions → answers)
