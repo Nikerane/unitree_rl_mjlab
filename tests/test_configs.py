@@ -50,6 +50,8 @@ from src.tasks.hammer.mdp.guideline import (
     guideline_perpendicular_error,
     next_gate_vector,
     ordered_gate_progress_reward,
+    ordered_waypoint_progress_reward,
+    waypoint_progress_state,
 )
 from src.tasks.hammer.mdp.rewards import (
     DeliveredImpulseTerm,
@@ -511,11 +513,13 @@ class TestArmCompositionGuards:
 class TestCartesianGuidelineStudy:
     _C0 = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0"
     _C_GATE = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate"
+    _C_PROGRESS = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress"
     _F8 = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear"
     _GUIDELINE_OBSERVATIONS = {
         "next_gate_vector": (next_gate_vector, 3),
         "completed_gate_fraction": (completed_gate_fraction, 1),
         "guideline_perpendicular_error": (guideline_perpendicular_error, 1),
+        "waypoint_progress_state": (waypoint_progress_state, 2),
     }
     _F8_REWARDS = {
         "approach": 0.1,
@@ -606,6 +610,7 @@ class TestCartesianGuidelineStudy:
         assert tuple(parameters) == self._LEGACY_FACTORY_PARAMETERS + (
             "guideline",
             "gate_reward",
+            "progress_reward",
         )
         assert all(
             parameters[name].default is False
@@ -613,16 +618,25 @@ class TestCartesianGuidelineStudy:
         )
         assert parameters["guideline"].default is False
         assert parameters["gate_reward"].default is False
+        assert parameters["progress_reward"].default is False
 
-    def test_new_registration_adds_only_two_task_ids(self):
+    def test_progress_reward_requires_guideline_tracker(self):
+        with pytest.raises(ValueError, match="progress_reward.*guideline"):
+            z1_hammer_env_cfg(progress_reward=True)
+
+    def test_new_registration_adds_only_three_task_ids(self):
         registered_z1 = {
             task for task in list_tasks() if task.startswith("Unitree-Z1-Hammer")
         }
-        assert registered_z1 == self._LEGACY_TASK_IDS | {self._C0, self._C_GATE}
+        assert registered_z1 == self._LEGACY_TASK_IDS | {
+            self._C0,
+            self._C_GATE,
+            self._C_PROGRESS,
+        }
 
     @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
-    @pytest.mark.parametrize("task_id", (_C0, _C_GATE))
-    def test_both_arms_share_exact_guideline_state_and_f8_contract(
+    @pytest.mark.parametrize("task_id", (_C0, _C_GATE, _C_PROGRESS))
+    def test_all_arms_share_exact_guideline_state_and_f8_contract(
         self, task_id, play
     ):
         cfg = load_env_cfg(task_id, play=play)
@@ -649,6 +663,8 @@ class TestCartesianGuidelineStudy:
         expected_reward_keys = set(self._F8_REWARDS)
         if task_id == self._C_GATE:
             expected_reward_keys.add("r_gate")
+        if task_id == self._C_PROGRESS:
+            expected_reward_keys.add("r_waypoint_progress")
         assert set(cfg.rewards) == expected_reward_keys
         assert {
             name: cfg.rewards[name].weight for name in self._F8_REWARDS
@@ -677,6 +693,18 @@ class TestCartesianGuidelineStudy:
             ("BuiltinPositionActuatorCfg", 100.0, 20.0, 30.0, 0.005, ("jointGripper",)),
         )
         assert cfg.metrics["cat_soft"].params["imp_max_p"] == 0.0
+        assert tuple(cfg.metrics["cat_soft"].params["imp_limit"]) == (
+            1.64,
+            3.28,
+            1.64,
+            1.64,
+            1.64,
+            1.64,
+        )
+        assert cfg.metrics["cat_soft"].params["use_vel"] is False
+        assert "cat_vel" not in cfg.terminations
+        assert "r_imit" not in cfg.rewards
+        assert "set_gains" not in cfg.actions
 
     def test_constructor_probe_is_narrow_and_runtime_reader_still_fails_closed(self):
         from types import SimpleNamespace
@@ -710,12 +738,36 @@ class TestCartesianGuidelineStudy:
         assert reward.weight == pytest.approx(8.0)
         assert reward.params == {}
 
+    def test_only_cprogress_enables_ordered_waypoint_progress_reward(self):
+        c0 = load_env_cfg(self._C0)
+        cprogress = load_env_cfg(self._C_PROGRESS)
+        assert "r_waypoint_progress" not in c0.rewards
+        reward = cprogress.rewards["r_waypoint_progress"]
+        assert reward.func is ordered_waypoint_progress_reward
+        assert reward.weight == pytest.approx(8.0)
+        assert reward.params == {}
+
     @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
     def test_c0_and_cgate_whole_configs_differ_only_by_gate_reward(self, play):
         c0 = load_env_cfg(self._C0, play=play)
         cgate = load_env_cfg(self._C_GATE, play=play)
         cgate.rewards.pop("r_gate")
         assert self._normalize(cgate) == self._normalize(c0)
+
+    @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
+    def test_c0_and_cprogress_whole_configs_differ_only_by_waypoint_reward(self, play):
+        c0 = load_env_cfg(self._C0, play=play)
+        cprogress = load_env_cfg(self._C_PROGRESS, play=play)
+        cprogress.rewards.pop("r_waypoint_progress")
+        assert self._normalize(cprogress) == self._normalize(c0)
+
+    @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
+    def test_cgate_and_cprogress_exchange_only_their_reward_readers(self, play):
+        cgate = load_env_cfg(self._C_GATE, play=play)
+        cprogress = load_env_cfg(self._C_PROGRESS, play=play)
+        cgate.rewards.pop("r_gate")
+        cprogress.rewards.pop("r_waypoint_progress")
+        assert self._normalize(cgate) == self._normalize(cprogress)
 
     @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
     def test_c0_is_f8_plus_only_shared_guideline_state(self, play):
@@ -731,7 +783,7 @@ class TestCartesianGuidelineStudy:
         assert self._normalize(c0) == self._normalize(f8)
 
     @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
-    @pytest.mark.parametrize("task_id", (_C0, _C_GATE))
+    @pytest.mark.parametrize("task_id", (_C0, _C_GATE, _C_PROGRESS))
     def test_guideline_arms_use_a_fixed_nominal_joint_reset(self, task_id, play):
         cfg = load_env_cfg(task_id, play=play)
         assert cfg.events["reset_robot_joints"].params["position_range"] == (

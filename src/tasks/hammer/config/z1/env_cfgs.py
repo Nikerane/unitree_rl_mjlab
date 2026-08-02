@@ -95,6 +95,7 @@ def z1_hammer_env_cfg(
   quality_instrumentation: bool = False,
   guideline: bool = False,
   gate_reward: bool = False,
+  progress_reward: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Create Z1 hammer-nail task configuration.
 
@@ -153,6 +154,10 @@ def z1_hammer_env_cfg(
   if gate_reward and not guideline:
     raise ValueError(
       "z1_hammer_env_cfg: gate_reward requires guideline=True"
+    )
+  if progress_reward and not guideline:
+    raise ValueError(
+      "z1_hammer_env_cfg: progress_reward requires guideline=True"
     )
   cfg = make_hammer_env_cfg(imitation=imitation)
 
@@ -524,6 +529,10 @@ def z1_hammer_env_cfg(
         func=_guideline_observation,
         params={"reader": hammer_mdp.guideline_perpendicular_error, "width": 1},
       ),
+      "waypoint_progress_state": ObservationTermCfg(
+        func=_guideline_observation,
+        params={"reader": hammer_mdp.waypoint_progress_state, "width": 2},
+      ),
     }
     for group in cfg.observations.values():
       assert isinstance(group, ObservationGroupCfg)
@@ -532,6 +541,12 @@ def z1_hammer_env_cfg(
   if gate_reward:
     cfg.rewards["r_gate"] = RewardTermCfg(
       func=hammer_mdp.ordered_gate_progress_reward,
+      weight=8.0,
+      params={},
+    )
+  if progress_reward:
+    cfg.rewards["r_waypoint_progress"] = RewardTermCfg(
+      func=hammer_mdp.ordered_waypoint_progress_reward,
       weight=8.0,
       params={},
     )

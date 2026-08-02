@@ -141,7 +141,7 @@ register_mjlab_task(
 )
 
 # Cartesian straight-waypoint study: fresh matched F8 controls share the same
-# always-on tracker and policy observations; only C-Gate enables gate progress.
+# always-on tracker and policy observations; only their reward reader differs.
 register_mjlab_task(
     task_id="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0",
     env_cfg=z1_hammer_env_cfg(
@@ -174,6 +174,27 @@ register_mjlab_task(
         event_linear=True,
         guideline=True,
         gate_reward=True,
+    ),
+    rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+    runner_cls=HammerOnPolicyRunner,
+)
+
+register_mjlab_task(
+    task_id="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress",
+    env_cfg=z1_hammer_env_cfg(
+        cat_impulse=True,
+        event_correct=True,
+        event_linear=True,
+        guideline=True,
+        progress_reward=True,
+    ),
+    play_env_cfg=z1_hammer_env_cfg(
+        play=True,
+        cat_impulse=True,
+        event_correct=True,
+        event_linear=True,
+        guideline=True,
+        progress_reward=True,
     ),
     rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
     runner_cls=HammerOnPolicyRunner,
