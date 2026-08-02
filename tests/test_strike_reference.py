@@ -1,9 +1,8 @@
-"""Unit tests for the single-strike reference (plan stage T1).
+"""Unit tests for the direct, one-segment hammer strike reference.
 
-Pure torch — no MuJoCo/Warp. Covers anchoring, the two-segment phase law
-(time-indexed wind-up, projection-indexed descent), the monotone latch,
-re-anchoring on reset, playback continuity, batching, and the two observation
-terms against a stub env (same pattern as test_impact_progress_reward.py).
+Pure torch — no MuJoCo/Warp.  The reference anchors the realized reset head
+and advances only through spatial progress on the finite follow-through
+segment; episode time must not create motion.
 """
 
 from __future__ import annotations
@@ -16,232 +15,121 @@ from src.tasks.hammer.mdp.references import SingleStrikeReference, get_strike_re
 
 
 B = 3
-HEAD0 = torch.tensor([[0.50, 0.00, 0.12]]).repeat(B, 1)
+HEAD0 = torch.tensor([[0.50, 0.00, 0.20]]).repeat(B, 1)
 NAIL = torch.tensor([[0.50, 0.00, 0.102]]).repeat(B, 1)
 
 
 def _ref(**kw) -> SingleStrikeReference:
-    return SingleStrikeReference(B, "cpu", **kw)
+    return SingleStrikeReference(B, "cpu", overshoot=0.05, descent_speed=0.03, axis_tol=0.01, **kw)
 
 
 def _steps(v: int) -> torch.Tensor:
     return torch.full((B,), v, dtype=torch.long)
 
 
-# --- anchoring -------------------------------------------------------------
+def _target(nail: torch.Tensor = NAIL) -> torch.Tensor:
+    return nail - torch.tensor([0.0, 0.0, 0.05])
 
 
-def test_anchor_on_step_zero_phi_is_zero():
-    ref = _ref()
-    phi = ref.update(HEAD0, NAIL, _steps(0))
-    assert torch.allclose(phi, torch.zeros(B))
-
-
-def test_waypoint_endpoints():
-    ref = _ref(approach_height=0.10, overshoot=0.005)
-    ref.update(HEAD0, NAIL, _steps(0))
-    assert torch.allclose(ref.waypoint(torch.zeros(B)), HEAD0, atol=1e-6)
-    apex = NAIL.clone()
-    apex[:, 2] += 0.10
-    assert torch.allclose(ref.waypoint(torch.full((B,), 0.5)), apex, atol=1e-6)
-    target = NAIL.clone()
-    target[:, 2] -= 0.005
-    assert torch.allclose(ref.waypoint(torch.ones(B)), target, atol=1e-6)
-
-
-# --- wind-up phase (time-indexed) -------------------------------------------
-
-
-def test_windup_phase_grows_with_step_count():
-    # (2026-07-14 hygiene fix: the old body checked ONE midpoint was in (0, 0.5) — no growth
-    # comparison at all, so a phase law frozen at a constant would have passed.) Two ascending
-    # pre-descent step counts must give strictly growing φ; strictness is meaningful because a
-    # constant law would make the monotone latch return EQUAL values, failing the <.
+def test_reference_is_the_reset_head_to_follow_through_segment():
     ref = _ref()
     ref.update(HEAD0, NAIL, _steps(0))
-    n_w = int(ref._n_windup[0].item())
-    k1 = max(n_w // 3, 1)
-    k2 = max(2 * n_w // 3, k1 + 1)
-    phi_1 = ref.update(HEAD0, NAIL, _steps(k1)).clone()
-    phi_2 = ref.update(HEAD0, NAIL, _steps(min(k2, n_w - 1) if n_w > k1 + 1 else k1 + 1)).clone()
-    assert 0.0 < phi_1[0] < 0.5
-    assert phi_1[0] < phi_2[0] <= 0.5
-    # (step >= n_windup switches to the descent law, tested below).
+
+    assert torch.equal(ref._head0, HEAD0)
+    assert torch.equal(ref._target, _target())
+    assert torch.allclose(ref.waypoint(torch.zeros(B)), HEAD0)
+    midpoint = torch.tensor([[0.50, 0.00, 0.126]]).repeat(B, 1)
+    assert torch.allclose(ref.waypoint(torch.full((B,), 0.5)), midpoint, atol=1e-6)
+    assert torch.equal(ref.waypoint(torch.ones(B)), _target())
 
 
-def test_descent_phase_is_projection_indexed():
-    ref = _ref(approach_height=0.10, overshoot=0.005)
-    ref.update(HEAD0, NAIL, _steps(0))
-    n_w = int(ref._n_windup[0].item())
-    apex = NAIL.clone()
-    apex[:, 2] += 0.10
-    # Head at the apex when descent begins -> phi == 0.5 (s=0: at/above the
-    # anchor projection, so descent credit is gated off — R2-F2 — and the
-    # saturated wind-up phase reads the same 0.5).
-    phi = ref.update(apex, NAIL, _steps(n_w))
-    assert torch.allclose(phi, torch.full((B,), 0.5), atol=1e-6)
-    # Probe BELOW the anchor projection (the R2-F2 gate frees descent credit
-    # only for progress below s0 = the anchor head's own corridor position;
-    # HEAD0 z=0.12 anchors deep in this short corridor, s0 ≈ 0.78) ->
-    # phi == 0.5 + 0.5*s exactly (projection-indexed).
-    probe = NAIL.clone()
-    probe[:, 2] = 0.105
-    length = 0.10 + 0.005  # apex -> target axis length for this geometry
-    s = (float(apex[0, 2]) - 0.105) / length
-    phi = ref.update(probe, NAIL, _steps(n_w + 1))
-    assert torch.allclose(phi, torch.full((B,), 0.5 + 0.5 * s), atol=1e-3)
-    # Head at the strike target -> phi == 1.
-    target = NAIL.clone()
-    target[:, 2] -= 0.005
-    phi = ref.update(target, NAIL, _steps(n_w + 2))
-    assert torch.allclose(phi, torch.ones(B), atol=1e-3)
-
-
-def test_descent_phase_clamped_for_overshoot_below_target():
-    """Head below the strike target must clamp to phi = 1, not exceed it.
-
-    Probe point is anchored to the reference's OWN target so the test stays a
-    clamp-law test under any overshoot default (the 2026-07-13 follow-through fix
-    moved the default from 0.035 to 0.15). It sits WITHIN axis_tol below the
-    target: past the clamped s=1, the excess below-target distance projects into
-    the perp term, so a probe deeper than axis_tol reads off-axis by design and
-    would test the axis gate, not the clamp."""
+def test_waypoints_never_rise_above_the_frozen_reset_head():
     ref = _ref()
     ref.update(HEAD0, NAIL, _steps(0))
-    n_w = int(ref._n_windup[0].item())
-    below = NAIL.clone()
-    below[:, 2] -= ref.overshoot + 0.8 * ref.axis_tol
-    phi = ref.update(below, NAIL, _steps(n_w + 1))
-    assert torch.allclose(phi, torch.ones(B), atol=1e-6)
+
+    for phi in (0.0, 0.25, 0.5, 0.75, 1.0):
+        waypoint = ref.waypoint(torch.full((B,), phi))
+        assert torch.all(waypoint[:, 2] <= HEAD0[:, 2])
 
 
-# --- monotone latch ----------------------------------------------------------
-
-
-def test_phase_latch_survives_bounce():
-    """A post-impact bounce (head moving back up) must not rewind the phase."""
+def test_stationary_head_does_not_advance_from_episode_clock():
     ref = _ref()
     ref.update(HEAD0, NAIL, _steps(0))
-    n_w = int(ref._n_windup[0].item())
-    target = NAIL.clone()
-    target[:, 2] -= 0.005
-    phi_deep = ref.update(target, NAIL, _steps(n_w + 3))
-    bounced = NAIL.clone()
-    bounced[:, 2] += 0.06  # head thrown back up above the nail
-    phi_after = ref.update(bounced, NAIL, _steps(n_w + 4))
-    assert torch.all(phi_after >= phi_deep - 1e-6)
+
+    for step in (1, 7, 100):
+        assert torch.allclose(ref.update(HEAD0, NAIL, _steps(step)), torch.zeros(B))
 
 
-def test_lateral_motion_does_not_advance_descent_phase():
-    """A head far off the strike axis must NOT read as strike progress
-    (review finding: altitude-only phase aliased lateral wandering as phi≈0.9
-    and the latch made it irreversible)."""
+def test_phase_is_projection_gated_and_monotone_latched():
     ref = _ref()
     ref.update(HEAD0, NAIL, _steps(0))
-    n_w = int(ref._n_windup[0].item())
-    off_axis = NAIL.clone()
-    off_axis[:, 0] += 0.14  # 14 cm lateral of the nail, at nail height
-    phi = ref.update(off_axis, NAIL, _steps(n_w + 1))
-    assert torch.all(phi <= 0.5 + 1e-6), f"off-axis head advanced phase: {phi}"
-    # Returning to the axis (below the anchor projection) resumes descent indexing.
-    apex = NAIL.clone()
-    apex[:, 2] += ref.approach_height
-    target = NAIL.clone()
-    target[:, 2] -= ref.overshoot
-    halfway = (apex + target) / 2
-    phi = ref.update(halfway, NAIL, _steps(n_w + 2))
-    assert torch.allclose(phi, torch.full((B,), 0.75), atol=1e-3)
+    halfway = torch.tensor([[0.50, 0.00, 0.126]]).repeat(B, 1)
+    assert torch.allclose(ref.update(halfway, NAIL, _steps(1)), torch.full((B,), 0.5))
+
+    off_axis = torch.tensor([[0.512, 0.00, 0.052]]).repeat(B, 1)
+    assert torch.allclose(ref.update(off_axis, NAIL, _steps(2)), torch.full((B,), 0.5))
+    assert torch.allclose(ref.update(_target(), NAIL, _steps(3)), torch.ones(B))
+    assert torch.allclose(ref.update(halfway, NAIL, _steps(4)), torch.ones(B))
 
 
-def test_update_is_idempotent_within_a_step():
+def test_preview_is_current_kinematics_only_and_peek_is_defensive():
     ref = _ref()
-    phi1 = ref.update(HEAD0, NAIL, _steps(0))
-    phi2 = ref.update(HEAD0, NAIL, _steps(0))
-    assert torch.allclose(phi1, phi2)
-
-
-# --- re-anchoring -------------------------------------------------------------
-
-
-def test_reanchor_on_episode_reset_follows_new_nail():
-    ref = _ref()
+    assert torch.allclose(ref.peek(), torch.zeros(B))
+    assert not bool(ref._anchored.any())
     ref.update(HEAD0, NAIL, _steps(0))
-    n_w = int(ref._n_windup[0].item())
-    target = NAIL.clone()
-    target[:, 2] -= 0.005
-    ref.update(target, NAIL, _steps(n_w + 2))  # drive phase to ~1
-    new_nail = NAIL.clone()
-    new_nail[:, 0] += 0.03  # nail moved 3 cm in x (reset randomization)
-    phi = ref.update(HEAD0, new_nail, _steps(0))  # fresh episode
-    assert torch.allclose(phi, torch.zeros(B))
-    apex = new_nail.clone()
-    apex[:, 2] += ref.approach_height
-    assert torch.allclose(ref.waypoint(torch.full((B,), 0.5)), apex, atol=1e-6)
+    halfway = torch.tensor([[0.50, 0.00, 0.126]]).repeat(B, 1)
+
+    state = (ref._phi.clone(), ref._anchored.clone())
+    assert torch.allclose(ref.preview(halfway, _steps(5)), torch.full((B,), 0.5))
+    assert torch.equal(ref._phi, state[0])
+    assert torch.equal(ref._anchored, state[1])
+    peeked = ref.peek()
+    peeked += 1.0
+    assert torch.allclose(ref.peek(), torch.zeros(B))
 
 
-def test_explicit_reset_clears_latch():
-    ref = _ref()
-    ref.update(HEAD0, NAIL, _steps(0))
-    n_w = int(ref._n_windup[0].item())
-    target = NAIL.clone()
-    target[:, 2] -= 0.005
-    ref.update(target, NAIL, _steps(n_w + 2))
-    ref.reset()
-    phi = ref.update(HEAD0, NAIL, _steps(5))  # mid-episode step but unanchored
-    assert torch.all(phi < 0.5)  # re-anchored fresh, wind-up law applies
-
-
-def test_per_env_independence():
-    """Different nail positions per env produce different apexes."""
+def test_reanchor_and_batching_follow_each_environment_reset_state():
+    heads = HEAD0.clone()
+    heads[1, 0] += 0.04
     nails = NAIL.clone()
-    nails[1, 0] += 0.05
+    nails[1, 0] += 0.04
     ref = _ref()
-    ref.update(HEAD0, nails, _steps(0))
-    wp = ref.waypoint(torch.full((B,), 0.5))
-    assert not torch.allclose(wp[0], wp[1])
-    assert torch.allclose(wp[0], wp[2])
+    ref.update(heads, nails, _steps(0))
+
+    assert torch.equal(ref._head0, heads)
+    assert torch.equal(ref._target, _target(nails))
+    assert not torch.allclose(ref.waypoint(torch.full((B,), 0.5))[0], ref.waypoint(torch.full((B,), 0.5))[1])
+
+    new_nails = nails.clone()
+    new_nails[2, 1] += 0.02
+    phi = ref.update(heads, new_nails, _steps(0))
+    assert torch.allclose(phi, torch.zeros(B))
+    assert torch.equal(ref._target, _target(new_nails))
 
 
-# --- playback ------------------------------------------------------------------
-
-
-def test_playback_continuity_and_endpoint():
+def test_zero_length_segment_is_safe():
+    nail_at_target = HEAD0 + torch.tensor([0.0, 0.0, 0.05])
     ref = _ref()
-    ref.update(HEAD0, NAIL, _steps(0))
-    n = ref.playback_length()
-    assert n >= 2
-    max_step = max(ref.windup_speed, ref.descent_speed) + 1e-6
-    prev = ref.playback_target(0)
-    for k in range(1, n + 1):
-        cur = ref.playback_target(k)
-        assert float((cur - prev).norm(dim=-1).max()) <= max_step
-        prev = cur
-    target = NAIL.clone()
-    target[:, 2] -= ref.overshoot
-    assert torch.allclose(ref.playback_target(n), target, atol=1e-6)
+    assert torch.allclose(ref.update(HEAD0, nail_at_target, _steps(0)), torch.zeros(B))
+    assert torch.allclose(ref.update(HEAD0, nail_at_target, _steps(4)), torch.zeros(B))
+    assert torch.equal(ref.waypoint(torch.ones(B)), HEAD0)
+    assert ref.playback_length() == 0
+    assert torch.equal(ref.playback_target(1), HEAD0)
 
 
-def test_playback_passes_through_apex():
+def test_playback_advances_along_the_direct_segment_at_descent_speed():
     ref = _ref()
     ref.update(HEAD0, NAIL, _steps(0))
-    n_w = int(ref._n_windup[0].item())
-    apex = NAIL.clone()
-    apex[:, 2] += ref.approach_height
-    assert torch.allclose(ref.playback_target(n_w), apex, atol=1e-6)
 
-
-# --- shapes ----------------------------------------------------------------------
-
-
-def test_shapes():
-    ref = _ref()
-    phi = ref.update(HEAD0, NAIL, _steps(0))
-    assert tuple(phi.shape) == (B,)
-    assert tuple(ref.waypoint(phi).shape) == (B, 3)
-    assert tuple(ref.playback_target(1).shape) == (B, 3)
-
-
-# --- observation terms against a stub env ------------------------------------------
+    assert ref.playback_length() == 5
+    previous = ref.playback_target(0)
+    for k in range(1, 6):
+        current = ref.playback_target(k)
+        assert torch.all((current[:, 2] <= previous[:, 2]))
+        assert float((current - previous).norm(dim=-1).max()) <= 0.03 + 1e-6
+        previous = current
+    assert torch.equal(ref.playback_target(5), _target())
+    assert torch.equal(ref.playback_target(99), _target())
 
 
 _ROBOT_CFG = SimpleNamespace(name="robot", site_ids=[0])
@@ -259,139 +147,16 @@ def _stub_env(num_envs: int = B):
     )
 
 
-def test_strike_phase_obs_shape_and_anchor():
-    from src.tasks.hammer.mdp.observations import strike_phase
+def test_observations_anchor_and_stay_stationary_without_spatial_progress():
+    from src.tasks.hammer.mdp.observations import strike_phase, strike_ref_error
 
     env = _stub_env()
-    phi = strike_phase(env, robot_cfg=_ROBOT_CFG, nail_cfg=_NAIL_CFG)
-    assert tuple(phi.shape) == (B, 1)
-    assert torch.allclose(phi, torch.zeros(B, 1))
-
-
-def test_strike_ref_error_points_to_apex_during_windup():
-    from src.tasks.hammer.mdp.observations import strike_ref_error
-
-    env = _stub_env()
-    err = strike_ref_error(env, robot_cfg=_ROBOT_CFG, nail_cfg=_NAIL_CFG)
-    assert tuple(err.shape) == (B, 3)
-    # At phi = 0 the waypoint is head0 itself -> error ~ 0.
-    assert float(err.norm(dim=-1).max()) < 1e-5
-    # Advance one wind-up step without moving the head: waypoint moves toward
-    # the apex (upward), so the error gains a positive z component.
-    env.episode_length_buf += 1
-    err = strike_ref_error(env, robot_cfg=_ROBOT_CFG, nail_cfg=_NAIL_CFG)
-    assert float(err[:, 2].min()) > 0.0
+    assert tuple(strike_phase(env, robot_cfg=_ROBOT_CFG, nail_cfg=_NAIL_CFG).shape) == (B, 1)
+    env.episode_length_buf += 7
+    assert torch.allclose(strike_phase(env, robot_cfg=_ROBOT_CFG, nail_cfg=_NAIL_CFG), torch.zeros(B, 1))
+    assert torch.allclose(strike_ref_error(env, robot_cfg=_ROBOT_CFG, nail_cfg=_NAIL_CFG), torch.zeros(B, 3))
 
 
 def test_get_strike_reference_is_cached_per_env():
     env = _stub_env()
-    r1 = get_strike_reference(env)
-    r2 = get_strike_reference(env)
-    assert r1 is r2
-
-
-# --- 2026-07-13 adversarial-review fixes (F1 peek purity, F3 apex clearance) ---
-
-
-def test_peek_is_pure_and_matches_latch():
-    """peek() returns the latched phase without anchoring or advancing (F1)."""
-    ref = _ref()
-    # Before any update: unanchored, peek returns zeros and does NOT anchor.
-    assert torch.allclose(ref.peek(), torch.zeros(B))
-    assert not bool(ref._anchored.any())
-    # After anchoring + descent progress, peek == the latch, and repeated
-    # peeks with no update in between never move it.
-    ref.update(HEAD0, NAIL, _steps(0))
-    n_w = int(ref._n_windup[0].item())
-    deep = NAIL.clone()
-    deep[:, 2] -= 0.005
-    phi = ref.update(deep, NAIL, _steps(n_w + 2))
-    for _ in range(3):
-        assert torch.equal(ref.peek(), phi)
-    # Defensive copy: mutating the peeked tensor must not leak into the latch.
-    p = ref.peek()
-    p += 1.0
-    assert torch.equal(ref.peek(), phi)
-
-
-def test_hold_still_never_enters_descent():
-    """R2-F2 regression: a head that anchors ON the descent axis (the L6 near-nail
-    reset sits between apex and target) and never lifts must NOT enter descent by
-    clock alone — phi stays <= 0.5 and the waypoint keeps pointing at the apex
-    (nonzero error), so the prior decays instead of paying 1.0 forever."""
-    head_l6 = NAIL.clone()
-    head_l6[:, 2] = 0.102 + 0.148  # z = 0.250: on-axis, between apex and target
-    ref = _ref()
-    ref.update(head_l6, NAIL, _steps(0))
-    n_w = int(ref._n_windup[0].item())
-    for t in range(1, n_w + 6):  # hold still well past the wind-up clock
-        phi = ref.update(head_l6, NAIL, _steps(t))
-    assert torch.all(phi <= 0.5 + 1e-6), f"hold-still entered descent: phi={phi}"
-    # Waypoint at the saturated wind-up phase is the APEX, 5 cm above the head.
-    err = (ref.waypoint(phi) - head_l6).norm(dim=-1)
-    assert torch.all(err >= 0.04), f"waypoint collapsed onto the idle head: err={err}"
-    # Genuine descent BELOW the anchor projection unlocks descent credit.
-    # (Head at nail−5mm projects to phi = 0.5+0.5·(0.208/0.348) ≈ 0.80.)
-    deep = NAIL.clone()
-    deep[:, 2] -= 0.005
-    phi = ref.update(deep, NAIL, _steps(n_w + 7))
-    assert torch.all(phi > 0.75)
-
-
-def test_preview_is_pure_and_rewards_current_progress():
-    """R2-F1 regression: preview() must (a) write NOTHING and (b) compute the phase
-    from the CURRENT head, so under production ordering (obs commits at t-1, reward
-    reads at t) a faithful follower scores ~1.0 — not exp(-1)/0.74 against the
-    previous step's waypoint — while a hoverer's reward decays as the wind-up
-    waypoint marches away from it."""
-    ref = _ref()
-    ref.update(HEAD0, NAIL, _steps(0))  # obs pass at t=0 anchors
-    apex = ref._apex.clone()
-    n_w = int(ref._n_windup[0].item())
-    sigma = 0.05
-    # t=1..n_w: follower rides the wind-up waypoints; production order = reward
-    # BEFORE the obs pass of the same step.
-    for t in range(1, n_w + 1):
-        frac = t / float(n_w)
-        head_t = HEAD0 + frac * (apex - HEAD0)
-        state = (ref._phi.clone(), ref._anchored.clone(), ref._s0.clone())
-        phi_r = ref.preview(head_t, _steps(t))              # reward-time read
-        assert torch.equal(ref._phi, state[0])              # pure: no writes
-        assert torch.equal(ref._anchored, state[1])
-        assert torch.equal(ref._s0, state[2])
-        r_follow = torch.exp(-((head_t - ref.waypoint(phi_r)) ** 2).sum(-1) / sigma**2)
-        phi_h = ref.preview(HEAD0, _steps(t))               # the hoverer, same step
-        r_hover = torch.exp(-((HEAD0 - ref.waypoint(phi_h)) ** 2).sum(-1) / sigma**2)
-        assert torch.all(r_follow >= 0.999), f"follower under-rewarded at t={t}: {r_follow}"
-        assert torch.all(r_follow >= r_hover - 1e-6)
-        ref.update(head_t, NAIL, _steps(t))                 # obs pass commits
-    # Descent: head well below the anchor projection (R2-F2 gate satisfied) —
-    # preview must credit the CURRENT projection (self-referential ~1.0), not
-    # the stale one committed at the previous obs pass.
-    head_d = apex.clone()
-    head_d[:, 2] = 0.09  # 3 cm below the HEAD0 anchor (z=0.12): R2-F2 gate open
-    phi_r = ref.preview(head_d, _steps(n_w + 1))
-    r_follow = torch.exp(-((head_d - ref.waypoint(phi_r)) ** 2).sum(-1) / sigma**2)
-    assert torch.all(r_follow >= 0.999), (
-        f"descent follower scored {r_follow} — stale-phi anti-motion gradient is back")
-
-
-def test_apex_clearance_floors_windup_at_near_apex_reset():
-    """F3 fix: when the head anchors AT/ABOVE nail_top+approach_height (the L6
-    near-nail reset), the apex is floored at head0+min_windup_clearance so the
-    wind-up cannot degenerate to a 1-step nudge."""
-    # L6-like: head 2 mm below the nominal apex (0.252) — the degenerate case.
-    head_l6 = NAIL.clone()
-    head_l6[:, 2] = 0.102 + 0.148  # z = 0.250 vs nail_top+0.15 = 0.252
-    ref = _ref()
-    ref.update(head_l6, NAIL, _steps(0))
-    apex_z = ref._apex[:, 2]
-    assert torch.allclose(apex_z, head_l6[:, 2] + ref.min_windup_clearance)
-    assert int(ref._n_windup[0].item()) >= 2  # real lift, not a 1-step nudge
-    # waypoint(0.5) is the floored apex.
-    wp_apex = ref.waypoint(torch.full((B,), 0.5))
-    assert torch.allclose(wp_apex[:, 2], apex_z, atol=1e-6)
-    # Heads well BELOW the nominal apex keep the classic anchor untouched.
-    ref2 = _ref()
-    ref2.update(HEAD0, NAIL, _steps(0))  # head z=0.12 << 0.252
-    assert torch.allclose(ref2._apex[:, 2], NAIL[:, 2] + ref2.approach_height)
+    assert get_strike_reference(env) is get_strike_reference(env)

@@ -77,10 +77,10 @@ def strike_phase(
   robot_cfg: SceneEntityCfg,
   nail_cfg: SceneEntityCfg,
 ) -> torch.Tensor:
-  """Phase of the scripted single-strike reference (plan T1). Shape: (B, 1).
+  """Phase of the direct scripted single-strike reference. Shape: (B, 1).
 
-  phi in [0, 0.5] = wind-up (step-indexed); [0.5, 1] = strike descent
-  (distance-indexed). Monotone within an episode; re-anchored on reset.
+  ``phi`` is monotone-latched spatial progress on the reset-head-to-
+  follow-through segment, re-anchored on reset.
   """
   robot: Entity = env.scene[robot_cfg.name]
   nail_entity: Entity = env.scene[nail_cfg.name]
@@ -96,7 +96,7 @@ def strike_ref_error(
   robot_cfg: SceneEntityCfg,
   nail_cfg: SceneEntityCfg,
 ) -> torch.Tensor:
-  """Vector from the hammer head to the current reference waypoint (plan T1).
+  """Vector from the hammer head to the current direct-strike waypoint.
 
   Gives the policy the reference to anticipate (anchor, not cage). Shape: (B, 3).
   """

@@ -501,7 +501,7 @@ class ImitationPriorTerm(ManagerTermBase):
 
   Rewards the hammer head for following the scripted SingleStrikeReference waypoint
   p*(phi), but ONLY before the first hammer->nail contact of the episode (ante-impact
-  latch), so it shapes the approach/wind-up and never the impact. Position-only,
+  latch), so it shapes the direct approach and never the impact. Position-only,
   task-space; no velocity imitation (Biemond/TAC: ill-posed through contact). Intended
   to run at a small weight that ANNEALS to 0 via mjlab's reward_curriculum, so the policy
   stays free to deviate and beat the reference (online RL, not DeepMimic).
@@ -528,7 +528,7 @@ class ImitationPriorTerm(ManagerTermBase):
   latch any completed within-interval contact.
 
   KNOWN RISK (watch-item, not yet guarded): the latch bounds accumulation only once
-  contact occurs. A policy that hovers near the wind-up apex without contacting keeps
+  contact occurs. A policy that hovers near the reference segment without contacting keeps
   earning ~weight/step. Mitigated by (a) the anneal to 0 by step 6000, and (b) the +100
   completion bonus that terminates the episode (striking dominates hovering: perpetuity
   ≤ 0.1/(1−γ) = 10 ≪ 100). The deviation-norm / press-watchdog training metrics surface
