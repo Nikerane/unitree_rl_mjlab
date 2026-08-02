@@ -1,0 +1,27 @@
+Traceback (most recent call last):
+  File "/cephhome/eunikhilr/campaigns/guideline_smoke_6771419/scripts/smoke_first_strike_instrumentation.py", line 27, in <module>
+    import scripts.eval_impulse as eval_impulse
+  File "/cephhome/eunikhilr/campaigns/guideline_smoke_6771419/scripts/eval_impulse.py", line 47, in <module>
+    import src.tasks  # noqa: F401  (register hammer tasks)
+    ^^^^^^^^^^^^^^^^
+  File "/cephhome/eunikhilr/campaigns/guideline_smoke_6771419/src/tasks/__init__.py", line 5, in <module>
+    import_packages(__name__, _BLACKLIST_PKGS)
+  File "/ceph/hpc/home/eunikhilr/repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/utils/lab_api/tasks/importer.py", line 40, in import_packages
+    for _ in _walk_packages(
+             ^^^^^^^^^^^^^^^
+  File "/ceph/hpc/home/eunikhilr/repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/utils/lab_api/tasks/importer.py", line 89, in _walk_packages
+    yield from _walk_packages(path, info.name + ".", onerror, blacklist_pkgs)
+  File "/ceph/hpc/home/eunikhilr/repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/utils/lab_api/tasks/importer.py", line 77, in _walk_packages
+    __import__(info.name)
+  File "/cephhome/eunikhilr/campaigns/guideline_smoke_6771419/src/tasks/hammer/cat/__init__.py", line 9, in <module>
+    from .constraints import joint_velocity_excess
+  File "/cephhome/eunikhilr/campaigns/guideline_smoke_6771419/src/tasks/hammer/cat/constraints.py", line 20, in <module>
+    from src.tasks.hammer.mdp.impulse_bound import _ENV_SUBSTEP_IMPULSE_ATTR
+  File "/cephhome/eunikhilr/campaigns/guideline_smoke_6771419/src/tasks/hammer/mdp/__init__.py", line 8, in <module>
+    from .first_strike import (  # noqa: F401
+  File "/cephhome/eunikhilr/campaigns/guideline_smoke_6771419/src/tasks/hammer/mdp/first_strike.py", line 12, in <module>
+    from src.tasks.hammer.nail_block import NAIL_GOAL_DEPTH, NAIL_SUCCESS_THRESHOLD
+  File "/cephhome/eunikhilr/campaigns/guideline_smoke_6771419/src/tasks/hammer/nail_block.py", line 22, in <module>
+    assert _SCENE_XML.exists(), f"Nail/block scene XML not found: {_SCENE_XML}"
+           ^^^^^^^^^^^^^^^^^^^
+AssertionError: Nail/block scene XML not found: /cephhome/eunikhilr/campaigns/safe_impact_manipulation/hammer_z1_env/assets/nail_block_scene.xml

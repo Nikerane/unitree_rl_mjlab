@@ -1,0 +1,61 @@
+Traceback (most recent call last):
+  File "/ceph/hpc/home/eunikhilr/repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/git/__init__.py", line 296, in <module>
+    refresh()
+  File "/ceph/hpc/home/eunikhilr/repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/git/__init__.py", line 287, in refresh
+    if not Git.refresh(path=path):
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/ceph/hpc/home/eunikhilr/repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/git/cmd.py", line 864, in refresh
+    raise ImportError(err)
+ImportError: Bad git executable.
+The git executable must be specified in one of the following ways:
+    - be included in your $PATH
+    - be set via $GIT_PYTHON_GIT_EXECUTABLE
+    - explicitly set via git.refresh(<full-path-to-git-executable>)
+
+All git commands will error until this is rectified.
+
+This initial message can be silenced or aggravated in the future by setting the
+$GIT_PYTHON_REFRESH environment variable. Use one of the following values:
+    - quiet|q|silence|s|silent|none|n|0: for no message or exception
+    - warn|w|warning|log|l|1: for a warning message (logging level CRITICAL, displayed by default)
+    - error|e|exception|raise|r|2: for a raised exception
+
+Example:
+    export GIT_PYTHON_REFRESH=quiet
+
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/cephhome/eunikhilr/campaigns/guideline_smoke_6771419/scripts/smoke_first_strike_instrumentation.py", line 23, in <module>
+    from mjlab.rl import RslRlVecEnvWrapper
+  File "/ceph/hpc/home/eunikhilr/repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/rl/__init__.py", line 5, in <module>
+    from mjlab.rl.runner import MjlabOnPolicyRunner as MjlabOnPolicyRunner
+  File "/ceph/hpc/home/eunikhilr/repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/rl/runner.py", line 6, in <module>
+    from rsl_rl.runners import OnPolicyRunner
+  File "/ceph/hpc/home/eunikhilr/repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/rsl_rl/runners/__init__.py", line 8, in <module>
+    from .on_policy_runner import OnPolicyRunner  # noqa: I001
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/ceph/hpc/home/eunikhilr/repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/rsl_rl/runners/on_policy_runner.py", line 17, in <module>
+    from rsl_rl.utils.logger import Logger
+  File "/ceph/hpc/home/eunikhilr/repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/rsl_rl/utils/logger.py", line 9, in <module>
+    import git
+  File "/ceph/hpc/home/eunikhilr/repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/git/__init__.py", line 298, in <module>
+    raise ImportError("Failed to initialize: {0}".format(_exc)) from _exc
+ImportError: Failed to initialize: Bad git executable.
+The git executable must be specified in one of the following ways:
+    - be included in your $PATH
+    - be set via $GIT_PYTHON_GIT_EXECUTABLE
+    - explicitly set via git.refresh(<full-path-to-git-executable>)
+
+All git commands will error until this is rectified.
+
+This initial message can be silenced or aggravated in the future by setting the
+$GIT_PYTHON_REFRESH environment variable. Use one of the following values:
+    - quiet|q|silence|s|silent|none|n|0: for no message or exception
+    - warn|w|warning|log|l|1: for a warning message (logging level CRITICAL, displayed by default)
+    - error|e|exception|raise|r|2: for a raised exception
+
+Example:
+    export GIT_PYTHON_REFRESH=quiet
+
