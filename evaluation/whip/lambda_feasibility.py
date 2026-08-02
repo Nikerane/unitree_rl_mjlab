@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 import hashlib
+import inspect
 import json
 import multiprocessing as mp
 import os
@@ -2847,13 +2848,28 @@ def replay_saved_tape(tape: SavedTape) -> dict[str, object]:
 
 def _reference_controller_spec() -> dict[str, object]:
     """Inspectable provenance for the active direct-reference controller."""
+    from src.tasks.hammer.mdp.references import SingleStrikeReference
+
+    constructor = inspect.signature(SingleStrikeReference)
+    parameter_names = ("overshoot", "descent_speed", "axis_tol")
+    actual_names = tuple(constructor.parameters)[2:]
+    if actual_names != parameter_names:
+        raise RuntimeError(
+            "SingleStrikeReference constructor parameters drifted: "
+            f"expected {parameter_names}, got {actual_names}"
+        )
+    parameters: dict[str, object] = {}
+    for name in parameter_names:
+        default = constructor.parameters[name].default
+        if default is inspect.Parameter.empty:
+            raise RuntimeError(
+                f"SingleStrikeReference parameter {name!r} has no default"
+            )
+        parameters[name] = default
+
     return {
         "class": "src.tasks.hammer.mdp.references.SingleStrikeReference",
-        "parameters": {
-            "overshoot": 0.15,
-            "descent_speed": 0.05,
-            "axis_tol": 0.05,
-        },
+        "parameters": parameters,
         "geometry": {
             "start": "frozen reset hammer-head position",
             "target_xy": "frozen nail x/y",

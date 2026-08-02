@@ -35,7 +35,9 @@ def _is_exact_frozen_cap(value) -> bool:
   return actual.shape == expected.shape and torch.equal(actual, expected)
 
 
-def assert_log_only_reference_contract(cfg, *, live_imp_limit=None) -> torch.Tensor:
+def assert_log_only_reference_contract(
+  cfg, *, live_imp_limit=None, live_imp_max_p=None
+) -> torch.Tensor:
   """Fail closed unless the config and optional live hook use frozen C0 settings."""
   params = cfg.metrics["cat_soft"].params
   imp_max_p = float(params["imp_max_p"])
@@ -50,6 +52,10 @@ def assert_log_only_reference_contract(cfg, *, live_imp_limit=None) -> torch.Ten
   if live_imp_limit is not None and not _is_exact_frozen_cap(live_imp_limit):
     raise RuntimeError(
       f"live cap drifted from frozen IMP_J_LIMIT: {live_imp_limit}"
+    )
+  if live_imp_max_p is not None and float(live_imp_max_p) != 0.0:
+    raise RuntimeError(
+      f"live imp_max_p drifted from log-only 0.0: {live_imp_max_p}"
     )
   return torch.tensor(IMP_J_LIMIT, dtype=torch.float32)
 
@@ -104,7 +110,9 @@ def run_reference_strikes(cfg, repeat_count: int) -> dict:
 
   hook = env.metrics_manager.cfg["cat_soft"].func
   frozen_limit = assert_log_only_reference_contract(
-    cfg, live_imp_limit=hook._imp_limit
+    cfg,
+    live_imp_limit=hook._imp_limit,
+    live_imp_max_p=hook._imp_max_p,
   ).to(device=env.device)
   acc = getattr(env, _ENV_SUBSTEP_IMPULSE_ATTR)
   rm = env.reward_manager

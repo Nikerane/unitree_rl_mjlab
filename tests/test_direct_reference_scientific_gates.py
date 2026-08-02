@@ -63,6 +63,11 @@ def c2_script() -> ModuleType:
     return _load_script("test_c2_enforcement_gate", REWARD_DESIGN / "c2_enforcement_gate.py")
 
 
+@pytest.fixture(scope="module")
+def playback_script() -> ModuleType:
+    return _load_script("test_playback_reference", REWARD_DESIGN / "playback_reference.py")
+
+
 def _cfg(*, imp_max_p: float = 0.0, imp_limit=IMP_J_LIMIT):
     return SimpleNamespace(
         metrics={
@@ -159,6 +164,47 @@ def test_direct_reference_guard_accepts_only_the_frozen_log_only_contract(
     assert torch.equal(frozen, torch.tensor(IMP_J_LIMIT))
 
 
+def test_direct_reference_guard_rejects_live_imp_max_p_divergence(
+    reward_util: ModuleType,
+) -> None:
+    guard = getattr(reward_util, "assert_log_only_reference_contract")
+    with pytest.raises(RuntimeError, match="live imp_max_p"):
+        guard(
+            _cfg(),
+            live_imp_limit=torch.tensor(IMP_J_LIMIT),
+            live_imp_max_p=0.25,
+        )
+
+
+def test_live_guard_call_sites_check_both_hook_values() -> None:
+    required = {
+        "playback_reference.py": "main",
+        "reward_design_util.py": "run_reference_strikes",
+        "derive_impulse_thresholds.py": "main",
+    }
+
+    for filename, function_name in required.items():
+        tree = ast.parse((REWARD_DESIGN / filename).read_text(), filename=filename)
+        function = next(
+            node
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == function_name
+        )
+        live_guard_calls = [
+            node
+            for node in ast.walk(function)
+            if isinstance(node, ast.Call)
+            and getattr(node.func, "id", None) == "assert_log_only_reference_contract"
+            and "live_imp_limit" in {keyword.arg for keyword in node.keywords}
+        ]
+        assert len(live_guard_calls) == 1, filename
+        assert {
+            "live_imp_limit",
+            "live_imp_max_p",
+        } <= {keyword.arg for keyword in live_guard_calls[0].keywords}
+
+
 def test_production_measurement_config_is_fixed_reset_fixed_impedance_c0(
     reward_util: ModuleType,
 ) -> None:
@@ -181,6 +227,40 @@ def test_reference_helper_exposes_repeatability_not_intensity_semantics(
     assert labels == (0, 1, 2)
     with pytest.raises(ValueError, match="positive"):
         getattr(reward_util, "direct_reference_repeat_indices")(0)
+
+
+def test_reference_provenance_tracks_actual_constructor_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.tasks.hammer.mdp.references import SingleStrikeReference
+
+    original_digest = lambda_feasibility._reference_controller_digest()
+    defaults = SingleStrikeReference.__init__.__defaults__
+    assert defaults is not None
+    monkeypatch.setattr(
+        SingleStrikeReference.__init__,
+        "__defaults__",
+        (0.123, defaults[1], defaults[2]),
+    )
+
+    spec = lambda_feasibility._reference_controller_spec()
+
+    assert spec["parameters"]["overshoot"] == 0.123
+    assert lambda_feasibility._reference_controller_digest() != original_digest
+
+
+def test_playback_verdict_explicitly_defers_full_rate_certification(
+    playback_script: ModuleType,
+) -> None:
+    scope = getattr(playback_script, "CONTROL_RATE_FEASIBILITY_SCOPE")
+    assert scope == (
+        "control-rate sampled feasibility only; authoritative 500 Hz "
+        "qvel/contact/finite certification is delegated to "
+        "evaluation/guideline/qualify_reference.py"
+    )
+    main_source = inspect.getsource(playback_script.main)
+    assert "CONTROL_RATE_FEASIBILITY_SCOPE" in main_source
+    assert "legal finite state" not in main_source
 
 
 def test_measured_contact_duration_cannot_rederive_the_frozen_cap(

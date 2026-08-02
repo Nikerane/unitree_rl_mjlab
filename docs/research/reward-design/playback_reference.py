@@ -1,10 +1,10 @@
 """Run the one nominal direct strike against the production fixed-reset C0 config.
 
-This is the active Phase-M reference-quality check.  It requires nail drive,
-in-script contact, strike-speed contact, finite control-rate state, and legal
-arm-joint speed.  The slow-press run is a diagnostic only.  The printed
-max-force integral is a crude control-rate proxy, not either reward impulse
-normalizer.
+This is a control-rate-sampled Phase-M feasibility check.  Authoritative 500 Hz
+qvel/contact/finite certification belongs to
+``evaluation/guideline/qualify_reference.py``.  The slow-press run is a
+diagnostic only.  The printed max-force integral is a crude control-rate proxy,
+not either reward impulse normalizer.
 
 Run:
     python docs/research/reward-design/playback_reference.py
@@ -37,13 +37,22 @@ CONTACT_SLACK = 2
 CONTACT_SPEED_FLOOR = 0.5
 PRESS_STEPS = 200
 PRESS_ACTION = -0.1
+CONTROL_RATE_FEASIBILITY_SCOPE = (
+    "control-rate sampled feasibility only; authoritative 500 Hz "
+    "qvel/contact/finite certification is delegated to "
+    "evaluation/guideline/qualify_reference.py"
+)
 
 
 def main() -> int:
     cfg = load_direct_reference_c0_cfg()
     env = ManagerBasedRlEnv(cfg, device="cpu")
     hook = env.metrics_manager.cfg["cat_soft"].func
-    assert_log_only_reference_contract(cfg, live_imp_limit=hook._imp_limit)
+    assert_log_only_reference_contract(
+        cfg,
+        live_imp_limit=hook._imp_limit,
+        live_imp_max_p=hook._imp_max_p,
+    )
 
     rcfg = SceneEntityCfg("robot", site_names=(HAMMER_HEAD_SITE_NAME,))
     arm_cfg = SceneEntityCfg("robot", joint_names=ARM_JOINT_NAMES)
@@ -74,16 +83,16 @@ def main() -> int:
     contact_speed = None
     terminated_step = None
     force_impulse_proxy = 0.0
-    qvel_peak = 0.0
-    finite = True
+    sampled_qvel_peak = 0.0
+    sampled_finite = True
     for k in range(1, n + HOLD_STEPS + 1):
         target = ref.playback_target(min(k, n))
         head_z_pre = float(head()[0, 2])
         action = ((target - head()) / Z1_HAMMER_DELTA_POS_SCALE).clamp(-1.0, 1.0)
         env.step(action)
         qvel = robot.data.joint_vel[0, arm_cfg.joint_ids]
-        qvel_peak = max(qvel_peak, float(qvel.abs().max()))
-        finite = finite and bool(
+        sampled_qvel_peak = max(sampled_qvel_peak, float(qvel.abs().max()))
+        sampled_finite = sampled_finite and bool(
             torch.isfinite(action).all()
             and torch.isfinite(head()).all()
             and torch.isfinite(qvel).all()
@@ -111,15 +120,23 @@ def main() -> int:
         max_d = max(max_d, NAIL_SUCCESS_THRESHOLD)
     in_script = contact_step is not None and contact_step <= n + CONTACT_SLACK
     fast = contact_speed is not None and contact_speed >= CONTACT_SPEED_FLOOR
-    qvel_legal = qvel_peak <= QVEL_LIMIT_RAD_S
-    strike_ok = drove_nail and in_script and fast and qvel_legal and finite
+    sampled_qvel_within_rail = sampled_qvel_peak <= QVEL_LIMIT_RAD_S
+    sampled_feasible = (
+        drove_nail
+        and in_script
+        and fast
+        and sampled_qvel_within_rail
+        and sampled_finite
+    )
     speed_text = f"{contact_speed:.2f} m/s" if contact_speed is not None else "n/a"
     print(
         f"nominal direct strike (script n={n}): max depth >= {max_d * 1000:.1f} mm  "
         f"contact@step {contact_step} (in-script<={n + CONTACT_SLACK}: {in_script})  "
-        f"v_contact={speed_text}  qvel_peak={qvel_peak:.4f} rad/s  finite={finite}  "
+        f"v_contact={speed_text}  sampled_qvel_peak={sampled_qvel_peak:.4f} rad/s  "
+        f"sampled_finite={sampled_finite}  "
         f"control-rate max-force impulse proxy={force_impulse_proxy:.2f} N·s"
     )
+    print(f"scope: {CONTROL_RATE_FEASIBILITY_SCOPE}")
 
     # Diagnostic only: this does not affect the direct-strike gate verdict.
     env.reset()
@@ -143,21 +160,23 @@ def main() -> int:
             f"{press_steps_to_success} steps; press-exploit pressure exists"
         )
 
-    if strike_ok:
+    if sampled_feasible:
         print(
-            "PHASE M GATE: PASS — the nominal direct reference drives the nail "
-            "with in-script strike-speed contact and legal finite state"
+            "PHASE M CONTROL-RATE FEASIBILITY: PASS — the nominal direct reference "
+            "drives the nail with in-script strike-speed contact at the sampled "
+            "control-rate states"
         )
         return 0
     if drove_nail:
         print(
-            "PHASE M GATE: NOT MET — nail depth was reached without the required "
-            "in-script strike-speed, finite-state, and qvel contract; stop the experiment"
+            "PHASE M CONTROL-RATE FEASIBILITY: NOT MET — nail depth was reached "
+            "without the required sampled in-script strike-speed, finite-state, "
+            "and qvel conditions; stop the experiment"
         )
         return 1
     print(
-        "PHASE M GATE: NOT MET — the nominal direct reference did not drive the nail; "
-        "stop the experiment"
+        "PHASE M CONTROL-RATE FEASIBILITY: NOT MET — the nominal direct reference "
+        "did not drive the nail; stop the experiment"
     )
     return 1
 

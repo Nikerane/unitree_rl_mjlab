@@ -69,7 +69,11 @@ def main() -> int:
   cfg = load_direct_reference_c0_cfg()
   env = ManagerBasedRlEnv(cfg, device="cpu")
   hook = env.metrics_manager.cfg["cat_soft"].func
-  assert_log_only_reference_contract(cfg, live_imp_limit=hook._imp_limit)
+  assert_log_only_reference_contract(
+    cfg,
+    live_imp_limit=hook._imp_limit,
+    live_imp_max_p=hook._imp_max_p,
+  )
   robot = env.scene["robot"]
   nail_e = env.scene["nail_block"]
   contact = env.scene["hammer_nail_contact"]
