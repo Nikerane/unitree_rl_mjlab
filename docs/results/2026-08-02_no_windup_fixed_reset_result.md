@@ -20,7 +20,7 @@ behavior.
 | Geometry | six gates; 5.0 mm corridor through accepted onset | 6/6 gates; max 1.3001 mm |
 | Contact and task progress | production accepted-contact tracker | accepted/raw contact true; 32.000 mm nail progress |
 | Joint velocity | `<= 3.1415 rad/s` | peak 2.5308 rad/s |
-| Impulse configuration | unchanged `IMP_J_LIMIT`; log-only `imp_max_p=0.0` | enforced by the 16-seed qualifier |
+| Impulse configuration | unchanged `IMP_J_LIMIT`; log-only `imp_max_p=0.0` | live log-only machinery and caps confirmed unchanged; no Lambda-cap enforcement |
 
 Separately, a five-repeat log-only direct-reference quantity cross-check found
 the scripted reference far from binding the unchanged manufacturer-derived
