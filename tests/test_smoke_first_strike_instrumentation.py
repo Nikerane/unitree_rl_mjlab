@@ -34,6 +34,10 @@ QUALITY_ARM_TASKS = {
     "FQ-min": "Unitree-Z1-Hammer-CaT-Impulse-Event-Quality",
     "B8": "Unitree-Z1-Hammer-CaT-Impulse-Event-Bounded",
 }
+GUIDELINE_ARM_TASKS = {
+    "C0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0",
+    "C-Gate": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate",
+}
 
 COMMON_PREDICATES = (
     "finite_signals",
@@ -60,6 +64,13 @@ TRACKER_DELIVERED_PULSE_PREDICATES = (
     "delivered_exactly_one_terminal_pulse",
 )
 QUALITY_PREDICATES = ("quality_snapshot_valid", "quality_no_overflow")
+GUIDELINE_PREDICATES = (
+    "guideline_tracker_exists",
+    "guideline_tracker_initialized",
+    "guideline_geometry_finite",
+    "guideline_geometry_nondegenerate",
+    "guideline_all_gates_crossed",
+)
 
 
 def valid_record(*, arm: str, num_envs: int, device_type: str) -> dict[str, object]:
@@ -89,6 +100,10 @@ def valid_record(*, arm: str, num_envs: int, device_type: str) -> dict[str, obje
             predicate_names.extend(TRACKER_DELIVERED_PULSE_PREDICATES)
     if contract.quality_required:
         predicate_names.extend(QUALITY_PREDICATES)
+    if contract.guideline_required:
+        predicate_names.extend(GUIDELINE_PREDICATES)
+    if contract.gate_reward_required:
+        predicate_names.append("manager_gate_positive_finite")
     actual_device = "cuda:0" if device_type == "cuda" else "cpu"
     return {
         "schema_version": "four-task-cuda-smoke-v1",
@@ -624,6 +639,68 @@ def test_arm_contracts_pin_the_fq4x8_payout_semantics(
 
 
 @pytest.mark.parametrize(
+    ("arm", "gate_reward_required"), (("C0", False), ("C-Gate", True))
+)
+def test_guideline_arm_contracts_pin_literal_task_and_f_reward_semantics(
+    arm, gate_reward_required
+):
+    contract = smoke.ARM_CONTRACTS[arm]
+
+    assert contract.task == GUIDELINE_ARM_TASKS[arm]
+    assert contract.impact_reader == "FirstStrikeImpactRewardTerm"
+    assert contract.delivered_reader == "FirstStrikeDeliveredRewardTerm"
+    assert contract.tracker_required is True
+    assert contract.event_i_ref_n_s == pytest.approx(0.3088)
+    assert contract.delivered_saturate is False
+    assert contract.guideline_required is True
+    assert contract.gate_reward_required is gate_reward_required
+
+
+@pytest.mark.parametrize("arm", ("C0", "C-Gate"))
+def test_synthetic_valid_guideline_record_passes_and_wrong_pairing_fails(arm):
+    record = valid_record(arm=arm, num_envs=256, device_type="cuda")
+
+    result = smoke.evaluate_gate(record)
+
+    assert result["integration_pass"] is True
+    assert result["cuda_qualification_pass"] is True
+    assert result["failed_predicates"] == []
+
+    wrong_arm = "C-Gate" if arm == "C0" else "C0"
+    record["task"] = GUIDELINE_ARM_TASKS[wrong_arm]
+    wrong = smoke.evaluate_gate(record)
+    assert wrong["integration_pass"] is False
+    assert "task_arm_pairing" in wrong["failed_predicates"]
+
+
+@pytest.mark.parametrize("arm", ("C0", "C-Gate"))
+@pytest.mark.parametrize("predicate", GUIDELINE_PREDICATES)
+def test_guideline_record_rejects_each_missing_nonfinite_or_incomplete_predicate(
+    arm, predicate
+):
+    record = valid_record(arm=arm, num_envs=256, device_type="cuda")
+    record["predicate_counts"][predicate] = {"passed": 255, "total": 256}  # type: ignore[index]
+
+    result = smoke.evaluate_gate(record)
+
+    assert result["integration_pass"] is False
+    assert predicate in result["failed_predicates"]
+
+
+def test_cgate_record_requires_finite_positive_manager_gate_payout():
+    record = valid_record(arm="C-Gate", num_envs=256, device_type="cuda")
+    record["predicate_counts"]["manager_gate_positive_finite"] = {  # type: ignore[index]
+        "passed": 0,
+        "total": 256,
+    }
+
+    result = smoke.evaluate_gate(record)
+
+    assert result["integration_pass"] is False
+    assert "manager_gate_positive_finite" in result["failed_predicates"]
+
+
+@pytest.mark.parametrize(
     ("field", "invalid_value", "failed_name"),
     (
         ("device_type", "cpu", "device_type"),
@@ -721,6 +798,31 @@ def test_live_contract_accepts_each_quality_arm_with_its_own_weight_contract(
     diagnostic_cfg = smoke.make_diagnostic_cfg(training_cfg, num_envs=8)
 
     assert diagnostic_cfg.metrics["substep_impulse_rows"].params["enabled"] is False
+
+
+@pytest.mark.parametrize(("arm", "task"), tuple(GUIDELINE_ARM_TASKS.items()))
+def test_live_contract_accepts_each_native_guideline_task_without_reset_normalization(
+    arm, task
+):
+    training_cfg, _, digest = smoke.validate_live_contract(task)
+
+    assert digest["treatment"] == arm
+    assert digest["impact_weight"] == 8.0
+    assert digest["delivered_weight"] == 2.0
+    assert digest["event_i_ref_n_s"] == pytest.approx(0.3088)
+    assert digest["guideline_num_gates"] == 6
+    assert training_cfg.events["reset_robot_joints"].params["position_range"] == (
+        0.0,
+        0.0,
+    )
+
+    diagnostic_cfg = smoke.make_diagnostic_cfg(training_cfg, num_envs=1)
+    assert diagnostic_cfg.events["reset_robot_joints"].params[
+        "position_range"
+    ] == (0.0, 0.0)
+    assert training_cfg.events["reset_robot_joints"].params[
+        "position_range"
+    ] == (0.0, 0.0)
 
 
 def test_live_contract_rejects_fq_min_v_expected_drift(monkeypatch):
@@ -1272,8 +1374,18 @@ def _control_payload(**overrides):
         "tracker_delivered": torch.tensor([0.55, 0.02]),
         "tracker_contact_quality_valid": torch.tensor([False, False]),
         "tracker_contact_quality_overflow": torch.tensor([False, False]),
+        "guideline_tracker_exists": torch.tensor([True, True]),
+        "guideline_tracker_initialized": torch.tensor([True, True]),
+        "guideline_entry": torch.tensor(
+            [[0.0, 0.0, 0.2], [0.0, 0.0, 0.2]]
+        ),
+        "guideline_nail": torch.tensor(
+            [[0.0, 0.0, 0.1], [0.0, 0.0, 0.1]]
+        ),
+        "guideline_next_gate": torch.tensor([6, 6]),
         "manager_impact": torch.tensor([8.0, 0.0]),
         "manager_delivered": torch.tensor([2.0, 0.0]),
+        "manager_gate": torch.tensor([0.16, 0.0]),
     }
     payload.update(overrides)
     return payload
@@ -1537,6 +1649,64 @@ def test_finalize_computes_quality_snapshot_predicates_from_the_tracker_latch():
 
     assert result["predicate_counts"]["quality_snapshot_valid"]["passed"] == 1
     assert result["predicate_counts"]["quality_no_overflow"]["passed"] == 1
+
+
+@pytest.mark.parametrize(
+    ("override", "failed_predicate"),
+    (
+        (
+            {"guideline_tracker_exists": torch.tensor([False, True])},
+            "guideline_tracker_exists",
+        ),
+        (
+            {"guideline_tracker_initialized": torch.tensor([False, True])},
+            "guideline_tracker_initialized",
+        ),
+        (
+            {
+                "guideline_entry": torch.tensor(
+                    [[float("nan"), 0.0, 0.2], [0.0, 0.0, 0.2]]
+                )
+            },
+            "guideline_geometry_finite",
+        ),
+        (
+            {
+                "guideline_nail": torch.tensor(
+                    [[0.0, 0.0, 0.2], [0.0, 0.0, 0.1]]
+                )
+            },
+            "guideline_geometry_nondegenerate",
+        ),
+        (
+            {"guideline_next_gate": torch.tensor([5, 6])},
+            "guideline_all_gates_crossed",
+        ),
+    ),
+)
+def test_finalize_derives_each_guideline_predicate_from_the_terminal_latch(
+    override, failed_predicate
+):
+    _, _, impact_tap, delivered_tap = _make_taps()
+    recorder = smoke.DeviceSmokeRecorder(impact_tap, delivered_tap)
+
+    recorder.capture_control_step(**_control_payload(**override))
+
+    result = recorder.finalize()
+    assert result["predicate_counts"][failed_predicate]["passed"] == 0
+
+
+@pytest.mark.parametrize("gate_payout", (0.0, float("nan")))
+def test_finalize_rejects_zero_or_nonfinite_manager_gate_payout(gate_payout):
+    _, _, impact_tap, delivered_tap = _make_taps()
+    recorder = smoke.DeviceSmokeRecorder(impact_tap, delivered_tap)
+
+    recorder.capture_control_step(
+        **_control_payload(manager_gate=torch.tensor([gate_payout, 0.0]))
+    )
+
+    result = recorder.finalize()
+    assert result["predicate_counts"]["manager_gate_positive_finite"]["passed"] == 0
 
 
 def test_terminal_latch_includes_transient_depth_nonfinite_in_finite_signals():
@@ -2007,6 +2177,20 @@ def test_cli_parses_the_exact_required_command_shape(tmp_path):
     assert args.expected_asset_revision == "b" * 40
     assert args.asset_repo == tmp_path / "assets"
     assert args.out == tmp_path / "external" / "result.json"
+
+
+@pytest.mark.parametrize("task", tuple(GUIDELINE_ARM_TASKS.values()))
+def test_cli_accepts_the_exact_two_guideline_task_ids(tmp_path, task):
+    args = smoke.parse_args(_valid_cli_argv(tmp_path, task=task))
+
+    assert args.task == task
+
+
+def test_cli_rejects_a_guideline_task_near_match(tmp_path):
+    near_match = GUIDELINE_ARM_TASKS["C-Gate"] + "-near-match"
+
+    with pytest.raises(SystemExit):
+        smoke.parse_args(_valid_cli_argv(tmp_path, task=near_match))
 
 
 def test_cli_module_has_an_executable_main_guard():
@@ -2638,3 +2822,20 @@ def test_b8_cpu_runtime_saturates_above_knee_center_blind_and_keeps_quality_gate
     assert result["integration_pass"] is True, result["failed_predicates"]
     assert result["predicate_counts"]["quality_snapshot_valid"]["passed"] == 1
     assert result["predicate_counts"]["quality_no_overflow"]["passed"] == 1
+
+
+@pytest.mark.parametrize(("arm", "task"), tuple(GUIDELINE_ARM_TASKS.items()))
+def test_cpu_guideline_smoke_crosses_all_six_gates_before_accepted_contact(
+    arm, task
+):
+    result = smoke.run_smoke(task=task, device="cpu", num_envs=1)
+
+    assert result["arm"] == arm
+    assert result["integration_pass"] is True, result["failed_predicates"]
+    assert result["terminal_guideline_next_gate"] == [6]
+    for predicate in GUIDELINE_PREDICATES:
+        assert result["predicate_counts"][predicate]["passed"] == 1
+    if arm == "C-Gate":
+        assert result["predicate_counts"]["manager_gate_positive_finite"][
+            "passed"
+        ] == 1

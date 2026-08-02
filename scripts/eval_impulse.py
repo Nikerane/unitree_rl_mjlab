@@ -46,7 +46,7 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 import mjlab.tasks  # noqa: F401  (register builtin tasks)
 import src.tasks  # noqa: F401  (register hammer tasks)
 from src.assets.robots.unitree_z1.z1_constants import HAMMER_HEAD_SITE_NAME
-from src.tasks.hammer.config.z1.env_cfgs import IMP_J_LIMIT
+from src.tasks.hammer.config.z1.env_cfgs import IMP_J_LIMIT, _guideline_observation
 from src.tasks.hammer.mdp.first_strike import (
   FirstStrikeEventTracker,
   REASON_SUCCESS,
@@ -54,7 +54,19 @@ from src.tasks.hammer.mdp.first_strike import (
   _ENV_FIRST_STRIKE_ATTR,
 )
 from src.tasks.hammer.mdp.impulse_bound import _ENV_SUBSTEP_DELIVERED_ATTR, _ENV_SUBSTEP_IMPULSE_ATTR
-from src.tasks.hammer.mdp.rewards import clamped_nail_depth
+from src.tasks.hammer.mdp.guideline import (
+  GUIDELINE_NUM_GATES,
+  WaypointProgressTracker,
+  completed_gate_fraction,
+  guideline_perpendicular_error,
+  next_gate_vector,
+  ordered_gate_progress_reward,
+)
+from src.tasks.hammer.mdp.rewards import (
+  FirstStrikeDeliveredRewardTerm,
+  FirstStrikeImpactRewardTerm,
+  clamped_nail_depth,
+)
 from evaluation.analysis.terminal_funnel import (
     decode_payload_json,
     encode_payload_json,
@@ -87,6 +99,13 @@ QUALITY_ARM_TASKS = {
   "B8": "Unitree-Z1-Hammer-CaT-Impulse-Event-Bounded",
 }
 QUALITY_TASK_TO_ARM = {task: arm for arm, task in QUALITY_ARM_TASKS.items()}
+GUIDELINE_ARM_TASKS = {
+  "C0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0",
+  "C-Gate": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate",
+}
+GUIDELINE_TASK_TO_ARM = {
+  task: arm for arm, task in GUIDELINE_ARM_TASKS.items()
+}
 QUALITY_EVALUATION_REFERENCE_TASK = QUALITY_ARM_TASKS["FQ"]
 FQ3X8_TASKS = frozenset(
   QUALITY_ARM_TASKS[arm] for arm in ("F8", "B8", "FQ")
@@ -788,6 +807,221 @@ def build_strict_quality_evaluation_cfg(task: str, *, play: bool):
     "evaluation_policy_observation_sha256": evaluation_observation,
     "training_treatment_reward_sha256": training_reward,
     "evaluation_treatment_reward_sha256": evaluation_reward,
+  }
+
+
+def _validate_native_guideline_env_contract(env_cfg, task: str) -> dict:
+  """Fail closed on an untouched registered C0/C-Gate training config."""
+  if task not in GUIDELINE_TASK_TO_ARM:
+    raise ValueError(
+      "native guideline validation requires exactly one of "
+      f"{tuple(GUIDELINE_TASK_TO_ARM)}, got {task!r}"
+    )
+  treatment = GUIDELINE_TASK_TO_ARM[task]
+
+  impact = env_cfg.rewards.get("impact_progress")
+  delivered = env_cfg.rewards.get("delivered_impulse")
+  if impact is None or delivered is None:
+    raise ValueError(f"{task}: missing F linear-event reward terms")
+  impact_weight = float(impact.weight)
+  delivered_weight = float(delivered.weight)
+  if (impact_weight, delivered_weight) != (8.0, 2.0):
+    raise ValueError(
+      f"{task}: configured maximize weights must be exactly 8.0/2.0, got "
+      f"{impact_weight}/{delivered_weight}"
+    )
+  if impact.func is not FirstStrikeImpactRewardTerm:
+    raise ValueError(f"{task}: impact reader must be FirstStrikeImpactRewardTerm")
+  if delivered.func is not FirstStrikeDeliveredRewardTerm:
+    raise ValueError(
+      f"{task}: delivered reader must be FirstStrikeDeliveredRewardTerm"
+    )
+  impact_v_expected_n_s = float(
+    impact.params.get("v_expected", float("nan"))
+  )
+  if impact_v_expected_n_s != 1.0:
+    raise ValueError(f"{task}: impact v_expected drift")
+  event_i_ref_n_s = float(delivered.params.get("i_ref", float("nan")))
+  if event_i_ref_n_s != 0.3088:
+    raise ValueError(f"{task}: delivered i_ref must be exactly 0.3088")
+  delivered_saturate = delivered.params.get("saturate")
+  if delivered_saturate is not False:
+    raise ValueError(f"{task}: delivered saturate must be False")
+  if "r_imit" in env_cfg.rewards:
+    raise ValueError(f"{task}: native guideline training config must not contain r_imit")
+
+  gate_reward = env_cfg.rewards.get("r_gate")
+  if treatment == "C0":
+    if gate_reward is not None:
+      raise ValueError(f"{task}: C0 must not contain r_gate")
+  elif (
+    gate_reward is None
+    or gate_reward.func is not ordered_gate_progress_reward
+    or float(gate_reward.weight) != 8.0
+    or gate_reward.params != {}
+  ):
+    raise ValueError(
+      f"{task}: C-Gate r_gate must be ordered_gate_progress_reward, "
+      "weight 8.0, with empty params"
+    )
+
+  reset_range = tuple(
+    float(value)
+    for value in env_cfg.events["reset_robot_joints"].params["position_range"]
+  )
+  if reset_range != (0.0, 0.0):
+    raise ValueError(f"{task}: native guideline requires fixed reset (0.0, 0.0)")
+
+  first_strike = env_cfg.metrics.get("first_strike")
+  waypoint = env_cfg.metrics.get("waypoint_progress")
+  if (
+    first_strike is None
+    or first_strike.func is not FirstStrikeEventTracker
+    or first_strike.per_substep is not True
+    or first_strike.reduce != "last"
+  ):
+    raise ValueError(f"{task}: missing or wrong FirstStrikeEventTracker")
+  if (
+    waypoint is None
+    or waypoint.func is not WaypointProgressTracker
+    or waypoint.per_substep is not True
+  ):
+    raise ValueError(f"{task}: missing or wrong per-substep WaypointProgressTracker")
+  metric_names = tuple(env_cfg.metrics)
+  if metric_names.index("waypoint_progress") != metric_names.index("first_strike") + 1:
+    raise ValueError(
+      f"{task}: waypoint_progress must immediately follow first_strike"
+    )
+  if set(waypoint.params) != {"robot_cfg", "nail_cfg"}:
+    raise ValueError(f"{task}: WaypointProgressTracker params drift")
+  robot_cfg = waypoint.params["robot_cfg"]
+  nail_cfg = waypoint.params["nail_cfg"]
+  if robot_cfg.name != "robot" or tuple(robot_cfg.site_names or ()) != (
+    HAMMER_HEAD_SITE_NAME,
+  ):
+    raise ValueError(f"{task}: guideline robot site binding drift")
+  if nail_cfg.name != "nail_block" or tuple(nail_cfg.site_names or ()) != (
+    "nail_top",
+  ):
+    raise ValueError(f"{task}: guideline nail site binding drift")
+
+  expected_observations = {
+    "next_gate_vector": (next_gate_vector, 3),
+    "completed_gate_fraction": (completed_gate_fraction, 1),
+    "guideline_perpendicular_error": (guideline_perpendicular_error, 1),
+  }
+  expected_observation_names = tuple(expected_observations)
+  for group_name in ("actor", "critic"):
+    group = env_cfg.observations[group_name]
+    terms = group.terms
+    configured_guideline_names = tuple(
+      name for name, term in terms.items()
+      if term.func is _guideline_observation
+    )
+    if (
+      configured_guideline_names != expected_observation_names
+      or tuple(terms)[-len(expected_observation_names):]
+      != expected_observation_names
+    ):
+      missing = [name for name in expected_observation_names if name not in terms]
+      detail = missing[0] if missing else "guideline observation ordering"
+      raise ValueError(f"{task}: {group_name} {detail} drift")
+    for name, (reader, width) in expected_observations.items():
+      term = terms[name]
+      if term.func is not _guideline_observation or term.params != {
+        "reader": reader,
+        "width": width,
+      }:
+        raise ValueError(f"{task}: {group_name} {name} reader/width drift")
+
+  actor_corruption = bool(env_cfg.observations["actor"].enable_corruption)
+  critic_corruption = bool(env_cfg.observations["critic"].enable_corruption)
+  if not actor_corruption or critic_corruption:
+    raise ValueError(
+      f"{task}: actor corruption must be on and critic corruption must be off"
+    )
+
+  cat_soft = env_cfg.metrics["cat_soft"]
+  if float(cat_soft.params["imp_max_p"]) != 0.0:
+    raise ValueError(f"{task}: native guideline requires imp_max_p=0")
+  impulse_limits = tuple(float(value) for value in cat_soft.params["imp_limit"])
+  imported_impulse_limits = tuple(float(value) for value in IMP_J_LIMIT)
+  if impulse_limits != LITERAL_IMPULSE_LIMITS_N_M_S:
+    raise ValueError(f"{task}: native guideline frozen impulse limits drift")
+  if imported_impulse_limits != LITERAL_IMPULSE_LIMITS_N_M_S:
+    raise ValueError(
+      f"{task}: imported IMP_J_LIMIT differs from frozen impulse limits"
+    )
+
+  actuator_signature = tuple(
+    (
+      type(actuator).__name__,
+      tuple(actuator.target_names_expr),
+      float(actuator.stiffness),
+      float(actuator.damping),
+      float(actuator.effort_limit),
+      float(actuator.armature),
+    )
+    for actuator in env_cfg.scene.entities["robot"].articulation.actuators
+  )
+  if actuator_signature != EXPECTED_FIXED_ACTUATOR_SIGNATURE:
+    raise ValueError(f"{task}: fixed-impedance actuator signature drift")
+
+  def freeze_config_value(value):
+    if isinstance(value, dict):
+      return tuple(
+        (str(key), freeze_config_value(item))
+        for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+      )
+    if isinstance(value, (tuple, list)):
+      return tuple(freeze_config_value(item) for item in value)
+    return value
+
+  action_signature = tuple(
+    (
+      name,
+      type(action).__name__,
+      tuple(
+        (field.name, freeze_config_value(getattr(action, field.name)))
+        for field in fields(action)
+      ),
+    )
+    for name, action in env_cfg.actions.items()
+  )
+  if action_signature != EXPECTED_FIXED_ACTION_SIGNATURE:
+    raise ValueError(f"{task}: fixed action signature drift")
+
+  physics_dt_s = _physics_timestep_s(env_cfg)
+  if not math.isclose(
+    physics_dt_s, EXPECTED_PHYSICS_DT_S, rel_tol=0.0, abs_tol=1e-15
+  ):
+    raise ValueError(f"{task}: physics timestep must remain 0.002 s (500 Hz)")
+  decimation = int(env_cfg.decimation)
+  if decimation != EXPECTED_CONTROL_DECIMATION:
+    raise ValueError(f"{task}: control decimation must remain 10")
+
+  return {
+    "treatment": treatment,
+    "impact_weight": impact_weight,
+    "delivered_weight": delivered_weight,
+    "reset_position_noise_min_rad": reset_range[0],
+    "reset_position_noise_max_rad": reset_range[1],
+    "actor_observation_corruption": actor_corruption,
+    "critic_observation_corruption": critic_corruption,
+    "event_i_ref_n_s": event_i_ref_n_s,
+    "impact_reader": _configured_reader_name(impact.func),
+    "delivered_reader": _configured_reader_name(delivered.func),
+    "impact_v_expected_n_s": impact_v_expected_n_s,
+    "delivered_saturate": delivered_saturate,
+    "impulse_limits_n_m_s": list(impulse_limits),
+    "physics_dt_s": physics_dt_s,
+    "control_decimation": decimation,
+    "fixed_impedance_signature_sha256": (
+      EXPECTED_FIXED_IMPEDANCE_SIGNATURE_SHA256
+    ),
+    "fixed_action_signature_sha256": EXPECTED_FIXED_ACTION_SIGNATURE_SHA256,
+    "guideline_num_gates": GUIDELINE_NUM_GATES,
+    "gate_reward_enabled": gate_reward is not None,
   }
 
 

@@ -523,6 +523,218 @@ def test_strict_native_quality_arms_reject_delivered_reader_swap(arm):
     eval_impulse._validate_sampled_env_contract(cfg, task)
 
 
+GUIDELINE_TASKS = {
+  "C0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0",
+  "C-Gate": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate",
+}
+
+
+@pytest.mark.parametrize(("arm", "task"), tuple(GUIDELINE_TASKS.items()))
+def test_native_guideline_contract_accepts_only_the_two_registered_training_configs(
+  arm, task
+):
+  cfg = eval_impulse.load_env_cfg(task, play=False)
+
+  contract = eval_impulse._validate_native_guideline_env_contract(cfg, task)
+
+  assert eval_impulse.GUIDELINE_ARM_TASKS == GUIDELINE_TASKS
+  assert contract["treatment"] == arm
+  assert (contract["impact_weight"], contract["delivered_weight"]) == (8.0, 2.0)
+  assert contract["event_i_ref_n_s"] == pytest.approx(0.3088)
+  assert contract["impact_reader"] == "FirstStrikeImpactRewardTerm"
+  assert contract["delivered_reader"] == "FirstStrikeDeliveredRewardTerm"
+  assert contract["delivered_saturate"] is False
+  assert contract["reset_position_noise_min_rad"] == 0.0
+  assert contract["reset_position_noise_max_rad"] == 0.0
+  assert contract["guideline_num_gates"] == 6
+
+
+def test_native_guideline_mapping_does_not_expand_strict_checkpoint_evaluator_tasks():
+  guideline_tasks = set(eval_impulse.GUIDELINE_ARM_TASKS.values())
+  advertised_checkpoint_tasks = set(
+    eval_impulse.TASK_TO_ARM | eval_impulse.QUALITY_TASK_TO_ARM
+  )
+
+  assert guideline_tasks.isdisjoint(advertised_checkpoint_tasks)
+  assert advertised_checkpoint_tasks == {
+    "Unitree-Z1-Hammer-CaT-Impulse",
+    "Unitree-Z1-Hammer-CaT-Impulse-FirstStrike-Legacy",
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear",
+    "Unitree-Z1-Hammer-CaT-Impulse-Event",
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0",
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0",
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Quality",
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Bounded",
+  }
+  near_match = GUIDELINE_TASKS["C-Gate"] + "-near-match"
+  cfg = eval_impulse.load_env_cfg(GUIDELINE_TASKS["C-Gate"], play=False)
+  with pytest.raises(ValueError, match="native guideline"):
+    eval_impulse._validate_native_guideline_env_contract(cfg, near_match)
+
+
+@pytest.mark.parametrize(
+  ("mutate", "message"),
+  (
+    (
+      lambda cfg: cfg.events["reset_robot_joints"].params.__setitem__(
+        "position_range", (-0.05, 0.05)
+      ),
+      "fixed reset",
+    ),
+    (
+      lambda cfg: cfg.rewards["impact_progress"].__setattr__("weight", 7.0),
+      "maximize weights",
+    ),
+    (
+      lambda cfg: cfg.rewards["impact_progress"].__setattr__("func", object),
+      "impact reader",
+    ),
+    (
+      lambda cfg: cfg.rewards["delivered_impulse"].params.__setitem__(
+        "i_ref", 1.0
+      ),
+      "i_ref",
+    ),
+    (
+      lambda cfg: cfg.rewards["delivered_impulse"].params.__setitem__(
+        "saturate", True
+      ),
+      "saturate",
+    ),
+    (
+      lambda cfg: cfg.actions["ik_hammer_head"].__setattr__("max_dq", 0.29),
+      "fixed action signature",
+    ),
+    (
+      lambda cfg: cfg.scene.entities["robot"].articulation.actuators[0].__setattr__(
+        "stiffness", 1.0
+      ),
+      "fixed-impedance actuator signature",
+    ),
+    (
+      lambda cfg: cfg.metrics["cat_soft"].params.__setitem__("imp_max_p", 0.5),
+      "imp_max_p",
+    ),
+    (
+      lambda cfg: cfg.metrics["cat_soft"].params.__setitem__(
+        "imp_limit", [1.0] * 6
+      ),
+      "impulse limits",
+    ),
+    (
+      lambda cfg: cfg.sim.mujoco.__setattr__("timestep", 0.004),
+      "physics timestep",
+    ),
+    (lambda cfg: cfg.__setattr__("decimation", 5), "control decimation"),
+    (
+      lambda cfg: cfg.rewards.__setitem__(
+        "r_imit", copy.deepcopy(cfg.rewards["approach"])
+      ),
+      "r_imit",
+    ),
+  ),
+)
+def test_native_guideline_contract_rejects_reward_reset_or_fixed_plant_drift(
+  mutate, message
+):
+  task = GUIDELINE_TASKS["C0"]
+  cfg = eval_impulse.load_env_cfg(task, play=False)
+  mutate(cfg)
+
+  with pytest.raises(ValueError, match=message):
+    eval_impulse._validate_native_guideline_env_contract(cfg, task)
+
+
+@pytest.mark.parametrize(
+  ("mutation", "message"),
+  (
+    ("missing", "WaypointProgressTracker"),
+    ("wrong_func", "WaypointProgressTracker"),
+    ("not_substep", "WaypointProgressTracker"),
+    ("wrong_robot", "robot site binding"),
+    ("wrong_nail", "nail site binding"),
+  ),
+)
+def test_native_guideline_contract_rejects_tracker_drift(mutation, message):
+  task = GUIDELINE_TASKS["C0"]
+  cfg = eval_impulse.load_env_cfg(task, play=False)
+  if mutation == "missing":
+    del cfg.metrics["waypoint_progress"]
+  elif mutation == "wrong_func":
+    cfg.metrics["waypoint_progress"].func = object
+  elif mutation == "not_substep":
+    cfg.metrics["waypoint_progress"].per_substep = False
+  elif mutation == "wrong_robot":
+    cfg.metrics["waypoint_progress"].params["robot_cfg"].site_names = ("wrong",)
+  else:
+    cfg.metrics["waypoint_progress"].params["nail_cfg"].site_names = ("wrong",)
+
+  with pytest.raises(ValueError, match=message):
+    eval_impulse._validate_native_guideline_env_contract(cfg, task)
+
+
+@pytest.mark.parametrize("group", ("actor", "critic"))
+@pytest.mark.parametrize(
+  "term_name",
+  (
+    "next_gate_vector",
+    "completed_gate_fraction",
+    "guideline_perpendicular_error",
+  ),
+)
+def test_native_guideline_contract_requires_each_guideline_observation_in_both_groups(
+  group, term_name
+):
+  task = GUIDELINE_TASKS["C0"]
+  cfg = eval_impulse.load_env_cfg(task, play=False)
+  del cfg.observations[group].terms[term_name]
+
+  with pytest.raises(ValueError, match=term_name):
+    eval_impulse._validate_native_guideline_env_contract(cfg, task)
+
+
+@pytest.mark.parametrize(
+  ("term_name", "field", "value"),
+  (
+    ("next_gate_vector", "reader", object),
+    ("completed_gate_fraction", "width", 2),
+    ("guideline_perpendicular_error", "reader", object),
+  ),
+)
+def test_native_guideline_contract_rejects_observation_reader_or_width_drift(
+  term_name, field, value
+):
+  task = GUIDELINE_TASKS["C0"]
+  cfg = eval_impulse.load_env_cfg(task, play=False)
+  cfg.observations["actor"].terms[term_name].params[field] = value
+
+  with pytest.raises(ValueError, match=term_name):
+    eval_impulse._validate_native_guideline_env_contract(cfg, task)
+
+
+def test_native_guideline_contract_rejects_c0_gate_reward_or_cgate_gate_reward_drift():
+  c0_task = GUIDELINE_TASKS["C0"]
+  cgate_task = GUIDELINE_TASKS["C-Gate"]
+  c0 = eval_impulse.load_env_cfg(c0_task, play=False)
+  cgate = eval_impulse.load_env_cfg(cgate_task, play=False)
+
+  c0.rewards["r_gate"] = copy.deepcopy(cgate.rewards["r_gate"])
+  with pytest.raises(ValueError, match="C0.*r_gate"):
+    eval_impulse._validate_native_guideline_env_contract(c0, c0_task)
+
+  mutations = (
+    lambda cfg: cfg.rewards.pop("r_gate"),
+    lambda cfg: cfg.rewards["r_gate"].__setattr__("func", object),
+    lambda cfg: cfg.rewards["r_gate"].__setattr__("weight", 7.0),
+    lambda cfg: cfg.rewards["r_gate"].params.__setitem__("extra", 1),
+  )
+  for mutate in mutations:
+    cfg = eval_impulse.load_env_cfg(cgate_task, play=False)
+    mutate(cfg)
+    with pytest.raises(ValueError, match="C-Gate.*r_gate"):
+      eval_impulse._validate_native_guideline_env_contract(cfg, cgate_task)
+
+
 @pytest.mark.integration
 def test_fixed_action_tape_preserves_physics_across_strict_quality_arms():
   """Passive quality sensing changes no plant channel; payouts are intentionally absent."""

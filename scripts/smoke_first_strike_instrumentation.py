@@ -32,6 +32,11 @@ from src.assets.robots.unitree_z1.z1_constants import (
 )
 from src.tasks.hammer.config.z1.env_cfgs import IMP_J_LIMIT
 from src.tasks.hammer.mdp.first_strike import FirstStrikeEventTracker
+from src.tasks.hammer.mdp.guideline import (
+    GUIDELINE_NUM_GATES,
+    WaypointProgressTracker,
+    _ENV_GUIDELINE_ATTR,
+)
 from src.tasks.hammer.mdp.references import SingleStrikeReference
 from src.tasks.hammer.nail_block import NAIL_GOAL_DEPTH, NAIL_SUCCESS_THRESHOLD
 
@@ -50,6 +55,10 @@ ARM_TASKS = {
     "D0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0",
     "FQ-min": "Unitree-Z1-Hammer-CaT-Impulse-Event-Quality",
     "B8": "Unitree-Z1-Hammer-CaT-Impulse-Event-Bounded",
+}
+GUIDELINE_ARM_TASKS = {
+    "C0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0",
+    "C-Gate": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate",
 }
 
 
@@ -74,6 +83,10 @@ class ArmContract:
     # FQ-min's speed reader is bounded by a different normalizer than every
     # other arm's default 1.0; checked against config drift when not None.
     impact_v_expected_n_s: float | None = None
+    # Cartesian-guideline arms require device-latched tracker geometry/gates.
+    guideline_required: bool = False
+    # C-Gate alone must produce a finite positive manager r_gate payout.
+    gate_reward_required: bool = False
 
 
 @dataclass(frozen=True)
@@ -126,6 +139,17 @@ ARM_CONTRACTS: dict[str, ArmContract] = {
         delivered_zero=True, quality_required=True,
         impact_v_expected_n_s=1.4598331451416016,
     ),
+    "C0": ArmContract(
+        "C0", GUIDELINE_ARM_TASKS["C0"], "FirstStrikeImpactRewardTerm",
+        "FirstStrikeDeliveredRewardTerm", True, 0.3088, False,
+        guideline_required=True,
+    ),
+    "C-Gate": ArmContract(
+        "C-Gate", GUIDELINE_ARM_TASKS["C-Gate"],
+        "FirstStrikeImpactRewardTerm", "FirstStrikeDeliveredRewardTerm",
+        True, 0.3088, False, guideline_required=True,
+        gate_reward_required=True,
+    ),
 }
 TASK_CONTRACTS = {contract.task: contract for contract in ARM_CONTRACTS.values()}
 LITERAL_IMPULSE_LIMITS_N_M_S = (1.64, 3.28, 1.64, 1.64, 1.64, 1.64)
@@ -162,6 +186,13 @@ TRACKER_DELIVERED_PULSE_PREDICATES = (
     "delivered_exactly_one_terminal_pulse",
 )
 QUALITY_PREDICATES = ("quality_snapshot_valid", "quality_no_overflow")
+GUIDELINE_PREDICATES = (
+    "guideline_tracker_exists",
+    "guideline_tracker_initialized",
+    "guideline_geometry_finite",
+    "guideline_geometry_nondegenerate",
+    "guideline_all_gates_crossed",
+)
 
 
 class RawRewardTap:
@@ -269,6 +300,7 @@ class DeviceSmokeRecorder:
         self.post_depth_max = torch.zeros(shape, device=self.device)
         self.manager_impact = torch.zeros(shape, device=self.device)
         self.manager_delivered = torch.zeros(shape, device=self.device)
+        self.manager_gate = torch.zeros(shape, device=self.device)
         self.control_step = torch.zeros(
             shape, dtype=torch.long, device=self.device
         )
@@ -308,6 +340,21 @@ class DeviceSmokeRecorder:
         self.terminal_tracker_contact_quality_overflow = torch.zeros(
             shape, dtype=torch.bool, device=self.device
         )
+        self.terminal_guideline_tracker_exists = torch.zeros(
+            shape, dtype=torch.bool, device=self.device
+        )
+        self.terminal_guideline_tracker_initialized = torch.zeros(
+            shape, dtype=torch.bool, device=self.device
+        )
+        self.terminal_guideline_entry = torch.zeros(
+            self.num_envs, 3, device=self.device
+        )
+        self.terminal_guideline_nail = torch.zeros(
+            self.num_envs, 3, device=self.device
+        )
+        self.terminal_guideline_next_gate = torch.zeros(
+            shape, dtype=torch.long, device=self.device
+        )
         self.terminal_raw_impact_finite = torch.ones(
             shape, dtype=torch.bool, device=self.device
         )
@@ -324,6 +371,7 @@ class DeviceSmokeRecorder:
         self.terminal_manager_delivered = torch.zeros(
             shape, device=self.device
         )
+        self.terminal_manager_gate = torch.zeros(shape, device=self.device)
         self.terminal_control_step = torch.zeros(
             shape, dtype=torch.long, device=self.device
         )
@@ -406,11 +454,18 @@ class DeviceSmokeRecorder:
         tracker_delivered: torch.Tensor,
         tracker_contact_quality_valid: torch.Tensor,
         tracker_contact_quality_overflow: torch.Tensor,
+        guideline_tracker_exists: torch.Tensor,
+        guideline_tracker_initialized: torch.Tensor,
+        guideline_entry: torch.Tensor,
+        guideline_nail: torch.Tensor,
+        guideline_next_gate: torch.Tensor,
         manager_impact: torch.Tensor,
         manager_delivered: torch.Tensor,
+        manager_gate: torch.Tensor,
     ) -> None:
         self.manager_impact += manager_impact
         self.manager_delivered += manager_delivered
+        self.manager_gate += manager_gate
 
         first_terminal = reset_buf & ~self.terminal_seen
         sources = (
@@ -432,6 +487,17 @@ class DeviceSmokeRecorder:
                 self.terminal_tracker_contact_quality_overflow,
                 tracker_contact_quality_overflow,
             ),
+            (
+                self.terminal_guideline_tracker_exists,
+                guideline_tracker_exists,
+            ),
+            (
+                self.terminal_guideline_tracker_initialized,
+                guideline_tracker_initialized,
+            ),
+            (self.terminal_guideline_entry, guideline_entry),
+            (self.terminal_guideline_nail, guideline_nail),
+            (self.terminal_guideline_next_gate, guideline_next_gate),
             (self.terminal_raw_impact_finite, self.impact_tap.all_finite),
             (
                 self.terminal_raw_delivered_finite,
@@ -447,6 +513,7 @@ class DeviceSmokeRecorder:
             ),
             (self.terminal_manager_impact, self.manager_impact),
             (self.terminal_manager_delivered, self.manager_delivered),
+            (self.terminal_manager_gate, self.manager_gate),
             (self.terminal_control_step, self.control_step),
             (
                 self.terminal_impact_positive_count,
@@ -526,9 +593,30 @@ class DeviceSmokeRecorder:
         tracker_delivered_zero = torch.zeros(
             self.num_envs, device=self.device
         )
+        guideline_tracker = getattr(env, _ENV_GUIDELINE_ATTR, None)
+        if not isinstance(guideline_tracker, WaypointProgressTracker):
+            guideline_tracker = None
+        guideline_tracker_exists = torch.full(
+            (self.num_envs,),
+            guideline_tracker is not None,
+            dtype=torch.bool,
+            device=self.device,
+        )
+        guideline_geometry_zero = torch.zeros(
+            self.num_envs, 3, device=self.device
+        )
+        guideline_gate_zero = torch.zeros(
+            self.num_envs, dtype=torch.long, device=self.device
+        )
+        manager_gate_zero = torch.zeros(self.num_envs, device=self.device)
         impact_idx = env.reward_manager.active_terms.index("impact_progress")
         delivered_idx = env.reward_manager.active_terms.index(
             "delivered_impulse"
+        )
+        gate_idx = (
+            env.reward_manager.active_terms.index("r_gate")
+            if "r_gate" in env.reward_manager.active_terms
+            else None
         )
 
         self._env = env
@@ -596,6 +684,16 @@ class DeviceSmokeRecorder:
                     tracker_contact_quality_overflow = (
                         tracker.contact_quality_overflow
                     )
+                if guideline_tracker is None:
+                    guideline_initialized = tracker_false
+                    guideline_entry = guideline_geometry_zero
+                    guideline_nail = guideline_geometry_zero
+                    guideline_next_gate = guideline_gate_zero
+                else:
+                    guideline_initialized = guideline_tracker.initialized
+                    guideline_entry = guideline_tracker.entry
+                    guideline_nail = guideline_tracker.nail
+                    guideline_next_gate = guideline_tracker.next_gate
                 self.capture_control_step(
                     reset_buf=env.reset_buf,
                     terminal_depth=depth,
@@ -610,8 +708,18 @@ class DeviceSmokeRecorder:
                     tracker_delivered=tracker_delivered,
                     tracker_contact_quality_valid=tracker_contact_quality_valid,
                     tracker_contact_quality_overflow=tracker_contact_quality_overflow,
+                    guideline_tracker_exists=guideline_tracker_exists,
+                    guideline_tracker_initialized=guideline_initialized,
+                    guideline_entry=guideline_entry,
+                    guideline_nail=guideline_nail,
+                    guideline_next_gate=guideline_next_gate,
                     manager_impact=step_reward[:, impact_idx] * env.step_dt,
                     manager_delivered=step_reward[:, delivered_idx] * env.step_dt,
+                    manager_gate=(
+                        step_reward[:, gate_idx] * env.step_dt
+                        if gate_idx is not None
+                        else manager_gate_zero
+                    ),
                 )
                 return result
             except BaseException:
@@ -676,6 +784,18 @@ class DeviceSmokeRecorder:
             & torch.isfinite(tensor_fields["terminal_pre_depth_max"])
             & torch.isfinite(tensor_fields["terminal_post_depth_max"])
         )
+        guideline_geometry_finite = (
+            torch.isfinite(tensor_fields["terminal_guideline_entry"]).all(dim=-1)
+            & torch.isfinite(tensor_fields["terminal_guideline_nail"]).all(dim=-1)
+        )
+        guideline_geometry_nondegenerate = (
+            torch.linalg.vector_norm(
+                tensor_fields["terminal_guideline_nail"]
+                - tensor_fields["terminal_guideline_entry"],
+                dim=-1,
+            )
+            > 0.0
+        )
         predicates = {
             "finite_signals": finite_signals,
             "hammer_nail_contact": seen
@@ -718,12 +838,32 @@ class DeviceSmokeRecorder:
             & (tensor_fields["terminal_manager_impact"] == 0.0),
             "manager_delivered_zero": seen
             & (tensor_fields["terminal_manager_delivered"] == 0.0),
+            "manager_gate_positive_finite": (
+                seen
+                & torch.isfinite(tensor_fields["terminal_manager_gate"])
+                & (tensor_fields["terminal_manager_gate"] > 0.0)
+            ),
             # FQ-min only: the one-shot onset quality snapshot must be valid
             # and must not have overflowed its fixed contact-slot capacity.
             "quality_snapshot_valid": seen
             & tensor_fields["terminal_tracker_contact_quality_valid"],
             "quality_no_overflow": seen
             & ~tensor_fields["terminal_tracker_contact_quality_overflow"],
+            "guideline_tracker_exists": seen
+            & tensor_fields["terminal_guideline_tracker_exists"],
+            "guideline_tracker_initialized": seen
+            & tensor_fields["terminal_guideline_tracker_initialized"],
+            "guideline_geometry_finite": seen & guideline_geometry_finite,
+            "guideline_geometry_nondegenerate": (
+                seen
+                & guideline_geometry_finite
+                & guideline_geometry_nondegenerate
+            ),
+            "guideline_all_gates_crossed": seen
+            & (
+                tensor_fields["terminal_guideline_next_gate"]
+                == GUIDELINE_NUM_GATES
+            ),
             "hardware_qvel": (
                 seen
                 & (tensor_fields["terminal_pre_qvel_max"] <= 3.1415)
@@ -874,7 +1014,16 @@ def validate_live_contract(task: str) -> tuple[Any, Any, dict[str, Any]]:
 
     training_cfg = load_env_cfg(task, play=False)
     agent_cfg = load_rl_cfg(task)
-    digest = dict(eval_impulse._validate_sampled_env_contract(training_cfg, task))
+    if task in eval_impulse.GUIDELINE_TASK_TO_ARM:
+        digest = dict(
+            eval_impulse._validate_native_guideline_env_contract(
+                training_cfg, task
+            )
+        )
+    else:
+        digest = dict(
+            eval_impulse._validate_sampled_env_contract(training_cfg, task)
+        )
     contract = TASK_CONTRACTS[task]
     impact = training_cfg.rewards["impact_progress"]
     delivered = training_cfg.rewards["delivered_impulse"]
@@ -1382,6 +1531,15 @@ def evaluate_gate(record: Mapping[str, Any]) -> dict[str, Any]:
         for predicate in QUALITY_PREDICATES:
             if not _count_passes(predicate_counts.get(predicate), num_envs):
                 failures.add(predicate)
+    if contract is not None and contract.guideline_required:
+        for predicate in GUIDELINE_PREDICATES:
+            if not _count_passes(predicate_counts.get(predicate), num_envs):
+                failures.add(predicate)
+    if contract is not None and contract.gate_reward_required:
+        if not _count_passes(
+            predicate_counts.get("manager_gate_positive_finite"), num_envs
+        ):
+            failures.add("manager_gate_positive_finite")
 
     hardware_count_valid = _count_is_well_formed(
         predicate_counts.get("hardware_qvel"), num_envs
