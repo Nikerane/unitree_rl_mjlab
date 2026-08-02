@@ -2,16 +2,17 @@
 
 **Date:** 2026-08-02
 
-**Reviewed code revision:** `a54c7a1a212d4383afb1329ac1806399b7c3d14f`
+**Reviewed code revision:** `d389d4ca3b91975243a09ea06e48e630c7deb0dd`
 
 **Branch:** `cartesian-guideline-fic`
 
-**Outcome:** **PASS — local CPU evaluator pre-training gate only, after C1 repair**
+**Outcome:** **PASS — local CPU evaluator pre-training gate only, after complete C1 repair**
 
 This note supersedes its earlier qualification of revision `bf6fab9`. Final
 whole-branch review found that revision's CSV-to-analysis boundary discarded
-load-bearing identity and result columns. The corrected boundary at the
-reviewed revision above is the only qualified one.
+load-bearing identity and result columns. A scoped re-review then found four
+remaining discarded secondary outputs at revision `a54c7a1`. The corrected
+boundary at the reviewed revision above is the only qualified one.
 
 No guideline `model_499.pt` with clean accepted provenance existed locally.
 Accordingly, this qualification covers evaluator plumbing and fail-closed
@@ -49,7 +50,9 @@ than reconstructing a lossy projection:
   episodes, and the 4.0 s failure-mode horizon;
 - finite primary episode-first q90 perpendicular error in `[0.0, 0.050]`, plus
   finite/range-valid all-six-gates, corridor-occupancy, backward-progress,
-  gate-payout, success-rate, and qvel-sentinel results.
+  gate-payout, success-rate, useful-speed, Lambda/cap-ratio, finite-qvel
+  exceedance-rate, maximum-absolute-qvel, and qvel-sentinel results. Finite
+  qvel exceedance is retained in `[0,1]`; it is not forced to zero.
 
 C0 still requires literal absence of `r_gate` and zero actual manager payout.
 Each C-Gate seed requires `r_gate` at weight 8 and finite positive actual
@@ -68,7 +71,10 @@ All Python commands used `PYTHONPATH=.` and
 - Strict RED: **25 failed**, all because the old direct or DictWriter boundary
   did not raise for the intended tamper/omission.
 - Focused identity/CSV GREEN: **36 passed**, with **169 deselected**.
-- Full focused evaluator and pure campaign suite: **205 passed**, exit 0.
+- Residual secondary-output RED: **32 failed**, with **203 deselected**; every
+  failure exercised missing validation or missing returned values.
+- Residual secondary-output GREEN: **32 passed**, with **203 deselected**.
+- Full focused evaluator and pure campaign suite: **235 passed**, exit 0.
 - Documentation freshness/path suite: **2 passed**, exit 0.
 - `git diff --check`: clean before commits.
 
@@ -77,6 +83,10 @@ DictWriter tests for frozen RNG drift, missing/non-boolean dirty flags,
 missing/malformed hashes and revisions, wrong registered tasks, checkpoint SHA
 mismatch, shared and per-arm config drift, missing/nonfinite/out-of-range q90,
 episode-horizon drift, and invalid or duplicated trace identities.
+It also writes the four secondary outputs through actual evaluator
+`FIELDNAMES`, rejects each when blank, missing, nonfinite, negative, or (for
+finite-qvel exceedance rate) above one, and returns the four validated values
+for every canonical pilot row.
 
 The 35 warnings in the focused integration run are the existing third-party
 `torch.jit.script` deprecation. They are not project warnings.
@@ -88,7 +98,7 @@ the broader guideline/config/environment set, mandatory reward/impulse tests,
 reward phases A–M, and contact/reward setup scripts. C1 did not change runtime
 collection or task configuration, but those commands were not rerun for this
 final serialization-boundary repair; they remain historical supporting
-evidence, not fresh verification for revision `a54c7a1`.
+evidence, not fresh verification for revision `d389d4c`.
 
 The optional full-repository pytest run was also not rerun. Its earlier attempt
 was stopped after 14 minutes at 1,081 passed, one skipped, and 20 failures in
