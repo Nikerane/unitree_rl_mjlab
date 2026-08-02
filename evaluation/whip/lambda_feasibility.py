@@ -2845,27 +2845,34 @@ def replay_saved_tape(tape: SavedTape) -> dict[str, object]:
     )
 
 
-def _reference_controller_digest() -> str:
-    return reset_bank_digest(
-        {
-            "class": "src.tasks.hammer.mdp.references.SingleStrikeReference",
-            "parameters": {
-                "approach_height": 0.15,
-                "min_windup_clearance": 0.05,
-                "overshoot": 0.15,
-                "windup_speed": 0.02,
-                "descent_speed": 0.05,
-                "axis_tol": 0.05,
-                "descent_margin": 0.01,
-            },
-            "playback_rule": (
-                "target=playback_target(min(k,n));"
-                "action=clip((target-live_head)/delta,-1,1)"
+def _reference_controller_spec() -> dict[str, object]:
+    """Inspectable provenance for the active direct-reference controller."""
+    return {
+        "class": "src.tasks.hammer.mdp.references.SingleStrikeReference",
+        "parameters": {
+            "overshoot": 0.15,
+            "descent_speed": 0.05,
+            "axis_tol": 0.05,
+        },
+        "geometry": {
+            "start": "frozen reset hammer-head position",
+            "target_xy": "frozen nail x/y",
+            "target_z": (
+                "min(frozen nail z - overshoot, frozen reset hammer-head z)"
             ),
+            "path": "single direct segment with distance-paced linear interpolation",
+        },
+        "playback": {
+            "target": "playback_target(min(control_index, playback_length))",
+            "action": "clip((target - live_head) / delta, -1, 1)",
             "recorded_commands": 30,
             "post_zero_commands": POST_TAPE_ZERO_ACTIONS,
-        }
-    )
+        },
+    }
+
+
+def _reference_controller_digest() -> str:
+    return reset_bank_digest(_reference_controller_spec())
 
 
 def _source_specs(tapes: list[SavedTape]) -> list[dict[str, object]]:

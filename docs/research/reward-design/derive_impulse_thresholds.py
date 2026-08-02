@@ -1,43 +1,17 @@
-"""C0 quantity gate for the impulse-CaT arm (IMPULSE_CAT_IMPL_PLAN.md C0).
+"""Log-only direct-reference impulse quantity cross-check (legacy filename).
 
-Drives the OPEN-LOOP single-strike reference against the live env and certifies that the measured
-per-joint reaction impulse Λ_j is the REAL impact impulse — not weld/friction pollution — before any
-enforcement (max_p>0) is enabled. Per-substep (500 Hz) instrumentation via a scene.update wrapper
-captures the full impact even on the success step (reset zeroes the accumulators AFTER the decimation
-loop). Many reference strikes → a per-joint Λ_j histogram.
-
-Reports / asserts (fail-not-warn → exit 1):
-  1. OFF-CONTACT + SHIPPED-CODE CROSS-CHECK: the SHIPPED SubstepImpulseAccumulator (the buffer
-     training actually uses) is read every substep and must be exactly 0 before any contact (a
-     leaking sensor gate shows up here as the ±frictionloss baseline), AND its per-window Λ and the
-     shipped delivered-impulse Δ must agree with this script's independent sums — the gate certifies
-     the wired code, not a parallel reimplementation. ASSERT.
-  2. CONTAMINATION (the "weld pollution" gate): during contact, raw |qfrc| includes the friction/weld
-     baseline. Compare raw-gated Λ_j vs pre-contact-baseline-subtracted Λ_j; report the contamination
-     fraction. ASSERT the baseline-subtracted signal is a strictly positive impact signal.
-  3. GROUND TRUTH: the object-side delivered axial impulse ∫F_axial dt (contact sensor = weld/friction
-     IMMUNE by construction) is the independent cross-check that an impact impulse of this scale is
-     real. Pinocchio impulseDynamics(r_coeff=0) leg is scaffolded behind an availability check.
-  4. THRESHOLDS: per-joint J_limit = τ_rated,j × 2 (Harmonic-Drive Repeated-Peak) × Δt_impact, with the
-     1e4-event fatigue-budget note. Binding-ness: Λ_j(p95) / J_limit_j — REPORT ONLY: never read it
-     as a "binds at Nx more violent" headroom (falsified 2026-07-12/13, see section [4]'s in-line
-     note; strike velocity is effort-clamped, binding is the windowed press-through quantity).
-  5. NORMALIZER FLOOR: section [5] prints p95(Λ_j) for reference only — imp_seed stays a small decay
-     floor (1e-3); the hook self-seeds from the first over-limit sample.
+Repeated executions of the one production direct strike are deterministic
+repeatability observations, not an intensity sweep or a population sample.
+This script checks accumulator/contact-row/delivered-impulse liveness and
+reports measured Λ against the imported frozen ``IMP_J_LIMIT``.  Contact
+duration is descriptive only: this script cannot calculate replacement caps,
+normalizers, or enforcement settings, and writes no result asset.
 
 Run: ~/miniconda3/envs/unitree_mjlab/bin/python docs/research/reward-design/derive_impulse_thresholds.py
 """
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-import matplotlib
-
-matplotlib.use("Agg")  # headless (macOS/CI safe) — must precede pyplot import
-
-import matplotlib.pyplot as plt
 import torch
 
 from mjlab.envs import ManagerBasedRlEnv
@@ -47,20 +21,16 @@ from src.assets.robots.unitree_z1.z1_constants import (
   HAMMER_HEAD_SITE_NAME,
   Z1_HAMMER_DELTA_POS_SCALE,
 )
-from src.tasks.hammer.config.z1.env_cfgs import z1_hammer_env_cfg
+from src.tasks.hammer.config.z1.env_cfgs import IMP_J_LIMIT
 from src.tasks.hammer.mdp.references import SingleStrikeReference
 
+from reward_design_util import (
+  assert_log_only_reference_contract,
+  direct_reference_repeat_indices,
+  load_direct_reference_c0_cfg,
+)
+
 ARM = ("joint1", "joint2", "joint3", "joint4", "joint5", "joint6")
-# Per-joint rated peak torque [N·m] from z1_constants effort_limit (joint2 = heavy shoulder).
-TAU_RATED = torch.tensor([30.0, 60.0, 30.0, 30.0, 30.0, 30.0])
-REPEATED_PEAK = 2.0  # Harmonic-Drive Repeated-Peak ≈ 2× rated (< Momentary-Peak ≈ 4×)
-# Sweep variable (CHANGED 2026-07-14, adversarial review R2-F3): at the L6 near-nail reset
-# the apex floor (references.py min_windup_clearance) clamps ALL approach heights 0.06/0.10/0.15
-# to the SAME apex (head0+clearance) — the old height sweep silently collapsed to 15 identical
-# deterministic strikes (fingerprint: mean=p95=max exactly equal). The live intensity knob at
-# this reset is the CLEARANCE itself (drop height above the head): sweep it instead.
-# 0.05 = the shipped default (this config's strikes define i_ref; see [3]).
-WINDUP_CLEARANCES = [0.03, 0.05, 0.08]
 REPEATS = 5
 HOLD_STEPS = 6
 WELD_TOL = 0.5  # max acceptable off-contact-baseline fraction of the contact-window Λ (gate)
@@ -72,20 +42,34 @@ ROWS_RAW_TOL = 1.05  # Track-2 triangle-inequality check (AMENDED 2026-07-10 sig
 # accumulator vs script-sum divergence); the ASSERTED Track-2 gates are the object-side ∫F·dt
 # cross-checks. noncontact_j = Σ_substeps |qfrc_constraint_j − contact_row_qfrc_j| · dt over the
 # SAME window as raw/rows; 5% slack covers float/window-boundary noise.
-TRACK2_RATIO_SPREAD_TOL = 5.0  # Track-2 cross-check: worst-joint contact-row Λ [N·m·s] and object-
-# side ∫F·dt [N·s] are DIFFERENT units, so only the SPREAD of their ratio across strikes is
-# meaningful (both should scale together with impact intensity). Wider than this across the
-# WINDUP_CLEARANCES sweep signals a row-attribution bug (Task 8/9), not physical scaling.
+def direct_reference_measurement_summary(
+  measured_lambda: torch.Tensor,
+  *,
+  contact_duration_s: list[float],
+) -> dict[str, object]:
+  """Return a log-only summary whose cap is independent of measured duration."""
+  values = torch.as_tensor(measured_lambda, dtype=torch.float64)
+  if values.ndim != 2 or values.shape[1] != len(IMP_J_LIMIT):
+    raise ValueError(
+      f"measured_lambda must have shape (samples, {len(IMP_J_LIMIT)}), got {tuple(values.shape)}"
+    )
+  if len(contact_duration_s) != values.shape[0]:
+    raise ValueError("contact_duration_s must have one descriptive value per repeat")
+  caps = torch.tensor(IMP_J_LIMIT, dtype=values.dtype)
+  return {
+    "sample_kind": "deterministic direct-reference repeatability",
+    "contact_duration_s": [float(value) for value in contact_duration_s],
+    "measured_lambda_nms": values.tolist(),
+    "frozen_cap_nms": list(IMP_J_LIMIT),
+    "lambda_to_frozen_cap": (values / caps).tolist(),
+  }
 
 
-def _pct(x: torch.Tensor, q: float) -> torch.Tensor:
-  return torch.quantile(x, q, dim=0) if x.numel() else torch.zeros(x.shape[1:])
-
-
-def main() -> None:
-  cfg = z1_hammer_env_cfg(play=True, cat_impulse=True)
-  cfg.scene.num_envs = 1
+def main() -> int:
+  cfg = load_direct_reference_c0_cfg()
   env = ManagerBasedRlEnv(cfg, device="cpu")
+  hook = env.metrics_manager.cfg["cat_soft"].func
+  assert_log_only_reference_contract(cfg, live_imp_limit=hook._imp_limit)
   robot = env.scene["robot"]
   nail_e = env.scene["nail_block"]
   contact = env.scene["hammer_nail_contact"]
@@ -151,9 +135,9 @@ def main() -> None:
 
   env.metrics_manager.compute_substep = patched  # type: ignore[method-assign]
 
-  # --- collect many reference strikes ---
+  # --- collect fixed repeats of the one nominal direct strike ---
   per_joint_raw: list[torch.Tensor] = []      # Λ_j raw-gated, per strike (script-side)
-  per_joint_sub: list[torch.Tensor] = []      # Λ_j baseline-subtracted, per strike (script-side)
+  per_joint_sub: list[torch.Tensor] = []      # Λ_j baseline-subtracted, per strike (shipped/live)
   per_joint_rows: list[torch.Tensor] = []     # Track 2: rigorous efc-row-only Λ_j, per strike (shipped)
   per_joint_noncontact: list[torch.Tensor] = []  # Σ|qfrc − contact_row_qfrc|·dt, per strike (sign-aware bound term)
   delivered: list[float] = []                 # object-side ∫F_axial dt, per strike (script-side)
@@ -163,112 +147,104 @@ def main() -> None:
   ximp_err: list[float] = []                  # |shipped window Λ − script baseline-subtracted Λ| per strike
   xdel_err: list[float] = []                  # |shipped delivered Δ − script deliv| per strike
 
-  cfg_of_strike: list[float] = []  # which clearance produced each strike (distinctness + i_ref)
-  for c in WINDUP_CLEARANCES:
-    for _ in range(REPEATS):
-      cfg_of_strike.append(c)
-      env.reset()
-      ref = SingleStrikeReference(1, env.device, min_windup_clearance=c)
-      ref.update(head(), nail_top(), torch.zeros(1, dtype=torch.long, device=env.device))
-      n = ref.playback_length()
-      rec.clear()
-      for k in range(1, n + HOLD_STEPS + 1):
-        target = ref.playback_target(min(k, n))
-        action = ((target - head()) / Z1_HAMMER_DELTA_POS_SCALE).clamp(-1.0, 1.0)
-        env.step(action)
-        if int(env.episode_length_buf[0]) == 0:  # success auto-reset; strike captured in rec
-          break
+  for _repeat_index in direct_reference_repeat_indices(REPEATS):
+    env.reset()
+    ref = SingleStrikeReference(1, env.device)
+    ref.update(head(), nail_top(), torch.zeros(1, dtype=torch.long, device=env.device))
+    n = ref.playback_length()
+    rec.clear()
+    for k in range(1, n + HOLD_STEPS + 1):
+      target = ref.playback_target(min(k, n))
+      action = ((target - head()) / Z1_HAMMER_DELTA_POS_SCALE).clamp(-1.0, 1.0)
+      env.step(action)
+      if bool(env.reset_terminated.any()):
+        break
 
-      # Pre-contact baseline = last off-contact qfrc before the (first) contact window.
-      baseline = torch.zeros(6)
-      raw = torch.zeros(6)
-      sub = torch.zeros(6)
-      # Mirror of the SHIPPED accumulator's SLIDING window (2026-07-13): max over any
-      # `imp_window`-substep interval of the baseline-subtracted sum. Window length read from the
-      # runtime accumulator (never hardcoded) so the mirror cannot silently desync from the config.
-      imp_window = int(acc_shipped._window)
-      del_window = int(dacc_shipped._window)
-      sub_win_buf: list[torch.Tensor] = []  # last `imp_window` per-substep contributions
-      sub_capped = torch.zeros(6)           # max sliding-window sum seen (== full sum if dur < window)
-      noncontact = torch.zeros(6)
-      dur = 0
-      deliv = 0.0
-      seen_contact = False
-      shipped_win = torch.zeros(6)  # per-joint max of the SHIPPED acc.impulse over the window
-      shipped_rows_win = torch.zeros(6)  # per-joint max of the SHIPPED rows acc.impulse (Track 2)
-      shipped_del_start = 0.0
-      shipped_del_end = 0.0
-      deliv_capped = 0.0  # script-side mirror of the shipped per-event accrual cap (first 25 substeps)
-      for in_c, qfrc, contact_qfrc, f_ax, ship_imp, ship_del, ship_rows in rec:
-        if not in_c:
-          baseline = qfrc  # rolling pre-contact reference (frozen once contact opens)
-          friction_baseline.append(qfrc.abs())
-          if not seen_contact:
-            # REAL leak check: before any contact, the SHIPPED accumulator must be exactly 0 —
-            # if its sensor gate regresses, the off-contact friction shows up right here.
-            shipped_leak = max(shipped_leak, float(ship_imp.abs().max()))
-            shipped_del_start = ship_del
-          if seen_contact:
-            break  # stop at first release (isolate the impact, ignore re-contact)
-        else:
-          seen_contact = True
-          raw += qfrc.abs() * dt
-          sub += (qfrc - baseline).abs() * dt
-          # Sliding-window mirror (impulse_bound.py, 2026-07-13): track the max window-sum so the
-          # ximp_err gate compares like with like. For dur < window this equals the full sum.
-          sub_win_buf.append((qfrc - baseline).abs() * dt)
-          if len(sub_win_buf) > imp_window:
-            sub_win_buf.pop(0)
-          sub_capped = torch.maximum(sub_capped, torch.stack(sub_win_buf).sum(dim=0))
-          # Sign-aware bound term (ADJUDICATED 2026-07-10): the non-contact-row component of qfrc
-          # (dof-friction/limit contamination), accumulated over the IDENTICAL contact window as
-          # raw/rows above — so rows_j ≤ raw_j + noncontact_j (triangle inequality) holds exactly.
-          noncontact += (qfrc - contact_qfrc).abs() * dt
-          deliv += f_ax * dt
-          if dur < del_window:  # mirrors SubstepDeliveredImpulse's per-event PREFIX cap (unchanged)
-            deliv_capped += f_ax * dt
-          dur += 1
-          shipped_win = torch.maximum(shipped_win, ship_imp)
-          shipped_rows_win = torch.maximum(shipped_rows_win, ship_rows)
-          shipped_del_end = ship_del
-      if seen_contact and dur > 0:
-        per_joint_raw.append(raw)
-        per_joint_sub.append(sub)
-        per_joint_rows.append(shipped_rows_win)
-        per_joint_noncontact.append(noncontact)
-        delivered.append(deliv)
-        durations.append(dur)
-        # Cross-check the SHIPPED buffers against this script's independent sums — records snapshot
-        # AFTER metrics.compute_substep, so agreement must be exact (float tolerance only). The
-        # shipped substep_impulse accumulator is configured subtract_baseline=True (C2, env_cfgs.py),
-        # so its window value IS the baseline-subtracted sum — compare against `sub_capped`, not
-        # `raw` (fixed 2026-07-10: previously compared `raw`, a stale leftover from before the C2
-        # subtract_baseline=True switch). sub_capped (sliding-window since 2026-07-13) mirrors the
-        # shipped accumulator's max window-sum with the window read from the runtime instance;
-        # an uncapped `sub` would spuriously FAIL the gate on any strike whose contact outlives
-        # the window (the reference strike's ~9-20 substeps is unaffected: windowed == full sum).
-        ximp_err.append(max(0.0, float((shipped_win - sub_capped).abs().max()) - 1e-4))
-        xdel_err.append(max(0.0, abs((shipped_del_end - shipped_del_start) - deliv_capped) - 1e-4))
+    # Pre-contact baseline = last off-contact qfrc before the first contact window.
+    baseline = torch.zeros(6)
+    raw = torch.zeros(6)
+    imp_window = int(acc_shipped._window)
+    del_window = int(dacc_shipped._window)
+    sub_win_buf: list[torch.Tensor] = []
+    sub_capped = torch.zeros(6)
+    noncontact = torch.zeros(6)
+    dur = 0
+    deliv = 0.0
+    seen_contact = False
+    shipped_win = torch.zeros(6)
+    shipped_rows_win = torch.zeros(6)
+    shipped_del_start = 0.0
+    shipped_del_end = 0.0
+    deliv_capped = 0.0
+    for in_c, qfrc, contact_qfrc, f_ax, ship_imp, ship_del, ship_rows in rec:
+      if not in_c:
+        baseline = qfrc
+        friction_baseline.append(qfrc.abs())
+        if not seen_contact:
+          shipped_leak = max(shipped_leak, float(ship_imp.abs().max()))
+          shipped_del_start = ship_del
+        if seen_contact:
+          break
+      else:
+        seen_contact = True
+        raw += qfrc.abs() * dt
+        sub_win_buf.append((qfrc - baseline).abs() * dt)
+        if len(sub_win_buf) > imp_window:
+          sub_win_buf.pop(0)
+        sub_capped = torch.maximum(sub_capped, torch.stack(sub_win_buf).sum(dim=0))
+        noncontact += (qfrc - contact_qfrc).abs() * dt
+        deliv += f_ax * dt
+        if dur < del_window:
+          deliv_capped += f_ax * dt
+        dur += 1
+        shipped_win = torch.maximum(shipped_win, ship_imp)
+        shipped_rows_win = torch.maximum(shipped_rows_win, ship_rows)
+        shipped_del_end = ship_del
+    if seen_contact and dur > 0:
+      per_joint_raw.append(raw)
+      per_joint_sub.append(shipped_win)
+      per_joint_rows.append(shipped_rows_win)
+      per_joint_noncontact.append(noncontact)
+      delivered.append(deliv)
+      durations.append(dur)
+      # The script-side sliding-window and prefix sums independently mirror the
+      # shipped accumulators.  Only float tolerance is discounted here.
+      ximp_err.append(max(0.0, float((shipped_win - sub_capped).abs().max()) - 1e-4))
+      xdel_err.append(max(0.0, abs((shipped_del_end - shipped_del_start) - deliv_capped) - 1e-4))
 
   env.metrics_manager.compute_substep = orig_substep  # type: ignore[method-assign]
 
   if not per_joint_raw:
     print("[FAIL] no contact windows captured — reference strike never contacted the nail.")
-    sys.exit(1)
+    return 1
+  if len(per_joint_raw) != REPEATS:
+    print(
+      f"[FAIL] captured {len(per_joint_raw)}/{REPEATS} required direct-reference repeats."
+    )
+    return 1
 
   RAW = torch.stack(per_joint_raw)   # (S, 6)
-  SUB = torch.stack(per_joint_sub)   # (S, 6)
+  SUB = torch.stack(per_joint_sub)   # (S, 6), shipped baseline-subtracted sliding-window quantity
   ROWS = torch.stack(per_joint_rows) # (S, 6) Track 2: rigorous efc-row-only Λ_j (Task 9)
   NONCONTACT = torch.stack(per_joint_noncontact)  # (S, 6) Σ|qfrc−contact_row_qfrc|·dt (sign-aware bound term)
   DEL = torch.tensor(delivered)      # (S,)
   DUR = torch.tensor(durations, dtype=torch.float32)  # (S,)
   FB = torch.stack(friction_baseline) if friction_baseline else torch.zeros(1, 6)
   S = RAW.shape[0]
-  dt_impact = float(DUR.mean()) * dt
+  duration_s = [float(value) * dt for value in durations]
+  measurement = direct_reference_measurement_summary(
+    SUB, contact_duration_s=duration_s
+  )
+  frozen_cap = torch.tensor(IMP_J_LIMIT, dtype=SUB.dtype)
 
-  print(f"\n=== C0 IMPULSE QUANTITY GATE — {S} reference strikes ===")
-  print(f"contact-window duration: mean {DUR.mean():.1f} substeps = {dt_impact * 1000:.1f} ms "
-        f"(p95 {_pct(DUR.unsqueeze(1), 0.95)[0]:.0f})")
+  print(
+    f"\n=== DIRECT-REFERENCE LOG-ONLY QUANTITY CROSS-CHECK — "
+    f"{S} deterministic repeatability samples ==="
+  )
+  print(
+    "contact-window duration (descriptive only; never used to derive a cap): "
+    f"{[f'{value * 1000:.1f}' for value in duration_s]} ms"
+  )
 
   print("\n[1] OFF-CONTACT (weld/friction-immunity of the SHIPPED sensor gate)")
   print(f"    off-contact raw |qfrc_constraint| per joint (the dof-friction baseline) mean: "
@@ -278,91 +254,36 @@ def main() -> None:
         f"delivered Δ worst excess-over-tol: {max(xdel_err):.6f}  (0 = agree)")
 
   print("\n[2] PER-JOINT Λ_j [N·m·s] over the contact window")
-  print(f"    {'joint':<8}{'raw mean':>10}{'raw p95':>10}{'raw max':>10}{'sub mean':>10}{'contam%':>9}")
-  raw_mean, raw_p95, raw_max = RAW.mean(0), _pct(RAW, 0.95), RAW.amax(0)
+  print(
+    f"    {'joint':<8}{'raw mean':>10}{'raw max':>10}{'sub mean':>10}"
+    f"{'frozen cap':>12}{'max Λ/cap':>12}{'contam%':>9}"
+  )
+  raw_mean, raw_max = RAW.mean(0), RAW.amax(0)
   sub_mean = SUB.mean(0)
   contam = (1.0 - sub_mean / raw_mean.clamp_min(1e-9)) * 100.0
+  lambda_to_cap_max = (SUB / frozen_cap).amax(0)
   for j in range(6):
-    print(f"    {ARM[j]:<8}{raw_mean[j]:>10.4f}{raw_p95[j]:>10.4f}{raw_max[j]:>10.4f}"
-          f"{sub_mean[j]:>10.4f}{contam[j]:>8.1f}%")
-  print(f"    (contam% = friction/weld baseline share of the raw contact-window sum; "
-        f"baseline-subtracted is the cleaner impact signal.)")
+    print(
+      f"    {ARM[j]:<8}{raw_mean[j]:>10.4f}{raw_max[j]:>10.4f}"
+      f"{sub_mean[j]:>10.4f}{frozen_cap[j]:>12.3f}"
+      f"{lambda_to_cap_max[j]:>12.4f}{contam[j]:>8.1f}%"
+    )
+  print(
+    "    frozen cap is imported IMP_J_LIMIT; measured duration cannot change it. "
+    "raw is diagnostic; sub is the shipped baseline-subtracted window quantity."
+  )
 
   print("\n[3] OBJECT-SIDE delivered axial impulse (weld/friction-IMMUNE ground truth)")
-  print(f"    ∫F_axial dt over the window: mean {DEL.mean():.4f}  p95 {_pct(DEL.unsqueeze(1),0.95)[0]:.4f}  "
-        f"max {DEL.amax():.4f} N·s")
-  # Per-clearance breakdown + the i_ref contract line (R2-F3): i_ref is defined as the
-  # DEFAULT-config (clearance 0.05) reference strike's delivered impulse — the number
-  # env_cfgs.py's DeliveredImpulseTerm i_ref must match. The sweep rows exist to give the
-  # Λ statistics REAL intensity variation, not to move i_ref.
-  cfg_t = torch.tensor(cfg_of_strike)
-  per_cfg_del = []
-  for c in WINDUP_CLEARANCES:
-    m = cfg_t == c
-    d = DEL[m]
-    per_cfg_del.append(float(d.mean()))
-    tag = "  <-- i_ref (default config)" if abs(c - 0.05) < 1e-9 else ""
-    print(f"    clearance {c:.2f}: ∫F_axial dt mean {d.mean():.4f} N·s over {int(m.sum())} strikes{tag}")
-  # Distinctness gate (R2-F3): the sweep must actually sweep — identical intensities across
-  # configs means the variation knob is dead and every mean/p95 above is a pseudo-replicate.
-  spread = max(per_cfg_del) - min(per_cfg_del)
-  if spread < 1e-3:
-    print(f"[GATE FAIL] sweep collapsed: per-clearance delivered impulses {per_cfg_del} "
-          f"differ by only {spread:.2e} N·s — the intensity sweep is not sweeping.")
-    sys.exit(1)
-  print(f"    sweep distinctness OK: per-clearance delivered spread {spread:.4f} N·s")
-  # Pinocchio independent cross-check (impulseDynamics, r_coeff=0) — scaffolded.
-  try:
-    import pinocchio  # noqa: F401
-    print("    Pinocchio AVAILABLE — TODO: build Z1 model from URDF + impulseDynamics(r_coeff=0) "
-          "cross-check (see report; not yet wired).")
-  except ImportError:
-    print("    Pinocchio NOT installed → independent impulseDynamics cross-check SKIPPED. "
-          "The contact-sensor ∫F·dt above is the MuJoCo-native weld-immune ground truth; "
-          "see the C0 report DECISION on installing Pinocchio (env + Vega).")
+  print(
+    f"    per-repeat ∫F_axial dt: {[f'{value:.4f}' for value in DEL.tolist()]} N·s; "
+    f"mean {DEL.mean():.4f} N·s (measurement only; no normalizer calibration)"
+  )
 
-  print("\n[4] PER-JOINT J_limit (Harmonic-Drive Repeated-Peak × impact duration)")
-  j_limit = TAU_RATED * REPEATED_PEAK * dt_impact  # (6,) N·m·s
-  print(f"    τ_rated [N·m]: {TAU_RATED.tolist()}  ×{REPEATED_PEAK} (Repeated-Peak)  ×{dt_impact*1000:.1f} ms")
-  print(f"    J_limit [N·m·s]: {[f'{v:.3f}' for v in j_limit.tolist()]}  "
-        "(at THIS run's measured Δt — the SHIPPED IMP_J_LIMIT stays the 2026-07-06 fixture-era "
-        "derivation until the window/cap pairing is decided; Khadiv decision (e))")
-  binding = raw_p95 / j_limit.clamp_min(1e-9)
-  print(f"    binding-ness Λ_j(p95)/J_limit: {[f'{v:.3f}' for v in binding.tolist()]}")
-  # HEADROOM FRAMING (amended 2026-07-14, adversarial-review I4): do NOT read the ratio below as
-  # "the constraint binds at 1/ratio× more violent strikes". That extrapolation was FALSIFIED by
-  # the 2026-07-12/13 probes (docs/results/2026-07-12_impulse_vacuity.md + _state_of_everything.md
-  # §9/§10): strike velocity is effort-clamped at ~1.35-1.4 m/s regardless of commanded scale, so
-  # the "more violent" regime is unreachable ballistically (worst reachable ballistic Λ/cap
-  # ≤ 0.38); the binding that DOES exist is windowed press-through reaction (1.12-1.17× cap),
-  # conditional on the window/cap pairing — a different quantity, not a scaled-up strike.
-  print(f"    → reference strike sits at {binding.max()*100:.1f}% of the worst-joint limit at this "
-        "Δt — NON-binding, as expected for the gentle scripted reference. Do NOT extrapolate a "
-        "'binds at Nx more violent' headroom from this ratio: reachable strike velocity is "
-        "effort-clamped (vacuity result, docs/results/2026-07-12_impulse_vacuity.md); observed "
-        "binding is windowed press-through, not scaled-up impact (Khadiv decision (e)). "
-        "1e4-event fatigue budget: a strike at Λ_j(p95) uses 1/1e4 of the per-joint budget.")
-
-  print("\n[5] NORMALIZER FLOOR (C2; env_cfgs cat_soft imp_seed)")
-  print(f"    reference p95(Λ_j) worst joint = {raw_p95.max():.4f}  (small-sample caveat: p95 of "
-        f"{S} strikes ≈ the max)")
-  print("    NOTE: imp_seed is only a DECAY FLOOR — the hook self-seeds each joint's scale from its "
-        "first over-limit sample (CaT-style), so no excess-scale statistic is needed here; any "
-        "small floor (e.g. 1e-3) is safe.")
-
-  print("\n[6] TRACK 2 — THREE-WAY QUANTITY VALIDATION "
+  print("\n[4] TRACK 2 — THREE-WAY QUANTITY VALIDATION "
         "(raw Λ | baseline-subtracted Λ | contact-row Λ | object-side ∫F·dt)")
   rows_mean = ROWS.mean(0)
-  noncont_mean = NONCONTACT.mean(0)  # sign-aware bound term (ADJUDICATED 2026-07-10): the
-  # non-contact-row share of qfrc; rows_j ≤ raw_j + noncont_j is the amended hard gate below.
-  # friction share: fraction of the raw contact-window sum that is dof-friction contamination, not
-  # real hammer<->nail contact reaction (rows is the rigorous efc-row-only ground truth, Task 9).
-  # NOTE: friction_share/residual_after_sub below are ratios-OF-MEANS (mean over strikes, THEN one
-  # ratio) — NOT the mean of each strike's own ratio; quote per-strike numbers before citing these
-  # percentages in the thesis.
+  noncont_mean = NONCONTACT.mean(0)
   friction_share = (raw_mean - rows_mean) / raw_mean.clamp_min(1e-9) * 100.0
-  # residual after subtraction: fraction the SHIPPED enforced quantity (baseline-subtracted Λ, C2)
-  # still overshoots the rigorous ground truth by, after the cheaper baseline-subtraction correction.
   residual_after_sub = (sub_mean - rows_mean) / rows_mean.clamp_min(1e-9) * 100.0
   print(f"    {'joint':<8}{'raw':>9}{'sub':>9}{'rows':>9}{'noncont':>9}{'fric-shr%':>11}{'resid%':>9}")
   for j in range(6):
@@ -371,36 +292,17 @@ def main() -> None:
   print(f"    object-side ∫F_axial dt (task-space N·s, single scalar, NOT per-joint): "
         f"mean {DEL.mean():.4f}  max {DEL.amax():.4f}")
   print("    friction share = (raw − rows)/raw; residual after subtraction = (subtracted − rows)/rows "
-        "(rows = the rigorous efc-row-only ground truth, Task 9; see the module docstring's [2]). "
+        "(rows = the rigorous efc-row-only ground truth, Task 9). "
         "noncont = Σ|qfrc − contact_row_qfrc|·dt, the sign-aware bound term (rows ≤ raw + noncont).")
-
-  fig_dir = Path(__file__).parent / "figures"
-  fig_dir.mkdir(parents=True, exist_ok=True)
-  fig, ax = plt.subplots(figsize=(9, 5))
-  x = list(range(6))
-  w = 0.25
-  ax.bar([xi - w for xi in x], raw_mean.tolist(), width=w, label="raw Λ (qfrc, uncorrected)")
-  ax.bar(x, sub_mean.tolist(), width=w, label="baseline-subtracted Λ (shipped, enforced, C2)")
-  ax.bar(
-    [xi + w for xi in x], rows_mean.tolist(), width=w,
-    label="contact-row Λ (efc rows, rigorous GT, Task 9)",
-  )
-  ax.set_xticks(x)
-  ax.set_xticklabels(ARM)
-  ax.set_ylabel(f"Λ_j  [N·m·s]  (mean over {S} reference strikes)")
-  ax.set_title(
-    "Impulse-CaT quantity-contamination gate\n"
-    f"object-side ∫F_axial·dt (task-space GT) mean={DEL.mean():.3f} N·s"
-  )
-  ax.legend()
-  fig.tight_layout()
-  fig_path = fig_dir / "impulse_contamination.png"
-  fig.savefig(fig_path, dpi=150)
-  plt.close(fig)
-  print(f"    figure saved: {fig_path}")
 
   # --- gate verdict ---
   ok = True
+  if not all(
+    bool(torch.isfinite(value).all())
+    for value in (RAW, SUB, ROWS, NONCONTACT, DEL, DUR)
+  ):
+    print("\n[GATE FAIL] a direct-reference measurement is non-finite.")
+    ok = False
   if shipped_leak > 1e-9:
     print(f"\n[GATE FAIL] SHIPPED accumulator nonzero before any contact ({shipped_leak:.2e}) — "
           "its contact-sensor gate is leaking off-contact friction into Λ_j.")
@@ -417,23 +319,23 @@ def main() -> None:
   if not (raw_mean.max() > 0 and sub_mean.max() > 0):
     print("\n[GATE FAIL] Λ_j is zero on the reference strike — no impact signal captured.")
     ok = False
-  if not (DEL.mean() > 0):
-    print("\n[GATE FAIL] object-side delivered impulse is zero — netforce sensor / axis wrong.")
+  if not bool((DEL > 0).all()):
+    print("\n[GATE FAIL] object-side delivered impulse is not positive on every repeat.")
     ok = False
   worst_contam = float(contam.max())
   if worst_contam > WELD_TOL * 100.0:
     print(f"\n[GATE WARN] worst-joint contamination {worst_contam:.0f}% > {WELD_TOL*100:.0f}% tol — "
           "prefer subtract_baseline=True for the shipped quantity (report decision).")
 
-  # [6] triangle-inequality check — DEMOTED TO INFORMATIONAL (2026-07-14, adversarial-review I5):
+  # Triangle-inequality check is informational: it is a drift tripwire, not a
+  # calibration or independent physics certificate.
   # rows ≤ raw + noncontact is the algebraic identity |c| ≤ |q| + |q − c| — when all three sums
   # come from the same per-substep signals it holds BY CONSTRUCTION and certifies nothing about
   # measurement quality (the 2026-07-10 amendment made the old falsified `rows ≤ raw` gate
   # unfalsifiable rather than correct). A violation can still flag gross implementation drift
   # between the SHIPPED rows accumulator and this script's sums (different windowing, double
-  # counting), so it is still computed and printed — but the ASSERTED Track-2 gates are the
-  # independent ones below: the object-side ∫F·dt cross-checks (missing-rows + ratio-spread) and
-  # the shipped-vs-script agreement gates in [1].
+  # counting), so it is still computed and printed.  The asserted independent checks are the
+  # object-side/contact-row liveness below and the shipped-vs-script agreement gates in [1].
   rows_bound = (RAW + NONCONTACT) * ROWS_RAW_TOL + 1e-6
   rows_ok = bool((ROWS <= rows_bound).all())
   if not rows_ok:
@@ -445,14 +347,13 @@ def main() -> None:
           "(windowing/double-count drift), NOT a physics finding. Investigate, but the verdict "
           "rests on the asserted ∫F·dt cross-checks below.")
   else:
-    print(f"\n    [6] triangle-inequality check (informational): contact-row Λ ≤ "
+    print(f"\n    [4] triangle-inequality check (informational): contact-row Λ ≤ "
           f"{ROWS_RAW_TOL:.2f}× (raw Λ + noncontact Λ) for all {S} strikes — holds by "
           "construction; the asserted Track-2 gates are the ∫F·dt cross-checks below.")
 
-  # [6] Track-2 cross-check: contact-row Λ vs. the weld/friction-immune object-side ∫F·dt. Different
-  # units (N·m·s per joint vs N·s task-space) so we check (a) rows is never absent when a real strike
-  # delivered impulse, and (b) the ratio between them doesn't swing wildly across strikes — a bug
-  # (e.g. row misattribution) would decouple the two independent measurements of the SAME event.
+  # Track-2 liveness: contact-row Λ must be present whenever object-side
+  # delivered impulse reports a strike.  Repeats do not support an
+  # intensity-response or population-spread claim.
   rows_worst = ROWS.amax(dim=1)  # (S,) worst-joint contact-row Λ per strike
   strike_mask = DEL > 1e-6
   if bool(strike_mask.any()):
@@ -460,26 +361,19 @@ def main() -> None:
     if bool(missing.any()):
       print(f"\n[TRACK-2 BUG] contact-row Λ is zero on {int(missing.sum())}/{S} strike(s) where "
             "object-side ∫F·dt shows a real strike. This blocks TRACK-2 (contact-row / Task 8-10) "
-            "conclusions ONLY — the enforced Track-1 quantity (raw / baseline-subtracted Λ, "
+            "conclusions ONLY — the shipped Track-1 quantity (raw / baseline-subtracted Λ, "
             "sections [1]-[2]) is measured independently and is UNAFFECTED.")
       ok = False
-    elif int(strike_mask.sum()) >= 2:
-      ratio = rows_worst[strike_mask] / DEL[strike_mask]
-      spread = float(ratio.max() / ratio.min().clamp_min(1e-9))
-      if spread > TRACK2_RATIO_SPREAD_TOL:
-        print(f"\n[TRACK-2 BUG] contact-row Λ / object-side ∫F·dt ratio spreads {spread:.1f}× across "
-              f"strikes (tol {TRACK2_RATIO_SPREAD_TOL:.1f}×; units differ so only the SPREAD is "
-              "checked). This blocks TRACK-2 (contact-row / Task 8-10) conclusions ONLY — Track-1 "
-              "(raw / baseline-subtracted Λ) is measured independently and is UNAFFECTED.")
-        ok = False
-      else:
-        print(f"    Track-2 cross-check PASS: contact-row Λ(worst-joint)/object-side ∫F·dt ratio "
-              f"spread {spread:.1f}× across {int(strike_mask.sum())} strikes "
-              f"(tol {TRACK2_RATIO_SPREAD_TOL:.1f}×).")
+    else:
+      print(
+        f"    Track-2 liveness PASS: contact-row Λ is positive on all "
+        f"{int(strike_mask.sum())} delivered-impulse repeats."
+      )
 
-  print(f"\n=== C0 QUANTITY GATE: {'PASS' if ok else 'FAIL'} ===")
-  sys.exit(0 if ok else 1)
+  assert measurement["frozen_cap_nms"] == IMP_J_LIMIT
+  print(f"\n=== DIRECT-REFERENCE LOG-ONLY CROSS-CHECK: {'PASS' if ok else 'FAIL'} ===")
+  return 0 if ok else 1
 
 
 if __name__ == "__main__":
-  main()
+  raise SystemExit(main())

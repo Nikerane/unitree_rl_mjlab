@@ -259,7 +259,7 @@ def main() -> None:
   # --- Phase J: strike-reference phase machinery (T1) ---
   # The obs manager drives the shared SingleStrikeReference every step; we read
   # its latched phase directly. Asserts: ~0 after reset, monotone under a
-  # sustained descent, reaches the descent half, re-anchors to ~0 on reset.
+  # sustained descent, reaches the direct-segment midpoint, re-anchors to ~0 on reset.
   print("\n--- Phase J: strike-reference phase (anchored, monotone, resets) ---")
   from src.tasks.hammer.mdp.references import get_strike_reference
 
@@ -284,13 +284,13 @@ def main() -> None:
     phis.append(phi)
   if max(phis) <= 0.5:
     if env.episode_length_buf[0].item() == 0:
-      # Success arrived before phi crossed into the descent half — possible if
-      # nail physics are ever retuned to terminate in < n_windup steps. The
+      # Success arrived before phi crossed the direct-segment midpoint — possible if
+      # nail physics are ever retuned to terminate in fewer scripted direct-segment steps. The
       # anchor/latch/re-anchor properties were still exercised; warn, not fail.
       print("  WARN  success terminated the episode before phi crossed 0.5; "
-            "descent-half coverage skipped")
+            "direct-segment midpoint coverage skipped")
     else:
-      print(f"\n[FAIL] J: phi never reached the descent half (max={max(phis):.3f})")
+      print(f"\n[FAIL] J: phi never reached the direct-segment midpoint (max={max(phis):.3f})")
       sys.exit(1)
   env.reset()
   phi_reset = float(get_strike_reference(env)._phi[0])
