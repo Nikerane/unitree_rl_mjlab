@@ -102,6 +102,23 @@ def test_episode_retains_a_nonfinite_qvel_failure_for_pilot_validation() -> None
     assert summary["qvel_finite"] is False
 
 
+def test_episode_rejects_any_drift_from_frozen_manufacturer_impulse_caps() -> None:
+    trace = _trace()
+    trace["impulse_limits_n_m_s"][3] = 1.63
+
+    with pytest.raises(ValueError, match="frozen manufacturer impulse caps"):
+        summarize_guideline_episode(trace)
+
+
+@pytest.mark.parametrize("accepted_onset", (1.9, "1", math.nan))
+def test_episode_rejects_nonintegral_accepted_contact_indices(accepted_onset: object) -> None:
+    trace = _trace()
+    trace["first_strike"]["accepted_onset_index"] = accepted_onset
+
+    with pytest.raises(ValueError, match="literal integral index"):
+        summarize_guideline_episode(trace)
+
+
 @pytest.mark.parametrize(
     "mutate",
     (
@@ -146,6 +163,11 @@ def _pilot_rows() -> list[dict]:
         "n_episodes_sampled": 512,
         "reset_digest": "reset-fixed",
         "guideline_geometry_digest": "geometry-fixed",
+        "reset_position_range_rad": [0.0, 0.0],
+        "windup_enabled": False,
+        "impedance_mode": "fixed",
+        "imp_max_p": 0.0,
+        "treatment_base_identity": "guideline-canonical-without-r-gate",
         "reset_rng_seed": 11,
         "observation_rng_seed": 12,
         "action_rng_seed": 13,
@@ -158,13 +180,13 @@ def _pilot_rows() -> list[dict]:
         "qvel_nonfinite_rate_sampled": 0.0,
     }
     return [
-        dict(common, treatment="C0", training_seed=0, gate_reward_present=False,
+        dict(common, treatment="C0", training_seed=0, r_gate_present=False, r_gate_weight=None, gate_reward_present=False,
              actual_gate_return_total_sampled=0.0, success_rate_sampled=0.30),
-        dict(common, treatment="C0", training_seed=1, gate_reward_present=False,
+        dict(common, treatment="C0", training_seed=1, r_gate_present=False, r_gate_weight=None, gate_reward_present=False,
              actual_gate_return_total_sampled=0.0, success_rate_sampled=0.10),
-        dict(common, treatment="C-Gate", training_seed=0, gate_reward_present=True,
+        dict(common, treatment="C-Gate", training_seed=0, r_gate_present=True, r_gate_weight=8.0, gate_reward_present=True,
              actual_gate_return_total_sampled=1.0, success_rate_sampled=0.25),
-        dict(common, treatment="C-Gate", training_seed=1, gate_reward_present=True,
+        dict(common, treatment="C-Gate", training_seed=1, r_gate_present=True, r_gate_weight=8.0, gate_reward_present=True,
              actual_gate_return_total_sampled=0.5, success_rate_sampled=0.10),
     ]
 
@@ -180,6 +202,15 @@ def test_pilot_contract_accepts_only_the_literal_four_rows_and_reports_continuat
     }
 
 
+def test_pilot_contract_accepts_a_permutation_and_returns_canonical_identities() -> None:
+    rows = _pilot_rows()
+    rows.reverse()
+
+    summary = validate_guideline_pilot_rows(rows)
+
+    assert summary["row_identities"] == [("C0", 0), ("C0", 1), ("C-Gate", 0), ("C-Gate", 1)]
+
+
 @pytest.mark.parametrize(
     "mutate",
     (
@@ -189,6 +220,13 @@ def test_pilot_contract_accepts_only_the_literal_four_rows_and_reports_continuat
         lambda rows: rows.__setitem__(0, dict(rows[0], checkpoint_filename="model_498.pt")),
         lambda rows: rows.__setitem__(0, dict(rows[0], reset_digest="drift")),
         lambda rows: rows.__setitem__(0, dict(rows[0], guideline_geometry_digest="drift")),
+        lambda rows: rows.__setitem__(0, dict(rows[0], reset_position_range_rad=[-0.05, 0.05])),
+        lambda rows: rows.__setitem__(0, dict(rows[0], windup_enabled=True)),
+        lambda rows: rows.__setitem__(0, dict(rows[0], impedance_mode="variable")),
+        lambda rows: rows.__setitem__(0, dict(rows[0], imp_max_p=0.01)),
+        lambda rows: rows.__setitem__(0, dict(rows[0], treatment_base_identity="drift")),
+        lambda rows: rows.__setitem__(0, dict(rows[0], r_gate_weight=8.0)),
+        lambda rows: rows.__setitem__(2, dict(rows[2], r_gate_weight=7.9)),
         lambda rows: rows.__setitem__(0, dict(rows[0], action_rng_seed=14)),
         lambda rows: rows.__setitem__(0, dict(rows[0], git_revision="other-clean-code")),
         lambda rows: rows.__setitem__(0, dict(rows[0], training_seed=0.0)),
@@ -199,7 +237,7 @@ def test_pilot_contract_accepts_only_the_literal_four_rows_and_reports_continuat
         lambda rows: rows.__setitem__(0, dict(rows[0], actual_gate_return_total_sampled=0.1)),
         lambda rows: rows.__setitem__(2, dict(rows[2], actual_gate_return_total_sampled=0.0)),
     ),
-    ids=("duplicate", "extra", "replacement", "nonfinal", "reset-drift", "geometry-drift", "rng-drift", "provenance-drift", "noninteger-seed", "dirty-provenance", "impossible-success", "lambda-dead", "nonfinite-qvel", "c0-payout", "cgate-zero-payout"),
+    ids=("duplicate", "extra", "replacement", "nonfinal", "reset-drift", "geometry-drift", "randomized-reset", "windup", "variable-impedance", "impulse-enforcement", "treatment-base-drift", "c0-r-gate", "cgate-r-gate-weight", "rng-drift", "provenance-drift", "noninteger-seed", "dirty-provenance", "impossible-success", "lambda-dead", "nonfinite-qvel", "c0-payout", "cgate-zero-payout"),
 )
 def test_pilot_contract_rejects_identity_and_validity_drift(mutate) -> None:
     rows = _pilot_rows()
@@ -218,3 +256,12 @@ def test_pilot_continuation_requires_a_successful_seed_in_each_arm() -> None:
     assert summary["valid"] is True
     assert summary["continuation_by_arm"] == {"C0": False, "C-Gate": True}
     assert summary["continuation_allowed"] is False
+
+
+@pytest.mark.parametrize("success_rate", (-0.01, 1.01, math.nan))
+def test_pilot_contract_rejects_out_of_range_success_rates(success_rate: float) -> None:
+    rows = _pilot_rows()
+    rows[0]["success_rate_sampled"] = success_rate
+
+    with pytest.raises(ValueError, match="success rate"):
+        validate_guideline_pilot_rows(rows)

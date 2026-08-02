@@ -13,6 +13,14 @@ FAILURE_ERROR_M = 0.050
 CORRIDOR_RADIUS_M = 0.005
 NUM_GATES = 6
 EXPECTED_EPISODE_COUNT = 512
+FROZEN_MANUFACTURER_IMPULSE_CAPS_N_M_S = (
+    1.640,
+    3.280,
+    1.640,
+    1.640,
+    1.640,
+    1.640,
+)
 PILOT_IDENTITIES = (("C0", 0), ("C0", 1), ("C-Gate", 0), ("C-Gate", 1))
 _PILOT_SHARED_FIELDS = (
     "reset_digest",
@@ -22,6 +30,7 @@ _PILOT_SHARED_FIELDS = (
     "action_rng_seed",
     "git_revision",
     "asset_git_revision",
+    "treatment_base_identity",
 )
 
 
@@ -139,12 +148,13 @@ def summarize_guideline_episode(trace: Mapping) -> dict:
     if accepted_raw is None:
         accepted_contact = None
     else:
-        if isinstance(accepted_raw, bool):
-            raise ValueError("first_strike.accepted_onset_index must be an index")
-        try:
-            accepted_contact = int(accepted_raw)
-        except (TypeError, ValueError, OverflowError) as error:
-            raise ValueError("first_strike.accepted_onset_index must be an index") from error
+        if isinstance(accepted_raw, bool) or not isinstance(
+            accepted_raw, (int, np.integer)
+        ):
+            raise ValueError(
+                "first_strike.accepted_onset_index must be a literal integral index"
+            )
+        accepted_contact = int(accepted_raw)
         if accepted_contact < 0 or accepted_contact >= count:
             raise ValueError("first_strike.accepted_onset_index is out of range")
 
@@ -172,6 +182,8 @@ def summarize_guideline_episode(trace: Mapping) -> dict:
     caps = _array(trace.get("impulse_limits_n_m_s"), name="impulse_limits_n_m_s")
     if peak_lambda.shape != (6,) or caps.shape != (6,) or np.any(peak_lambda < 0.0) or np.any(caps <= 0.0):
         raise ValueError("terminal Lambda and impulse caps must be six non-negative/positive values")
+    if not np.array_equal(caps, np.asarray(FROZEN_MANUFACTURER_IMPULSE_CAPS_N_M_S)):
+        raise ValueError("trace impulse caps drift from frozen manufacturer impulse caps")
     speed = float(first_strike.get("v_precontact_m_s", 0.0))
     if not math.isfinite(speed) or speed < 0.0:
         raise ValueError("first_strike.v_precontact_m_s must be finite and non-negative")
@@ -253,14 +265,34 @@ def validate_guideline_pilot_rows(rows: Sequence[Mapping]) -> dict:
     ):
         raise ValueError("pilot training seeds must be literal integers")
     identities = [(row.get("treatment"), row.get("training_seed")) for row in rows]
-    if identities != list(PILOT_IDENTITIES):
-        raise ValueError("pilot rows must be exactly C0/C-Gate seeds 0/1 in frozen order")
+    if len(identities) != len(PILOT_IDENTITIES) or set(identities) != set(PILOT_IDENTITIES):
+        raise ValueError("pilot rows must contain exactly C0/C-Gate seeds 0/1")
     for row in rows:
         identity = f"{row['treatment']}/seed{row['training_seed']}"
         if row.get("checkpoint_filename") != "model_499.pt":
             raise ValueError(f"{identity}: final model_499.pt checkpoint is required")
         if row.get("n_episodes_sampled") != EXPECTED_EPISODE_COUNT:
             raise ValueError(f"{identity}: exactly 512 sampled episodes are required")
+        reset_range = _array(
+            row.get("reset_position_range_rad"),
+            name=f"{identity}: reset_position_range_rad",
+            shape=(2,),
+        )
+        if not np.array_equal(reset_range, np.zeros(2)):
+            raise ValueError(f"{identity}: reset range must be literally (0.0, 0.0)")
+        if row.get("windup_enabled") is not False:
+            raise ValueError(f"{identity}: wind-up must be disabled")
+        if row.get("impedance_mode") != "fixed":
+            raise ValueError(f"{identity}: fixed impedance is required")
+        imp_max_p = row.get("imp_max_p")
+        if isinstance(imp_max_p, bool):
+            raise ValueError(f"{identity}: imp_max_p must be literal 0.0")
+        try:
+            imp_max_p = float(imp_max_p)
+        except (TypeError, ValueError, OverflowError) as error:
+            raise ValueError(f"{identity}: imp_max_p must be literal 0.0") from error
+        if not math.isfinite(imp_max_p) or imp_max_p != 0.0:
+            raise ValueError(f"{identity}: imp_max_p must be literal 0.0")
         if bool(row.get("git_dirty")) or bool(row.get("asset_git_dirty")):
             raise ValueError(f"{identity}: clean code and asset provenance are required")
         for sentinel in ("impossible_success_n", "lambda_dead_n"):
@@ -279,11 +311,32 @@ def validate_guideline_pilot_rows(rows: Sequence[Mapping]) -> dict:
             raise ValueError(f"{identity}: gate payout and success rate are required") from error
         if not math.isfinite(payout) or not math.isfinite(success_rate):
             raise ValueError(f"{identity}: gate payout and success rate must be finite")
+        if not 0.0 <= success_rate <= 1.0:
+            raise ValueError(f"{identity}: success rate must lie in [0.0, 1.0]")
         if row["treatment"] == "C0":
-            if row.get("gate_reward_present") is not False or payout != 0.0:
+            if (
+                row.get("r_gate_present") is not False
+                or row.get("r_gate_weight") is not None
+                or row.get("gate_reward_present") is not False
+                or payout != 0.0
+            ):
                 raise ValueError(f"{identity}: C0 needs absent gate reward and zero payout")
-        elif row.get("gate_reward_present") is not True or payout <= 0.0:
-            raise ValueError(f"{identity}: C-Gate needs positive actual gate payout")
+        else:
+            r_gate_weight = row.get("r_gate_weight")
+            if isinstance(r_gate_weight, bool):
+                raise ValueError(f"{identity}: C-Gate needs r_gate at weight 8.0")
+            try:
+                r_gate_weight = float(r_gate_weight)
+            except (TypeError, ValueError, OverflowError) as error:
+                raise ValueError(f"{identity}: C-Gate needs r_gate at weight 8.0") from error
+            if (
+                row.get("r_gate_present") is not True
+                or not math.isfinite(r_gate_weight)
+                or r_gate_weight != 8.0
+                or row.get("gate_reward_present") is not True
+                or payout <= 0.0
+            ):
+                raise ValueError(f"{identity}: C-Gate needs r_gate at weight 8.0 and positive actual payout")
 
     for field in _PILOT_SHARED_FIELDS:
         values = [row.get(field) for row in rows]
