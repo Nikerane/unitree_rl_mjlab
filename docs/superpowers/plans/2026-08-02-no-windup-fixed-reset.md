@@ -215,7 +215,7 @@ PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -m pytest 
 
 ```bash
 PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -m pytest \
-  tests/test_strike_reference.py tests/test_guideline.py \
+  tests/test_strike_reference.py tests/test_hammer_guideline.py \
   tests/test_guideline_qualification.py tests/test_configs.py tests/test_env.py -q
 ```
 
