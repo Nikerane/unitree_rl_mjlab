@@ -162,34 +162,101 @@ def test_seed_requires_its_exact_production_episode_count() -> None:
 def _pilot_rows() -> list[dict]:
     common = {
         "checkpoint_filename": "model_499.pt",
+        "num_envs": 256,
+        "episode_len_s": 4.0,
         "n_episodes_sampled": 512,
-        "reset_digest": "reset-fixed",
-        "guideline_geometry_digest": "geometry-fixed",
+        "episodes_per_env_sampled": 2,
+        "reset_digest": "a" * 64,
+        "guideline_geometry_digest": "b" * 64,
         "reset_position_range_rad": (0.0, 0.0),
         "windup_enabled": False,
         "impedance_mode": "fixed",
         "imp_max_p": 0.0,
-        "treatment_base_identity": "guideline-canonical-without-r-gate",
-        "reset_rng_seed": 11,
-        "observation_rng_seed": 12,
-        "action_rng_seed": 13,
+        "treatment_base_identity": "c" * 64,
+        "reset_rng_seed": 2036072919,
+        "observation_rng_seed": 2046072933,
+        "action_rng_seed": 2056072941,
         "git_dirty": False,
         "asset_git_dirty": False,
-        "git_revision": "code-clean",
-        "asset_git_revision": "asset-clean",
+        "git_revision": "1" * 40,
+        "asset_git_revision": "2" * 40,
+        "accepted_manifest_sha256": "d" * 64,
+        "training_code_revision": "3" * 40,
+        "training_asset_revision": "2" * 40,
+        "campaign_config_sha256": "e" * 64,
         "impossible_success_n": 0,
         "lambda_dead_n": 0,
         "qvel_nonfinite_rate_sampled": 0.0,
+        "q90_terminal_descent_perpendicular_error_m_sampled": 0.004,
+        "all_six_gates_rate_sampled": 0.75,
+        "corridor_occupancy_mean_sampled": 0.80,
+        "backward_progress_count_mean_sampled": 0.25,
     }
     return [
-        dict(common, treatment="C0", training_seed=0, r_gate_present=False, r_gate_weight=None, gate_reward_present=False,
-             actual_gate_return_total_sampled=0.0, success_rate_sampled=0.30),
-        dict(common, treatment="C0", training_seed=1, r_gate_present=False, r_gate_weight=None, gate_reward_present=False,
-             actual_gate_return_total_sampled=0.0, success_rate_sampled=0.10),
-        dict(common, treatment="C-Gate", training_seed=0, r_gate_present=True, r_gate_weight=8.0, gate_reward_present=True,
-             actual_gate_return_total_sampled=1.0, success_rate_sampled=0.25),
-        dict(common, treatment="C-Gate", training_seed=1, r_gate_present=True, r_gate_weight=8.0, gate_reward_present=True,
-             actual_gate_return_total_sampled=0.5, success_rate_sampled=0.10),
+        dict(
+            common,
+            task="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0",
+            treatment="C0",
+            training_seed=0,
+            checkpoint_sha256="4" * 64,
+            accepted_checkpoint_sha256="4" * 64,
+            treatment_config_sha256="f" * 64,
+            sampled_trace_digest="5" * 64,
+            sampled_trace_artifact_sha256="6" * 64,
+            r_gate_present=False,
+            r_gate_weight=None,
+            gate_reward_present=False,
+            actual_gate_return_total_sampled=0.0,
+            success_rate_sampled=0.30,
+        ),
+        dict(
+            common,
+            task="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0",
+            treatment="C0",
+            training_seed=1,
+            checkpoint_sha256="7" * 64,
+            accepted_checkpoint_sha256="7" * 64,
+            treatment_config_sha256="f" * 64,
+            sampled_trace_digest="8" * 64,
+            sampled_trace_artifact_sha256="9" * 64,
+            r_gate_present=False,
+            r_gate_weight=None,
+            gate_reward_present=False,
+            actual_gate_return_total_sampled=0.0,
+            success_rate_sampled=0.10,
+        ),
+        dict(
+            common,
+            task="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate",
+            treatment="C-Gate",
+            training_seed=0,
+            checkpoint_sha256="a" * 64,
+            accepted_checkpoint_sha256="a" * 64,
+            treatment_config_sha256="0" * 64,
+            sampled_trace_digest="b" * 64,
+            sampled_trace_artifact_sha256="c" * 64,
+            r_gate_present=True,
+            r_gate_weight=8.0,
+            gate_reward_present=True,
+            actual_gate_return_total_sampled=1.0,
+            success_rate_sampled=0.25,
+        ),
+        dict(
+            common,
+            task="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate",
+            treatment="C-Gate",
+            training_seed=1,
+            checkpoint_sha256="d" * 64,
+            accepted_checkpoint_sha256="d" * 64,
+            treatment_config_sha256="0" * 64,
+            sampled_trace_digest="e" * 64,
+            sampled_trace_artifact_sha256="f" * 64,
+            r_gate_present=True,
+            r_gate_weight=8.0,
+            gate_reward_present=True,
+            actual_gate_return_total_sampled=0.5,
+            success_rate_sampled=0.10,
+        ),
     ]
 
 
@@ -219,6 +286,90 @@ def test_csv_loader_rejects_malformed_typed_fields(
     _write_pilot_csv(path, rows)
 
     with pytest.raises(ValueError, match=field):
+        guideline_campaign.load_and_validate_guideline_pilot_csv(path)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    (
+        lambda rows: [row.__setitem__("reset_rng_seed", 999) for row in rows],
+        lambda rows: rows[0].pop("git_dirty"),
+        lambda rows: rows[0].__setitem__("asset_git_dirty", 0),
+        lambda rows: rows[0].pop("checkpoint_sha256"),
+        lambda rows: rows[0].__setitem__("accepted_manifest_sha256", "not-a-sha"),
+        lambda rows: rows[0].__setitem__("task", "wrong-task"),
+        lambda rows: rows[0].__setitem__("accepted_checkpoint_sha256", "9" * 64),
+        lambda rows: rows[0].__setitem__("campaign_config_sha256", "9" * 64),
+        lambda rows: rows[1].__setitem__("treatment_config_sha256", "9" * 64),
+        lambda rows: [row.__setitem__("treatment_config_sha256", "f" * 64) for row in rows[2:]],
+        lambda rows: rows[0].__setitem__("training_code_revision", "not-a-revision"),
+        lambda rows: rows[0].__setitem__("training_asset_revision", "3" * 40),
+        lambda rows: rows[0].pop("q90_terminal_descent_perpendicular_error_m_sampled"),
+        lambda rows: rows[0].__setitem__("q90_terminal_descent_perpendicular_error_m_sampled", math.nan),
+        lambda rows: rows[0].__setitem__("q90_terminal_descent_perpendicular_error_m_sampled", 0.051),
+        lambda rows: rows[0].__setitem__("episode_len_s", 3.9),
+        lambda rows: rows[0].__setitem__("sampled_trace_digest", "bad"),
+        lambda rows: rows[1].__setitem__("sampled_trace_artifact_sha256", rows[0]["sampled_trace_artifact_sha256"]),
+    ),
+    ids=(
+        "wrong-frozen-rng",
+        "missing-dirty",
+        "nonbool-dirty",
+        "missing-checkpoint-sha",
+        "invalid-manifest-sha",
+        "wrong-task",
+        "checkpoint-sha-mismatch",
+        "campaign-config-drift",
+        "within-arm-config-drift",
+        "same-config-across-arms",
+        "invalid-training-code-revision",
+        "training-asset-mismatch",
+        "missing-primary-q90",
+        "nonfinite-primary-q90",
+        "out-of-range-primary-q90",
+        "episode-horizon-drift",
+        "invalid-trace-digest",
+        "duplicate-trace-artifact",
+    ),
+)
+def test_pilot_contract_rejects_load_bearing_identity_or_result_drift(mutate) -> None:
+    rows = _pilot_rows()
+    mutate(rows)
+
+    with pytest.raises(ValueError):
+        validate_guideline_pilot_rows(rows)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    (
+        lambda rows: [row.__setitem__("action_rng_seed", 999) for row in rows],
+        lambda rows: [row.pop("q90_terminal_descent_perpendicular_error_m_sampled") for row in rows],
+        lambda rows: rows[0].__setitem__("checkpoint_sha256", "not-a-sha"),
+        lambda rows: rows[0].__setitem__("task", "wrong-task"),
+        lambda rows: rows[0].__setitem__("accepted_checkpoint_sha256", "9" * 64),
+        lambda rows: rows[0].__setitem__("campaign_config_sha256", "9" * 64),
+        lambda rows: rows[0].__setitem__("q90_terminal_descent_perpendicular_error_m_sampled", "nan"),
+    ),
+    ids=(
+        "wrong-frozen-rng",
+        "missing-primary-q90",
+        "invalid-checkpoint-sha",
+        "wrong-task",
+        "checkpoint-sha-mismatch",
+        "campaign-config-drift",
+        "nonfinite-primary-q90",
+    ),
+)
+def test_csv_loader_rejects_persisted_identity_or_result_tampering(
+    tmp_path, mutate
+) -> None:
+    rows = _pilot_rows()
+    mutate(rows)
+    path = tmp_path / "summary.csv"
+    _write_pilot_csv(path, rows)
+
+    with pytest.raises(ValueError):
         guideline_campaign.load_and_validate_guideline_pilot_csv(path)
 
 

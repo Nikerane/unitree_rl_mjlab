@@ -16,6 +16,29 @@ FAILURE_ERROR_M = 0.050
 CORRIDOR_RADIUS_M = 0.005
 NUM_GATES = 6
 EXPECTED_EPISODE_COUNT = 512
+_PILOT_EXACT_FIELDS = {
+    "checkpoint_filename": "model_499.pt",
+    "num_envs": 256,
+    "episode_len_s": 4.0,
+    "n_episodes_sampled": EXPECTED_EPISODE_COUNT,
+    "episodes_per_env_sampled": 2,
+    "reset_rng_seed": 2036072919,
+    "observation_rng_seed": 2046072933,
+    "action_rng_seed": 2056072941,
+}
+_PILOT_BOUNDED_RESULTS = {
+    "q90_terminal_descent_perpendicular_error_m_sampled": (
+        0.0, FAILURE_ERROR_M, "primary q90"
+    ),
+    "success_rate_sampled": (0.0, 1.0, "success rate"),
+    "all_six_gates_rate_sampled": (0.0, 1.0, "all-six-gates rate"),
+    "corridor_occupancy_mean_sampled": (0.0, 1.0, "corridor occupancy"),
+    "backward_progress_count_mean_sampled": (0.0, math.inf, "backward progress"),
+}
+PILOT_TASKS = {
+    "C0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0",
+    "C-Gate": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate",
+}
 FROZEN_MANUFACTURER_IMPULSE_CAPS_N_M_S = (
     1.640,
     3.280,
@@ -34,7 +57,35 @@ _PILOT_SHARED_FIELDS = (
     "git_revision",
     "asset_git_revision",
     "treatment_base_identity",
+    "accepted_manifest_sha256",
+    "training_code_revision",
+    "training_asset_revision",
+    "campaign_config_sha256",
 )
+_PILOT_SHA256_FIELDS = (
+    "checkpoint_sha256",
+    "accepted_checkpoint_sha256",
+    "accepted_manifest_sha256",
+    "campaign_config_sha256",
+    "treatment_config_sha256",
+    "sampled_trace_digest",
+    "sampled_trace_artifact_sha256",
+    "reset_digest",
+    "guideline_geometry_digest",
+    "treatment_base_identity",
+)
+_PILOT_REVISION_FIELDS = (
+    "training_code_revision",
+    "training_asset_revision",
+    "git_revision",
+    "asset_git_revision",
+)
+
+
+def _is_hex(value: object, length: int) -> bool:
+    return isinstance(value, str) and len(value) == length and all(
+        character in "0123456789abcdef" for character in value.lower()
+    )
 
 
 def _array(
@@ -272,10 +323,12 @@ def validate_guideline_pilot_rows(rows: Sequence[Mapping]) -> dict:
         raise ValueError("pilot rows must contain exactly C0/C-Gate seeds 0/1")
     for row in rows:
         identity = f"{row['treatment']}/seed{row['training_seed']}"
-        if row.get("checkpoint_filename") != "model_499.pt":
-            raise ValueError(f"{identity}: final model_499.pt checkpoint is required")
-        if row.get("n_episodes_sampled") != EXPECTED_EPISODE_COUNT:
-            raise ValueError(f"{identity}: exactly 512 sampled episodes are required")
+        if row.get("task") != PILOT_TASKS[row["treatment"]]:
+            raise ValueError(f"{identity}: exact registered task is required")
+        for field, expected in _PILOT_EXACT_FIELDS.items():
+            value = row.get(field)
+            if type(value) is not type(expected) or value != expected:
+                raise ValueError(f"{identity}: {field} must be literal {expected!r}")
         reset_range = _array(
             row.get("reset_position_range_rad"),
             name=f"{identity}: reset_position_range_rad",
@@ -296,8 +349,19 @@ def validate_guideline_pilot_rows(rows: Sequence[Mapping]) -> dict:
             raise ValueError(f"{identity}: imp_max_p must be literal 0.0") from error
         if not math.isfinite(imp_max_p) or imp_max_p != 0.0:
             raise ValueError(f"{identity}: imp_max_p must be literal 0.0")
-        if bool(row.get("git_dirty")) or bool(row.get("asset_git_dirty")):
-            raise ValueError(f"{identity}: clean code and asset provenance are required")
+        for field in ("git_dirty", "asset_git_dirty"):
+            if row.get(field) is not False:
+                raise ValueError(f"{identity}: {field} must be literal False")
+        for field in _PILOT_SHA256_FIELDS:
+            if not _is_hex(row.get(field), 64):
+                raise ValueError(f"{identity}: {field} must be 64 hexadecimal characters")
+        for field in _PILOT_REVISION_FIELDS:
+            if not _is_hex(row.get(field), 40):
+                raise ValueError(f"{identity}: {field} must be a 40-hex revision")
+        if row["checkpoint_sha256"] != row["accepted_checkpoint_sha256"]:
+            raise ValueError(f"{identity}: accepted checkpoint SHA-256 mismatch")
+        if row["training_asset_revision"] != row["asset_git_revision"]:
+            raise ValueError(f"{identity}: training/evaluation asset revision mismatch")
         for sentinel in ("impossible_success_n", "lambda_dead_n"):
             if row.get(sentinel) != 0:
                 raise ValueError(f"{identity}: {sentinel} must be zero")
@@ -307,15 +371,23 @@ def validate_guideline_pilot_rows(rows: Sequence[Mapping]) -> dict:
             raise ValueError(f"{identity}: qvel nonfinite rate is required") from error
         if not math.isfinite(nonfinite_qvel) or nonfinite_qvel != 0.0:
             raise ValueError(f"{identity}: nonfinite qvel invalidates the pilot row")
+        results = {}
+        for field, (lower, upper, label) in _PILOT_BOUNDED_RESULTS.items():
+            try:
+                raw_value = row[field]
+                value = float(raw_value)
+            except (KeyError, TypeError, ValueError, OverflowError) as error:
+                raise ValueError(f"{identity}: {label} is required") from error
+            if isinstance(raw_value, bool) or not math.isfinite(value) or not lower <= value <= upper:
+                raise ValueError(f"{identity}: {label} is outside its valid range")
+            results[field] = value
+        success_rate = results["success_rate_sampled"]
         try:
             payout = float(row["actual_gate_return_total_sampled"])
-            success_rate = float(row["success_rate_sampled"])
         except (KeyError, TypeError, ValueError, OverflowError) as error:
-            raise ValueError(f"{identity}: gate payout and success rate are required") from error
-        if not math.isfinite(payout) or not math.isfinite(success_rate):
-            raise ValueError(f"{identity}: gate payout and success rate must be finite")
-        if not 0.0 <= success_rate <= 1.0:
-            raise ValueError(f"{identity}: success rate must lie in [0.0, 1.0]")
+            raise ValueError(f"{identity}: gate payout is required") from error
+        if not math.isfinite(payout):
+            raise ValueError(f"{identity}: gate payout must be finite")
         if row["treatment"] == "C0":
             if (
                 row.get("r_gate_present") is not False
@@ -346,6 +418,18 @@ def validate_guideline_pilot_rows(rows: Sequence[Mapping]) -> dict:
         if values[0] in (None, "") or len(set(values)) != 1:
             raise ValueError(f"pilot rows must share {field}")
 
+    treatment_configs = {
+        arm: {row["treatment_config_sha256"] for row in rows if row["treatment"] == arm}
+        for arm in PILOT_TASKS
+    }
+    if any(len(values) != 1 for values in treatment_configs.values()):
+        raise ValueError("pilot rows must share treatment config within each arm")
+    if len({next(iter(values)) for values in treatment_configs.values()}) != 2:
+        raise ValueError("C0 and C-Gate require distinct treatment config identities")
+    for field in ("sampled_trace_digest", "sampled_trace_artifact_sha256"):
+        if len({row[field] for row in rows}) != len(rows):
+            raise ValueError(f"pilot rows require unique {field}")
+
     continuation_by_arm = {
         arm: any(float(row["success_rate_sampled"]) >= 0.25 for row in rows if row["treatment"] == arm)
         for arm in ("C0", "C-Gate")
@@ -359,14 +443,26 @@ def validate_guideline_pilot_rows(rows: Sequence[Mapping]) -> dict:
 
 
 _PILOT_CSV_SCHEMA = {
-    **dict.fromkeys(("training_seed", "n_episodes_sampled", "reset_rng_seed",
+    **dict.fromkeys(("training_seed", "num_envs", "n_episodes_sampled",
+                     "episodes_per_env_sampled", "reset_rng_seed",
                      "observation_rng_seed", "action_rng_seed",
                      "impossible_success_n", "lambda_dead_n"), "int"),
-    **dict.fromkeys(("imp_max_p", "qvel_nonfinite_rate_sampled",
-                     "actual_gate_return_total_sampled", "success_rate_sampled"), "float"),
+    **dict.fromkeys(("episode_len_s", "imp_max_p",
+                     "qvel_nonfinite_rate_sampled",
+                     "q90_terminal_descent_perpendicular_error_m_sampled",
+                     "all_six_gates_rate_sampled",
+                     "corridor_occupancy_mean_sampled",
+                     "backward_progress_count_mean_sampled",
+                     "actual_gate_return_total_sampled",
+                     "success_rate_sampled"), "float"),
     **dict.fromkeys(("windup_enabled", "r_gate_present", "gate_reward_present",
                      "git_dirty", "asset_git_dirty"), "bool"),
-    **dict.fromkeys(("treatment", "checkpoint_filename", "reset_digest",
+    **dict.fromkeys(("task", "treatment", "checkpoint_filename",
+                     "checkpoint_sha256", "accepted_checkpoint_sha256",
+                     "accepted_manifest_sha256", "training_code_revision",
+                     "training_asset_revision", "campaign_config_sha256",
+                     "treatment_config_sha256", "sampled_trace_digest",
+                     "sampled_trace_artifact_sha256", "reset_digest",
                      "guideline_geometry_digest", "impedance_mode",
                      "treatment_base_identity", "git_revision",
                      "asset_git_revision"), "text"),

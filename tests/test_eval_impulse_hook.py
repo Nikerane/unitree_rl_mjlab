@@ -765,17 +765,20 @@ def test_guideline_extension_preserves_legacy_digest_literals():
   ) == "37146ea3b5cf0e90262179c1dfea83bda63fc377bb5445ecf38145bc4500758b"
 
 
-def test_guideline_csv_round_trip_reaches_strict_four_row_validator(tmp_path):
+def _guideline_pilot_csv_rows():
   common = {
     "checkpoint_filename": "model_499.pt",
+    "num_envs": 256,
+    "episode_len_s": 4.0,
     "n_episodes_sampled": 512,
-    "reset_digest": "reset-fixed",
-    "guideline_geometry_digest": "geometry-fixed",
+    "episodes_per_env_sampled": 2,
+    "reset_digest": "1" * 64,
+    "guideline_geometry_digest": "2" * 64,
     "reset_position_range_rad": (0.0, 0.0),
     "windup_enabled": False,
     "impedance_mode": "fixed",
     "imp_max_p": 0.0,
-    "treatment_base_identity": "guideline-config-without-r-gate",
+    "treatment_base_identity": "3" * 64,
     "reset_rng_seed": GUIDELINE_RNG["reset_seed"],
     "observation_rng_seed": GUIDELINE_RNG["observation_seed"],
     "action_rng_seed": GUIDELINE_RNG["action_seed"],
@@ -783,37 +786,69 @@ def test_guideline_csv_round_trip_reaches_strict_four_row_validator(tmp_path):
     "asset_git_dirty": False,
     "git_revision": "a" * 40,
     "asset_git_revision": "b" * 40,
+    "accepted_manifest_sha256": "4" * 64,
+    "training_code_revision": "c" * 40,
+    "training_asset_revision": "b" * 40,
+    "campaign_config_sha256": "5" * 64,
     "impossible_success_n": 0,
     "lambda_dead_n": 0,
     "qvel_nonfinite_rate_sampled": 0.0,
+    "q90_terminal_descent_perpendicular_error_m_sampled": 0.004,
+    "all_six_gates_rate_sampled": 0.75,
+    "corridor_occupancy_mean_sampled": 0.80,
+    "backward_progress_count_mean_sampled": 0.25,
   }
-  rows = [
+  return [
     dict(
-      common, treatment="C0", training_seed=0, r_gate_present=False,
+      common, task=GUIDELINE_TASKS["C0"], treatment="C0", training_seed=0,
+      checkpoint_sha256="6" * 64, accepted_checkpoint_sha256="6" * 64,
+      treatment_config_sha256="7" * 64,
+      sampled_trace_digest="8" * 64,
+      sampled_trace_artifact_sha256="9" * 64, r_gate_present=False,
       r_gate_weight=None, gate_reward_present=False,
       actual_gate_return_total_sampled=0.0, success_rate_sampled=0.30,
     ),
     dict(
-      common, treatment="C0", training_seed=1, r_gate_present=False,
+      common, task=GUIDELINE_TASKS["C0"], treatment="C0", training_seed=1,
+      checkpoint_sha256="a" * 64, accepted_checkpoint_sha256="a" * 64,
+      treatment_config_sha256="7" * 64,
+      sampled_trace_digest="b" * 64,
+      sampled_trace_artifact_sha256="c" * 64, r_gate_present=False,
       r_gate_weight=None, gate_reward_present=False,
       actual_gate_return_total_sampled=0.0, success_rate_sampled=0.10,
     ),
     dict(
-      common, treatment="C-Gate", training_seed=0, r_gate_present=True,
+      common, task=GUIDELINE_TASKS["C-Gate"], treatment="C-Gate", training_seed=0,
+      checkpoint_sha256="d" * 64, accepted_checkpoint_sha256="d" * 64,
+      treatment_config_sha256="e" * 64,
+      sampled_trace_digest="f" * 64,
+      sampled_trace_artifact_sha256="0" * 64, r_gate_present=True,
       r_gate_weight=8.0, gate_reward_present=True,
       actual_gate_return_total_sampled=1.0, success_rate_sampled=0.25,
     ),
     dict(
-      common, treatment="C-Gate", training_seed=1, r_gate_present=True,
+      common, task=GUIDELINE_TASKS["C-Gate"], treatment="C-Gate", training_seed=1,
+      checkpoint_sha256="1" * 64, accepted_checkpoint_sha256="1" * 64,
+      treatment_config_sha256="e" * 64,
+      sampled_trace_digest="2" * 64,
+      sampled_trace_artifact_sha256="3" * 64, r_gate_present=True,
       r_gate_weight=8.0, gate_reward_present=True,
       actual_gate_return_total_sampled=0.5, success_rate_sampled=0.10,
     ),
   ]
-  csv_path = tmp_path / "summary.csv"
-  with csv_path.open("w", newline="") as handle:
+
+
+def _write_actual_guideline_csv(path, rows):
+  with path.open("w", newline="") as handle:
     writer = csv.DictWriter(handle, fieldnames=eval_impulse.FIELDNAMES)
     writer.writeheader()
     writer.writerows(rows)
+
+
+def test_guideline_csv_round_trip_reaches_strict_four_row_validator(tmp_path):
+  rows = _guideline_pilot_csv_rows()
+  csv_path = tmp_path / "summary.csv"
+  _write_actual_guideline_csv(csv_path, rows)
 
   result = guideline_analysis.load_and_validate_guideline_pilot_csv(csv_path)
 
@@ -821,6 +856,27 @@ def test_guideline_csv_round_trip_reaches_strict_four_row_validator(tmp_path):
   assert result["row_identities"] == [
     ("C0", 0), ("C0", 1), ("C-Gate", 0), ("C-Gate", 1)
   ]
+
+
+@pytest.mark.parametrize(
+  "mutate",
+  (
+    lambda rows: [row.__setitem__("reset_rng_seed", 999) for row in rows],
+    lambda rows: [row.pop("git_dirty") for row in rows],
+    lambda rows: [row.pop("q90_terminal_descent_perpendicular_error_m_sampled") for row in rows],
+    lambda rows: rows[0].__setitem__("accepted_checkpoint_sha256", "f" * 64),
+    lambda rows: rows[0].__setitem__("campaign_config_sha256", "f" * 64),
+  ),
+  ids=("frozen-rng", "missing-dirty", "missing-q90", "checkpoint", "config"),
+)
+def test_actual_evaluator_csv_rejects_load_bearing_tampering(tmp_path, mutate):
+  rows = _guideline_pilot_csv_rows()
+  mutate(rows)
+  csv_path = tmp_path / "summary.csv"
+  _write_actual_guideline_csv(csv_path, rows)
+
+  with pytest.raises(ValueError):
+    guideline_analysis.load_and_validate_guideline_pilot_csv(csv_path)
 
 
 @pytest.fixture(scope="module")
