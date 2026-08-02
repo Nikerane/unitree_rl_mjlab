@@ -2517,6 +2517,17 @@ def test_runner_relies_on_wrapper_constructor_for_exactly_one_reset(
     assert raw_reset_calls == ["reset"]
 
 
+def test_cpu_integration_records_direct_reference_provenance():
+    """Smoke evidence must identify the direct reset-head follow-through segment."""
+    result = smoke.run_smoke(task=ARM_TASKS["C"], device="cpu", num_envs=1)
+
+    reference = result["scripted_reference"]
+    assert reference["geometry"] == "reset_head_to_below_nail_follow_through"
+    assert reference["follow_through_overshoot_m"] == pytest.approx(0.15)
+    assert "approach_height_m" not in reference
+    assert not any("apex" in field or "windup" in field for field in reference)
+
+
 @pytest.mark.parametrize("task", tuple(ARM_TASKS.values()))
 def test_cpu_integration_runs_the_fixed_reference_for_each_task(task):
     """Breaking any registered arm's live instrumentation must fail locally."""
