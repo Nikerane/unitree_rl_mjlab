@@ -17,6 +17,7 @@ from evaluation.guideline.qualify_reference import (
     TASK_ID,
     _configure_projection_x_ticks,
     _gate_disk_points,
+    bind_provenance_failures,
     canonical_qvel_trace,
     corridor_window_errors,
     load_qualification_cfg,
@@ -35,8 +36,11 @@ def _passing_rows() -> list[dict[str, object]]:
             "gates_crossed": 6,
             "contact_seen": True,
             "nail_progress_m": 0.03,
+            "success_reached": True,
             "corridor_max_m": 0.004,
             "qvel_peak_rad_s": 3.0,
+            "max_commanded_rise_m": 0.0,
+            "max_stepwise_commanded_rise_m": 0.0,
             "finite": True,
             "reset_arm_qpos_rad": [0.1, -0.2, 0.3, -0.4, 0.5, -0.6],
         }
@@ -69,9 +73,16 @@ def test_summary_schema_accepts_only_the_complete_preregistered_seed_set() -> No
     (
         ("gates_crossed", 5, "fewer than six gates"),
         ("contact_seen", False, "no contact"),
-        ("nail_progress_m", 0.0, "no nail progress"),
+        ("nail_progress_m", 1e-12, "nail progress below 0.030 m success threshold"),
+        ("success_reached", False, "nail success threshold not reached"),
         ("corridor_max_m", 0.0050001, "corridor above 0.005 m"),
         ("qvel_peak_rad_s", 3.1415001, "qvel above 3.1415 rad/s"),
+        ("max_commanded_rise_m", 1e-12, "commanded target rises above reset"),
+        (
+            "max_stepwise_commanded_rise_m",
+            1e-12,
+            "commanded target rises step-to-step",
+        ),
         ("qvel_peak_rad_s", math.nan, "non-finite value"),
         ("finite", False, "non-finite value"),
     ),
@@ -123,6 +134,25 @@ def test_missing_required_row_field_fails_closed() -> None:
     assert summary["passed"] is False
     assert summary["qualified_resets"] == 15
     assert summary["failures"] == ["seed 1000: missing corridor_max_m"]
+
+
+@pytest.mark.parametrize(
+    ("source_identity", "reason"),
+    (
+        ({"git_dirty": True, "external_safe_impact_manipulation": {"tracked_dirty": False}}, "source repository has uncommitted changes"),
+        ({"git_dirty": False, "external_safe_impact_manipulation": {"tracked_dirty": True}}, "external safe_impact_manipulation repository has tracked changes"),
+    ),
+    ids=("source-git-dirty", "tracked-assets-dirty"),
+)
+def test_dirty_provenance_fails_an_otherwise_qualified_summary(
+    source_identity: dict[str, object], reason: str
+) -> None:
+    summary = summarize_qualification(_passing_rows())
+
+    bind_provenance_failures(summary, source_identity)
+
+    assert summary["passed"] is False
+    assert summary["failures"] == [reason]
 
 
 def test_missing_seed_fails_closed_instead_of_raising() -> None:
@@ -282,6 +312,7 @@ def test_raw_trace_finiteness_rejects_interior_pre_gate_nan() -> None:
         "path": [np.zeros(3), np.ones(3)],
         "depth": [0.0, 0.03],
         "actions": [np.zeros(3)],
+        "commanded_targets": [np.zeros(3)],
         "samples": [
             {"gates_crossed": 0, "error_m": math.nan},
             {"gates_crossed": 1, "error_m": 0.004},

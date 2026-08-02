@@ -16,6 +16,7 @@ from src.tasks.hammer.mdp.guideline import (
     GUIDELINE_CORRIDOR_RADIUS_M as CORRIDOR_RADIUS_M,
     GUIDELINE_NUM_GATES as REQUIRED_GATES,
 )
+from src.tasks.hammer.nail_block import NAIL_SUCCESS_THRESHOLD
 
 
 TASK_ID = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0"
@@ -28,8 +29,11 @@ _REQUIRED_ROW_FIELDS = (
     "gates_crossed",
     "contact_seen",
     "nail_progress_m",
+    "success_reached",
     "corridor_max_m",
     "qvel_peak_rad_s",
+    "max_commanded_rise_m",
+    "max_stepwise_commanded_rise_m",
     "finite",
     "reset_arm_qpos_rad",
 )
@@ -45,6 +49,8 @@ def _row_failures(row: dict[str, Any]) -> list[str]:
         row["nail_progress_m"],
         row["corridor_max_m"],
         row["qvel_peak_rad_s"],
+        row["max_commanded_rise_m"],
+        row["max_stepwise_commanded_rise_m"],
     )
     reset_qpos = row["reset_arm_qpos_rad"]
     try:
@@ -63,13 +69,36 @@ def _row_failures(row: dict[str, Any]) -> list[str]:
         failures.append("fewer than six gates")
     if not bool(row["contact_seen"]):
         failures.append("no contact")
-    if float(row["nail_progress_m"]) <= 0.0:
-        failures.append("no nail progress")
+    if float(row["nail_progress_m"]) < NAIL_SUCCESS_THRESHOLD:
+        failures.append(
+            f"nail progress below {NAIL_SUCCESS_THRESHOLD:.3f} m success threshold"
+        )
+    if not bool(row["success_reached"]):
+        failures.append("nail success threshold not reached")
     if float(row["corridor_max_m"]) > CORRIDOR_RADIUS_M:
         failures.append("corridor above 0.005 m")
     if float(row["qvel_peak_rad_s"]) > QVEL_LIMIT_RAD_S:
         failures.append("qvel above 3.1415 rad/s")
+    if float(row["max_commanded_rise_m"]) > 0.0:
+        failures.append("commanded target rises above reset")
+    if float(row["max_stepwise_commanded_rise_m"]) > 0.0:
+        failures.append("commanded target rises step-to-step")
     return failures
+
+
+def bind_provenance_failures(
+    summary: dict[str, Any], source_identity: dict[str, Any]
+) -> None:
+    """Attach provenance and make dirty tracked sources an explicit failure."""
+    failures: list[str] = []
+    if bool(source_identity.get("git_dirty")):
+        failures.append("source repository has uncommitted changes")
+    external = source_identity.get("external_safe_impact_manipulation", {})
+    if isinstance(external, dict) and bool(external.get("tracked_dirty")):
+        failures.append("external safe_impact_manipulation repository has tracked changes")
+    summary["source_identity"] = source_identity
+    summary["failures"].extend(failures)
+    summary["passed"] = bool(summary["passed"]) and not failures
 
 
 def summarize_qualification(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -216,6 +245,7 @@ def trace_numeric_is_finite(
         np.asarray(trace["path"], dtype=np.float64),
         np.asarray(trace["depth"], dtype=np.float64),
         np.asarray(trace["actions"], dtype=np.float64),
+        np.asarray(trace["commanded_targets"], dtype=np.float64),
         np.asarray(
             [
                 (sample["gates_crossed"], sample["error_m"])
@@ -449,6 +479,7 @@ def run_cpu_qualification() -> tuple[list[dict[str, Any]], dict[int, dict[str, A
             "path": [reset_head],
             "depth": [],
             "actions": [],
+            "commanded_targets": [],
             "samples": [],
             "gate_centers": {},
             "contact_point": None,
@@ -461,6 +492,7 @@ def run_cpu_qualification() -> tuple[list[dict[str, Any]], dict[int, dict[str, A
         active = trace
         for control_index in range(1, playback_length + HOLD_STEPS + 1):
             target = reference.playback_target(min(control_index, playback_length))
+            trace["commanded_targets"].append(_as_numpy(target[0]))
             action = ((target - head_position()) / Z1_HAMMER_DELTA_POS_SCALE).clamp(
                 -1.0, 1.0
             )
@@ -496,6 +528,19 @@ def run_cpu_qualification() -> tuple[list[dict[str, Any]], dict[int, dict[str, A
         nail_progress = (
             float(np.max(depths) - initial_depth) if depths.size else 0.0
         )
+        max_depth = float(np.max(depths)) if depths.size else initial_depth
+        commanded_targets = np.asarray(trace["commanded_targets"], dtype=np.float64)
+        target_z = commanded_targets[:, 2] if commanded_targets.size else np.empty(0)
+        max_commanded_rise = (
+            max(0.0, float(np.max(target_z) - reset_head[2]))
+            if target_z.size
+            else 0.0
+        )
+        max_stepwise_commanded_rise = (
+            max(0.0, float(np.max(np.diff(target_z))))
+            if len(target_z) > 1
+            else 0.0
+        )
         corridor_max = max(corridor_errors, default=0.0)
         trace["entry"] = entry
         trace["nail"] = frozen_nail
@@ -510,8 +555,11 @@ def run_cpu_qualification() -> tuple[list[dict[str, Any]], dict[int, dict[str, A
             "contact_seen": accepted_contact,
             "raw_contact_seen": raw_contact,
             "nail_progress_m": nail_progress,
+            "success_reached": max_depth >= NAIL_SUCCESS_THRESHOLD,
             "corridor_max_m": corridor_max,
             "qvel_peak_rad_s": qvel_peak,
+            "max_commanded_rise_m": max_commanded_rise,
+            "max_stepwise_commanded_rise_m": max_stepwise_commanded_rise,
             "finite": finite,
             "reset_arm_qpos_rad": reset_arm_qpos,
             "substeps": len(post),
@@ -725,9 +773,9 @@ def main(argv: list[str] | None = None) -> int:
             "contact_gate": "production FirstStrikeEventTracker.started accepted onset",
             "corridor_window": "production gate-1 transition through accepted onset inclusive",
             "representative_plot_seed": 1000,
-            "source_identity": _source_identity(),
         }
     )
+    bind_provenance_failures(summary, _source_identity())
     write_result_tables(summary, args.out)
     plot_representative_trace(
         traces[1000], summary, args.out / "reference_xz_xy.png"
