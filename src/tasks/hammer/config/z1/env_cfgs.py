@@ -510,6 +510,7 @@ def z1_hammer_env_cfg(
       raise ValueError(
         "z1_hammer_env_cfg: guideline requires the existing first_strike metric"
       )
+    cfg.events["reset_robot_joints"].params["position_range"] = (0.0, 0.0)
     guideline_observations = {
       "next_gate_vector": ObservationTermCfg(
         func=_guideline_observation,

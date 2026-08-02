@@ -725,10 +725,26 @@ class TestCartesianGuidelineStudy:
             for name in self._GUIDELINE_OBSERVATIONS:
                 group.terms.pop(name)
         c0.metrics.pop("waypoint_progress")
+        c0.events["reset_robot_joints"].params["position_range"] = (
+            f8.events["reset_robot_joints"].params["position_range"]
+        )
         assert self._normalize(c0) == self._normalize(f8)
+
+    @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
+    @pytest.mark.parametrize("task_id", (_C0, _C_GATE))
+    def test_guideline_arms_use_a_fixed_nominal_joint_reset(self, task_id, play):
+        cfg = load_env_cfg(task_id, play=play)
+        assert cfg.events["reset_robot_joints"].params["position_range"] == (
+            0.0,
+            0.0,
+        )
 
     def test_legacy_f8_remains_exact(self):
         f8 = load_env_cfg(self._F8)
+        assert f8.events["reset_robot_joints"].params["position_range"] == (
+            -0.05,
+            0.05,
+        )
         assert set(f8.rewards) == set(self._F8_REWARDS)
         assert {name: term.weight for name, term in f8.rewards.items()} == self._F8_REWARDS
         assert set(f8.observations["actor"].terms) == {
