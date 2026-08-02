@@ -34,6 +34,12 @@ _REQUIRED_ROW_FIELDS = (
     "qvel_peak_rad_s",
     "max_commanded_rise_m",
     "max_stepwise_commanded_rise_m",
+    "target_start_distances_m",
+    "multi_gate_crossings",
+    "gate_reward_enabled",
+    "raw_gate_total",
+    "progress_reward_enabled",
+    "raw_progress_total",
     "finite",
     "reset_arm_qpos_rad",
 )
@@ -83,6 +89,38 @@ def _row_failures(row: dict[str, Any]) -> list[str]:
         failures.append("commanded target rises above reset")
     if float(row["max_stepwise_commanded_rise_m"]) > 0.0:
         failures.append("commanded target rises step-to-step")
+    try:
+        target_starts_valid = (
+            len(row["target_start_distances_m"]) == REQUIRED_GATES
+            and all(
+                math.isfinite(float(value)) and float(value) > 0.0
+                for value in row["target_start_distances_m"]
+            )
+        )
+    except (TypeError, ValueError, OverflowError):
+        target_starts_valid = False
+    if not target_starts_valid:
+        failures.append("target start distances must be six finite positive values")
+    if (
+        not isinstance(row["multi_gate_crossings"], int)
+        or isinstance(row["multi_gate_crossings"], bool)
+        or row["multi_gate_crossings"] != 0
+    ):
+        failures.append("scripted multi-gate crossings")
+    for enabled_field, total_field, label in (
+        ("gate_reward_enabled", "raw_gate_total", "gate"),
+        ("progress_reward_enabled", "raw_progress_total", "progress"),
+    ):
+        if row[enabled_field] is True:
+            try:
+                complete_total = (
+                    math.isfinite(float(row[total_field]))
+                    and float(row[total_field]) == 1.0
+                )
+            except (TypeError, ValueError, OverflowError):
+                complete_total = False
+            if not complete_total:
+                failures.append(f"raw {label} total must be 1.0 when enabled")
     return failures
 
 
@@ -383,6 +421,8 @@ def run_cpu_qualification() -> tuple[list[dict[str, Any]], dict[int, dict[str, A
     from src.tasks.hammer.mdp.rewards import clamped_nail_depth
 
     cfg = load_qualification_cfg(load_env_cfg)
+    gate_reward_enabled = "r_gate" in cfg.rewards
+    progress_reward_enabled = "r_waypoint_progress" in cfg.rewards
     env = ManagerBasedRlEnv(cfg, device="cpu")
     robot = env.scene["robot"]
     nail = env.scene["nail_block"]
@@ -444,6 +484,13 @@ def run_cpu_qualification() -> tuple[list[dict[str, Any]], dict[int, dict[str, A
         active["qvel_post"].append(qvel)
         active["path"].append(_as_numpy(head[0]))
         active["depth"].append(depth)
+        if bool(guideline_tracker.initialized[0]):
+            index = int(guideline_tracker.next_gate[0])
+            if index < REQUIRED_GATES:
+                active["target_start_distances_m"].setdefault(
+                    index,
+                    float(guideline_tracker.target_start_distance[0]),
+                )
         active["samples"].append(
             {
                 "gates_crossed": gates,
@@ -482,6 +529,7 @@ def run_cpu_qualification() -> tuple[list[dict[str, Any]], dict[int, dict[str, A
             "commanded_targets": [],
             "samples": [],
             "gate_centers": {},
+            "target_start_distances_m": {},
             "contact_point": None,
             "contact_path_index": None,
             "actions_finite": True,
@@ -548,6 +596,11 @@ def run_cpu_qualification() -> tuple[list[dict[str, Any]], dict[int, dict[str, A
             trace["gate_centers"][index]
             for index in sorted(trace["gate_centers"])
         ]
+        target_start_distances = [
+            trace["target_start_distances_m"][index]
+            for index in range(REQUIRED_GATES)
+            if index in trace["target_start_distances_m"]
+        ]
         traces[seed] = trace
         return {
             "seed": seed,
@@ -560,6 +613,16 @@ def run_cpu_qualification() -> tuple[list[dict[str, Any]], dict[int, dict[str, A
             "qvel_peak_rad_s": qvel_peak,
             "max_commanded_rise_m": max_commanded_rise,
             "max_stepwise_commanded_rise_m": max_stepwise_commanded_rise,
+            "target_start_distances_m": target_start_distances,
+            "multi_gate_crossings": int(guideline_tracker.multi_gate_crossings[0]),
+            "gate_reward_enabled": gate_reward_enabled,
+            "raw_gate_total": gates / REQUIRED_GATES if gate_reward_enabled else 0.0,
+            "progress_reward_enabled": progress_reward_enabled,
+            "raw_progress_total": (
+                float(guideline_tracker.episode_credit[0])
+                if progress_reward_enabled
+                else 0.0
+            ),
             "finite": finite,
             "reset_arm_qpos_rad": reset_arm_qpos,
             "substeps": len(post),

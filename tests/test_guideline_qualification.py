@@ -41,6 +41,12 @@ def _passing_rows() -> list[dict[str, object]]:
             "qvel_peak_rad_s": 3.0,
             "max_commanded_rise_m": 0.0,
             "max_stepwise_commanded_rise_m": 0.0,
+            "target_start_distances_m": [0.021] * 6,
+            "multi_gate_crossings": 0,
+            "gate_reward_enabled": False,
+            "raw_gate_total": 0.0,
+            "progress_reward_enabled": False,
+            "raw_progress_total": 0.0,
             "finite": True,
             "reset_arm_qpos_rad": [0.1, -0.2, 0.3, -0.4, 0.5, -0.6],
         }
@@ -100,6 +106,76 @@ def test_any_single_reset_failure_fails_the_aggregate(
     assert summary["failures"] == [f"seed 1007: {reason}"]
     assert summary["rows"][7]["qualifies"] is False
     assert summary["rows"][7]["failures"] == [reason]
+
+
+@pytest.mark.parametrize(
+    ("field", "bad_value", "reason"),
+    (
+        (
+            "target_start_distances_m",
+            [0.021] * 5,
+            "target start distances must be six finite positive values",
+        ),
+        (
+            "target_start_distances_m",
+            [0.021, 0.021, 0.021, 0.0, 0.021, 0.021],
+            "target start distances must be six finite positive values",
+        ),
+        (
+            "target_start_distances_m",
+            [0.021, 0.021, math.nan, 0.021, 0.021, 0.021],
+            "target start distances must be six finite positive values",
+        ),
+        ("multi_gate_crossings", 1, "scripted multi-gate crossings"),
+    ),
+    ids=("incomplete-d-start", "zero-d-start", "nonfinite-d-start", "multi-gate"),
+)
+def test_new_tracker_state_qualification_sentinels_fail_closed(
+    field: str, bad_value: object, reason: str
+) -> None:
+    """Dropping this tracker sentinel would qualify an invalid scripted reference."""
+    rows = _passing_rows()
+    rows[7][field] = bad_value
+
+    summary = summarize_qualification(rows)
+
+    assert summary["passed"] is False
+    assert summary["qualified_resets"] == 15
+    assert summary["failures"] == [f"seed 1007: {reason}"]
+    assert summary["rows"][7]["failures"] == [reason]
+
+
+@pytest.mark.parametrize(
+    ("enabled_field", "total_field", "bad_total", "reason"),
+    (
+        (
+            "gate_reward_enabled",
+            "raw_gate_total",
+            1.0 - 1e-6,
+            "raw gate total must be 1.0 when enabled",
+        ),
+        (
+            "progress_reward_enabled",
+            "raw_progress_total",
+            math.nan,
+            "raw progress total must be 1.0 when enabled",
+        ),
+    ),
+    ids=("gate-total", "progress-total"),
+)
+def test_enabled_waypoint_reader_requires_a_complete_finite_raw_dose(
+    enabled_field: str, total_field: str, bad_total: object, reason: str
+) -> None:
+    """An enabled reader with a partial or non-finite raw budget must not qualify."""
+    rows = _passing_rows()
+    rows[7][enabled_field] = True
+    rows[7][total_field] = bad_total
+
+    summary = summarize_qualification(rows)
+
+    assert summary["passed"] is False
+    assert summary["qualified_resets"] == 15
+    assert summary["failures"] == [f"seed 1007: {reason}"]
 
 
 @pytest.mark.parametrize(

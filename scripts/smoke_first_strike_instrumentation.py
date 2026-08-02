@@ -36,6 +36,7 @@ from src.tasks.hammer.mdp.guideline import (
     GUIDELINE_NUM_GATES,
     WaypointProgressTracker,
     _ENV_GUIDELINE_ATTR,
+    ordered_waypoint_progress_reward,
 )
 from src.tasks.hammer.mdp.references import SingleStrikeReference
 from src.tasks.hammer.nail_block import NAIL_GOAL_DEPTH, NAIL_SUCCESS_THRESHOLD
@@ -59,6 +60,7 @@ ARM_TASKS = {
 GUIDELINE_ARM_TASKS = {
     "C0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0",
     "C-Gate": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate",
+    "P": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress",
 }
 
 
@@ -87,6 +89,8 @@ class ArmContract:
     guideline_required: bool = False
     # C-Gate alone must produce a finite positive manager r_gate payout.
     gate_reward_required: bool = False
+    # P alone must produce a finite positive manager dense-progress payout.
+    progress_reward_required: bool = False
 
 
 @dataclass(frozen=True)
@@ -150,6 +154,11 @@ ARM_CONTRACTS: dict[str, ArmContract] = {
         True, 0.3088, False, guideline_required=True,
         gate_reward_required=True,
     ),
+    "P": ArmContract(
+        "P", GUIDELINE_ARM_TASKS["P"], "FirstStrikeImpactRewardTerm",
+        "FirstStrikeDeliveredRewardTerm", True, 0.3088, False,
+        guideline_required=True, progress_reward_required=True,
+    ),
 }
 TASK_CONTRACTS = {contract.task: contract for contract in ARM_CONTRACTS.values()}
 LITERAL_IMPULSE_LIMITS_N_M_S = (1.64, 3.28, 1.64, 1.64, 1.64, 1.64)
@@ -192,6 +201,7 @@ GUIDELINE_PREDICATES = (
     "guideline_geometry_finite",
     "guideline_geometry_nondegenerate",
     "guideline_all_gates_crossed",
+    "guideline_progress_state_finite",
 )
 
 
@@ -301,6 +311,7 @@ class DeviceSmokeRecorder:
         self.manager_impact = torch.zeros(shape, device=self.device)
         self.manager_delivered = torch.zeros(shape, device=self.device)
         self.manager_gate = torch.zeros(shape, device=self.device)
+        self.manager_progress = torch.zeros(shape, device=self.device)
         self.control_step = torch.zeros(
             shape, dtype=torch.long, device=self.device
         )
@@ -355,6 +366,21 @@ class DeviceSmokeRecorder:
         self.terminal_guideline_next_gate = torch.zeros(
             shape, dtype=torch.long, device=self.device
         )
+        self.terminal_guideline_target_start_distance = torch.zeros(
+            shape, device=self.device
+        )
+        self.terminal_guideline_best_target_fraction = torch.zeros(
+            shape, device=self.device
+        )
+        self.terminal_guideline_window_new_credit = torch.zeros(
+            shape, device=self.device
+        )
+        self.terminal_guideline_episode_credit = torch.zeros(
+            shape, device=self.device
+        )
+        self.terminal_guideline_multi_gate_crossings = torch.zeros(
+            shape, dtype=torch.long, device=self.device
+        )
         self.terminal_raw_impact_finite = torch.ones(
             shape, dtype=torch.bool, device=self.device
         )
@@ -372,6 +398,7 @@ class DeviceSmokeRecorder:
             shape, device=self.device
         )
         self.terminal_manager_gate = torch.zeros(shape, device=self.device)
+        self.terminal_manager_progress = torch.zeros(shape, device=self.device)
         self.terminal_control_step = torch.zeros(
             shape, dtype=torch.long, device=self.device
         )
@@ -459,13 +486,20 @@ class DeviceSmokeRecorder:
         guideline_entry: torch.Tensor,
         guideline_nail: torch.Tensor,
         guideline_next_gate: torch.Tensor,
+        guideline_target_start_distance: torch.Tensor,
+        guideline_best_target_fraction: torch.Tensor,
+        guideline_window_new_credit: torch.Tensor,
+        guideline_episode_credit: torch.Tensor,
+        guideline_multi_gate_crossings: torch.Tensor,
         manager_impact: torch.Tensor,
         manager_delivered: torch.Tensor,
         manager_gate: torch.Tensor,
+        manager_progress: torch.Tensor,
     ) -> None:
         self.manager_impact += manager_impact
         self.manager_delivered += manager_delivered
         self.manager_gate += manager_gate
+        self.manager_progress += manager_progress
 
         first_terminal = reset_buf & ~self.terminal_seen
         sources = (
@@ -498,6 +532,26 @@ class DeviceSmokeRecorder:
             (self.terminal_guideline_entry, guideline_entry),
             (self.terminal_guideline_nail, guideline_nail),
             (self.terminal_guideline_next_gate, guideline_next_gate),
+            (
+                self.terminal_guideline_target_start_distance,
+                guideline_target_start_distance,
+            ),
+            (
+                self.terminal_guideline_best_target_fraction,
+                guideline_best_target_fraction,
+            ),
+            (
+                self.terminal_guideline_window_new_credit,
+                guideline_window_new_credit,
+            ),
+            (
+                self.terminal_guideline_episode_credit,
+                guideline_episode_credit,
+            ),
+            (
+                self.terminal_guideline_multi_gate_crossings,
+                guideline_multi_gate_crossings,
+            ),
             (self.terminal_raw_impact_finite, self.impact_tap.all_finite),
             (
                 self.terminal_raw_delivered_finite,
@@ -514,6 +568,7 @@ class DeviceSmokeRecorder:
             (self.terminal_manager_impact, self.manager_impact),
             (self.terminal_manager_delivered, self.manager_delivered),
             (self.terminal_manager_gate, self.manager_gate),
+            (self.terminal_manager_progress, self.manager_progress),
             (self.terminal_control_step, self.control_step),
             (
                 self.terminal_impact_positive_count,
@@ -608,6 +663,7 @@ class DeviceSmokeRecorder:
         guideline_gate_zero = torch.zeros(
             self.num_envs, dtype=torch.long, device=self.device
         )
+        guideline_scalar_zero = torch.zeros(self.num_envs, device=self.device)
         manager_gate_zero = torch.zeros(self.num_envs, device=self.device)
         impact_idx = env.reward_manager.active_terms.index("impact_progress")
         delivered_idx = env.reward_manager.active_terms.index(
@@ -616,6 +672,11 @@ class DeviceSmokeRecorder:
         gate_idx = (
             env.reward_manager.active_terms.index("r_gate")
             if "r_gate" in env.reward_manager.active_terms
+            else None
+        )
+        progress_idx = (
+            env.reward_manager.active_terms.index("r_waypoint_progress")
+            if "r_waypoint_progress" in env.reward_manager.active_terms
             else None
         )
 
@@ -689,11 +750,27 @@ class DeviceSmokeRecorder:
                     guideline_entry = guideline_geometry_zero
                     guideline_nail = guideline_geometry_zero
                     guideline_next_gate = guideline_gate_zero
+                    guideline_target_start_distance = guideline_scalar_zero
+                    guideline_best_target_fraction = guideline_scalar_zero
+                    guideline_window_new_credit = guideline_scalar_zero
+                    guideline_episode_credit = guideline_scalar_zero
+                    guideline_multi_gate_crossings = guideline_gate_zero
                 else:
                     guideline_initialized = guideline_tracker.initialized
                     guideline_entry = guideline_tracker.entry
                     guideline_nail = guideline_tracker.nail
                     guideline_next_gate = guideline_tracker.next_gate
+                    guideline_target_start_distance = (
+                        guideline_tracker.target_start_distance
+                    )
+                    guideline_best_target_fraction = (
+                        guideline_tracker.best_target_fraction
+                    )
+                    guideline_window_new_credit = guideline_tracker.window_new_credit
+                    guideline_episode_credit = guideline_tracker.episode_credit
+                    guideline_multi_gate_crossings = (
+                        guideline_tracker.multi_gate_crossings
+                    )
                 self.capture_control_step(
                     reset_buf=env.reset_buf,
                     terminal_depth=depth,
@@ -713,11 +790,21 @@ class DeviceSmokeRecorder:
                     guideline_entry=guideline_entry,
                     guideline_nail=guideline_nail,
                     guideline_next_gate=guideline_next_gate,
+                    guideline_target_start_distance=guideline_target_start_distance,
+                    guideline_best_target_fraction=guideline_best_target_fraction,
+                    guideline_window_new_credit=guideline_window_new_credit,
+                    guideline_episode_credit=guideline_episode_credit,
+                    guideline_multi_gate_crossings=guideline_multi_gate_crossings,
                     manager_impact=step_reward[:, impact_idx] * env.step_dt,
                     manager_delivered=step_reward[:, delivered_idx] * env.step_dt,
                     manager_gate=(
                         step_reward[:, gate_idx] * env.step_dt
                         if gate_idx is not None
+                        else manager_gate_zero
+                    ),
+                    manager_progress=(
+                        step_reward[:, progress_idx] * env.step_dt
+                        if progress_idx is not None
                         else manager_gate_zero
                     ),
                 )
@@ -796,6 +883,20 @@ class DeviceSmokeRecorder:
             )
             > 0.0
         )
+        guideline_progress_state_finite = (
+            torch.isfinite(
+                tensor_fields["terminal_guideline_target_start_distance"]
+            )
+            & torch.isfinite(
+                tensor_fields["terminal_guideline_best_target_fraction"]
+            )
+            & torch.isfinite(
+                tensor_fields["terminal_guideline_window_new_credit"]
+            )
+            & torch.isfinite(
+                tensor_fields["terminal_guideline_episode_credit"]
+            )
+        )
         predicates = {
             "finite_signals": finite_signals,
             "hammer_nail_contact": seen
@@ -843,6 +944,11 @@ class DeviceSmokeRecorder:
                 & torch.isfinite(tensor_fields["terminal_manager_gate"])
                 & (tensor_fields["terminal_manager_gate"] > 0.0)
             ),
+            "manager_progress_positive_finite": (
+                seen
+                & torch.isfinite(tensor_fields["terminal_manager_progress"])
+                & (tensor_fields["terminal_manager_progress"] > 0.0)
+            ),
             # FQ-min only: the one-shot onset quality snapshot must be valid
             # and must not have overflowed its fixed contact-slot capacity.
             "quality_snapshot_valid": seen
@@ -863,6 +969,12 @@ class DeviceSmokeRecorder:
             & (
                 tensor_fields["terminal_guideline_next_gate"]
                 == GUIDELINE_NUM_GATES
+            ),
+            "guideline_progress_state_finite": (
+                seen
+                & tensor_fields["terminal_guideline_tracker_exists"]
+                & tensor_fields["terminal_guideline_tracker_initialized"]
+                & guideline_progress_state_finite
             ),
             "hardware_qvel": (
                 seen
@@ -1007,6 +1119,44 @@ def _configured_reader_name(func: Any) -> str:
     return func.__name__ if inspect.isclass(func) else type(func).__name__
 
 
+def _validate_guideline_smoke_contract(
+    training_cfg: Any, contract: ArmContract
+) -> dict[str, Any]:
+    """Adapt the frozen C0/C-Gate validator to the shared progress-state observation."""
+    compatible_cfg = copy.deepcopy(training_cfg)
+    for group_name in ("actor", "critic"):
+        compatible_cfg.observations[group_name].terms.pop(
+            "waypoint_progress_state", None
+        )
+
+    progress = compatible_cfg.rewards.pop("r_waypoint_progress", None)
+    if contract.progress_reward_required:
+        if (
+            progress is None
+            or progress.func is not ordered_waypoint_progress_reward
+            or float(progress.weight) != 8.0
+            or progress.params != {}
+        ):
+            raise ValueError(
+                f"{contract.task}: P r_waypoint_progress must be "
+                "ordered_waypoint_progress_reward, weight 8.0, with empty params"
+            )
+        validator_task = GUIDELINE_ARM_TASKS["C0"]
+    else:
+        if progress is not None:
+            raise ValueError(f"{contract.task}: {contract.arm} must not contain r_waypoint_progress")
+        validator_task = contract.task
+
+    digest = dict(
+        eval_impulse._validate_native_guideline_env_contract(
+            compatible_cfg, validator_task
+        )
+    )
+    digest["treatment"] = contract.arm
+    digest["progress_reward_enabled"] = contract.progress_reward_required
+    return digest
+
+
 def validate_live_contract(task: str) -> tuple[Any, Any, dict[str, Any]]:
     """Load and fail closed on the unmodified registered task configuration."""
     if task not in TASK_CONTRACTS:
@@ -1014,17 +1164,13 @@ def validate_live_contract(task: str) -> tuple[Any, Any, dict[str, Any]]:
 
     training_cfg = load_env_cfg(task, play=False)
     agent_cfg = load_rl_cfg(task)
-    if task in eval_impulse.GUIDELINE_TASK_TO_ARM:
-        digest = dict(
-            eval_impulse._validate_native_guideline_env_contract(
-                training_cfg, task
-            )
-        )
+    contract = TASK_CONTRACTS[task]
+    if contract.guideline_required:
+        digest = _validate_guideline_smoke_contract(training_cfg, contract)
     else:
         digest = dict(
             eval_impulse._validate_sampled_env_contract(training_cfg, task)
         )
-    contract = TASK_CONTRACTS[task]
     impact = training_cfg.rewards["impact_progress"]
     delivered = training_cfg.rewards["delivered_impulse"]
 
@@ -1540,6 +1686,11 @@ def evaluate_gate(record: Mapping[str, Any]) -> dict[str, Any]:
             predicate_counts.get("manager_gate_positive_finite"), num_envs
         ):
             failures.add("manager_gate_positive_finite")
+    if contract is not None and contract.progress_reward_required:
+        if not _count_passes(
+            predicate_counts.get("manager_progress_positive_finite"), num_envs
+        ):
+            failures.add("manager_progress_positive_finite")
 
     hardware_count_valid = _count_is_well_formed(
         predicate_counts.get("hardware_qvel"), num_envs

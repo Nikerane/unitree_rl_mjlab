@@ -37,6 +37,7 @@ QUALITY_ARM_TASKS = {
 GUIDELINE_ARM_TASKS = {
     "C0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0",
     "C-Gate": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate",
+    "P": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress",
 }
 
 COMMON_PREDICATES = (
@@ -70,6 +71,7 @@ GUIDELINE_PREDICATES = (
     "guideline_geometry_finite",
     "guideline_geometry_nondegenerate",
     "guideline_all_gates_crossed",
+    "guideline_progress_state_finite",
 )
 
 
@@ -104,6 +106,8 @@ def valid_record(*, arm: str, num_envs: int, device_type: str) -> dict[str, obje
         predicate_names.extend(GUIDELINE_PREDICATES)
     if contract.gate_reward_required:
         predicate_names.append("manager_gate_positive_finite")
+    if contract.progress_reward_required:
+        predicate_names.append("manager_progress_positive_finite")
     actual_device = "cuda:0" if device_type == "cuda" else "cpu"
     return {
         "schema_version": "four-task-cuda-smoke-v1",
@@ -639,10 +643,11 @@ def test_arm_contracts_pin_the_fq4x8_payout_semantics(
 
 
 @pytest.mark.parametrize(
-    ("arm", "gate_reward_required"), (("C0", False), ("C-Gate", True))
+    ("arm", "gate_reward_required", "progress_reward_required"),
+    (("C0", False, False), ("C-Gate", True, False), ("P", False, True)),
 )
 def test_guideline_arm_contracts_pin_literal_task_and_f_reward_semantics(
-    arm, gate_reward_required
+    arm, gate_reward_required, progress_reward_required
 ):
     contract = smoke.ARM_CONTRACTS[arm]
 
@@ -654,9 +659,10 @@ def test_guideline_arm_contracts_pin_literal_task_and_f_reward_semantics(
     assert contract.delivered_saturate is False
     assert contract.guideline_required is True
     assert contract.gate_reward_required is gate_reward_required
+    assert contract.progress_reward_required is progress_reward_required
 
 
-@pytest.mark.parametrize("arm", ("C0", "C-Gate"))
+@pytest.mark.parametrize("arm", ("C0", "C-Gate", "P"))
 def test_synthetic_valid_guideline_record_passes_and_wrong_pairing_fails(arm):
     record = valid_record(arm=arm, num_envs=256, device_type="cuda")
 
@@ -673,7 +679,7 @@ def test_synthetic_valid_guideline_record_passes_and_wrong_pairing_fails(arm):
     assert "task_arm_pairing" in wrong["failed_predicates"]
 
 
-@pytest.mark.parametrize("arm", ("C0", "C-Gate"))
+@pytest.mark.parametrize("arm", ("C0", "C-Gate", "P"))
 @pytest.mark.parametrize("predicate", GUIDELINE_PREDICATES)
 def test_guideline_record_rejects_each_missing_nonfinite_or_incomplete_predicate(
     arm, predicate
@@ -698,6 +704,35 @@ def test_cgate_record_requires_finite_positive_manager_gate_payout():
 
     assert result["integration_pass"] is False
     assert "manager_gate_positive_finite" in result["failed_predicates"]
+
+
+def test_c0_tracker_state_is_live_even_without_a_progress_payout_reader():
+    """Treating C0's always-on state as conditional on P's reader must fail."""
+    record = valid_record(arm="C0", num_envs=256, device_type="cuda")
+    assert "manager_progress_positive_finite" not in record["predicate_counts"]
+    record["predicate_counts"]["guideline_progress_state_finite"] = {  # type: ignore[index]
+        "passed": 0,
+        "total": 256,
+    }
+
+    result = smoke.evaluate_gate(record)
+
+    assert result["integration_pass"] is False
+    assert "guideline_progress_state_finite" in result["failed_predicates"]
+
+
+def test_p_record_requires_a_finite_positive_waypoint_progress_dose():
+    """Accepting P without a credited dense-progress dose must fail."""
+    record = valid_record(arm="P", num_envs=256, device_type="cuda")
+    record["predicate_counts"]["manager_progress_positive_finite"] = {  # type: ignore[index]
+        "passed": 0,
+        "total": 256,
+    }
+
+    result = smoke.evaluate_gate(record)
+
+    assert result["integration_pass"] is False
+    assert "manager_progress_positive_finite" in result["failed_predicates"]
 
 
 @pytest.mark.parametrize(
@@ -1383,9 +1418,15 @@ def _control_payload(**overrides):
             [[0.0, 0.0, 0.1], [0.0, 0.0, 0.1]]
         ),
         "guideline_next_gate": torch.tensor([6, 6]),
+        "guideline_target_start_distance": torch.tensor([0.0, 0.0]),
+        "guideline_best_target_fraction": torch.tensor([0.0, 0.0]),
+        "guideline_window_new_credit": torch.tensor([0.0, 0.0]),
+        "guideline_episode_credit": torch.tensor([1.0, 0.0]),
+        "guideline_multi_gate_crossings": torch.tensor([0, 0]),
         "manager_impact": torch.tensor([8.0, 0.0]),
         "manager_delivered": torch.tensor([2.0, 0.0]),
         "manager_gate": torch.tensor([0.16, 0.0]),
+        "manager_progress": torch.tensor([0.16, 0.0]),
     }
     payload.update(overrides)
     return payload
