@@ -208,6 +208,10 @@ def _pilot_rows() -> list[dict]:
             gate_reward_present=False,
             actual_gate_return_total_sampled=0.0,
             success_rate_sampled=0.30,
+            first_strike_useful_speed_mean_sampled=0.41,
+            worst_ratio_max_sampled=0.61,
+            qvel_finite_exceedance_rate_sampled=0.01,
+            qvel_max_abs_rad_s_sampled=2.1,
         ),
         dict(
             common,
@@ -224,6 +228,10 @@ def _pilot_rows() -> list[dict]:
             gate_reward_present=False,
             actual_gate_return_total_sampled=0.0,
             success_rate_sampled=0.10,
+            first_strike_useful_speed_mean_sampled=0.42,
+            worst_ratio_max_sampled=0.62,
+            qvel_finite_exceedance_rate_sampled=0.02,
+            qvel_max_abs_rad_s_sampled=2.2,
         ),
         dict(
             common,
@@ -240,6 +248,10 @@ def _pilot_rows() -> list[dict]:
             gate_reward_present=True,
             actual_gate_return_total_sampled=1.0,
             success_rate_sampled=0.25,
+            first_strike_useful_speed_mean_sampled=0.43,
+            worst_ratio_max_sampled=0.63,
+            qvel_finite_exceedance_rate_sampled=0.03,
+            qvel_max_abs_rad_s_sampled=2.3,
         ),
         dict(
             common,
@@ -256,6 +268,10 @@ def _pilot_rows() -> list[dict]:
             gate_reward_present=True,
             actual_gate_return_total_sampled=0.5,
             success_rate_sampled=0.10,
+            first_strike_useful_speed_mean_sampled=0.44,
+            worst_ratio_max_sampled=0.64,
+            qvel_finite_exceedance_rate_sampled=0.04,
+            qvel_max_abs_rad_s_sampled=2.4,
         ),
     ]
 
@@ -373,6 +389,41 @@ def test_csv_loader_rejects_persisted_identity_or_result_tampering(
         guideline_campaign.load_and_validate_guideline_pilot_csv(path)
 
 
+@pytest.mark.parametrize(
+    ("field", "mode"),
+    (
+        ("first_strike_useful_speed_mean_sampled", "missing"),
+        ("worst_ratio_max_sampled", "missing"),
+        ("qvel_finite_exceedance_rate_sampled", "missing"),
+        ("qvel_max_abs_rad_s_sampled", "missing"),
+        ("first_strike_useful_speed_mean_sampled", "nonfinite"),
+        ("worst_ratio_max_sampled", "nonfinite"),
+        ("qvel_finite_exceedance_rate_sampled", "nonfinite"),
+        ("qvel_max_abs_rad_s_sampled", "nonfinite"),
+        ("first_strike_useful_speed_mean_sampled", "negative"),
+        ("worst_ratio_max_sampled", "negative"),
+        ("qvel_finite_exceedance_rate_sampled", "negative"),
+        ("qvel_max_abs_rad_s_sampled", "negative"),
+        ("qvel_finite_exceedance_rate_sampled", "above-one"),
+    ),
+)
+def test_direct_pilot_contract_rejects_invalid_secondary_outputs(
+    field: str, mode: str
+) -> None:
+    rows = _pilot_rows()
+    if mode == "missing":
+        rows[0].pop(field)
+    elif mode == "nonfinite":
+        rows[0][field] = math.nan
+    elif mode == "negative":
+        rows[0][field] = -0.01
+    else:
+        rows[0][field] = 1.01
+
+    with pytest.raises(ValueError, match=field):
+        validate_guideline_pilot_rows(rows)
+
+
 def test_pilot_contract_accepts_only_the_literal_four_rows_and_reports_continuation() -> None:
     summary = validate_guideline_pilot_rows(_pilot_rows())
 
@@ -381,6 +432,40 @@ def test_pilot_contract_accepts_only_the_literal_four_rows_and_reports_continuat
         "row_identities": [("C0", 0), ("C0", 1), ("C-Gate", 0), ("C-Gate", 1)],
         "continuation_by_arm": {"C0": True, "C-Gate": True},
         "continuation_allowed": True,
+        "validated_secondary_results": [
+            {
+                "treatment": "C0",
+                "training_seed": 0,
+                "first_strike_useful_speed_mean_sampled": 0.41,
+                "worst_ratio_max_sampled": 0.61,
+                "qvel_finite_exceedance_rate_sampled": 0.01,
+                "qvel_max_abs_rad_s_sampled": 2.1,
+            },
+            {
+                "treatment": "C0",
+                "training_seed": 1,
+                "first_strike_useful_speed_mean_sampled": 0.42,
+                "worst_ratio_max_sampled": 0.62,
+                "qvel_finite_exceedance_rate_sampled": 0.02,
+                "qvel_max_abs_rad_s_sampled": 2.2,
+            },
+            {
+                "treatment": "C-Gate",
+                "training_seed": 0,
+                "first_strike_useful_speed_mean_sampled": 0.43,
+                "worst_ratio_max_sampled": 0.63,
+                "qvel_finite_exceedance_rate_sampled": 0.03,
+                "qvel_max_abs_rad_s_sampled": 2.3,
+            },
+            {
+                "treatment": "C-Gate",
+                "training_seed": 1,
+                "first_strike_useful_speed_mean_sampled": 0.44,
+                "worst_ratio_max_sampled": 0.64,
+                "qvel_finite_exceedance_rate_sampled": 0.04,
+                "qvel_max_abs_rad_s_sampled": 2.4,
+            },
+        ],
     }
 
 

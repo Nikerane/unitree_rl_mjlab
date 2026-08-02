@@ -34,7 +34,21 @@ _PILOT_BOUNDED_RESULTS = {
     "all_six_gates_rate_sampled": (0.0, 1.0, "all-six-gates rate"),
     "corridor_occupancy_mean_sampled": (0.0, 1.0, "corridor occupancy"),
     "backward_progress_count_mean_sampled": (0.0, math.inf, "backward progress"),
+    "first_strike_useful_speed_mean_sampled": (
+        0.0, math.inf, "first_strike_useful_speed_mean_sampled"
+    ),
+    "worst_ratio_max_sampled": (0.0, math.inf, "worst_ratio_max_sampled"),
+    "qvel_finite_exceedance_rate_sampled": (
+        0.0, 1.0, "qvel_finite_exceedance_rate_sampled"
+    ),
+    "qvel_max_abs_rad_s_sampled": (0.0, math.inf, "qvel_max_abs_rad_s_sampled"),
 }
+_PILOT_RETAINED_SECONDARY_RESULTS = (
+    "first_strike_useful_speed_mean_sampled",
+    "worst_ratio_max_sampled",
+    "qvel_finite_exceedance_rate_sampled",
+    "qvel_max_abs_rad_s_sampled",
+)
 PILOT_TASKS = {
     "C0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0",
     "C-Gate": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate",
@@ -321,6 +335,7 @@ def validate_guideline_pilot_rows(rows: Sequence[Mapping]) -> dict:
     identities = [(row.get("treatment"), row.get("training_seed")) for row in rows]
     if len(identities) != len(PILOT_IDENTITIES) or set(identities) != set(PILOT_IDENTITIES):
         raise ValueError("pilot rows must contain exactly C0/C-Gate seeds 0/1")
+    validated_secondary_results = {}
     for row in rows:
         identity = f"{row['treatment']}/seed{row['training_seed']}"
         if row.get("task") != PILOT_TASKS[row["treatment"]]:
@@ -382,6 +397,9 @@ def validate_guideline_pilot_rows(rows: Sequence[Mapping]) -> dict:
                 raise ValueError(f"{identity}: {label} is outside its valid range")
             results[field] = value
         success_rate = results["success_rate_sampled"]
+        validated_secondary_results[
+            (row["treatment"], row["training_seed"])
+        ] = {field: results[field] for field in _PILOT_RETAINED_SECONDARY_RESULTS}
         try:
             payout = float(row["actual_gate_return_total_sampled"])
         except (KeyError, TypeError, ValueError, OverflowError) as error:
@@ -439,6 +457,14 @@ def validate_guideline_pilot_rows(rows: Sequence[Mapping]) -> dict:
         "row_identities": list(PILOT_IDENTITIES),
         "continuation_by_arm": continuation_by_arm,
         "continuation_allowed": all(continuation_by_arm.values()),
+        "validated_secondary_results": [
+            {
+                "treatment": treatment,
+                "training_seed": training_seed,
+                **validated_secondary_results[(treatment, training_seed)],
+            }
+            for treatment, training_seed in PILOT_IDENTITIES
+        ],
     }
 
 
@@ -453,6 +479,10 @@ _PILOT_CSV_SCHEMA = {
                      "all_six_gates_rate_sampled",
                      "corridor_occupancy_mean_sampled",
                      "backward_progress_count_mean_sampled",
+                     "first_strike_useful_speed_mean_sampled",
+                     "worst_ratio_max_sampled",
+                     "qvel_finite_exceedance_rate_sampled",
+                     "qvel_max_abs_rad_s_sampled",
                      "actual_gate_return_total_sampled",
                      "success_rate_sampled"), "float"),
     **dict.fromkeys(("windup_enabled", "r_gate_present", "gate_reward_present",

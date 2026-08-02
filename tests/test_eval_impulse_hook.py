@@ -22,6 +22,7 @@ import importlib.util
 import copy
 import csv
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -807,6 +808,10 @@ def _guideline_pilot_csv_rows():
       sampled_trace_artifact_sha256="9" * 64, r_gate_present=False,
       r_gate_weight=None, gate_reward_present=False,
       actual_gate_return_total_sampled=0.0, success_rate_sampled=0.30,
+      first_strike_useful_speed_mean_sampled=0.41,
+      worst_ratio_max_sampled=0.61,
+      qvel_finite_exceedance_rate_sampled=0.01,
+      qvel_max_abs_rad_s_sampled=2.1,
     ),
     dict(
       common, task=GUIDELINE_TASKS["C0"], treatment="C0", training_seed=1,
@@ -816,6 +821,10 @@ def _guideline_pilot_csv_rows():
       sampled_trace_artifact_sha256="c" * 64, r_gate_present=False,
       r_gate_weight=None, gate_reward_present=False,
       actual_gate_return_total_sampled=0.0, success_rate_sampled=0.10,
+      first_strike_useful_speed_mean_sampled=0.42,
+      worst_ratio_max_sampled=0.62,
+      qvel_finite_exceedance_rate_sampled=0.02,
+      qvel_max_abs_rad_s_sampled=2.2,
     ),
     dict(
       common, task=GUIDELINE_TASKS["C-Gate"], treatment="C-Gate", training_seed=0,
@@ -825,6 +834,10 @@ def _guideline_pilot_csv_rows():
       sampled_trace_artifact_sha256="0" * 64, r_gate_present=True,
       r_gate_weight=8.0, gate_reward_present=True,
       actual_gate_return_total_sampled=1.0, success_rate_sampled=0.25,
+      first_strike_useful_speed_mean_sampled=0.43,
+      worst_ratio_max_sampled=0.63,
+      qvel_finite_exceedance_rate_sampled=0.03,
+      qvel_max_abs_rad_s_sampled=2.3,
     ),
     dict(
       common, task=GUIDELINE_TASKS["C-Gate"], treatment="C-Gate", training_seed=1,
@@ -834,6 +847,10 @@ def _guideline_pilot_csv_rows():
       sampled_trace_artifact_sha256="3" * 64, r_gate_present=True,
       r_gate_weight=8.0, gate_reward_present=True,
       actual_gate_return_total_sampled=0.5, success_rate_sampled=0.10,
+      first_strike_useful_speed_mean_sampled=0.44,
+      worst_ratio_max_sampled=0.64,
+      qvel_finite_exceedance_rate_sampled=0.04,
+      qvel_max_abs_rad_s_sampled=2.4,
     ),
   ]
 
@@ -856,6 +873,79 @@ def test_guideline_csv_round_trip_reaches_strict_four_row_validator(tmp_path):
   assert result["row_identities"] == [
     ("C0", 0), ("C0", 1), ("C-Gate", 0), ("C-Gate", 1)
   ]
+  assert result["validated_secondary_results"] == [
+    {
+      "treatment": "C0", "training_seed": 0,
+      "first_strike_useful_speed_mean_sampled": 0.41,
+      "worst_ratio_max_sampled": 0.61,
+      "qvel_finite_exceedance_rate_sampled": 0.01,
+      "qvel_max_abs_rad_s_sampled": 2.1,
+    },
+    {
+      "treatment": "C0", "training_seed": 1,
+      "first_strike_useful_speed_mean_sampled": 0.42,
+      "worst_ratio_max_sampled": 0.62,
+      "qvel_finite_exceedance_rate_sampled": 0.02,
+      "qvel_max_abs_rad_s_sampled": 2.2,
+    },
+    {
+      "treatment": "C-Gate", "training_seed": 0,
+      "first_strike_useful_speed_mean_sampled": 0.43,
+      "worst_ratio_max_sampled": 0.63,
+      "qvel_finite_exceedance_rate_sampled": 0.03,
+      "qvel_max_abs_rad_s_sampled": 2.3,
+    },
+    {
+      "treatment": "C-Gate", "training_seed": 1,
+      "first_strike_useful_speed_mean_sampled": 0.44,
+      "worst_ratio_max_sampled": 0.64,
+      "qvel_finite_exceedance_rate_sampled": 0.04,
+      "qvel_max_abs_rad_s_sampled": 2.4,
+    },
+  ]
+
+
+@pytest.mark.parametrize(
+  ("field", "mode"),
+  (
+    ("first_strike_useful_speed_mean_sampled", "blank"),
+    ("worst_ratio_max_sampled", "blank"),
+    ("qvel_finite_exceedance_rate_sampled", "blank"),
+    ("qvel_max_abs_rad_s_sampled", "blank"),
+    ("first_strike_useful_speed_mean_sampled", "missing"),
+    ("worst_ratio_max_sampled", "missing"),
+    ("qvel_finite_exceedance_rate_sampled", "missing"),
+    ("qvel_max_abs_rad_s_sampled", "missing"),
+    ("first_strike_useful_speed_mean_sampled", "nonfinite"),
+    ("worst_ratio_max_sampled", "nonfinite"),
+    ("qvel_finite_exceedance_rate_sampled", "nonfinite"),
+    ("qvel_max_abs_rad_s_sampled", "nonfinite"),
+    ("first_strike_useful_speed_mean_sampled", "negative"),
+    ("worst_ratio_max_sampled", "negative"),
+    ("qvel_finite_exceedance_rate_sampled", "negative"),
+    ("qvel_max_abs_rad_s_sampled", "negative"),
+    ("qvel_finite_exceedance_rate_sampled", "above-one"),
+  ),
+)
+def test_actual_evaluator_csv_rejects_invalid_secondary_outputs(
+  tmp_path, field, mode
+):
+  rows = _guideline_pilot_csv_rows()
+  if mode == "missing":
+    rows[0].pop(field)
+  elif mode == "blank":
+    rows[0][field] = ""
+  elif mode == "nonfinite":
+    rows[0][field] = math.nan
+  elif mode == "negative":
+    rows[0][field] = -0.01
+  else:
+    rows[0][field] = 1.01
+  csv_path = tmp_path / "summary.csv"
+  _write_actual_guideline_csv(csv_path, rows)
+
+  with pytest.raises(ValueError, match=field):
+    guideline_analysis.load_and_validate_guideline_pilot_csv(csv_path)
 
 
 @pytest.mark.parametrize(
