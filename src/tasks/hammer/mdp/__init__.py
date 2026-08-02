@@ -23,7 +23,9 @@ from .guideline import (  # noqa: F401
   guideline_perpendicular_error,
   next_gate_vector,
   ordered_gate_progress_reward,
+  ordered_waypoint_progress_reward,
   project_to_reference,
+  waypoint_progress_state,
 )
 from .impulse_bound import (  # noqa: F401
   CatDeltaPeak,

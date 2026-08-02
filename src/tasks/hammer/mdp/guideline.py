@@ -110,6 +110,15 @@ class WaypointProgressTracker(ManagerTermBase):
     self.newly_crossed = torch.zeros(
       env.num_envs, dtype=torch.long, device=env.device
     )
+    self.target_start_distance = torch.zeros(
+      env.num_envs, dtype=head.dtype, device=env.device
+    )
+    self.best_target_fraction = torch.zeros_like(self.target_start_distance)
+    self.window_new_credit = torch.zeros_like(self.target_start_distance)
+    self.episode_credit = torch.zeros_like(self.target_start_distance)
+    self.multi_gate_crossings = torch.zeros(
+      env.num_envs, dtype=torch.long, device=env.device
+    )
     self.disarmed = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
     setattr(env, _ENV_GUIDELINE_ATTR, self)
 
@@ -127,6 +136,11 @@ class WaypointProgressTracker(ManagerTermBase):
     self.previous_head[idx] = 0.0
     self.next_gate[idx] = 0
     self.newly_crossed[idx] = 0
+    self.target_start_distance[idx] = 0.0
+    self.best_target_fraction[idx] = 0.0
+    self.window_new_credit[idx] = 0.0
+    self.episode_credit[idx] = 0.0
+    self.multi_gate_crossings[idx] = 0
     self.disarmed[idx] = False
     return None
 
@@ -134,12 +148,36 @@ class WaypointProgressTracker(ManagerTermBase):
     del params
     if self._i % self._dec == 0:
       self.newly_crossed.zero_()
+      self.window_new_credit.zero_()
 
     head = self._head_position()
     nail = self._nail_position()
     was_initialized = self.initialized.clone()
     self.disarmed |= getattr(env, _ENV_FIRST_STRIKE_ATTR).started
-    eligible = was_initialized & ~self.disarmed
+    eligible = was_initialized & ~self.disarmed & (self.next_gate < GUIDELINE_NUM_GATES)
+
+    fraction = (self.next_gate + 1).to(dtype=head.dtype) / (
+      GUIDELINE_NUM_GATES + 1
+    )
+    active_target = self.entry + fraction[:, None] * (self.nail - self.entry)
+    current_distance = torch.linalg.vector_norm(head - active_target, dim=-1)
+    epsilon = torch.finfo(head.dtype).eps
+    approach_fraction = (
+      (self.target_start_distance - current_distance)
+      / self.target_start_distance.clamp_min(epsilon)
+    ).clamp(0.0, 1.0)
+    new_fraction = (approach_fraction - self.best_target_fraction).clamp_min(0.0)
+    self.best_target_fraction = torch.where(
+      eligible,
+      torch.maximum(self.best_target_fraction, approach_fraction),
+      self.best_target_fraction,
+    )
+    new_credit = torch.where(
+      eligible,
+      new_fraction / GUIDELINE_NUM_GATES,
+      torch.zeros_like(new_fraction),
+    )
+
     crossed, advanced = advance_ordered_gates(
       self.previous_head,
       head,
@@ -151,9 +189,57 @@ class WaypointProgressTracker(ManagerTermBase):
     self.next_gate = torch.where(eligible, advanced, self.next_gate)
     self.newly_crossed += crossed
 
+    crossed_target = crossed > 0
+    remainder = 1.0 - self.best_target_fraction
+    settled_credit = torch.where(
+      crossed_target,
+      (remainder + (crossed - 1).to(dtype=head.dtype)) / GUIDELINE_NUM_GATES,
+      torch.zeros_like(new_credit),
+    )
+    new_credit += settled_credit
+    remaining_episode_credit = 1.0 - self.episode_credit
+    new_credit = torch.minimum(new_credit, remaining_episode_credit.clamp_min(0.0))
+    self.window_new_credit += new_credit
+    self.episode_credit += new_credit
+    self.multi_gate_crossings += torch.where(
+      crossed > 1,
+      crossed - 1,
+      torch.zeros_like(crossed),
+    )
+
+    switched_target = crossed_target & (self.next_gate < GUIDELINE_NUM_GATES)
+    next_fraction = (self.next_gate + 1).to(dtype=head.dtype) / (
+      GUIDELINE_NUM_GATES + 1
+    )
+    next_target = self.entry + next_fraction[:, None] * (self.nail - self.entry)
+    next_distance = torch.linalg.vector_norm(head - next_target, dim=-1)
+    self.target_start_distance = torch.where(
+      switched_target,
+      next_distance,
+      self.target_start_distance,
+    )
+    self.best_target_fraction = torch.where(
+      crossed_target,
+      torch.zeros_like(self.best_target_fraction),
+      self.best_target_fraction,
+    )
+    complete = crossed_target & (self.next_gate >= GUIDELINE_NUM_GATES)
+    self.target_start_distance = torch.where(
+      complete,
+      torch.zeros_like(self.target_start_distance),
+      self.target_start_distance,
+    )
+
     initializing = ~was_initialized
     self.entry = torch.where(initializing[:, None], head, self.entry)
     self.nail = torch.where(initializing[:, None], nail, self.nail)
+    first_target = self.entry + (self.nail - self.entry) / (GUIDELINE_NUM_GATES + 1)
+    first_target_distance = torch.linalg.vector_norm(head - first_target, dim=-1)
+    self.target_start_distance = torch.where(
+      initializing,
+      first_target_distance,
+      self.target_start_distance,
+    )
     self.previous_head.copy_(head)
     self.initialized |= initializing
     self._i += 1
@@ -212,3 +298,36 @@ def ordered_gate_progress_reward(env: "ManagerBasedRlEnv") -> torch.Tensor:
   """Read the current control window's one-shot gate pulse, normalized to one."""
   tracker = _guideline_tracker(env)
   return tracker.newly_crossed.float() / GUIDELINE_NUM_GATES
+
+
+def ordered_waypoint_progress_reward(env: "ManagerBasedRlEnv") -> torch.Tensor:
+  """Read new-best ordered waypoint progress accrued in this control window."""
+  tracker = _guideline_tracker(env)
+  return tracker.window_new_credit
+
+
+def waypoint_progress_state(env: "ManagerBasedRlEnv") -> torch.Tensor:
+  """Return normalized active-target start distance and credited approach fraction."""
+  tracker = _guideline_tracker(env)
+  head, entry, nail = _reader_geometry(tracker)
+  reference_length = torch.linalg.vector_norm(nail - entry, dim=-1)
+  epsilon = torch.finfo(head.dtype).eps
+  first_target = entry + (nail - entry) / (GUIDELINE_NUM_GATES + 1)
+  preview_start_distance = torch.linalg.vector_norm(head - first_target, dim=-1)
+  start_distance = torch.where(
+    tracker.initialized,
+    tracker.target_start_distance,
+    preview_start_distance,
+  )
+  normalized_start = (
+    start_distance / reference_length.clamp_min(epsilon)
+  ).clamp(0.0, 1.0)
+  best_fraction = torch.where(
+    tracker.initialized,
+    tracker.best_target_fraction,
+    torch.zeros_like(normalized_start),
+  )
+  complete = tracker.initialized & (tracker.next_gate >= GUIDELINE_NUM_GATES)
+  normalized_start = torch.where(complete, torch.zeros_like(normalized_start), normalized_start)
+  best_fraction = torch.where(complete, torch.zeros_like(best_fraction), best_fraction)
+  return torch.stack((normalized_start, best_fraction), dim=-1)

@@ -13,7 +13,9 @@ from src.tasks.hammer.mdp.guideline import (
   guideline_perpendicular_error,
   next_gate_vector,
   ordered_gate_progress_reward,
+  ordered_waypoint_progress_reward,
   project_to_reference,
+  waypoint_progress_state,
 )
 
 
@@ -48,6 +50,12 @@ def tracker_env():
 
 def _set_head_z(env, values) -> None:
   env.scene["robot"].data.site_pos_w[:, 0, 2] = torch.as_tensor(values)
+
+
+def _set_21mm_waypoint_track(env) -> None:
+  """Set a 147 mm reference whose six intermediate gates are 21 mm apart."""
+  _set_head_z(env, [0.700, 0.700])
+  env.scene["nail_block"].data.site_pos_w[:, 0, 2] = 0.553
 
 
 def test_projection_returns_progress_and_perpendicular_distance():
@@ -544,3 +552,231 @@ def test_readers_fail_loudly_when_tracker_is_missing(tracker_env, reader):
 
   with pytest.raises(RuntimeError, match="WaypointProgressTracker"):
     reader(tracker_env)
+
+
+def test_progress_initialization_previews_distance_and_pays_zero(tracker_env):
+  """Paying the initial target potential would create reward without moving."""
+  tracker_env.cfg.decimation = 1
+  _set_21mm_waypoint_track(tracker_env)
+  tracker = WaypointProgressTracker(METRIC_CFG, tracker_env)
+
+  preview = waypoint_progress_state(tracker_env)
+  tracker(tracker_env)
+
+  torch.testing.assert_close(
+    preview,
+    torch.tensor([[1.0 / 7.0, 0.0], [1.0 / 7.0, 0.0]]),
+  )
+  torch.testing.assert_close(
+    waypoint_progress_state(tracker_env),
+    torch.tensor([[1.0 / 7.0, 0.0], [1.0 / 7.0, 0.0]]),
+  )
+  assert ordered_waypoint_progress_reward(tracker_env).tolist() == [0.0, 0.0]
+  assert tracker.window_new_credit.tolist() == [0.0, 0.0]
+  assert tracker.episode_credit.tolist() == [0.0, 0.0]
+
+
+def test_progress_half_center_distance_pays_half_one_target_budget(tracker_env):
+  """Using gate radius rather than center distance would not pay 1/12 at 10.5 mm."""
+  tracker_env.cfg.decimation = 1
+  _set_21mm_waypoint_track(tracker_env)
+  tracker = WaypointProgressTracker(METRIC_CFG, tracker_env)
+  tracker(tracker_env)
+  _set_head_z(tracker_env, [0.6895, 0.6895])
+
+  tracker(tracker_env)
+
+  torch.testing.assert_close(
+    ordered_waypoint_progress_reward(tracker_env),
+    torch.full((2,), 1.0 / 12.0),
+  )
+  torch.testing.assert_close(tracker.best_target_fraction, torch.full((2,), 0.5))
+  torch.testing.assert_close(tracker.episode_credit, torch.full((2,), 1.0 / 12.0))
+  torch.testing.assert_close(
+    waypoint_progress_state(tracker_env),
+    torch.tensor([[1.0 / 7.0, 0.5], [1.0 / 7.0, 0.5]]),
+  )
+
+
+def test_progress_hover_backtrack_and_revisit_pay_no_duplicate_credit(tracker_env):
+  """Clearing best progress on retreat would let the same half interval pay twice."""
+  tracker_env.cfg.decimation = 1
+  _set_21mm_waypoint_track(tracker_env)
+  tracker = WaypointProgressTracker(METRIC_CFG, tracker_env)
+  tracker(tracker_env)
+  _set_head_z(tracker_env, [0.6895, 0.6895])
+  tracker(tracker_env)
+  _set_head_z(tracker_env, [0.6895, 0.6895])
+  tracker(tracker_env)
+  hover = ordered_waypoint_progress_reward(tracker_env)
+  _set_head_z(tracker_env, [0.7000, 0.7000])
+  tracker(tracker_env)
+  backtrack = ordered_waypoint_progress_reward(tracker_env)
+  _set_head_z(tracker_env, [0.6895, 0.6895])
+  tracker(tracker_env)
+  revisit = ordered_waypoint_progress_reward(tracker_env)
+
+  assert hover.tolist() == [0.0, 0.0]
+  assert backtrack.tolist() == [0.0, 0.0]
+  assert revisit.tolist() == [0.0, 0.0]
+  torch.testing.assert_close(tracker.episode_credit, torch.full((2,), 1.0 / 12.0))
+
+
+def test_progress_crossing_settles_only_the_uncredited_remainder(tracker_env):
+  """Adding a full gate payment after half progress would double-pay the target."""
+  tracker_env.cfg.decimation = 1
+  _set_21mm_waypoint_track(tracker_env)
+  tracker = WaypointProgressTracker(METRIC_CFG, tracker_env)
+  tracker(tracker_env)
+  _set_head_z(tracker_env, [0.6895, 0.6895])
+  tracker(tracker_env)
+  _set_head_z(tracker_env, [0.6685, 0.6685])
+
+  tracker(tracker_env)
+
+  torch.testing.assert_close(
+    ordered_waypoint_progress_reward(tracker_env),
+    torch.full((2,), 1.0 / 12.0),
+  )
+  torch.testing.assert_close(tracker.episode_credit, torch.full((2,), 1.0 / 6.0))
+  assert tracker.next_gate.tolist() == [1, 1]
+
+
+def test_progress_six_completed_targets_total_one_raw_credit(tracker_env):
+  """A denominator or settlement error would make six completed targets miss 1.0."""
+  tracker_env.cfg.decimation = 1
+  _set_21mm_waypoint_track(tracker_env)
+  tracker = WaypointProgressTracker(METRIC_CFG, tracker_env)
+  tracker(tracker_env)
+  total = torch.zeros(tracker_env.num_envs)
+
+  for z in (0.670, 0.650, 0.630, 0.610, 0.590, 0.570):
+    _set_head_z(tracker_env, [z, z])
+    tracker(tracker_env)
+    total += ordered_waypoint_progress_reward(tracker_env)
+
+  torch.testing.assert_close(total, torch.ones(tracker_env.num_envs))
+  torch.testing.assert_close(tracker.episode_credit, torch.ones(tracker_env.num_envs))
+  torch.testing.assert_close(waypoint_progress_state(tracker_env), torch.zeros(2, 2))
+
+
+def test_progress_two_same_substep_gates_pay_two_sixths(tracker_env):
+  """Dropping extra swept crossings would pay 1/6 instead of 2/6 for one segment."""
+  tracker_env.cfg.decimation = 1
+  _set_21mm_waypoint_track(tracker_env)
+  tracker = WaypointProgressTracker(METRIC_CFG, tracker_env)
+  tracker(tracker_env)
+  _set_head_z(tracker_env, [0.648, 0.648])
+
+  tracker(tracker_env)
+
+  torch.testing.assert_close(
+    ordered_waypoint_progress_reward(tracker_env),
+    torch.full((2,), 2.0 / 6.0),
+  )
+  assert tracker.next_gate.tolist() == [2, 2]
+  assert tracker.multi_gate_crossings.tolist() == [1, 1]
+
+
+def test_progress_contact_censors_same_substep_credit(tracker_env):
+  """Computing dense credit before contact disarm would pay a contacted segment."""
+  tracker_env.cfg.decimation = 1
+  _set_21mm_waypoint_track(tracker_env)
+  tracker = WaypointProgressTracker(METRIC_CFG, tracker_env)
+  tracker(tracker_env)
+  tracker_env._hammer_first_strike.started[:] = True
+  _set_head_z(tracker_env, [0.6895, 0.6895])
+
+  tracker(tracker_env)
+
+  assert ordered_waypoint_progress_reward(tracker_env).tolist() == [0.0, 0.0]
+  assert tracker.episode_credit.tolist() == [0.0, 0.0]
+  assert tracker.best_target_fraction.tolist() == [0.0, 0.0]
+
+
+def test_progress_partial_reset_preserves_unselected_dense_state(tracker_env):
+  """A whole-tensor reset would erase another environment's earned progress."""
+  tracker_env.cfg.decimation = 1
+  _set_21mm_waypoint_track(tracker_env)
+  tracker = WaypointProgressTracker(METRIC_CFG, tracker_env)
+  tracker(tracker_env)
+  _set_head_z(tracker_env, [0.6895, 0.6895])
+  tracker(tracker_env)
+  preserved = (
+    tracker.target_start_distance[1].clone(),
+    tracker.best_target_fraction[1].clone(),
+    tracker.window_new_credit[1].clone(),
+    tracker.episode_credit[1].clone(),
+    tracker.multi_gate_crossings[1].clone(),
+  )
+
+  tracker.reset(torch.tensor([0]))
+
+  assert tracker.target_start_distance[0].item() == 0.0
+  assert tracker.best_target_fraction[0].item() == 0.0
+  assert tracker.window_new_credit[0].item() == 0.0
+  assert tracker.episode_credit[0].item() == 0.0
+  assert tracker.multi_gate_crossings[0].item() == 0
+  for actual, expected in zip(
+    (
+      tracker.target_start_distance[1],
+      tracker.best_target_fraction[1],
+      tracker.window_new_credit[1],
+      tracker.episode_credit[1],
+      tracker.multi_gate_crossings[1],
+    ),
+    preserved,
+    strict=True,
+  ):
+    torch.testing.assert_close(actual, expected)
+
+
+def test_progress_state_is_finite_on_tracker_device_and_idempotent(tracker_env):
+  """State readers must neither produce NaNs nor mutate dense progress bookkeeping."""
+  tracker_env.cfg.decimation = 1
+  tracker_env.scene["robot"].data.site_pos_w = (
+    tracker_env.scene["robot"].data.site_pos_w.double()
+  )
+  tracker_env.scene["nail_block"].data.site_pos_w = (
+    tracker_env.scene["nail_block"].data.site_pos_w.double()
+  )
+  tracker = WaypointProgressTracker(METRIC_CFG, tracker_env)
+  tracker(tracker_env)
+  before = (
+    tracker.target_start_distance.clone(),
+    tracker.best_target_fraction.clone(),
+    tracker.window_new_credit.clone(),
+    tracker.episode_credit.clone(),
+    tracker.multi_gate_crossings.clone(),
+  )
+
+  state = waypoint_progress_state(tracker_env)
+  payout = ordered_waypoint_progress_reward(tracker_env)
+
+  assert state.shape == (2, 2)
+  assert state.device == torch.device(tracker_env.device)
+  assert payout.device == torch.device(tracker_env.device)
+  assert torch.isfinite(state).all()
+  assert torch.isfinite(payout).all()
+  assert all(
+    value.device == torch.device(tracker_env.device)
+    for value in (
+      tracker.target_start_distance,
+      tracker.best_target_fraction,
+      tracker.window_new_credit,
+      tracker.episode_credit,
+      tracker.multi_gate_crossings,
+    )
+  )
+  for actual, expected in zip(
+    (
+      tracker.target_start_distance,
+      tracker.best_target_fraction,
+      tracker.window_new_credit,
+      tracker.episode_credit,
+      tracker.multi_gate_crossings,
+    ),
+    before,
+    strict=True,
+  ):
+    torch.testing.assert_close(actual, expected)
