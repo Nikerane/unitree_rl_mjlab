@@ -137,6 +137,20 @@ def test_missing_seed_fails_closed_instead_of_raising() -> None:
     ]
 
 
+def test_invalid_execution_seed_does_not_change_valid_fixed_reset_identity() -> None:
+    rows = _passing_rows()
+    rows[-1] = dict(rows[-2])
+
+    summary = summarize_qualification(rows)
+
+    assert summary["passed"] is False
+    assert summary["qualified_resets"] == 0
+    assert summary["identical_fixed_reset"] is True
+    assert summary["failures"] == [
+        "seed set must be exactly 1000--1015 with one row per seed"
+    ]
+
+
 @pytest.mark.parametrize(
     ("bad_reset", "aggregate_reason"),
     (
@@ -168,6 +182,24 @@ def test_invalid_or_drifting_realized_fixed_reset_fails_closed(
     assert summary["identical_fixed_reset"] is False
     assert summary["failures"] == [
         aggregate_reason
+    ]
+
+
+def test_unrepresentable_reset_value_fails_closed_instead_of_raising() -> None:
+    rows = _passing_rows()
+    rows[1]["reset_arm_qpos_rad"] = [10**400, -0.2, 0.3, -0.4, 0.5, -0.6]
+
+    summary = summarize_qualification(rows)
+
+    assert summary["passed"] is False
+    assert summary["qualified_resets"] == 0
+    assert summary["identical_fixed_reset"] is False
+    assert summary["failures"] == [
+        "reset_arm_qpos_rad must be six finite values"
+    ]
+    assert summary["rows"][1]["failures"] == [
+        "non-finite value",
+        "invalid or drifting realized fixed reset state",
     ]
 
 

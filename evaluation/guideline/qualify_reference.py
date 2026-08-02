@@ -52,7 +52,7 @@ def _row_failures(row: dict[str, Any]) -> list[str]:
         reset_finite = len(reset_qpos) == 6 and all(
             math.isfinite(float(value)) for value in reset_qpos
         )
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         numeric_finite = False
         reset_finite = False
     if not bool(row["finite"]) or not numeric_finite or not reset_finite:
@@ -103,7 +103,7 @@ def summarize_qualification(rows: list[dict[str, Any]]) -> dict[str, Any]:
         reset_contract_failure = (
             "reset_arm_qpos_rad must be identical across all execution seeds"
         )
-    identical_fixed_reset = exact_seed_set and reset_contract_failure is None
+    identical_fixed_reset = reset_contract_failure is None
     if exact_seed_set and reset_contract_failure is not None:
         aggregate_failures.append(reset_contract_failure)
 
@@ -130,7 +130,11 @@ def summarize_qualification(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "corridor_radius_m": CORRIDOR_RADIUS_M,
             "qvel_limit_rad_s": QVEL_LIMIT_RAD_S,
         },
-        "passed": identical_fixed_reset and qualified == len(REQUIRED_SEEDS),
+        "passed": (
+            exact_seed_set
+            and identical_fixed_reset
+            and qualified == len(REQUIRED_SEEDS)
+        ),
         "qualified_resets": qualified,
         "required_resets": len(REQUIRED_SEEDS),
         "identical_fixed_reset": identical_fixed_reset,
