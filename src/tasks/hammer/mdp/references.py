@@ -94,6 +94,10 @@ class SingleStrikeReference:
     self._head0[mask] = head_w[mask]
     target = nail_top_w[mask].clone()
     target[:, 2] -= self.overshoot
+    # A low realized reset must never turn the direct strike into an upward
+    # command. Preserve the nail-derived x/y follow-through while clamping its
+    # height to the frozen reset head.
+    target[:, 2] = torch.minimum(target[:, 2], head_w[mask][:, 2])
     self._target[mask] = target
     self._phi[mask] = 0.0
     self._anchored[mask] = True

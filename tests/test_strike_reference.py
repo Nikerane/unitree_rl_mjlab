@@ -52,6 +52,20 @@ def test_waypoints_never_rise_above_the_frozen_reset_head():
         assert torch.all(waypoint[:, 2] <= HEAD0[:, 2])
 
 
+def test_low_reset_clamps_the_target_height_without_changing_xy_target():
+    low_head = torch.tensor([[0.30, -0.20, 0.00]]).repeat(B, 1)
+    nail = torch.tensor([[0.80, 0.40, 0.10]]).repeat(B, 1)
+    ref = _ref()
+    ref.update(low_head, nail, _steps(0))
+
+    expected_target = torch.tensor([[0.80, 0.40, 0.00]]).repeat(B, 1)
+    assert torch.equal(ref._target, expected_target)
+    for phi in (0.0, 0.25, 0.5, 0.75, 1.0):
+        assert torch.all(ref.waypoint(torch.full((B,), phi))[:, 2] <= low_head[:, 2])
+    for k in range(ref.playback_length() + 1):
+        assert torch.all(ref.playback_target(k)[:, 2] <= low_head[:, 2])
+
+
 def test_stationary_head_does_not_advance_from_episode_clock():
     ref = _ref()
     ref.update(HEAD0, NAIL, _steps(0))
@@ -100,11 +114,30 @@ def test_reanchor_and_batching_follow_each_environment_reset_state():
     assert torch.equal(ref._target, _target(nails))
     assert not torch.allclose(ref.waypoint(torch.full((B,), 0.5))[0], ref.waypoint(torch.full((B,), 0.5))[1])
 
-    new_nails = nails.clone()
-    new_nails[2, 1] += 0.02
-    phi = ref.update(heads, new_nails, _steps(0))
-    assert torch.allclose(phi, torch.zeros(B))
-    assert torch.equal(ref._target, _target(new_nails))
+    halfway = (heads + _target(nails)) / 2
+    ref.update(halfway, nails, _steps(1))
+    assert torch.allclose(ref.peek(), torch.tensor([0.5, 0.5, 0.5]))
+
+    reset_heads = heads.clone()
+    reset_heads[0, 1] += 0.02
+    reset_nails = nails.clone()
+    reset_nails[0, 1] += 0.02
+    phi = ref.update(reset_heads, reset_nails, torch.tensor([0, 2, 2]))
+    assert torch.allclose(phi, torch.tensor([0.0, 0.5, 0.5]))
+    assert torch.equal(ref._head0[0], reset_heads[0])
+    assert torch.equal(ref._head0[1:], heads[1:])
+    assert torch.equal(ref._target[0], _target(reset_nails)[0])
+    assert torch.equal(ref._target[1:], _target(nails)[1:])
+
+    ref.reset(torch.tensor([2]))
+    rearmed_heads = reset_heads.clone()
+    rearmed_heads[2, 0] += 0.03
+    rearmed_nails = reset_nails.clone()
+    rearmed_nails[2, 0] += 0.03
+    phi = ref.update(rearmed_heads, rearmed_nails, torch.tensor([1, 3, 3]))
+    assert torch.allclose(phi, torch.tensor([0.0, 0.5, 0.0]))
+    assert torch.equal(ref._head0[2], rearmed_heads[2])
+    assert torch.equal(ref._target[2], _target(rearmed_nails)[2])
 
 
 def test_zero_length_segment_is_safe():
