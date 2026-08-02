@@ -712,6 +712,15 @@ def test_native_guideline_contract_rejects_observation_reader_or_width_drift(
     eval_impulse._validate_native_guideline_env_contract(cfg, task)
 
 
+def test_native_guideline_contract_rejects_c0_r_gate_key_with_none_value():
+  task = GUIDELINE_TASKS["C0"]
+  cfg = eval_impulse.load_env_cfg(task, play=False)
+  cfg.rewards["r_gate"] = None
+
+  with pytest.raises(ValueError, match="C0.*r_gate"):
+    eval_impulse._validate_native_guideline_env_contract(cfg, task)
+
+
 def test_native_guideline_contract_rejects_c0_gate_reward_or_cgate_gate_reward_drift():
   c0_task = GUIDELINE_TASKS["C0"]
   cgate_task = GUIDELINE_TASKS["C-Gate"]

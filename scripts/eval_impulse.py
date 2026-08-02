@@ -852,7 +852,7 @@ def _validate_native_guideline_env_contract(env_cfg, task: str) -> dict:
 
   gate_reward = env_cfg.rewards.get("r_gate")
   if treatment == "C0":
-    if gate_reward is not None:
+    if "r_gate" in env_cfg.rewards:
       raise ValueError(f"{task}: C0 must not contain r_gate")
   elif (
     gate_reward is None

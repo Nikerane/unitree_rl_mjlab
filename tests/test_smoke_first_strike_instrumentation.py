@@ -1423,6 +1423,12 @@ def test_terminal_latch_captures_each_environment_once_with_episode_aggregates()
             "terminal_raw_delivered_finite",
             "terminal_manager_impact",
             "terminal_manager_delivered",
+            "terminal_manager_gate",
+            "terminal_guideline_tracker_exists",
+            "terminal_guideline_tracker_initialized",
+            "terminal_guideline_entry",
+            "terminal_guideline_nail",
+            "terminal_guideline_next_gate",
             "terminal_control_step",
             "terminal_impact_positive_count",
             "terminal_delivered_positive_count",
@@ -1462,6 +1468,16 @@ def test_terminal_latch_captures_each_environment_once_with_episode_aggregates()
             tracker_delivered=torch.tensor([9.0, 0.66]),
             manager_impact=torch.tensor([99.0, 12.0]),
             manager_delivered=torch.tensor([99.0, 4.0]),
+            manager_gate=torch.tensor([99.0, 0.24]),
+            guideline_tracker_exists=torch.tensor([False, True]),
+            guideline_tracker_initialized=torch.tensor([False, True]),
+            guideline_entry=torch.tensor(
+                [[9.0, 9.0, 9.0], [0.0, 0.0, 0.2]]
+            ),
+            guideline_nail=torch.tensor(
+                [[8.0, 8.0, 8.0], [0.0, 0.0, 0.1]]
+            ),
+            guideline_next_gate=torch.tensor([1, 6]),
         )
     )
 
