@@ -161,8 +161,8 @@ def _trace_geometry(trace: Mapping[str, Any]) -> tuple[np.ndarray, np.ndarray, n
     if contact.shape != (len(positions),):
         raise ValueError("trace contact must have one value per head position")
     reference = np.asarray(trace.get("reference_polyline_m"), dtype=float)
-    if reference.shape != (3, 3) or not np.isfinite(reference).all():
-        raise ValueError("trace reference_polyline_m must be finite with shape (3, 3)")
+    if reference.shape not in ((2, 3), (3, 3)) or not np.isfinite(reference).all():
+        raise ValueError("trace reference_polyline_m must be finite with shape (2, 3) or (3, 3)")
     nail_top = np.asarray(trace.get("nail_top_m"), dtype=float)
     if nail_top.shape != (3,) or not np.isfinite(nail_top).all():
         raise ValueError("trace nail_top_m must be finite with shape (3,)")

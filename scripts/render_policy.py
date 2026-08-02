@@ -81,7 +81,7 @@ def _sha256(path: Path) -> str:
 
 
 def _reference_polyline_m(reference, device: str) -> np.ndarray:
-  """Return the three analytical vertices of the already anchored reference."""
+  """Return the direct-reference analytical endpoints of the anchored segment."""
   return np.stack(
     [
       reference.waypoint(torch.tensor([phi], device=device))
@@ -90,7 +90,7 @@ def _reference_polyline_m(reference, device: str) -> np.ndarray:
       .cpu()
       .numpy()
       .astype(np.float64)
-      for phi in (0.0, 0.5, 1.0)
+      for phi in (0.0, 1.0)
     ]
   )
 

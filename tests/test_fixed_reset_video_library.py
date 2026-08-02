@@ -1088,7 +1088,7 @@ def test_final_validator_requires_one_presentation_revision_across_library(
 
 
 def test_artifact_validator_requires_the_anchored_reference_polyline(tmp_path):
-    """Every trajectory must preserve the three supplied reference vertices."""
+    """Every trajectory must preserve its finite reference polyline."""
     write_complete_fake_library(tmp_path, reset_digest=FIXED_DIGEST)
     trace_path = next(tmp_path.glob("*/*/*/trace.npz"))
     with np.load(trace_path) as trace:
@@ -1107,6 +1107,17 @@ def test_artifact_validator_requires_the_anchored_reference_polyline(tmp_path):
 
     with pytest.raises(ValueError, match="reference_polyline_m"):
         validate_policy_artifacts(tmp_path, expected_rows())
+
+
+def test_artifact_validator_preserves_historical_three_vertex_reference(tmp_path, monkeypatch):
+    """The historical 56-policy traces retain their accepted three-vertex geometry."""
+    monkeypatch.setattr(
+        "evaluation.analysis.fixed_reset_video_library.load_fixed_reset",
+        lambda _path: {"reset_state_digest": FIXED_DIGEST},
+    )
+    write_complete_fake_library(tmp_path, reset_digest=FIXED_DIGEST)
+
+    validate_policy_artifacts(tmp_path, expected_rows())
 
 
 def test_artifact_validator_requires_identical_reference_geometry_for_the_frozen_reset(tmp_path):
@@ -1128,9 +1139,30 @@ def test_artifact_validator_requires_identical_reference_geometry_for_the_frozen
         validate_policy_artifacts(tmp_path, expected_rows())
 
 
+def test_artifact_validator_accepts_a_uniform_direct_two_endpoint_reference(tmp_path, monkeypatch):
+    """Direct-reference artifacts may use the reset-head and follow-through endpoints."""
+    monkeypatch.setattr(
+        "evaluation.analysis.fixed_reset_video_library.load_fixed_reset",
+        lambda _path: {"reset_state_digest": FIXED_DIGEST},
+    )
+    write_complete_fake_library(tmp_path, reset_digest=FIXED_DIGEST)
+    for trace_path in tmp_path.glob("*/*/*/trace.npz"):
+        with np.load(trace_path) as trace:
+            mutated = {key: trace[key] for key in trace.files}
+        mutated["reference_polyline_m"] = mutated["reference_polyline_m"][[0, 2]]
+        np.savez(trace_path, **mutated)
+        metadata_path = trace_path.with_name("metadata.json")
+        metadata = json.loads(metadata_path.read_text())
+        metadata["artifacts"]["trace.npz"] = _sha256(trace_path)
+        del metadata["metadata_payload_sha256"]
+        _write_metadata(metadata_path, metadata)
+
+    validate_policy_artifacts(tmp_path, expected_rows())
+
+
 def test_renderer_reference_vertices_match_the_anchored_phi_waypoints():
-    """The renderer saves the exact analytical phi={0, .5, 1} vertices, not a chord."""
-    reference = SingleStrikeReference(1, "cpu", approach_height=0.10, overshoot=0.02)
+    """The renderer saves the exact direct-reference phi={0, 1} endpoints."""
+    reference = SingleStrikeReference(1, "cpu", overshoot=0.02)
     head = torch.tensor([[0.50, 0.01, 0.12]])
     nail = torch.tensor([[0.48, -0.02, 0.10]])
     reference.update(head, nail, torch.zeros(1, dtype=torch.long))
@@ -1140,11 +1172,32 @@ def test_renderer_reference_vertices_match_the_anchored_phi_waypoints():
     expected = np.array(
         [
             head.numpy()[0],
-            [0.48, -0.02, 0.20],
             [0.48, -0.02, 0.08],
         ]
     )
     np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-7)
+
+
+@pytest.mark.parametrize(
+    "reference",
+    (
+        np.zeros((1, 3)),
+        np.zeros((4, 3)),
+        np.zeros((2, 2)),
+        np.array([[0.0, 0.0, 0.0], [np.nan, 0.0, 0.0]]),
+    ),
+)
+def test_trajectory_plot_rejects_invalid_reference_polylines(tmp_path, reference):
+    """Only finite direct or historical reference polylines are valid trace geometry."""
+    with pytest.raises(ValueError, match="reference_polyline_m"):
+        write_trajectory_png(
+            {
+                "head_position_m": np.array([[0.0, 0.0, 0.0]]),
+                "reference_polyline_m": reference,
+                "nail_top_m": np.array([0.0, 0.0, 0.0]),
+            },
+            tmp_path / "trajectory.png",
+        )
 
 
 def test_trajectory_plot_draws_the_reference_as_a_dashed_observation_line(tmp_path, monkeypatch):

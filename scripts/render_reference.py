@@ -6,7 +6,7 @@ be inspected from images alone (works on macOS; offscreen GL needs no display).
 
 Run:
     python scripts/render_reference.py                 # -> /tmp/hammer_ref/
-    python scripts/render_reference.py --out-dir foo --steps 30 --approach-height 0.10
+    python scripts/render_reference.py --out-dir foo --steps 30
 """
 
 from __future__ import annotations
@@ -36,7 +36,6 @@ TASK_ID = "Unitree-Z1-Hammer"
 class Cfg:
   out_dir: str = "/tmp/hammer_ref"
   steps: int = 30
-  approach_height: float = 0.15
   width: int = 640
   height: int = 480
   # Camera overrides (None = keep the env's ViewerConfig). distance smaller =
@@ -70,7 +69,7 @@ def main(cfg: Cfg = Cfg()) -> None:
   ntop = lambda: nail.data.site_pos_w[:, ncfg.site_ids].squeeze(1)
   depth = lambda: float(nail.data.joint_pos[0, 0])
 
-  ref = SingleStrikeReference(1, env.device, approach_height=cfg.approach_height)
+  ref = SingleStrikeReference(1, env.device)
   ref.update(head(), ntop(), env.episode_length_buf)
   scale = Z1_HAMMER_DELTA_POS_SCALE
 

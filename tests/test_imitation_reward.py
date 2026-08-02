@@ -155,21 +155,21 @@ def test_reward_call_never_mutates_phase():
     env.episode_length_buf[:] = 0
     _obs_update(env, robot, nail)          # anchor; phi = 0
     ref = get_strike_reference(env)
-    phi_before = ref._phi.clone()
-    anchored_before = ref._anchored.clone()
-    s0_before = ref._s0.clone()
+    phi_before = ref.peek()
+    start_before = ref.waypoint(torch.zeros_like(phi_before))
+    target_before = ref.waypoint(torch.ones_like(phi_before))
     # Deep-descent kinematics + later step index: update() would advance phi here.
     _set(robot, nail, head=(0.0, 0.0, 0.105))
     env.episode_length_buf[:] = 7
     for _ in range(3):
         term(env, **_PARAMS)
-    assert torch.equal(ref._phi, phi_before)
-    assert torch.equal(ref._anchored, anchored_before)
-    assert torch.equal(ref._s0, s0_before)
+    assert torch.equal(ref.peek(), phi_before)
+    assert torch.equal(ref.waypoint(torch.zeros_like(phi_before)), start_before)
+    assert torch.equal(ref.waypoint(torch.ones_like(phi_before)), target_before)
     # The returned phase is a defensive copy: mutating it must not leak back.
     peeked = ref.peek()
     peeked += 123.0
-    assert torch.equal(ref._phi, phi_before)
+    assert torch.equal(ref.peek(), phi_before)
 
 
 def test_latch_resets_per_episode():

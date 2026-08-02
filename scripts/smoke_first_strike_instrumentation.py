@@ -1165,11 +1165,7 @@ def run_smoke(task: str, device: str, num_envs: int) -> dict[str, Any]:
             wrapped_env = RslRlVecEnvWrapper(
                 raw_env, clip_actions=float(agent_cfg.clip_actions)
             )
-            reference = SingleStrikeReference(
-                num_envs,
-                raw_env.device,
-                approach_height=0.10,
-            )
+            reference = SingleStrikeReference(num_envs, raw_env.device)
             reference.update(
                 head_position(),
                 nail_top_position(),
@@ -1208,7 +1204,8 @@ def run_smoke(task: str, device: str, num_envs: int) -> dict[str, Any]:
             "contract_digest": contract_digest,
             "scripted_reference": {
                 "class": "SingleStrikeReference",
-                "approach_height_m": 0.10,
+                "geometry": "reset_head_to_below_nail_follow_through",
+                "follow_through_overshoot_m": reference.overshoot,
                 "delta_pos_scale_m": 0.15,
                 "playback_length_steps": playback_length,
                 "hold_steps": 6,

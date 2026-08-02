@@ -93,7 +93,7 @@ def strike_trace_1env():
   head, nail_top, arm_joint_ids = _build_driving_helpers(env)
 
   env.reset()
-  ref = SingleStrikeReference(1, env.device, approach_height=0.10)
+  ref = SingleStrikeReference(1, env.device)
   ref.update(head(), nail_top(), torch.zeros(1, dtype=torch.long, device=env.device))
   n = ref.playback_length()
   cols = arm_dof_cols(env)
@@ -145,7 +145,7 @@ def strike_trace_2env():
   head, nail_top, arm_joint_ids = _build_driving_helpers(env)
 
   env.reset()
-  ref = SingleStrikeReference(2, env.device, approach_height=0.10)
+  ref = SingleStrikeReference(2, env.device)
   ref.update(head(), nail_top(), torch.zeros(2, dtype=torch.long, device=env.device))
   n = ref.playback_length()
   cols = arm_dof_cols(env)
@@ -313,7 +313,7 @@ def strike_trace_1env_rows_vs_shipped():
   head, nail_top, _ = _build_driving_helpers(env)
 
   env.reset()
-  ref = SingleStrikeReference(1, env.device, approach_height=0.10)
+  ref = SingleStrikeReference(1, env.device)
   ref.update(head(), nail_top(), torch.zeros(1, dtype=torch.long, device=env.device))
   n = ref.playback_length()
 

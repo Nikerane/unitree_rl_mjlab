@@ -38,7 +38,6 @@ from src.tasks.hammer.mdp.references import SingleStrikeReference
 @dataclass(frozen=True)
 class Cfg:
   out_dir: str = "/tmp/hammer_refpath"
-  approach_height: float = 0.15
   extra_steps: int = 14          # push-through hold after the scripted descent
   width: int = 720
   height: int = 540
@@ -96,7 +95,7 @@ def main(cfg: Cfg) -> None:
 
   # --- replay the scripted reference open-loop, growing the trail ---
   env.reset()
-  ref = SingleStrikeReference(1, env.device, approach_height=cfg.approach_height)
+  ref = SingleStrikeReference(1, env.device)
   ref.update(head(), nail_top(), torch.zeros(1, dtype=torch.long, device=env.device))
   n = ref.playback_length()
 

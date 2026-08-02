@@ -148,7 +148,7 @@ def _fixed_reference_action_tape() -> list[torch.Tensor]:
     head = lambda: robot.data.site_pos_w[:, head_cfg.site_ids].squeeze(1)
     nail_top = lambda: nail.data.site_pos_w[:, nail_cfg.site_ids].squeeze(1)
     env.reset()
-    reference = SingleStrikeReference(1, env.device, approach_height=0.10)
+    reference = SingleStrikeReference(1, env.device)
     reference.update(head(), nail_top(), torch.zeros(1, dtype=torch.long))
     tape = []
     for step in range(1, reference.playback_length() + HOLD_STEPS + 1):
@@ -250,7 +250,7 @@ def test_episode_hook_snapshots_pre_reset_buffers_on_the_terminal_step():
       return nail_e.data.site_pos_w[:, nail_cfg.site_ids].squeeze(1)
 
     env.reset()
-    ref = SingleStrikeReference(1, env.device, approach_height=0.10)
+    ref = SingleStrikeReference(1, env.device)
     ref.update(head(), nail_top(), torch.zeros(1, dtype=torch.long, device=env.device))
     n = ref.playback_length()
 

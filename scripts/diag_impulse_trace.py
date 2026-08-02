@@ -931,7 +931,7 @@ def _run_reference(
     return nail_e.data.site_pos_w[:, ncfg.site_ids].squeeze(1)
 
   env.reset()
-  ref = SingleStrikeReference(args.num_envs, env.device, approach_height=args.approach_height)
+  ref = SingleStrikeReference(args.num_envs, env.device)
   ref.update(head(), nail_top(), torch.zeros(args.num_envs, dtype=torch.long, device=env.device))
   n = ref.playback_length()
   terminal_reason = "step_limit"
@@ -1152,7 +1152,6 @@ def _build_arg_parser() -> argparse.ArgumentParser:
                        "REQUIRED to draw the J_limit cap lines in panel 3. NEVER defaulted "
                        "(the placeholder Z1_JOINT_IMPULSE_LIMIT=0.1 is not a real cap); omitting "
                        "this flag draws no cap lines.")
-  ap.add_argument("--approach-height", type=float, default=0.10, help="--reference mode: strike apex height (m)")
   ap.add_argument("--nsteps", type=int, default=80, help="--ckpt mode: control steps to roll out")
   ap.add_argument("--play", action="store_true", help="play-mode env cfg (zeroed reset/obs noise)")
   ap.add_argument(

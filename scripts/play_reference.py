@@ -9,7 +9,7 @@ reference action.
 
 Run (browser-based viser viewer — works on macOS, no mjpython needed):
     python scripts/play_reference.py
-    python scripts/play_reference.py --num-envs 4 --approach-height 0.10
+    python scripts/play_reference.py --num-envs 4
 
 Then open the viser URL it prints. Episodes auto-reset on success, so the
 strike repeats; screen-record that window to capture it.
@@ -42,7 +42,6 @@ TASK_ID = "Unitree-Z1-Hammer"
 @dataclass(frozen=True)
 class Cfg:
   num_envs: int = 1
-  approach_height: float = 0.15
   viewer: str = "viser"  # "viser" (browser, mac-friendly) or "native"
   show_line: bool = True  # draw the reference head path as a red 3D polyline (viser; GUI-toggleable)
   device: str | None = None
@@ -77,11 +76,11 @@ class ReferencePolicy:
   scripted target for the current per-env step (episode_length_buf).
   """
 
-  def __init__(self, env, approach_height: float):
+  def __init__(self, env):
     raw = env.unwrapped
     self._raw = raw
     self._scale = Z1_HAMMER_DELTA_POS_SCALE
-    self._ref = get_strike_reference(raw, approach_height=approach_height)
+    self._ref = get_strike_reference(raw)
     rcfg = SceneEntityCfg("robot", site_names=(HAMMER_HEAD_SITE_NAME,))
     ncfg = SceneEntityCfg("nail_block", site_names=("nail_top",))
     rcfg.resolve(raw.scene)
@@ -147,9 +146,9 @@ def main(cfg: Cfg = Cfg()) -> None:
   env = ManagerBasedRlEnv(cfg=env_cfg, device=device, render_mode=None)
   env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
-  policy = ReferencePolicy(env, cfg.approach_height)
+  policy = ReferencePolicy(env)
   print(f"[play_reference] open-loop scripted strike, num_envs={cfg.num_envs}, "
-        f"approach_height={cfg.approach_height}, viewer={cfg.viewer}")
+        f"viewer={cfg.viewer}")
 
   if cfg.viewer == "native":
     NativeMujocoViewer(env, policy).run()
