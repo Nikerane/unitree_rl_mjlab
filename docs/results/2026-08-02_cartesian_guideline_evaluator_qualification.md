@@ -2,22 +2,23 @@
 
 **Date:** 2026-08-02
 
-**Reviewed code revision:** `bf6fab930014cbc0357dcf44e96698a122d3e22f`
+**Reviewed code revision:** `a54c7a1a212d4383afb1329ac1806399b7c3d14f`
 
 **Branch:** `cartesian-guideline-fic`
 
-**Outcome:** **PASS — local CPU evaluator pre-training gate only**
+**Outcome:** **PASS — local CPU evaluator pre-training gate only, after C1 repair**
 
-The minimal evaluator is qualified to evaluate the excluded four-row
-fixed-reset Cartesian-guideline pilot after its final checkpoints exist. This
-does not authorize training, establish a C-Gate-versus-C0 result, or qualify a
-learned policy: no guideline `model_499.pt` with clean provenance existed
-locally, so no checkpoint rollout was invented and the required checkpoint
-identity was not relaxed.
+This note supersedes its earlier qualification of revision `bf6fab9`. Final
+whole-branch review found that revision's CSV-to-analysis boundary discarded
+load-bearing identity and result columns. The corrected boundary at the
+reviewed revision above is the only qualified one.
 
-## Qualified contract
+No guideline `model_499.pt` with clean accepted provenance existed locally.
+Accordingly, this qualification covers evaluator plumbing and fail-closed
+certification only. It does not authorize training, establish a learned-policy
+result, or support a C-Gate-versus-C0 scientific claim.
 
-The evaluator accepts exactly these future final-checkpoint rows:
+## Qualified four-row contract
 
 | Treatment | Registered task | Training seed | Checkpoint |
 |---|---|---:|---|
@@ -26,92 +27,97 @@ The evaluator accepts exactly these future final-checkpoint rows:
 | C-Gate | `Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate` | 0 | `model_499.pt` |
 | C-Gate | `Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate` | 1 | `model_499.pt` |
 
-All rows require the explicit `cartesian-guideline-pilot` campaign, final
-checkpoint and manifest hashes, clean code and asset provenance, the frozen
-evaluation RNG tuple, exactly 512 sampled episodes, zero physical-impossibility
-and dead-Lambda sentinels, and zero nonfinite-qvel rate. C0 requires literal
-absence of `r_gate` and zero stored gate payout. Each C-Gate seed independently
-requires a finite positive total of the actual weighted manager payout.
+Each row must retain and validate the evaluator's persisted identity rather
+than reconstructing a lossy projection:
 
-The `success_rate_sampled >= 0.25` rule is only a descriptive decision for
-whether each arm may continue beyond the excluded pilot. With two seeds per arm
-it supports no C-Gate-versus-C0 scientific claim; a confirmatory comparison
-still requires at least five seeds per arm.
+- literal task-to-treatment mapping and training seed 0 or 1;
+- `model_499.pt`, with 64-hex actual and accepted checkpoint SHA-256 values
+  equal per row;
+- 64-hex accepted-manifest, campaign-config, treatment-config, reset,
+  guideline-geometry, treatment-base, sampled-trace, and trace-artifact
+  identities;
+- 40-hex training/evaluation code and asset revisions, literal clean boolean
+  dirty flags, and training asset revision equal to evaluation asset revision;
+- one accepted manifest, training provenance, evaluation provenance, campaign
+  config, reset identity, geometry identity, and treatment-base identity shared
+  across all four rows;
+- one treatment-config identity shared by the two seeds in each arm, with C0
+  and C-Gate identities distinct, and unique sampled trace/artifact identities;
+- the exact frozen RNG tuple: reset `2036072919`, observation `2046072933`, and
+  action `2056072941`;
+- exactly 256 environments, 2 completed episodes per environment, 512 sampled
+  episodes, and the 4.0 s failure-mode horizon;
+- finite primary episode-first q90 perpendicular error in `[0.0, 0.050]`, plus
+  finite/range-valid all-six-gates, corridor-occupancy, backward-progress,
+  gate-payout, success-rate, and qvel-sentinel results.
 
-## Fresh verification
+C0 still requires literal absence of `r_gate` and zero actual manager payout.
+Each C-Gate seed requires `r_gate` at weight 8 and finite positive actual
+manager payout. Both arms retain fixed reset `(0.0, 0.0)`, no wind-up, fixed
+impedance, and log-only `imp_max_p=0.0`.
 
-All commands used `PYTHONPATH=.` and
+The `success_rate_sampled >= 0.25` continuation rule remains descriptive. With
+two seeds per arm it cannot support a treatment-effect claim; a confirmatory
+comparison still requires at least five seeds per arm.
+
+## Final-fix verification
+
+All Python commands used `PYTHONPATH=.` and
 `/Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python`.
 
-- Focused evaluator and pure campaign reducer: **175 passed**, exit 0.
-- All six additional test files discovered by
-  `rg -l "guideline|Guideline|GUIDELINE" tests/test_*.py` after excluding the
-  focused pair — configs, direct-reference scientific gates, environment,
-  guideline qualification, guideline mechanics, and first-strike
-  instrumentation: **447 passed**, exit 0.
-- Mandatory reward/impulse set
-  (`impact_progress`, impulse bound/constraint, delivered impulse, soft-CaT):
-  **122 passed**, exit 0.
-- `validate_rewards.py`: phases **A through M all passed**, exit 0. Phase M
-  retained `imp_max_p=0` with zero CaT delta and live substep impulse/delivered
-  signals.
-- `verify_contact_sensor.py`: exit 0; all four environments detected first
-  contact at step 5.
-- `verify_reward_setup.py`: exit 0; all four non-exempt terms fired. The random
-  sweep made no contact in 200 steps, so its optional contact-threshold tuning
-  was skipped.
-- Explicit no-checkpoint fixture smoke: **7 passed**, exit 0. It covered both
-  one-environment C0/C-Gate task executions, all six ordered gates before
-  accepted contact, positive finite C-Gate manager payout, real tracker/reward
-  collector capture, the typed CSV bridge, and exact four-row reduction.
-- `git diff --check`: clean before documentation.
+- Strict RED: **25 failed**, all because the old direct or DictWriter boundary
+  did not raise for the intended tamper/omission.
+- Focused identity/CSV GREEN: **36 passed**, with **169 deselected**.
+- Full focused evaluator and pure campaign suite: **205 passed**, exit 0.
+- Documentation freshness/path suite: **2 passed**, exit 0.
+- `git diff --check`: clean before commits.
 
-The recurring warnings were the existing TorchScript deprecation, Matplotlib
-and font-cache fallbacks, and pytest's inability to create `.pytest_cache` in
-the externally managed worktree. They did not change command exit status.
+The focused suite includes direct-row and actual evaluator-`FIELDNAMES`
+DictWriter tests for frozen RNG drift, missing/non-boolean dirty flags,
+missing/malformed hashes and revisions, wrong registered tasks, checkpoint SHA
+mismatch, shared and per-arm config drift, missing/nonfinite/out-of-range q90,
+episode-horizon drift, and invalid or duplicated trace identities.
 
-An optional full-repository pytest run was stopped after 14 minutes because it
-was disproportionate to this gate. At interruption it reported 1,081 passed,
-one skipped, and 20 failures, all in `test_fixed_reset_video_library.py`. The
-unchanged file reproduced as 47 passed and 20 failed. Every failure traced to
-the absent
-`docs/results/assets/2026-07-29_lambda_feasibility_stage0/lambda_feasibility_stage0_inputs.json`:
-the artifact is not tracked by Git and therefore is absent from this linked
-worktree, although an untracked local copy exists in the main checkout. The
-video-library source and test already depended on that path at revisions
-`30570dc` and `dfc3c88` and were not changed by this evaluator work. No artifact
-was copied and no unrelated source or test was changed. This incomplete optional
-run is non-authoritative; the explicit task gates above are the qualification
-evidence.
+The 35 warnings in the focused integration run are the existing third-party
+`torch.jit.script` deprecation. They are not project warnings.
+
+## Earlier runtime evidence and optional-suite limitation
+
+The earlier qualification run exercised the real tracker/reward collector,
+the broader guideline/config/environment set, mandatory reward/impulse tests,
+reward phases A–M, and contact/reward setup scripts. C1 did not change runtime
+collection or task configuration, but those commands were not rerun for this
+final serialization-boundary repair; they remain historical supporting
+evidence, not fresh verification for revision `a54c7a1`.
+
+The optional full-repository pytest run was also not rerun. Its earlier attempt
+was stopped after 14 minutes at 1,081 passed, one skipped, and 20 failures in
+unchanged `test_fixed_reset_video_library.py`. Those failures traced to the
+untracked, absent
+`docs/results/assets/2026-07-29_lambda_feasibility_stage0/lambda_feasibility_stage0_inputs.json`
+in the linked worktree. The unchanged file separately reproduced as 47 passed
+and 20 failed. This incomplete optional run is non-authoritative and is not
+presented as final-fix evidence.
 
 ## Constraint and compatibility audit
 
-The implementation delta from design revision `dfc3c88` through the reviewed
-revision touches only:
+The C1 fix changes only the pure campaign validator/CSV loader and focused
+tests. The complete evaluator feature remains persistence-only outside
+`scripts/eval_impulse.py`; no task dynamics, reward definition, tracker, task
+registration, action, gain, manufacturer cap, or enforcement source changed.
+There is no evaluator call to `set_gains`. `IMP_J_LIMIT` remains exactly
+`[1.640, 3.280, 1.640, 1.640, 1.640, 1.640] N·m·s`, and native guideline
+configuration is still validated before evaluator mutations.
 
-- `scripts/eval_impulse.py`;
-- `evaluation/analysis/guideline_campaign.py`;
-- their two focused test files.
-
-No task dynamics, reward definition, tracker, task registration, action,
-actuator gain, manufacturer cap, or enforcement source was changed. There is
-no evaluator call to `set_gains`; the native validator pins the fixed actuator
-and action signatures. `IMP_J_LIMIT` remains exactly
-`[1.640, 3.280, 1.640, 1.640, 1.640, 1.640] N·m·s`, and guideline evaluation
-requires the imported and configured limits to match it. Native guideline
-configuration is validated before evaluator mutations, `imp_max_p` remains
-literal zero, and the physical reset remains `(0.0, 0.0)` with no wind-up.
-C0 and C-Gate share a canonical base-configuration digest after removing only
-`r_gate`; C-Gate pins `ordered_gate_progress_reward` at weight 8.
-
-Legacy traces remain additive and unchanged: the guideline digest/schema is
-activated only for registered guideline traces, and the focused suite retained
-the frozen legacy campaign and treatment digest literals.
+Legacy trace handling remains additive. The corrected loader retains exactly
+the load-bearing guideline-pilot columns in a fixed typed schema and delegates
+to the existing exact-four-row validator; it is not a generic manifest layer.
 
 ## Decision boundary
 
-This revision may be considered for owner-approved push/deploy and the exact
-four PPO identities above. Stop here until the owner separately authorizes
-those actions. After checkpoints exist, the direct CPU evaluator smoke and the
-full 256-environment, 512-episode sampled evaluation remain required with
-unaltered final-checkpoint and provenance gates.
+This corrected revision may be considered for owner-approved push/deploy and
+the four exact PPO identities above. Stop here until the owner separately
+authorizes those actions. Once final checkpoints exist, the full
+256-environment, 512-episode sampled evaluation remains required with
+unaltered checkpoint, manifest, provenance, configuration, and trace identity
+gates.
