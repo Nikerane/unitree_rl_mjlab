@@ -80,7 +80,8 @@ Dated research records kept in place (bannered, bodies frozen):
 `docs/research/reward-design/derive_impulse_thresholds.py` (impulse quantity gate; re-run after any EE change) ·
 `docs/research/reward-design/playback_reference.py` (strike feasibility gate; the crude `test_single_strike.py` probe was retired 2026-07-10 — the script remains but is not a gate).
 
-**Entry scripts:** `scripts/train.py` · `scripts/play.py` · `scripts/lightning_pair.sh` (**the GPU route** — Lightning.ai prior-vs-none pair: train both arms + auto-eval; Vega is retired) ·
+**Current GPU route:** EuroHPC Vega. For the fixed-reset C0/C-Gate campaign, run the two required CUDA smokes before seeking authorization for a training pilot. `scripts/lightning_pair.sh` is retained as a legacy Lightning.ai launcher, not the current route.
+**Entry scripts:** `scripts/train.py` · `scripts/play.py` · `scripts/lightning_pair.sh` (legacy Lightning.ai prior-vs-none launcher) ·
 `scripts/diag_policy_trace.py` (strike-vs-press classifier + peak-|q̇| eval) ·
 `scripts/eval_impulse.py` + `scripts/eval_impulse.sh` (**standalone C3 checkpoint eval**: per-joint Λ max/p95, worst Λ/cap ratios, delivered impulse, success — one summary.csv row per checkpoint, same-env cross-arm protocol) ·
 `scripts/diag_impulse_trace.py` (per-substep impulse trace) · `scripts/compare_runs.py` ·

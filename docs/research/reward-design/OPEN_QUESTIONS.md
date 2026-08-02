@@ -3,6 +3,8 @@
 
 Status legend: 🔴 OPEN | 🟡 SCRIPT PROVIDED (run to resolve) | 🟢 RESOLVED
 
+> **Current campaign status (2026-08-02):** The fixed-reset C0/C-Gate branch is eligible only for its two Vega CUDA smokes, not a training pilot or impulse enforcement. Keep `imp_max_p=0.0`. Its deterministic direct-reference characterization validates feasibility, liveness, and repeatability only; it cannot calibrate enforcement. C2/C3 enforcement remains deferred until C2 is re-established under an authorized calibration protocol and the outstanding enforcement gates are discharged.
+
 ---
 
 ### 🟢 Q1 — Does a single strike fully drive the nail?
@@ -176,7 +178,7 @@ No spurious reward on the first step. **No debug assertion needed.**
 | Q9 | 🔴 Needs training + hardware | Defer; depends on Q1 |
 | Q10 | 🟢 Resolved | Finite-differenced velocity eliminates the risk |
 
-**Remaining blockers before first training run:** NONE — the L6 fixture EE NEAR_NAIL re-solve was adopted 2026-07-06 and the full pre-train gate re-greened 2026-07-10 (`validate_rewards.py` all phases A–M, `verify_contact_sensor.py`, `verify_reward_setup.py`, full pytest all PASS; see [[l6-hammer-fixture-ee]]). All resolvable-from-code reward questions are answered; no blockers remain before the C2/C3 impulse campaign. Remaining open questions require training cycles (Q3, Q6, Q7, Q9 — defer to training campaign); Q5's percentile script (`verify_reward_setup.py`) is ready to run.
+**Historical pre-train snapshot (2026-07-10):** the recorded blockers were NONE after the L6 fixture EE NEAR_NAIL re-solve and full pre-train gate re-green (`validate_rewards.py` all phases A–M, `verify_contact_sensor.py`, `verify_reward_setup.py`, full pytest all PASS; see [[l6-hammer-fixture-ee]]). At that date, all resolvable-from-code reward questions were recorded as answered. This snapshot is superseded operationally by the 2026-08-02 campaign status above and does not authorize C2/C3. Remaining open questions require training cycles (Q3, Q6, Q7, Q9); Q5's percentile script (`verify_reward_setup.py`) is ready to run.
 
 ---
 

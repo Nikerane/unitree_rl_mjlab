@@ -16,8 +16,8 @@ Phases (expected values scale with the live env config weights, not hardcoded):
     G. Bounce-back 0.020 -> 0.015 -> nail_depth_delta == 0                (proves clamp_min)
     H. Completion bonus           -> completion == W_completion above threshold
     I. Strike (drive down)        -> impact_progress > 0 on fresh productive contact, 0 else
-    J. Phase machinery (T1)       -> strike_phase ~0 after reset, monotone under
-                                     descent, reaches the descent half, re-anchors on reset
+    J. Phase machinery (T1)       -> strike_phase ~0 after reset, monotone along the
+                                     direct segment, reaches its midpoint, re-anchors on reset
     K. Imitation prior (T2)       -> r_imit anchored at reset, ante-impact latch, budget cap
     L. Overshoot clamp            -> nail_depth_delta clamps to GOAL past the soft-limit stop
     M. Impulse-CaT arm (C0)       -> Λ_j>0 on a strike, cat_delta ≡ 0 under log-only (imp_max_p=0),

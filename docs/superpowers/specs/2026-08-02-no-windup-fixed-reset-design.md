@@ -1,7 +1,7 @@
 # No-Windup Fixed-Reset Cartesian Strike Design
 
-**Date:** 2026-08-02  
-**Status:** owner-approved  
+**Date:** 2026-08-02
+**Status:** owner-approved
 **Branch:** `cartesian-guideline-fic`
 
 ## Goal
@@ -23,10 +23,13 @@ Test whether one-shot Cartesian guideline progress produces a straight hammer st
 At reset, freeze hammer-head position `p0` and nail-top position `pn`. Define the follow-through target
 
 ```text
-pt = pn + (0, 0, -overshoot)
+pt_xy = pn_xy
+pt_z = min(pn_z - overshoot, p0_z)
 u  = (pt - p0) / ||pt - p0||
 p(phi) = p0 + phi * (pt - p0),  phi in [0, 1]
 ```
+
+The target-height clamp is intentional: if a realized reset puts the hammer head below the nominal nail-derived follow-through height, only `pt_z` is clamped to `p0_z`; the nail-derived x/y target is preserved. This prevents a low reset from turning the direct strike into an upward command.
 
 Spatial phase is the clamped projection of the current head onto this segment, gated by the existing lateral-axis tolerance and monotonically latched. It is not clock-indexed. Scripted playback advances along the same segment by at most `descent_speed` metres per control step.
 

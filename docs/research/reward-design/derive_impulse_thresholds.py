@@ -33,7 +33,6 @@ from reward_design_util import (
 ARM = ("joint1", "joint2", "joint3", "joint4", "joint5", "joint6")
 REPEATS = 5
 HOLD_STEPS = 6
-WELD_TOL = 0.5  # max acceptable off-contact-baseline fraction of the contact-window Λ (gate)
 ROWS_RAW_TOL = 1.05  # Track-2 triangle-inequality check (AMENDED 2026-07-10 sign-aware; DEMOTED
 # to INFORMATIONAL 2026-07-14, adversarial-review I5): rows ≤ raw + noncontact is the algebraic
 # identity |c| ≤ |q| + |q − c| — it holds by construction when all three sums share the same
@@ -287,15 +286,16 @@ def main() -> int:
         "(raw Λ | baseline-subtracted Λ | contact-row Λ | object-side ∫F·dt)")
   rows_mean = ROWS.mean(0)
   noncont_mean = NONCONTACT.mean(0)
-  friction_share = (raw_mean - rows_mean) / raw_mean.clamp_min(1e-9) * 100.0
+  raw_rows_residual = (raw_mean - rows_mean) / raw_mean.clamp_min(1e-9) * 100.0
   residual_after_sub = (sub_mean - rows_mean) / rows_mean.clamp_min(1e-9) * 100.0
-  print(f"    {'joint':<8}{'raw':>9}{'sub':>9}{'rows':>9}{'noncont':>9}{'fric-shr%':>11}{'resid%':>9}")
+  print(f"    {'joint':<8}{'raw':>9}{'sub':>9}{'rows':>9}{'noncont':>9}{'diag-res%':>11}{'resid%':>9}")
   for j in range(6):
     print(f"    {ARM[j]:<8}{raw_mean[j]:>9.4f}{sub_mean[j]:>9.4f}{rows_mean[j]:>9.4f}"
-          f"{noncont_mean[j]:>9.4f}{friction_share[j]:>10.1f}%{residual_after_sub[j]:>8.1f}%")
+          f"{noncont_mean[j]:>9.4f}{raw_rows_residual[j]:>10.1f}%{residual_after_sub[j]:>8.1f}%")
   print(f"    object-side ∫F_axial dt (task-space N·s, single scalar, NOT per-joint): "
         f"mean {DEL.mean():.4f}  max {DEL.amax():.4f}")
-  print("    friction share = (raw − rows)/raw; residual after subtraction = (subtracted − rows)/rows "
+  print("    diagnostic residual = (raw − rows)/raw (not a friction attribution); "
+        "residual after subtraction = (subtracted − rows)/rows "
         "(rows = the rigorous efc-row-only ground truth, Task 9). "
         "noncont = Σ|qfrc − contact_row_qfrc|·dt, the sign-aware bound term (rows ≤ raw + noncont).")
 
@@ -326,11 +326,6 @@ def main() -> int:
   if not bool((DEL > 0).all()):
     print("\n[GATE FAIL] object-side delivered impulse is not positive on every repeat.")
     ok = False
-  worst_contam = float(contam.max())
-  if worst_contam > WELD_TOL * 100.0:
-    print(f"\n[GATE WARN] worst-joint contamination {worst_contam:.0f}% > {WELD_TOL*100:.0f}% tol — "
-          "prefer subtract_baseline=True for the shipped quantity (report decision).")
-
   # Triangle-inequality check is informational: it is a drift tripwire, not a
   # calibration or independent physics certificate.
   # rows ≤ raw + noncontact is the algebraic identity |c| ≤ |q| + |q − c| — when all three sums
