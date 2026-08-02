@@ -1,7 +1,7 @@
 # Wave 1: Waypoint-Guidance Isolation
 
 **Date:** 2026-08-02  
-**Status:** written design reviewed; owner implementation approval pending  
+**Status:** owner-approved for implementation; final external review fixes incorporated
 **Scope:** fixed-impedance Cartesian DiffIK trajectory shaping only
 
 ## Objective
@@ -14,7 +14,7 @@ does not tune impact reward and does not enforce velocity or impulse constraints
 
 Train fresh policies at one clean code and asset revision:
 
-| Arm | Ordered gate pulse | New-best waypoint progress |
+| Arm | Fixed gate-only pulse | New-best waypoint progress plus remainder settlement |
 |---|---:|---:|
 | C0 | absent | absent |
 | G | weight 8 | absent |
@@ -47,13 +47,21 @@ pulse. For the active target, the tracker stores:
 - the distance when that target becomes active, `d_start`;
 - the largest normalized approach fraction credited so far, `f_best`.
 
+Both values are exposed to the actor and critic in C0, G, and P as `f_best` and
+`d_start / reference_length`, each finite and bounded in `[0, 1]`. Before tracker
+initialization, the observation previews the first target from the live head/nail
+geometry with `f_best=0`; after all targets complete, both values are zero. This keeps
+the history-dependent reward state observable and observation structure identical
+across arms.
+
 At each 500 Hz physics substep before first accepted contact:
 
 1. Compute the current distance `d` from the hammer head to the active target.
-2. Compute `f = clip((d_start - d) / max(d_start - gate_radius, epsilon), 0, 1)`.
+2. Compute `f = clip((d_start - d) / max(d_start, epsilon), 0, 1)`.
 3. Credit only `max(f - f_best, 0)` and update `f_best = max(f_best, f)`.
 4. Hovering, moving backward, or re-covering old ground pays zero.
-5. When an intermediate gate is crossed, activate the next target and reset that
+5. When the active intermediate gate is validly crossed, credit only its remaining
+   uncredited potential `1 - f_best`, then activate the next target and reset that
    target's `d_start` and `f_best`.
 
 Each target receives at most `1/6` raw progress credit:
@@ -62,25 +70,38 @@ Each target receives at most `1/6` raw progress credit:
 target_credit = (1/6) * max(f - f_best, 0)
 ```
 
-Because a swept gate crossing occurs at radial distance at most `gate_radius`, a
-successfully reached target can earn its full `1/6` even without passing through its
-exact center. Six completed targets therefore have the same maximum raw total of one
-as the existing gate reward. Initialization earns zero. The tracker owns separate
+The center-distance denominator spreads dense credit across the full waypoint
+interval instead of exhausting it upon entering a gate-sized sphere. The remainder
+settlement means a valid swept crossing earns exactly the still-unpaid part rather
+than a second gate bonus. Six completed targets therefore have the same maximum raw
+total of one as the existing gate reward. Initialization earns zero. The tracker owns separate
 `window_new_credit` and `episode_credit` state: the former is cleared at every control
 window and is the only value exposed to the 50 Hz reward reader; the latter is used
 only for diagnostics and the episode cap. Per-environment reset clears both. This
 prevents old progress from being paid repeatedly.
 
-If one 2 ms swept segment crosses multiple gates, only the target that was active at
-the beginning of that substep receives dense progress credit; skipped-target count is
-logged. Reference qualification must observe zero multi-gate crossings. The term is
-zero after first accepted contact. It does not terminate the episode and has no
-negative penalty outside a corridor.
+If one 2 ms swept segment crosses `k > 1` gates, P settles the uncredited remainder
+for the target active at substep start and credits exactly `1/6` for each additional
+crossed target. This matches G's `k/6` completion budget and advances to the same next
+target; multi-cross count is logged. Reference qualification must still observe zero
+multi-gate crossings. The term is zero after first accepted contact. It does not
+terminate the episode and has no negative penalty outside a corridor.
 
 This definition gives G and P the same maximum raw shaping budget: one. Both use
 weight 8, so reward-manager dt scaling caps either treatment's actual episode return
 at `8 * 0.02 = 0.16`. The progress state is computed in C0, G, and P; only P registers
 the reward reader. This keeps treatment differences confined to reward payout.
+
+The existing G implementation is part of this contract: `newly_crossed` accumulates
+every crossing across all ten 500 Hz substeps in the current control window, the
+50 Hz reader returns `newly_crossed / 6`, and the accumulator clears only at the next
+window. Thus two crossings in one control window cannot be dropped. A regression test
+must show that all six crossings pay raw total `1.0` (actual return `0.16` at weight 8)
+regardless of whether two crossings occur in one window; the analogous P test must
+establish the same cap. Reference qualification must also prove that every target's
+`d_start > epsilon`. It must not require non-overlapping 15 mm gate disks: the frozen
+production geometry has approximately 21.1 mm center spacing, and disk overlap does
+not alter ordered active-target logic.
 
 ## Constraint state
 
@@ -101,7 +122,8 @@ contact censoring, and arm isolation. Then run the repository's mandatory reward
 impulse tests, `validate_rewards.py` A-M, `verify_contact_sensor.py`,
 `verify_reward_setup.py`, and the reference-playback gate. Run one short CUDA smoke
 for P and require finite tensors, positive progress dose, live Lambda measurement,
-and the exact registered task identity.
+and the exact registered task identity. The same smoke must exercise C0's always-on
+tracker and require finite tracker state even though C0 has no progress reward reader.
 
 No new manifest framework or broad evaluator rewrite is part of Wave 1.
 
@@ -110,10 +132,12 @@ No new manifest framework or broad evaluator rewrite is part of Wave 1.
 For every iteration-200 checkpoint produce:
 
 - one identical-reset slow-motion MP4 with the same camera, duration, and playback
-  rate; capture at every one or two 500 Hz substeps and encode at 50 fps;
+  rate; capture every two 500 Hz substeps (250 rendered frames/s of simulation) and
+  encode at 50 fps;
 - one 500 Hz x-z/x-y trajectory plot with the dashed straight reference, waypoint
   disks, control boundaries, contact, and normalized time;
-- one compact metrics row containing success, actual gate/progress return, completed
+- one compact metrics row containing code revision, asset revision, success, total
+  episode return, actual gate/progress return, completed
   waypoints, q90 pre-contact reference error, 5 mm occupancy, path-length ratio,
   backward travel, time to contact, useful contact speed, delivered impulse,
   worst per-joint Lambda/cap, and peak qvel.
