@@ -527,6 +527,516 @@ GUIDELINE_TASKS = {
   "C0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0",
   "C-Gate": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate",
 }
+GUIDELINE_CAMPAIGN = "cartesian-guideline-pilot"
+GUIDELINE_RNG = {
+  "reset_seed": 2036072919,
+  "observation_seed": 2046072933,
+  "action_seed": 2056072941,
+}
+
+
+def _constant_guideline_gate_reward(env):
+  return torch.ones(env.num_envs, device=env.device)
+
+
+def _guideline_identity_kwargs(
+  arm="C0", **overrides
+):
+  asset_revision = "b" * 40
+  values = {
+    "campaign": GUIDELINE_CAMPAIGN,
+    "env_cfg": eval_impulse.load_env_cfg(GUIDELINE_TASKS[arm], play=False),
+    "task": GUIDELINE_TASKS[arm],
+    "training_seed": 0,
+    "checkpoint_path": Path("/frozen/run/model_499.pt"),
+    "expected_checkpoint_sha256": "c" * 64,
+    "accepted_manifest_sha256": "d" * 64,
+    "training_code_revision": "e" * 40,
+    "training_asset_revision": asset_revision,
+    "code_git": {"revision": "a" * 40, "dirty": False, "status": ""},
+    "asset_git": {
+      "revision": asset_revision,
+      "dirty": False,
+      "status": "",
+    },
+  }
+  values.update(overrides)
+  return values
+
+
+@pytest.mark.parametrize("task", tuple(GUIDELINE_TASKS.values()))
+def test_guideline_campaign_accepts_only_the_frozen_rng_tuple(task):
+  eval_impulse._validate_evaluation_campaign(
+    GUIDELINE_CAMPAIGN,
+    task=task,
+    **GUIDELINE_RNG,
+  )
+
+
+@pytest.mark.parametrize(
+  ("campaign", "task", "message"),
+  (
+    (None, GUIDELINE_TASKS["C0"], "requires --campaign"),
+    (GUIDELINE_CAMPAIGN, eval_impulse.QUALITY_ARM_TASKS["FQ"], "guideline.*task"),
+    (GUIDELINE_CAMPAIGN, GUIDELINE_TASKS["C0"] + "-near-match", "guideline.*task"),
+  ),
+)
+def test_guideline_campaign_rejects_unscoped_or_nonexact_tasks(
+  campaign, task, message
+):
+  with pytest.raises(ValueError, match=message):
+    eval_impulse._validate_evaluation_campaign(
+      campaign,
+      task=task,
+      **GUIDELINE_RNG,
+    )
+
+
+@pytest.mark.parametrize("stream", tuple(GUIDELINE_RNG))
+def test_guideline_campaign_rejects_each_rng_stream_drift(stream):
+  streams = dict(GUIDELINE_RNG)
+  streams[stream] += 1
+  with pytest.raises(ValueError, match=f"guideline.*{stream.removesuffix('_seed')}"):
+    eval_impulse._validate_evaluation_campaign(
+      GUIDELINE_CAMPAIGN,
+      task=GUIDELINE_TASKS["C-Gate"],
+      **streams,
+    )
+
+
+def test_guideline_dispatch_normalizes_literal_treatment_identity_fields():
+  c0 = eval_impulse._validate_guideline_pilot_identity(
+    **_guideline_identity_kwargs("C0")
+  )
+  cgate = eval_impulse._validate_guideline_pilot_identity(
+    **_guideline_identity_kwargs("C-Gate")
+  )
+
+  expected_shared = {
+    "reset_position_range_rad": (0.0, 0.0),
+    "windup_enabled": False,
+    "impedance_mode": "fixed",
+    "imp_max_p": 0.0,
+  }
+  assert {key: c0[key] for key in expected_shared} == expected_shared
+  assert {key: cgate[key] for key in expected_shared} == expected_shared
+  assert c0["treatment_base_identity"] == cgate["treatment_base_identity"]
+  assert c0["r_gate_present"] is False
+  assert c0["r_gate_weight"] is None
+  assert cgate["r_gate_present"] is True
+  assert cgate["r_gate_weight"] == 8.0
+
+  drifted_cfg = eval_impulse.load_env_cfg(GUIDELINE_TASKS["C0"], play=False)
+  drifted_cfg.events["reset_robot_joints"].params["velocity_range"] = (-0.1, 0.1)
+  drifted = eval_impulse._validate_guideline_pilot_identity(
+    **_guideline_identity_kwargs("C0", env_cfg=drifted_cfg)
+  )
+  assert drifted["treatment_base_identity"] != c0["treatment_base_identity"]
+
+
+@pytest.mark.parametrize(
+  ("overrides", "message"),
+  (
+    ({"training_seed": 2}, "seeds 0/1"),
+    ({"checkpoint_path": Path("/frozen/run/model_498.pt")}, "model_499.pt"),
+    ({"expected_checkpoint_sha256": ""}, "expected checkpoint SHA-256"),
+    ({"accepted_manifest_sha256": ""}, "accepted manifest SHA-256"),
+    ({"training_code_revision": ""}, "training code revision"),
+    ({"training_asset_revision": ""}, "training asset revision"),
+    (
+      {"code_git": {"revision": "a" * 40, "dirty": True, "status": " M file"}},
+      "clean code provenance",
+    ),
+    (
+      {"code_git": {"revision": "unknown", "dirty": True, "status": "unavailable"}},
+      "clean code provenance",
+    ),
+    (
+      {"asset_git": {"revision": "b" * 40, "dirty": True, "status": " M asset"}},
+      "clean asset provenance",
+    ),
+    (
+      {"asset_git": {"revision": "unknown", "dirty": True, "status": "unavailable"}},
+      "clean asset provenance",
+    ),
+  ),
+)
+def test_guideline_dispatch_rejects_nonfrozen_identity_or_provenance(
+  overrides, message
+):
+  with pytest.raises((ValueError, RuntimeError), match=message):
+    eval_impulse._validate_guideline_pilot_identity(
+      **_guideline_identity_kwargs(**overrides)
+    )
+
+
+def test_guideline_main_loads_play_false_and_validates_before_checkpoint(
+  monkeypatch
+):
+  task = GUIDELINE_TASKS["C0"]
+  source_load = eval_impulse.load_env_cfg
+  calls = []
+
+  def load_training_cfg(requested, *, play=False):
+    calls.append((requested, play))
+    return source_load(requested, play=play)
+
+  def reject_native(cfg, requested):
+    assert requested == task
+    raise RuntimeError("native-guideline-sentinel")
+
+  monkeypatch.setattr(eval_impulse, "load_env_cfg", load_training_cfg)
+  monkeypatch.setattr(
+    eval_impulse, "_validate_native_guideline_env_contract", reject_native
+  )
+  monkeypatch.setattr(
+    sys,
+    "argv",
+    [
+      "eval_impulse.py",
+      "--campaign", GUIDELINE_CAMPAIGN,
+      "--task", task,
+      "--ckpt", "model_499.pt",
+      "--training-seed", "0",
+      "--expected-checkpoint-sha256", "c" * 64,
+      "--accepted-manifest-sha256", "d" * 64,
+      "--training-code-revision", "e" * 40,
+      "--training-asset-revision", "b" * 40,
+    ],
+  )
+
+  with pytest.raises(RuntimeError, match="native-guideline-sentinel"):
+    eval_impulse.main()
+  assert calls == [(task, False)]
+
+
+def test_guideline_extension_preserves_legacy_digest_literals():
+  task = eval_impulse.QUALITY_ARM_TASKS["FQ"]
+  _, cfg, _ = eval_impulse.build_strict_quality_evaluation_cfg(task, play=False)
+  contract = eval_impulse._validate_sampled_env_contract(cfg, task)
+
+  assert eval_impulse._campaign_config_digest(
+    contract=contract,
+    num_envs=256,
+    episode_len_s=4.0,
+    physics_dt_s=contract["physics_dt_s"],
+    decimation=contract["control_decimation"],
+    reset_seed=2036073019,
+    observation_seed=2046073033,
+    action_seed=2056073041,
+  ) == "831177002bdd74f661ef74f5aaec5a964f57d257721f66926605d4a07e3e5822"
+  assert eval_impulse._treatment_config_digest(
+    task=task, contract=contract
+  ) == "37146ea3b5cf0e90262179c1dfea83bda63fc377bb5445ecf38145bc4500758b"
+
+
+@pytest.fixture(scope="module")
+def guideline_autoreset_records():
+  records = {}
+  for arm, task in GUIDELINE_TASKS.items():
+    cfg = eval_impulse.load_env_cfg(task, play=False)
+    if arm == "C-Gate":
+      cfg.rewards["r_gate"].func = _constant_guideline_gate_reward
+    cfg.scene.num_envs = 1
+    cfg.episode_length_s = float(cfg.sim.mujoco.timestep * cfg.decimation)
+    env = ManagerBasedRlEnv(cfg=cfg, device="cpu", render_mode=None)
+    snapshot = eval_impulse._install_episode_hook(env)
+    collector = eval_impulse._SampledTraceCollector(
+      env,
+      snapshot=snapshot,
+      treatment=arm,
+      task=task,
+      gamma=0.99,
+      event_i_ref_n_s=0.3088,
+      nail_geometry={
+        "nail_axis": [0.0, 0.0, -1.0],
+        "nail_xy_m": [0.5, 0.0],
+        "nail_radius_m": 0.012,
+        "source_sha256": "0" * 64,
+      },
+    )
+    try:
+      env.reset()
+      action = torch.zeros(
+        (1, env.action_manager.total_action_dim), device=env.device
+      )
+      env.step(action)
+      assert len(collector.completed) == 1
+      first_reference = collector.completed[0]
+      first_frozen = copy.deepcopy(first_reference)
+      if "r_gate" in env.reward_manager.active_terms:
+        gate_idx = env.reward_manager.active_terms.index("r_gate")
+        manager_gate_payout = float(
+          env.reward_manager._step_reward[0, gate_idx] * env.step_dt
+        )
+      else:
+        manager_gate_payout = 0.0
+      env.step(action)
+      assert len(collector.completed) == 2
+      records[arm] = {
+        "first": copy.deepcopy(first_reference),
+        "second": copy.deepcopy(collector.completed[1]),
+        "first_unchanged": first_reference == first_frozen,
+        "manager_gate_payout": manager_gate_payout,
+      }
+    finally:
+      env.close()
+  return records
+
+
+def _synthetic_guideline_trace(source, *, arm="C0"):
+  trace = copy.deepcopy(source)
+  head = torch.tensor(trace["physical"]["head_position_m"], dtype=torch.float64)
+  entry = head[0].clone()
+  nail = entry.clone()
+  nail[2] -= 0.1
+  direction = nail - entry
+  progress = (
+    ((head - entry) @ direction) / torch.dot(direction, direction)
+  ).clamp(0.0, 1.0)
+  closest = entry + progress[:, None] * direction
+  errors = torch.linalg.vector_norm(head - closest, dim=-1)
+  count = len(trace["physical"]["contact"])
+  trace.update(
+    {
+      "arm": arm,
+      "task": GUIDELINE_TASKS[arm],
+      "guideline_trace_contract_version": 1,
+      "impulse_limits_n_m_s": [1.64, 3.28, 1.64, 1.64, 1.64, 1.64],
+      "guideline": {
+        "entry_m": entry.tolist(),
+        "nail_m": nail.tolist(),
+        "next_gate": [0] * count,
+        "perpendicular_error_m": errors.tolist(),
+        "disarmed": list(trace["event_trace"]["tracker_started"]),
+        "gate_reward_present": arm == "C-Gate",
+        "gate_payout": [0.0] * len(trace["action_tape"]),
+      },
+    }
+  )
+  return trace
+
+
+@pytest.mark.parametrize("arm", tuple(GUIDELINE_TASKS))
+def test_guideline_collector_persists_episode_local_aligned_tracker_state_and_payout(
+  guideline_autoreset_records, arm
+):
+  record = guideline_autoreset_records[arm]
+  trace = record["first"]
+  assert record["first_unchanged"] is True
+  assert trace["guideline_trace_contract_version"] == 1
+  guideline = trace["guideline"]
+  assert set(guideline) == {
+    "entry_m",
+    "nail_m",
+    "next_gate",
+    "perpendicular_error_m",
+    "disarmed",
+    "gate_reward_present",
+    "gate_payout",
+  }
+  count = len(trace["physical"]["contact"])
+  assert len(guideline["entry_m"]) == len(guideline["nail_m"]) == 3
+  assert guideline["entry_m"] == pytest.approx(
+    trace["physical"]["head_position_m"][0]
+  )
+  assert len(guideline["next_gate"]) == count
+  assert len(guideline["perpendicular_error_m"]) == count
+  assert len(guideline["disarmed"]) == count
+  assert len(guideline["gate_payout"]) == len(trace["action_tape"]) == 1
+  assert guideline["gate_reward_present"] is (arm == "C-Gate")
+  if arm == "C-Gate":
+    assert record["manager_gate_payout"] > 0.0
+  else:
+    assert record["manager_gate_payout"] == 0.0
+  assert guideline["gate_payout"] == pytest.approx(
+    [record["manager_gate_payout"]]
+  )
+  assert all(
+    later >= earlier
+    for earlier, later in zip(
+      guideline["next_gate"], guideline["next_gate"][1:]
+    )
+  )
+  assert eval_impulse._validated_physical_trace_digest(
+    trace, require_recorded_digest=True
+  ) == trace["trace_digest"]
+
+
+@pytest.mark.parametrize(
+  "mutate",
+  (
+    lambda trace: trace["guideline"]["entry_m"].__setitem__(0, 0.25),
+    lambda trace: trace["guideline"]["nail_m"].__setitem__(2, -0.25),
+    lambda trace: trace["guideline"]["next_gate"].__setitem__(0, 1),
+    lambda trace: trace["guideline"]["perpendicular_error_m"].__setitem__(0, 0.01),
+    lambda trace: trace["guideline"]["disarmed"].__setitem__(0, True),
+    lambda trace: trace["guideline"].__setitem__("gate_reward_present", True),
+    lambda trace: trace["guideline"]["gate_payout"].__setitem__(0, 0.1),
+    lambda trace: trace["impulse_limits_n_m_s"].__setitem__(0, 1.63),
+  ),
+)
+def test_guideline_trace_digest_binds_every_additive_field(
+  guideline_autoreset_records, mutate
+):
+  trace = _synthetic_guideline_trace(
+    guideline_autoreset_records["C0"]["first"]
+  )
+  baseline = eval_impulse._physical_trace_digest(trace)
+  mutate(trace)
+  assert eval_impulse._physical_trace_digest(trace) != baseline
+
+
+@pytest.mark.parametrize(
+  "missing",
+  (
+    "entry_m",
+    "nail_m",
+    "next_gate",
+    "perpendicular_error_m",
+    "disarmed",
+    "gate_reward_present",
+    "gate_payout",
+    "guideline_trace_contract_version",
+    "impulse_limits_n_m_s",
+  ),
+)
+def test_guideline_trace_validation_rejects_each_missing_channel(
+  guideline_autoreset_records, missing
+):
+  trace = _synthetic_guideline_trace(
+    guideline_autoreset_records["C0"]["first"]
+  )
+  if missing in trace:
+    trace.pop(missing)
+  else:
+    trace["guideline"].pop(missing)
+  with pytest.raises(ValueError, match="guideline"):
+    eval_impulse._validated_physical_trace_digest(
+      trace, require_recorded_digest=False
+    )
+
+
+@pytest.mark.parametrize(
+  "mutate",
+  (
+    lambda trace: trace.__setitem__("guideline_trace_contract_version", 2),
+    lambda trace: trace.__setitem__("guideline_trace_contract_version", 1.0),
+    lambda trace: trace["guideline"]["entry_m"].__setitem__(0, float("nan")),
+    lambda trace: trace["guideline"]["perpendicular_error_m"].__setitem__(0, -0.1),
+    lambda trace: trace["guideline"]["next_gate"].__setitem__(0, 7),
+    lambda trace: trace["guideline"]["next_gate"].__setitem__(0, 0.5),
+    lambda trace: trace["guideline"]["next_gate"].__setitem__(
+      slice(0, 3), [0, 1, 0]
+    ),
+    lambda trace: trace["guideline"]["disarmed"].__setitem__(
+      slice(0, 3), [False, True, False]
+    ),
+    lambda trace: trace["guideline"]["next_gate"].pop(),
+    lambda trace: trace["guideline"]["gate_payout"].append(0.0),
+    lambda trace: trace["guideline"]["gate_payout"].__setitem__(0, 0.1),
+    lambda trace: trace["guideline"].__setitem__("gate_reward_present", True),
+  ),
+)
+def test_guideline_trace_validation_fails_closed_on_malformed_or_c0_inconsistent_values(
+  guideline_autoreset_records, mutate
+):
+  trace = _synthetic_guideline_trace(
+    guideline_autoreset_records["C0"]["first"]
+  )
+  mutate(trace)
+  with pytest.raises(ValueError, match="guideline"):
+    eval_impulse._validated_physical_trace_digest(
+      trace, require_recorded_digest=False
+    )
+
+
+def test_guideline_trace_validation_rejects_cgate_absence(
+  guideline_autoreset_records
+):
+  trace = _synthetic_guideline_trace(
+    guideline_autoreset_records["C-Gate"]["first"], arm="C-Gate"
+  )
+  trace["guideline"]["gate_reward_present"] = False
+  with pytest.raises(ValueError, match="guideline"):
+    eval_impulse._validated_physical_trace_digest(
+      trace, require_recorded_digest=False
+    )
+
+
+def test_guideline_seed_fields_use_pure_reducer_and_bind_reset_geometry(
+  guideline_autoreset_records
+):
+  episodes = [
+    _synthetic_guideline_trace(trace)
+    for trace in (
+      guideline_autoreset_records["C0"]["first"],
+      guideline_autoreset_records["C0"]["second"],
+    )
+  ]
+  contract = eval_impulse._validate_guideline_pilot_identity(
+    **_guideline_identity_kwargs("C0")
+  )
+
+  fields = eval_impulse._guideline_seed_trace_fields(
+    episodes,
+    contract=contract,
+    expected_episode_count=2,
+  )
+
+  assert fields["q90_terminal_descent_perpendicular_error_m_sampled"] == 0.050
+  assert fields["all_six_gates_rate_sampled"] == 0.0
+  assert fields["actual_gate_return_total_sampled"] == 0.0
+  assert fields["gate_reward_present"] is False
+  assert fields["reset_digest"] == episodes[0]["reset_state_digest"]
+  assert len(fields["guideline_geometry_digest"]) == 64
+  assert {
+    "checkpoint_filename",
+    "reset_position_range_rad",
+    "windup_enabled",
+    "impedance_mode",
+    "r_gate_present",
+    "r_gate_weight",
+    "treatment_base_identity",
+    "gate_reward_present",
+    "reset_digest",
+    "guideline_geometry_digest",
+    "q90_terminal_descent_perpendicular_error_m_sampled",
+    "all_six_gates_rate_sampled",
+    "corridor_occupancy_mean_sampled",
+    "backward_progress_count_mean_sampled",
+    "actual_gate_return_total_sampled",
+  } <= set(eval_impulse.FIELDNAMES)
+
+
+def test_guideline_persistence_banks_contract_version(
+  tmp_path, guideline_autoreset_records
+):
+  trace = _synthetic_guideline_trace(
+    guideline_autoreset_records["C0"]["first"]
+  )
+  trace["trace_digest"] = eval_impulse._physical_trace_digest(trace)
+  contract = eval_impulse._validate_guideline_pilot_identity(
+    **_guideline_identity_kwargs("C0")
+  )
+  artifact = eval_impulse._persist_sampled_traces(
+    out_dir=tmp_path,
+    name="guideline-C0-seed0",
+    sampled_rec={"control_steps": 1, "episodes": [trace]},
+    task=GUIDELINE_TASKS["C0"],
+    contract=contract,
+    training_seed=0,
+    reset_seed=GUIDELINE_RNG["reset_seed"],
+    observation_seed=GUIDELINE_RNG["observation_seed"],
+    action_seed=GUIDELINE_RNG["action_seed"],
+    nail_geometry=trace["nail_geometry"],
+    provenance={"checkpoint_sha256": "c" * 64},
+    mean_rollout_invariants={},
+  )
+  with eval_impulse.np.load(artifact["path"], allow_pickle=False) as saved:
+    payload = json.loads(eval_impulse.decode_payload_json(saved))
+  assert payload["guideline_trace_contract_version"] == 1
+  assert payload["episodes"][0]["guideline"] == trace["guideline"]
 
 
 @pytest.mark.parametrize(("arm", "task"), tuple(GUIDELINE_TASKS.items()))

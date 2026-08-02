@@ -57,6 +57,7 @@ from src.tasks.hammer.mdp.impulse_bound import _ENV_SUBSTEP_DELIVERED_ATTR, _ENV
 from src.tasks.hammer.mdp.guideline import (
   GUIDELINE_NUM_GATES,
   WaypointProgressTracker,
+  _ENV_GUIDELINE_ATTR,
   completed_gate_fraction,
   guideline_perpendicular_error,
   next_gate_vector,
@@ -87,6 +88,10 @@ from evaluation.analysis.first_strike_campaign import (
   load_frozen_nail_geometry,
   summarize_episode,
 )
+from evaluation.analysis.guideline_campaign import (
+  aggregate_guideline_seed,
+  summarize_guideline_episode,
+)
 
 ARM_JOINTS = ("joint1", "joint2", "joint3", "joint4", "joint5", "joint6")
 LITERAL_IMPULSE_LIMITS_N_M_S = (1.64, 3.28, 1.64, 1.64, 1.64, 1.64)
@@ -115,12 +120,22 @@ FQ3X8_EVALUATION_RNG = {
   "observation": 2046073033,
   "action": 2056073041,
 }
+GUIDELINE_PILOT_CAMPAIGN = "cartesian-guideline-pilot"
+# Preserve the evaluator's already-frozen default RNG tuple for the excluded
+# guideline pilot.  Requiring it explicitly prevents one arm/seed from being
+# evaluated under a different stochastic population.
+GUIDELINE_PILOT_EVALUATION_RNG = {
+  "reset": 2036072919,
+  "observation": 2046072933,
+  "action": 2056072941,
+}
 RESET_SEED_OFFSET = 10_000_019
 OBSERVATION_SEED_OFFSET = 20_000_033
 ACTION_SEED_OFFSET = 30_000_041
 # D2 (2026-07-27): exact-episode-replay contract version. Bump only alongside
 # a change to what `reset_state` banks or how it is validated/restored.
 RESET_CONTRACT_VERSION = 1
+GUIDELINE_TRACE_CONTRACT_VERSION = 1
 _RESET_STATE_REALIZED_KEYS = (
   "robot_joint_pos", "robot_joint_vel", "nail_joint_pos", "nail_joint_vel",
 )
@@ -134,6 +149,8 @@ PAYOUT_SEMANTICS = {
   "D0": "actual_event_linear_delivered_disabled",
   "FQ": "actual_event_quality_bounded",
   "B8": "actual_event_center_blind_bounded",
+  "C0": "actual_event_linear_gate_absent",
+  "C-Gate": "actual_event_linear_plus_actual_ordered_gate",
 }
 
 _TRACE_PHYSICAL_KEYS = (
@@ -162,6 +179,17 @@ _TRACE_FIRST_STRIKE_PHYSICAL_KEYS = (
 _TRACE_EPISODE_PHYSICAL_KEYS = (
   "overall_success", "episode_peak_lambda",
   "episode_delivered_accumulator_n_s", "episode_depth_m",
+)
+_TRACE_GUIDELINE_KEYS = (
+  "entry_m", "nail_m", "next_gate", "perpendicular_error_m", "disarmed",
+  "gate_reward_present", "gate_payout",
+)
+_GUIDELINE_SAMPLED_FIELDS = (
+  "q90_terminal_descent_perpendicular_error_m_sampled",
+  "all_six_gates_rate_sampled",
+  "corridor_occupancy_mean_sampled",
+  "backward_progress_count_mean_sampled",
+  "actual_gate_return_total_sampled",
 )
 _INSTRUMENTATION_ONLY_TRACE_KEYS = {
   "physical": {
@@ -214,6 +242,11 @@ FIELDNAMES = [
   "sampled_trace_path", "sampled_trace_digest",
   "sampled_trace_artifact_sha256", "campaign_config_sha256",
   "treatment_config_sha256",
+  "checkpoint_filename", "reset_position_range_rad", "windup_enabled",
+  "impedance_mode", "r_gate_present", "r_gate_weight",
+  "treatment_base_identity", "gate_reward_present", "reset_digest",
+  "guideline_geometry_digest",
+  *_GUIDELINE_SAMPLED_FIELDS,
   "nail_asset_sha256", "host", "timestamp_utc",
   "git_hash", "git_revision", "git_dirty",
   "asset_git_hash", "asset_git_revision", "asset_git_dirty",
@@ -282,11 +315,94 @@ def _physical_trace_payload(trace: Mapping) -> dict:
   # actually get cross-bound.
   if "reset_state_digest" in trace:
     payload["reset"] = {"reset_state_digest": trace["reset_state_digest"]}
+  if "guideline_trace_contract_version" in trace:
+    version = trace["guideline_trace_contract_version"]
+    if type(version) is not int or version != GUIDELINE_TRACE_CONTRACT_VERSION:
+      raise ValueError(
+        "guideline_trace_contract_version must be literal version 1"
+      )
+    guideline = trace.get("guideline")
+    if not isinstance(guideline, Mapping):
+      raise ValueError("guideline trace missing guideline mapping")
+    missing_guideline = [
+      key for key in _TRACE_GUIDELINE_KEYS if key not in guideline
+    ]
+    if missing_guideline:
+      raise ValueError(
+        f"guideline trace missing channels: {missing_guideline}"
+      )
+    payload["guideline_trace_contract_version"] = version
+    if "impulse_limits_n_m_s" not in trace:
+      raise ValueError("guideline trace missing impulse_limits_n_m_s")
+    payload["impulse_limits_n_m_s"] = trace["impulse_limits_n_m_s"]
+    payload["guideline"] = {
+      key: guideline[key] for key in _TRACE_GUIDELINE_KEYS
+    }
   return payload
 
 
 def _physical_trace_digest(trace: Mapping) -> str:
   return _canonical_digest(_physical_trace_payload(trace))
+
+
+def _validate_guideline_trace(trace: Mapping) -> None:
+  """Fail closed on the additive, treatment-aware guideline trace contract."""
+  task = str(trace.get("task", ""))
+  arm = str(trace.get("arm", ""))
+  expected_arm = GUIDELINE_TASK_TO_ARM.get(task)
+  has_version = "guideline_trace_contract_version" in trace
+  if expected_arm is None and arm not in GUIDELINE_ARM_TASKS:
+    if has_version or "guideline" in trace:
+      raise ValueError("guideline trace contract cannot label a legacy task")
+    return
+  if expected_arm is None or arm != expected_arm:
+    raise ValueError("guideline trace task/treatment identity mismatch")
+  if not has_version:
+    raise ValueError("guideline trace missing guideline_trace_contract_version")
+  guideline = trace["guideline"]
+  try:
+    summarize_guideline_episode(trace)
+  except ValueError as error:
+    raise ValueError(f"guideline trace invalid: {error}") from error
+
+  head = np.asarray(trace["physical"]["head_position_m"], dtype=np.float64)
+  count = len(head)
+  entry = np.asarray(guideline["entry_m"], dtype=np.float64)
+  nail = np.asarray(guideline["nail_m"], dtype=np.float64)
+  direction = nail - entry
+  length_sq = float(np.dot(direction, direction))
+  next_gate = np.asarray(guideline["next_gate"], dtype=np.float64)
+  errors = np.asarray(guideline["perpendicular_error_m"], dtype=np.float64)
+  disarmed = np.asarray(guideline["disarmed"], dtype=np.float64)
+  if (
+    np.any(np.diff(next_gate) < 0.0)
+    or (count and next_gate[0] != 0.0)
+  ):
+    raise ValueError("guideline.next_gate must begin at zero and be monotone")
+  if np.any(np.diff(disarmed) < 0.0):
+    raise ValueError("guideline.disarmed must be a monotone boolean stream")
+  tracker_started = np.asarray(
+    trace["event_trace"]["tracker_started"], dtype=bool
+  )
+  if tracker_started.shape != (count,) or not np.array_equal(
+    disarmed.astype(bool), tracker_started
+  ):
+    raise ValueError("guideline.disarmed must agree with first-strike acceptance")
+
+  progress = np.clip(((head - entry) @ direction) / length_sq, 0.0, 1.0)
+  closest = entry + progress[:, None] * direction
+  expected_errors = np.linalg.norm(head - closest, axis=-1)
+  if not np.allclose(errors, expected_errors, rtol=0.0, atol=1e-6):
+    raise ValueError("guideline perpendicular error disagrees with frozen geometry")
+
+  gate_reward_present = guideline["gate_reward_present"]
+  payouts = np.asarray(guideline["gate_payout"], dtype=np.float64)
+  control_count = len(trace.get("action_tape", ()))
+  if payouts.shape != (control_count,):
+    raise ValueError("guideline.gate_payout must be a control-rate stream")
+  expected_present = arm == "C-Gate"
+  if gate_reward_present is not expected_present:
+    raise ValueError("guideline gate-reward presence disagrees with treatment")
 
 
 def _validated_physical_trace_digest(
@@ -296,6 +412,7 @@ def _validated_physical_trace_digest(
   payload = _physical_trace_payload(trace)
   _require_finite_trace_value(payload, path="sampled_trace")
   _validate_quality_trace(trace)
+  _validate_guideline_trace(trace)
   digest = _canonical_digest(payload)
   if require_recorded_digest and str(trace.get("trace_digest", "")) != digest:
     raise ValueError("recorded physical trace digest mismatch")
@@ -1239,6 +1356,14 @@ def _treatment_config_digest(*, task: str, contract: dict) -> str:
         "delivered_saturate": bool(contract["delivered_saturate"]),
       }
     )
+  elif treatment in GUIDELINE_ARM_TASKS:
+    identity.update(
+      {
+        "treatment_base_identity": str(contract["treatment_base_identity"]),
+        "r_gate_present": bool(contract["r_gate_present"]),
+        "r_gate_weight": contract["r_gate_weight"],
+      }
+    )
   return _canonical_digest(identity)
 
 
@@ -1265,6 +1390,7 @@ class _SampledTraceCollector:
     nail_geometry: dict,
     reset_seed: int = 0,
     initial_reset_states: Mapping[int, Mapping] | None = None,
+    impulse_limits_n_m_s=LITERAL_IMPULSE_LIMITS_N_M_S,
   ):
     self.env = env
     self.snapshot = snapshot
@@ -1273,6 +1399,9 @@ class _SampledTraceCollector:
     self.gamma = float(gamma)
     self.event_i_ref_n_s = float(event_i_ref_n_s)
     self.nail_geometry = copy.deepcopy(nail_geometry)
+    self.impulse_limits_n_m_s = [
+      float(value) for value in impulse_limits_n_m_s
+    ]
     self.completed: list[dict] = []
     self.accepted_counts = [0] * env.num_envs
     self._seen_counts = [0] * env.num_envs
@@ -1310,9 +1439,13 @@ class _SampledTraceCollector:
         "event_cumulative_transverse_impulse_n_s",
       )
     }
+    self._guideline_substeps: dict[str, list[torch.Tensor]] = {
+      key: [] for key in ("next_gate", "perpendicular_error_m", "disarmed")
+    }
     self._actions: list[torch.Tensor] = []
     self._impact_payout: list[torch.Tensor] = []
     self._delivered_payout: list[torch.Tensor] = []
+    self._gate_payout: list[torch.Tensor] = []
 
     robot = env.scene["robot"]
     nail = env.scene["nail_block"]
@@ -1333,6 +1466,13 @@ class _SampledTraceCollector:
     self._tracker = getattr(env, _ENV_FIRST_STRIKE_ATTR, None)
     if self._tracker is None:
       raise RuntimeError("sampled evaluator requires FirstStrikeEventTracker")
+    self._guideline_tracker = getattr(env, _ENV_GUIDELINE_ATTR, None)
+    if self.treatment in GUIDELINE_ARM_TASKS and not isinstance(
+      self._guideline_tracker, WaypointProgressTracker
+    ):
+      raise RuntimeError(
+        "guideline sampled evaluator requires WaypointProgressTracker"
+      )
     try:
       self._quality_sensor = env.scene["hammer_nail_quality"]
     except KeyError:
@@ -1340,6 +1480,11 @@ class _SampledTraceCollector:
     names = env.reward_manager.active_terms
     self._impact_idx = names.index("impact_progress")
     self._delivered_idx = names.index("delivered_impulse")
+    self._gate_idx = names.index("r_gate") if "r_gate" in names else None
+    if self.treatment == "C0" and self._gate_idx is not None:
+      raise RuntimeError("C0 sampled evaluator requires literal r_gate absence")
+    if self.treatment == "C-Gate" and self._gate_idx is None:
+      raise RuntimeError("C-Gate sampled evaluator requires r_gate")
     self._axis = torch.tensor(
       self.nail_geometry["nail_axis"], dtype=torch.float32, device=env.device
     )
@@ -1451,6 +1596,16 @@ class _SampledTraceCollector:
       self._substeps["event_cumulative_transverse_impulse_n_s"].append(
         self._tracker.delivered_transverse.detach().clone()
       )
+      if isinstance(self._guideline_tracker, WaypointProgressTracker):
+        self._guideline_substeps["next_gate"].append(
+          self._guideline_tracker.next_gate.detach().clone()
+        )
+        self._guideline_substeps["perpendicular_error_m"].append(
+          guideline_perpendicular_error(self.env).squeeze(-1).detach().clone()
+        )
+        self._guideline_substeps["disarmed"].append(
+          self._guideline_tracker.disarmed.detach().clone()
+        )
       if self._quality_sensor is None:
         batch = self.env.num_envs
         device = self.env.device
@@ -1495,6 +1650,15 @@ class _SampledTraceCollector:
       self._delivered_payout.append(
         (step_reward[:, self._delivered_idx] * self.env.step_dt).detach().clone()
       )
+      if isinstance(self._guideline_tracker, WaypointProgressTracker):
+        gate_payout = (
+          step_reward[:, self._gate_idx] * self.env.step_dt
+          if self._gate_idx is not None
+          else torch.zeros(
+            self.env.num_envs, device=self.env.device, dtype=step_reward.dtype
+          )
+        )
+        self._gate_payout.append(gate_payout.detach().clone())
       done_ids = torch.nonzero(self.env.reset_buf, as_tuple=False).flatten()
       for env_id in done_ids.tolist():
         self._capture_completed(env_id)
@@ -1514,6 +1678,13 @@ class _SampledTraceCollector:
     if not selected:
       raise RuntimeError("completed episode has no captured control steps")
     return torch.stack([value[env_id] for value in selected])
+
+  def _slice_guideline_substep(self, key: str, env_id: int) -> torch.Tensor:
+    start = self._substep_start[env_id]
+    values = self._guideline_substeps[key][start:]
+    if not values:
+      raise RuntimeError("completed guideline episode has no captured substeps")
+    return torch.stack([value[env_id] for value in values])
 
   def _reset_state_for(self, env_id: int, ordinal: int) -> dict:
     """The banked reset_state that produced episode `ordinal` for `env_id`.
@@ -1626,6 +1797,31 @@ class _SampledTraceCollector:
       ),
       "episode_depth_m": float(self.snapshot["depth"][env_id]),
     }
+    if isinstance(self._guideline_tracker, WaypointProgressTracker):
+      gate_payout = self._slice_control(self._gate_payout, env_id)
+      trace.update(
+        {
+          "guideline_trace_contract_version": GUIDELINE_TRACE_CONTRACT_VERSION,
+          "impulse_limits_n_m_s": list(self.impulse_limits_n_m_s),
+          "guideline": {
+            "entry_m": _json_values(self._guideline_tracker.entry[env_id]),
+            "nail_m": _json_values(self._guideline_tracker.nail[env_id]),
+            "next_gate": _json_values(
+              self._slice_guideline_substep("next_gate", env_id)
+            ),
+            "perpendicular_error_m": _json_values(
+              self._slice_guideline_substep(
+                "perpendicular_error_m", env_id
+              )
+            ),
+            "disarmed": _json_values(
+              self._slice_guideline_substep("disarmed", env_id)
+            ),
+            "gate_reward_present": self._gate_idx is not None,
+            "gate_payout": _json_values(gate_payout),
+          },
+        }
+      )
     trace["reset_state_digest"] = _validated_reset_state_digest(
       trace, require_recorded_digest=False
     )
@@ -1769,6 +1965,50 @@ def _rollout(
   }
 
 
+def _guideline_seed_trace_fields(
+  episodes: list[Mapping],
+  *,
+  contract: Mapping,
+  expected_episode_count: int = EXPECTED_EPISODES_PER_SEED,
+) -> dict:
+  """Reduce one fixed-reset guideline seed and bind shared trace identities."""
+  if str(contract.get("treatment")) not in GUIDELINE_ARM_TASKS:
+    raise ValueError("guideline seed fields require a C0/C-Gate contract")
+  summary = aggregate_guideline_seed(
+    episodes, expected_count=expected_episode_count
+  )
+  for trace in episodes:
+    _validated_physical_trace_digest(trace, require_recorded_digest=False)
+
+  reset_digests = {str(trace.get("reset_state_digest", "")) for trace in episodes}
+  if "" in reset_digests or len(reset_digests) != 1:
+    raise ValueError("guideline fixed-reset digest drift across sampled episodes")
+  geometry_payloads = [
+    {
+      "entry_m": trace["guideline"]["entry_m"],
+      "nail_m": trace["guideline"]["nail_m"],
+    }
+    for trace in episodes
+  ]
+  geometry_digests = {
+    _canonical_digest(payload) for payload in geometry_payloads
+  }
+  if len(geometry_digests) != 1:
+    raise ValueError("guideline geometry drift across sampled episodes")
+  gate_presence = {
+    trace["guideline"]["gate_reward_present"] for trace in episodes
+  }
+  expected_presence = bool(contract["r_gate_present"])
+  if gate_presence != {expected_presence}:
+    raise ValueError("guideline gate-reward presence drift across sampled episodes")
+  return {
+    **{key: summary[key] for key in _GUIDELINE_SAMPLED_FIELDS},
+    "gate_reward_present": expected_presence,
+    "reset_digest": next(iter(reset_digests)),
+    "guideline_geometry_digest": next(iter(geometry_digests)),
+  }
+
+
 def _rollout_balanced_sampled(
   env_cfg,
   agent_cfg,
@@ -1802,6 +2042,7 @@ def _rollout_balanced_sampled(
     event_i_ref_n_s=contract["event_i_ref_n_s"],
     nail_geometry=nail_geometry,
     reset_seed=reset_seed,
+    impulse_limits_n_m_s=contract["impulse_limits_n_m_s"],
   )
   wrapped = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
   runner = runner_cls(wrapped, asdict(agent_cfg), device=device)
@@ -1855,6 +2096,16 @@ def _rollout_balanced_sampled(
   aggregate = aggregate_episode_metrics(
     episode_metrics, expected_episode_count=EXPECTED_EPISODES_PER_SEED
   )
+  guideline_fields = {}
+  if contract["treatment"] in GUIDELINE_ARM_TASKS:
+    guideline_fields = _guideline_seed_trace_fields(
+      selected,
+      contract=contract,
+      expected_episode_count=EXPECTED_EPISODES_PER_SEED,
+    )
+    aggregate.update(
+      {key: guideline_fields[key] for key in _GUIDELINE_SAMPLED_FIELDS}
+    )
   result = {
     "lam": [
       torch.tensor(trace["episode_peak_lambda"], dtype=torch.float32)
@@ -1871,6 +2122,8 @@ def _rollout_balanced_sampled(
     "sampled_aggregate": aggregate,
     "control_steps": control_steps,
   }
+  if guideline_fields:
+    result["guideline_fields"] = guideline_fields
   env.close()
   return result
 
@@ -1896,6 +2149,12 @@ def _persist_sampled_traces(
       _validated_physical_trace_digest(trace, require_recorded_digest=True)
     if "reset_state" in trace:
       _validated_reset_state_digest(trace, require_recorded_digest=True)
+  weights = {
+    "impact_progress": contract["impact_weight"],
+    "delivered_impulse": contract["delivered_weight"],
+  }
+  if bool(contract.get("r_gate_present")):
+    weights["r_gate"] = contract["r_gate_weight"]
   payload = {
     "schema_version": 3,
     "selection": "first two completed episodes from each of 256 environments",
@@ -1903,10 +2162,7 @@ def _persist_sampled_traces(
     "treatment": contract["treatment"],
     "task": task,
     "training_seed": training_seed,
-    "weights": {
-      "impact_progress": contract["impact_weight"],
-      "delivered_impulse": contract["delivered_weight"],
-    },
+    "weights": weights,
     "event_i_ref_n_s": contract["event_i_ref_n_s"],
     "impulse_limits_n_m_s": contract["impulse_limits_n_m_s"],
     "imp_max_p": 0.0,
@@ -1922,6 +2178,10 @@ def _persist_sampled_traces(
     "control_steps_until_quota": sampled_rec["control_steps"],
     "episodes": sampled_rec["episodes"],
   }
+  if contract["treatment"] in GUIDELINE_ARM_TASKS:
+    payload["guideline_trace_contract_version"] = (
+      GUIDELINE_TRACE_CONTRACT_VERSION
+    )
   digest = _canonical_digest(payload)
   payload["payload_digest"] = digest
   safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", name)
@@ -2021,19 +2281,117 @@ def _validate_evaluation_campaign(
 ) -> None:
   """Enforce campaign-specific identity without changing unscoped evaluations."""
   if campaign is None:
+    if task in GUIDELINE_TASK_TO_ARM:
+      raise ValueError(
+        "guideline evaluation requires --campaign cartesian-guideline-pilot"
+      )
     return
-  if task not in FQ3X8_TASKS:
-    raise ValueError(f"fq3x8 evaluation requires a registered fq3x8 task, got {task}")
+  if campaign == "fq3x8":
+    allowed_tasks = FQ3X8_TASKS
+    expected_rng = FQ3X8_EVALUATION_RNG
+    label = "fq3x8"
+  elif campaign == GUIDELINE_PILOT_CAMPAIGN:
+    allowed_tasks = frozenset(GUIDELINE_TASK_TO_ARM)
+    expected_rng = GUIDELINE_PILOT_EVALUATION_RNG
+    label = "guideline pilot"
+  else:
+    raise ValueError(f"unknown evaluation campaign {campaign!r}")
+  if task not in allowed_tasks:
+    raise ValueError(
+      f"{label} evaluation requires a registered {label} task, got {task}"
+    )
   for stream, actual in (
     ("reset", reset_seed),
     ("observation", observation_seed),
     ("action", action_seed),
   ):
-    expected = FQ3X8_EVALUATION_RNG[stream]
+    expected = expected_rng[stream]
     if actual != expected:
       raise ValueError(
-        f"fq3x8 evaluation requires {stream} RNG seed {expected}, got {actual}"
+        f"{label} evaluation requires {stream} RNG seed {expected}, got {actual}"
       )
+
+
+def _validate_guideline_pilot_identity(
+  *,
+  campaign: str | None,
+  env_cfg,
+  task: str,
+  training_seed: int,
+  checkpoint_path: str | Path,
+  expected_checkpoint_sha256: str,
+  accepted_manifest_sha256: str,
+  training_code_revision: str,
+  training_asset_revision: str,
+  code_git: Mapping,
+  asset_git: Mapping,
+) -> dict:
+  """Bind one excluded-pilot row to its native config and frozen provenance."""
+  if campaign != GUIDELINE_PILOT_CAMPAIGN or task not in GUIDELINE_TASK_TO_ARM:
+    raise ValueError(
+      "guideline pilot identity requires its exact campaign and registered task"
+    )
+
+  # The reviewed native validator is the single authority for reset, tracker,
+  # action, gains, impulse caps, timing, observations, and literal r_gate drift.
+  contract = dict(_validate_native_guideline_env_contract(env_cfg, task))
+  if (
+    isinstance(training_seed, bool)
+    or not isinstance(training_seed, int)
+    or training_seed not in (0, 1)
+  ):
+    raise ValueError("guideline pilot permits only training seeds 0/1")
+  if Path(checkpoint_path).name != "model_499.pt":
+    raise ValueError("guideline pilot requires final checkpoint model_499.pt")
+
+  frozen_inputs = (
+    ("expected checkpoint SHA-256", expected_checkpoint_sha256, 64),
+    ("accepted manifest SHA-256", accepted_manifest_sha256, 64),
+    ("training code revision", training_code_revision, 40),
+    ("training asset revision", training_asset_revision, 40),
+  )
+  for label, value, length in frozen_inputs:
+    if len(value) != length or any(
+      character not in "0123456789abcdefABCDEF" for character in value
+    ):
+      raise ValueError(f"guideline pilot {label} must be frozen")
+
+  for label, provenance in (("code", code_git), ("asset", asset_git)):
+    revision = str(provenance.get("revision", "unknown"))
+    if (
+      bool(provenance.get("dirty", True))
+      or len(revision) != 40
+      or any(
+        character not in "0123456789abcdefABCDEF" for character in revision
+      )
+    ):
+      raise RuntimeError(
+        f"guideline pilot requires clean {label} provenance"
+      )
+  if str(asset_git["revision"]) != training_asset_revision:
+    raise RuntimeError("guideline pilot training/evaluation asset revision mismatch")
+
+  base_cfg = copy.deepcopy(env_cfg)
+  base_cfg.rewards.pop("r_gate", None)
+  r_gate_present = "r_gate" in env_cfg.rewards
+  contract.update(
+    {
+      "reset_position_range_rad": (0.0, 0.0),
+      "windup_enabled": False,
+      "impedance_mode": "fixed",
+      "imp_max_p": 0.0,
+      "r_gate_present": r_gate_present,
+      "r_gate_weight": (
+        float(env_cfg.rewards["r_gate"].weight)
+        if r_gate_present else None
+      ),
+      "treatment_base_identity": _canonical_digest(
+        _freeze_config_value(base_cfg)
+      ),
+      "payout_semantics": PAYOUT_SEMANTICS[contract["treatment"]],
+    }
+  )
+  return contract
 
 
 def _enforce_postwrite_invariants(
@@ -2090,13 +2448,18 @@ def _enforce_postwrite_invariants(
 def main() -> None:
   ap = argparse.ArgumentParser()
   ap.add_argument("--task", default="Unitree-Z1-Hammer-CaT-Impulse",
-                  choices=tuple(TASK_TO_ARM | QUALITY_TASK_TO_ARM),
+                  choices=tuple(
+                    TASK_TO_ARM | QUALITY_TASK_TO_ARM | GUIDELINE_TASK_TO_ARM
+                  ),
                   help="exact registered C/D-prime/F/E treatment task used to train this checkpoint")
   ap.add_argument(
     "--campaign",
-    choices=("fq3x8",),
+    choices=("fq3x8", GUIDELINE_PILOT_CAMPAIGN),
     default=None,
-    help="optional frozen evaluation contract; fq3x8 binds its three arms and RNG streams",
+    help=(
+      "optional frozen evaluation contract; fq3x8 binds its three arms and RNG "
+      "streams, while cartesian-guideline-pilot exclusively admits C0/C-Gate"
+    ),
   )
   ap.add_argument("--ckpt", required=True, help="checkpoint .pt path")
   ap.add_argument("--name", default=None, help="row label; defaults to the checkpoint's parent dir name")
@@ -2218,7 +2581,26 @@ def main() -> None:
   env_cfg.metrics["cat_soft"].params["imp_max_p"] = args.imp_max_p
   if args.task not in QUALITY_TASK_TO_ARM:
     _ensure_first_strike_instrumentation(env_cfg)
-  contract = _validate_sampled_env_contract(env_cfg, args.task)
+  if args.task in GUIDELINE_TASK_TO_ARM:
+    code_repo = Path(__file__).resolve().parents[1]
+    asset_repo = Path(args.nail_asset).resolve().parents[2]
+    code_git = _git_provenance(code_repo)
+    asset_git = _git_provenance(asset_repo)
+    contract = _validate_guideline_pilot_identity(
+      campaign=args.campaign,
+      env_cfg=env_cfg,
+      task=args.task,
+      training_seed=training_seed,
+      checkpoint_path=args.ckpt,
+      expected_checkpoint_sha256=args.expected_checkpoint_sha256,
+      accepted_manifest_sha256=args.accepted_manifest_sha256,
+      training_code_revision=args.training_code_revision,
+      training_asset_revision=args.training_asset_revision,
+      code_git=code_git,
+      asset_git=asset_git,
+    )
+  else:
+    contract = _validate_sampled_env_contract(env_cfg, args.task)
   agent_cfg = load_rl_cfg(args.task)
   runner_cls = load_runner_cls(args.task) or MjlabOnPolicyRunner
   nail_geometry = load_frozen_nail_geometry(args.nail_asset)
@@ -2226,8 +2608,9 @@ def main() -> None:
   out_dir = Path(args.out)
   out_dir.mkdir(parents=True, exist_ok=True)
   code_repo = Path(__file__).resolve().parents[1]
-  code_git = _git_provenance(code_repo)
-  asset_git = _git_provenance(asset_repo)
+  if args.task not in GUIDELINE_TASK_TO_ARM:
+    code_git = _git_provenance(code_repo)
+    asset_git = _git_provenance(asset_repo)
   if all(manifest_identity):
     # Code revision is intentionally NOT required to equal the training
     # revision: a persistence/provenance-only fix can legitimately land in
@@ -2415,6 +2798,18 @@ def main() -> None:
     if asset_git["dirty"]
     else str(asset_git["revision"])
   )
+  guideline_row_fields = {}
+  if args.task in GUIDELINE_TASK_TO_ARM:
+    guideline_row_fields = {
+      "checkpoint_filename": Path(checkpoint_path).name,
+      "reset_position_range_rad": contract["reset_position_range_rad"],
+      "windup_enabled": contract["windup_enabled"],
+      "impedance_mode": contract["impedance_mode"],
+      "r_gate_present": contract["r_gate_present"],
+      "r_gate_weight": contract["r_gate_weight"],
+      "treatment_base_identity": contract["treatment_base_identity"],
+      **sampled_rec["guideline_fields"],
+    }
 
   row = {
     "name": name,
@@ -2489,6 +2884,7 @@ def main() -> None:
     "asset_git_hash": asset_hash,
     "asset_git_revision": asset_git["revision"],
     "asset_git_dirty": asset_git["dirty"],
+    **guideline_row_fields,
   }
 
   # Finiteness guard: a silent NaN/inf in the thesis CSV is exactly the failure mode to prevent --
