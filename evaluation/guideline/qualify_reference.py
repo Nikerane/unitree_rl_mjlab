@@ -111,6 +111,9 @@ def _row_failures(row: dict[str, Any]) -> list[str]:
         ("gate_reward_enabled", "raw_gate_total", "gate"),
         ("progress_reward_enabled", "raw_progress_total", "progress"),
     ):
+        if not isinstance(row[enabled_field], bool):
+            failures.append(f"{label} reward enabled flag must be bool")
+            continue
         if row[enabled_field] is True:
             try:
                 complete_total = (

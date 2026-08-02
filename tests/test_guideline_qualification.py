@@ -179,6 +179,34 @@ def test_enabled_waypoint_reader_requires_a_complete_finite_raw_dose(
 
 
 @pytest.mark.parametrize(
+    ("field", "bad_value", "reason"),
+    (
+        ("gate_reward_enabled", 1, "gate reward enabled flag must be bool"),
+        (
+            "progress_reward_enabled",
+            "false",
+            "progress reward enabled flag must be bool",
+        ),
+    ),
+    ids=("integer-gate-enabled", "string-progress-enabled"),
+)
+def test_malformed_waypoint_reward_enable_flags_fail_closed(
+    field: str, bad_value: object, reason: str
+) -> None:
+    """Treating non-bool reader flags as disabled would hide an invalid raw total."""
+    rows = _passing_rows()
+    rows[7][field] = bad_value
+    rows[7]["raw_gate_total"] = math.nan
+    rows[7]["raw_progress_total"] = math.nan
+
+    summary = summarize_qualification(rows)
+
+    assert summary["passed"] is False
+    assert summary["qualified_resets"] == 15
+    assert summary["failures"] == [f"seed 1007: {reason}"]
+
+
+@pytest.mark.parametrize(
     "mutate",
     (
         lambda rows: rows.pop(),
