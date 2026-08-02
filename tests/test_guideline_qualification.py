@@ -38,7 +38,7 @@ def _passing_rows() -> list[dict[str, object]]:
             "corridor_max_m": 0.004,
             "qvel_peak_rad_s": 3.0,
             "finite": True,
-            "reset_arm_qpos_rad": [seed * 1e-6, 0.0, 0.0, 0.0, 0.0, 0.0],
+            "reset_arm_qpos_rad": [0.1, -0.2, 0.3, -0.4, 0.5, -0.6],
         }
         for seed in REQUIRED_SEEDS
     ]
@@ -58,7 +58,7 @@ def test_summary_schema_accepts_only_the_complete_preregistered_seed_set() -> No
         "passed": True,
         "qualified_resets": 16,
         "required_resets": 16,
-        "distinct_reset_arm_qpos": True,
+        "identical_fixed_reset": True,
         "failures": [],
         "rows": [dict(row, qualifies=True, failures=[]) for row in _passing_rows()],
     }
@@ -137,17 +137,37 @@ def test_missing_seed_fails_closed_instead_of_raising() -> None:
     ]
 
 
-def test_duplicate_realized_reset_state_fails_closed() -> None:
+@pytest.mark.parametrize(
+    ("bad_reset", "aggregate_reason"),
+    (
+        (
+            [0.1, -0.2, 0.3, -0.4, 0.5],
+            "reset_arm_qpos_rad must be six finite values",
+        ),
+        (
+            [0.1, -0.2, math.nan, -0.4, 0.5, -0.6],
+            "reset_arm_qpos_rad must be six finite values",
+        ),
+        (
+            [0.1, -0.2, 0.3, -0.4, 0.5, -0.5],
+            "reset_arm_qpos_rad must be identical across all execution seeds",
+        ),
+    ),
+    ids=("wrong-length", "non-finite", "physical-drift"),
+)
+def test_invalid_or_drifting_realized_fixed_reset_fails_closed(
+    bad_reset: list[float], aggregate_reason: str
+) -> None:
     rows = _passing_rows()
-    rows[1]["reset_arm_qpos_rad"] = rows[0]["reset_arm_qpos_rad"]
+    rows[1]["reset_arm_qpos_rad"] = bad_reset
 
     summary = summarize_qualification(rows)
 
     assert summary["passed"] is False
     assert summary["qualified_resets"] == 0
-    assert summary["distinct_reset_arm_qpos"] is False
+    assert summary["identical_fixed_reset"] is False
     assert summary["failures"] == [
-        "reset_arm_qpos_rad must contain 16 distinct realized training resets"
+        aggregate_reason
     ]
 
 
@@ -162,7 +182,7 @@ def test_qualification_loads_training_cfg_and_disables_auto_reset() -> None:
         },
         events={
             "reset_robot_joints": SimpleNamespace(
-                params={"position_range": (-0.05, 0.05)}
+                params={"position_range": (0.0, 0.0)}
             )
         },
     )
@@ -178,7 +198,7 @@ def test_qualification_loads_training_cfg_and_disables_auto_reset() -> None:
     assert loaded is cfg
     assert loaded.scene.num_envs == 1
     assert loaded.auto_reset is False
-    assert RESET_POSITION_RANGE_RAD == (-0.05, 0.05)
+    assert RESET_POSITION_RANGE_RAD == (0.0, 0.0)
 
 
 def test_qualification_rejects_wrong_nonzero_training_reset_range() -> None:
@@ -197,7 +217,7 @@ def test_qualification_rejects_wrong_nonzero_training_reset_range() -> None:
         },
     )
 
-    with pytest.raises(RuntimeError, match="reset position_range.*-0.05.*0.05"):
+    with pytest.raises(RuntimeError, match="reset position_range.*0.0.*0.0"):
         load_qualification_cfg(lambda _task_id, *, play: cfg)
 
 

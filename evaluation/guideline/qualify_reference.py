@@ -20,7 +20,7 @@ from src.tasks.hammer.mdp.guideline import (
 
 TASK_ID = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0"
 REQUIRED_SEEDS = tuple(range(1000, 1016))
-RESET_POSITION_RANGE_RAD = (-0.05, 0.05)
+RESET_POSITION_RANGE_RAD = (0.0, 0.0)
 QVEL_LIMIT_RAD_S = 3.1415
 HOLD_STEPS = 6
 _REQUIRED_ROW_FIELDS = (
@@ -84,34 +84,40 @@ def summarize_qualification(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "seed set must be exactly 1000--1015 with one row per seed"
         )
 
+    reset_contract_failure: str | None = None
     try:
         reset_tuples = [
             tuple(float(value) for value in row["reset_arm_qpos_rad"])
             for row in rows
         ]
-        distinct_reset_state = (
-            exact_seed_set
-            and all(len(values) == 6 for values in reset_tuples)
-            and len(set(reset_tuples)) == len(REQUIRED_SEEDS)
+        reset_values_valid = all(
+            len(values) == 6 and all(math.isfinite(value) for value in values)
+            for values in reset_tuples
         )
-    except (KeyError, TypeError, ValueError):
-        distinct_reset_state = False
-    if exact_seed_set and not distinct_reset_state:
-        aggregate_failures.append(
-            "reset_arm_qpos_rad must contain 16 distinct realized training resets"
+    except (KeyError, TypeError, ValueError, OverflowError):
+        reset_values_valid = False
+        reset_tuples = []
+    if not reset_values_valid:
+        reset_contract_failure = "reset_arm_qpos_rad must be six finite values"
+    elif len(set(reset_tuples)) != 1:
+        reset_contract_failure = (
+            "reset_arm_qpos_rad must be identical across all execution seeds"
         )
+    identical_fixed_reset = exact_seed_set and reset_contract_failure is None
+    if exact_seed_set and reset_contract_failure is not None:
+        aggregate_failures.append(reset_contract_failure)
 
     for row in rows:
         failures = _row_failures(row)
         if not exact_seed_set:
             failures = list(failures)
             failures.append("invalid seed set")
-        elif not distinct_reset_state:
+        elif not identical_fixed_reset:
             failures = list(failures)
-            failures.append("duplicate or invalid realized reset state")
+            failures.append("invalid or drifting realized fixed reset state")
         qualifies = not failures
         annotated_rows.append(dict(row, qualifies=qualifies, failures=failures))
-        if exact_seed_set and distinct_reset_state:
+        if exact_seed_set and identical_fixed_reset:
             seed = row.get("seed", "unknown")
             aggregate_failures.extend(f"seed {seed}: {reason}" for reason in failures)
 
@@ -124,10 +130,10 @@ def summarize_qualification(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "corridor_radius_m": CORRIDOR_RADIUS_M,
             "qvel_limit_rad_s": QVEL_LIMIT_RAD_S,
         },
-        "passed": exact_seed_set and qualified == len(REQUIRED_SEEDS),
+        "passed": identical_fixed_reset and qualified == len(REQUIRED_SEEDS),
         "qualified_resets": qualified,
         "required_resets": len(REQUIRED_SEEDS),
-        "distinct_reset_arm_qpos": distinct_reset_state,
+        "identical_fixed_reset": identical_fixed_reset,
         "failures": aggregate_failures,
         "rows": annotated_rows,
     }
