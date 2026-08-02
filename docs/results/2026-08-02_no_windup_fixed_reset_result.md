@@ -20,19 +20,20 @@ behavior.
 | Geometry | six gates; 5.0 mm corridor through accepted onset | 6/6 gates; max 1.3001 mm |
 | Contact and task progress | production accepted-contact tracker | accepted/raw contact true; 32.000 mm nail progress |
 | Joint velocity | `<= 3.1415 rad/s` | peak 2.5308 rad/s |
-| Impulse characterization | unchanged `IMP_J_LIMIT`; log-only `imp_max_p=0.0` | scripted-reference max `Lambda/cap = 0.0484` |
+| Impulse configuration | unchanged `IMP_J_LIMIT`; log-only `imp_max_p=0.0` | enforced by the 16-seed qualifier |
 
-The scripted direct reference is therefore far from binding the unchanged
-manufacturer-derived caps.  Its repeated executions are deterministic
-repeatability/plumbing samples, **not** an impact-intensity distribution or a
-population-percentile estimate.  C2 enforcement is explicitly deferred;
-`imp_max_p` remains `0.0`.
+Separately, a five-repeat log-only direct-reference quantity cross-check found
+the scripted reference far from binding the unchanged manufacturer-derived
+caps (worst `Lambda/cap = 0.0484`).  These five repeats and the 16
+qualification executions are deterministic repeatability/plumbing samples,
+**not** an impact-intensity distribution or a population-percentile estimate.
+C2 enforcement is explicitly deferred; `imp_max_p` remains `0.0`.
 
 ## Frozen provenance and evidence
 
 - Code revision: `5d9b14c704c56be7551f9e9e92949da7bf9c6291` (clean).
 - Z1 hammer-asset revision: `b58ccd2f81fd246f27c1e8d88cf86484cd888703`
-  (clean).
+  (tracked-clean; untracked historical/local files may be present).
 - Runtime: mjlab 1.4.0, MuJoCo/MuJoCo-Warp 3.8.1, Torch 2.12.0.
 - Frozen caps: `[1.640, 3.280, 1.640, 1.640, 1.640, 1.640]` N m s.
 - Source hashes: production config
@@ -50,6 +51,23 @@ population-percentile estimate.  C2 enforcement is explicitly deferred;
 
 The evidence is in
 `evaluation/results/2026-08-02_no_windup_fixed_reset_qualification/`.
+Those three committed 16-seed qualification artifacts contain the fixed-reset,
+geometry, contact, nail-progress, qvel, and finite-value results above; they
+do **not** contain a Lambda, cap, ratio, or five-repeat quantity record.
+
+The separate console-only log-only quantity cross-check was run as:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. \
+  /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python \
+  docs/research/reward-design/derive_impulse_thresholds.py
+```
+
+It ran five repeats of the same direct reference and reported the 0.0484
+worst-joint ratio above.  Its generating script SHA-256 is
+`f7a11a13d4421a6457952bfcb440c2554c09b7a583b791990b3b9a5b02ef8ce8`;
+it is distinct from, and not frozen inside, the three committed qualifier
+artifacts.
 
 ## Interpretation and boundaries
 
