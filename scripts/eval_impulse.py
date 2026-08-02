@@ -1057,6 +1057,8 @@ def _validate_native_guideline_env_contract(env_cfg, task: str) -> dict:
     raise ValueError(
       f"{task}: actor corruption must be on and critic corruption must be off"
     )
+  if env_cfg.scale_rewards_by_dt is not True:
+    raise ValueError(f"{task}: native guideline requires reward dt scaling")
 
   cat_soft = env_cfg.metrics["cat_soft"]
   if float(cat_soft.params["imp_max_p"]) != 0.0:
@@ -1125,6 +1127,7 @@ def _validate_native_guideline_env_contract(env_cfg, task: str) -> dict:
     "reset_position_noise_max_rad": reset_range[1],
     "actor_observation_corruption": actor_corruption,
     "critic_observation_corruption": critic_corruption,
+    "scale_rewards_by_dt": True,
     "event_i_ref_n_s": event_i_ref_n_s,
     "impact_reader": _configured_reader_name(impact.func),
     "delivered_reader": _configured_reader_name(delivered.func),
@@ -2574,13 +2577,8 @@ def main() -> None:
     )
   else:
     env_cfg = load_env_cfg(args.task, play=False)
-  env_cfg.scene.num_envs = args.num_envs
-  env_cfg.episode_length_s = args.episode_len_s
   if "cat_soft" not in env_cfg.metrics:
     raise RuntimeError(f"--task {args.task} has no 'cat_soft' metric -- not a cat_impulse=True task.")
-  env_cfg.metrics["cat_soft"].params["imp_max_p"] = args.imp_max_p
-  if args.task not in QUALITY_TASK_TO_ARM:
-    _ensure_first_strike_instrumentation(env_cfg)
   if args.task in GUIDELINE_TASK_TO_ARM:
     code_repo = Path(__file__).resolve().parents[1]
     asset_repo = Path(args.nail_asset).resolve().parents[2]
@@ -2599,7 +2597,13 @@ def main() -> None:
       code_git=code_git,
       asset_git=asset_git,
     )
-  else:
+  env_cfg.scene.num_envs = args.num_envs
+  env_cfg.episode_length_s = args.episode_len_s
+  if args.task not in GUIDELINE_TASK_TO_ARM:
+    env_cfg.metrics["cat_soft"].params["imp_max_p"] = args.imp_max_p
+  if args.task not in QUALITY_TASK_TO_ARM:
+    _ensure_first_strike_instrumentation(env_cfg)
+  if args.task not in GUIDELINE_TASK_TO_ARM:
     contract = _validate_sampled_env_contract(env_cfg, args.task)
   agent_cfg = load_rl_cfg(args.task)
   runner_cls = load_runner_cls(args.task) or MjlabOnPolicyRunner

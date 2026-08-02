@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import importlib.util
 import copy
+import csv
 import json
 import sys
 from pathlib import Path
@@ -36,6 +37,7 @@ from src.assets.robots.unitree_z1.z1_constants import (
 )
 from src.tasks.hammer.config.z1.env_cfgs import z1_hammer_env_cfg
 from src.tasks.hammer.mdp.references import SingleStrikeReference
+from evaluation.analysis import guideline_campaign as guideline_analysis
 
 pytestmark = pytest.mark.integration
 
@@ -535,10 +537,6 @@ GUIDELINE_RNG = {
 }
 
 
-def _constant_guideline_gate_reward(env):
-  return torch.ones(env.num_envs, device=env.device)
-
-
 def _guideline_identity_kwargs(
   arm="C0", **overrides
 ):
@@ -710,6 +708,43 @@ def test_guideline_main_loads_play_false_and_validates_before_checkpoint(
   assert calls == [(task, False)]
 
 
+def test_guideline_main_rejects_native_imp_max_before_evaluator_overwrite(
+  monkeypatch
+):
+  task = GUIDELINE_TASKS["C0"]
+  cfg = eval_impulse.load_env_cfg(task, play=False)
+  cfg.metrics["cat_soft"].params["imp_max_p"] = 0.25
+  monkeypatch.setattr(eval_impulse, "load_env_cfg", lambda *args, **kwargs: cfg)
+  monkeypatch.setattr(
+    eval_impulse,
+    "_git_provenance",
+    lambda path: {"revision": "b" * 40, "dirty": False, "status": ""},
+  )
+
+  def reached_post_validation(*args, **kwargs):
+    raise RuntimeError("past-native-validation")
+
+  monkeypatch.setattr(eval_impulse, "load_rl_cfg", reached_post_validation)
+  monkeypatch.setattr(
+    sys,
+    "argv",
+    [
+      "eval_impulse.py",
+      "--campaign", GUIDELINE_CAMPAIGN,
+      "--task", task,
+      "--ckpt", "model_499.pt",
+      "--training-seed", "0",
+      "--expected-checkpoint-sha256", "c" * 64,
+      "--accepted-manifest-sha256", "d" * 64,
+      "--training-code-revision", "e" * 40,
+      "--training-asset-revision", "b" * 40,
+    ],
+  )
+
+  with pytest.raises(ValueError, match="imp_max_p"):
+    eval_impulse.main()
+
+
 def test_guideline_extension_preserves_legacy_digest_literals():
   task = eval_impulse.QUALITY_ARM_TASKS["FQ"]
   _, cfg, _ = eval_impulse.build_strict_quality_evaluation_cfg(task, play=False)
@@ -730,13 +765,69 @@ def test_guideline_extension_preserves_legacy_digest_literals():
   ) == "37146ea3b5cf0e90262179c1dfea83bda63fc377bb5445ecf38145bc4500758b"
 
 
+def test_guideline_csv_round_trip_reaches_strict_four_row_validator(tmp_path):
+  common = {
+    "checkpoint_filename": "model_499.pt",
+    "n_episodes_sampled": 512,
+    "reset_digest": "reset-fixed",
+    "guideline_geometry_digest": "geometry-fixed",
+    "reset_position_range_rad": (0.0, 0.0),
+    "windup_enabled": False,
+    "impedance_mode": "fixed",
+    "imp_max_p": 0.0,
+    "treatment_base_identity": "guideline-config-without-r-gate",
+    "reset_rng_seed": GUIDELINE_RNG["reset_seed"],
+    "observation_rng_seed": GUIDELINE_RNG["observation_seed"],
+    "action_rng_seed": GUIDELINE_RNG["action_seed"],
+    "git_dirty": False,
+    "asset_git_dirty": False,
+    "git_revision": "a" * 40,
+    "asset_git_revision": "b" * 40,
+    "impossible_success_n": 0,
+    "lambda_dead_n": 0,
+    "qvel_nonfinite_rate_sampled": 0.0,
+  }
+  rows = [
+    dict(
+      common, treatment="C0", training_seed=0, r_gate_present=False,
+      r_gate_weight=None, gate_reward_present=False,
+      actual_gate_return_total_sampled=0.0, success_rate_sampled=0.30,
+    ),
+    dict(
+      common, treatment="C0", training_seed=1, r_gate_present=False,
+      r_gate_weight=None, gate_reward_present=False,
+      actual_gate_return_total_sampled=0.0, success_rate_sampled=0.10,
+    ),
+    dict(
+      common, treatment="C-Gate", training_seed=0, r_gate_present=True,
+      r_gate_weight=8.0, gate_reward_present=True,
+      actual_gate_return_total_sampled=1.0, success_rate_sampled=0.25,
+    ),
+    dict(
+      common, treatment="C-Gate", training_seed=1, r_gate_present=True,
+      r_gate_weight=8.0, gate_reward_present=True,
+      actual_gate_return_total_sampled=0.5, success_rate_sampled=0.10,
+    ),
+  ]
+  csv_path = tmp_path / "summary.csv"
+  with csv_path.open("w", newline="") as handle:
+    writer = csv.DictWriter(handle, fieldnames=eval_impulse.FIELDNAMES)
+    writer.writeheader()
+    writer.writerows(rows)
+
+  result = guideline_analysis.load_and_validate_guideline_pilot_csv(csv_path)
+
+  assert result["valid"] is True
+  assert result["row_identities"] == [
+    ("C0", 0), ("C0", 1), ("C-Gate", 0), ("C-Gate", 1)
+  ]
+
+
 @pytest.fixture(scope="module")
 def guideline_autoreset_records():
   records = {}
   for arm, task in GUIDELINE_TASKS.items():
     cfg = eval_impulse.load_env_cfg(task, play=False)
-    if arm == "C-Gate":
-      cfg.rewards["r_gate"].func = _constant_guideline_gate_reward
     cfg.scene.num_envs = 1
     cfg.episode_length_s = float(cfg.sim.mujoco.timestep * cfg.decimation)
     env = ManagerBasedRlEnv(cfg=cfg, device="cpu", render_mode=None)
@@ -764,20 +855,12 @@ def guideline_autoreset_records():
       assert len(collector.completed) == 1
       first_reference = collector.completed[0]
       first_frozen = copy.deepcopy(first_reference)
-      if "r_gate" in env.reward_manager.active_terms:
-        gate_idx = env.reward_manager.active_terms.index("r_gate")
-        manager_gate_payout = float(
-          env.reward_manager._step_reward[0, gate_idx] * env.step_dt
-        )
-      else:
-        manager_gate_payout = 0.0
       env.step(action)
       assert len(collector.completed) == 2
       records[arm] = {
         "first": copy.deepcopy(first_reference),
         "second": copy.deepcopy(collector.completed[1]),
         "first_unchanged": first_reference == first_frozen,
-        "manager_gate_payout": manager_gate_payout,
       }
     finally:
       env.close()
@@ -845,13 +928,9 @@ def test_guideline_collector_persists_episode_local_aligned_tracker_state_and_pa
   assert len(guideline["disarmed"]) == count
   assert len(guideline["gate_payout"]) == len(trace["action_tape"]) == 1
   assert guideline["gate_reward_present"] is (arm == "C-Gate")
-  if arm == "C-Gate":
-    assert record["manager_gate_payout"] > 0.0
-  else:
-    assert record["manager_gate_payout"] == 0.0
-  assert guideline["gate_payout"] == pytest.approx(
-    [record["manager_gate_payout"]]
-  )
+  assert all(value >= 0.0 for value in guideline["gate_payout"])
+  if arm == "C0":
+    assert guideline["gate_payout"] == [0.0]
   assert all(
     later >= earlier
     for earlier, later in zip(
@@ -861,6 +940,76 @@ def test_guideline_collector_persists_episode_local_aligned_tracker_state_and_pa
   assert eval_impulse._validated_physical_trace_digest(
     trace, require_recorded_digest=True
   ) == trace["trace_digest"]
+
+
+def test_guideline_collector_captures_real_gate_transition_disarm_and_payout():
+  task = GUIDELINE_TASKS["C-Gate"]
+  cfg = eval_impulse.load_env_cfg(task, play=False)
+  cfg.scene.num_envs = 1
+  env = ManagerBasedRlEnv(cfg=cfg, device="cpu", render_mode=None)
+  snapshot = eval_impulse._install_episode_hook(env)
+  collector = eval_impulse._SampledTraceCollector(
+    env,
+    snapshot=snapshot,
+    treatment="C-Gate",
+    task=task,
+    gamma=0.99,
+    event_i_ref_n_s=0.3088,
+    nail_geometry={
+      "nail_axis": [0.0, 0.0, -1.0],
+      "nail_xy_m": [0.5, 0.0],
+      "nail_radius_m": 0.012,
+      "source_sha256": "0" * 64,
+    },
+  )
+  try:
+    env.reset()
+    tracker = getattr(env, eval_impulse._ENV_GUIDELINE_ATTR)
+    first_strike = getattr(env, eval_impulse._ENV_FIRST_STRIKE_ATTR)
+    env.sim.step()
+    entry = tracker._head_position().detach().clone()
+    nail = entry.clone()
+    nail[:, 0] += 0.7
+    tracker.initialized[:] = True
+    tracker.entry.copy_(entry)
+    tracker.nail.copy_(nail)
+    tracker.previous_head.copy_(entry)
+    env.metrics_manager.compute_substep()
+
+    env.sim.step()
+    crossed_head = entry.clone()
+    crossed_head[:, 0] += 0.15
+    head_site_id = tracker._head_site_ids[0]
+    model_site_id = tracker._robot.data.indexing.site_ids[head_site_id]
+    tracker._robot.data.data.site_xpos[:, model_site_id, :] = crossed_head
+    env.metrics_manager.compute_substep()
+
+    env.sim.step()
+    tracker._robot.data.data.site_xpos[:, model_site_id, :] = crossed_head
+    first_strike._state[:] = 2
+    env.metrics_manager.compute_substep()
+
+    before = env.reward_manager._episode_sums["r_gate"].detach().clone()
+    env.reward_manager.compute(env.step_dt)
+    actual_manager_contribution = (
+      env.reward_manager._episode_sums["r_gate"] - before
+    )
+    assert float(actual_manager_contribution[0]) > 0.0
+
+    env.reset_buf = torch.ones(1, dtype=torch.bool, device=env.device)
+    env.reset_terminated = torch.zeros(
+      1, dtype=torch.bool, device=env.device
+    )
+    env.metrics_manager.compute()
+    assert len(collector.completed) == 1
+    guideline = collector.completed[0]["guideline"]
+    assert guideline["next_gate"] == [0, 1, 1]
+    assert guideline["disarmed"] == [False, False, True]
+    assert guideline["gate_payout"] == pytest.approx(
+      actual_manager_contribution.tolist()
+    )
+  finally:
+    env.close()
 
 
 @pytest.mark.parametrize(
@@ -1124,6 +1273,10 @@ def test_native_guideline_mapping_does_not_expand_strict_checkpoint_evaluator_ta
     (
       lambda cfg: cfg.metrics["cat_soft"].params.__setitem__("imp_max_p", 0.5),
       "imp_max_p",
+    ),
+    (
+      lambda cfg: setattr(cfg, "scale_rewards_by_dt", False),
+      "reward dt scaling",
     ),
     (
       lambda cfg: cfg.metrics["cat_soft"].params.__setitem__(

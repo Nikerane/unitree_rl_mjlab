@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import csv
 import math
+from pathlib import Path
+import re
 from typing import Any
 
 import numpy as np
@@ -353,3 +356,75 @@ def validate_guideline_pilot_rows(rows: Sequence[Mapping]) -> dict:
         "continuation_by_arm": continuation_by_arm,
         "continuation_allowed": all(continuation_by_arm.values()),
     }
+
+
+_PILOT_CSV_SCHEMA = {
+    **dict.fromkeys(("training_seed", "n_episodes_sampled", "reset_rng_seed",
+                     "observation_rng_seed", "action_rng_seed",
+                     "impossible_success_n", "lambda_dead_n"), "int"),
+    **dict.fromkeys(("imp_max_p", "qvel_nonfinite_rate_sampled",
+                     "actual_gate_return_total_sampled", "success_rate_sampled"), "float"),
+    **dict.fromkeys(("windup_enabled", "r_gate_present", "gate_reward_present",
+                     "git_dirty", "asset_git_dirty"), "bool"),
+    **dict.fromkeys(("treatment", "checkpoint_filename", "reset_digest",
+                     "guideline_geometry_digest", "impedance_mode",
+                     "treatment_base_identity", "git_revision",
+                     "asset_git_revision"), "text"),
+    "reset_position_range_rad": "reset_range",
+    "r_gate_weight": "optional_float",
+}
+
+
+def _decode_pilot_csv_field(field: str, value: str, kind: str):
+    if not isinstance(value, str) or value != value.strip():
+        raise ValueError(f"CSV field {field} has malformed text {value!r}")
+    if kind == "optional_float" and value == "":
+        return None
+    if value == "":
+        raise ValueError(f"CSV field {field} must not be empty")
+    if kind == "text":
+        return value
+    if kind == "bool":
+        if value not in ("True", "False"):
+            raise ValueError(f"CSV field {field} must be literal True or False")
+        return value == "True"
+    if kind == "int":
+        if re.fullmatch(r"-?(?:0|[1-9][0-9]*)", value) is None:
+            raise ValueError(f"CSV field {field} must be a literal integer")
+        return int(value)
+    if kind == "reset_range":
+        if value != "(0.0, 0.0)":
+            raise ValueError(f"CSV field {field} must be literal (0.0, 0.0)")
+        return (0.0, 0.0)
+    try:
+        number = float(value)
+    except ValueError as error:
+        raise ValueError(f"CSV field {field} must be numeric") from error
+    if not math.isfinite(number):
+        raise ValueError(f"CSV field {field} must be finite")
+    return number
+
+
+def load_and_validate_guideline_pilot_csv(path: str | Path) -> dict:
+    """Decode evaluator DictWriter rows and run the exact four-row pilot gate."""
+    with Path(path).open(newline="") as handle:
+        reader = csv.DictReader(handle)
+        fieldnames = reader.fieldnames
+        if fieldnames is None:
+            raise ValueError("guideline pilot CSV is missing a header")
+        if len(fieldnames) != len(set(fieldnames)):
+            raise ValueError("guideline pilot CSV contains duplicate columns")
+        missing = sorted(set(_PILOT_CSV_SCHEMA) - set(fieldnames))
+        if missing:
+            raise ValueError(f"guideline pilot CSV missing columns: {missing}")
+        raw_rows = list(reader)
+    if any(None in row or any(value is None for value in row.values()) for row in raw_rows):
+        raise ValueError("guideline pilot CSV contains malformed row widths")
+    typed_rows = [
+        {
+            field: _decode_pilot_csv_field(field, row[field], kind)
+            for field, kind in _PILOT_CSV_SCHEMA.items()
+        }
+        for row in raw_rows
+    ]
+    return validate_guideline_pilot_rows(typed_rows)

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import csv
 import math
 
 import numpy as np
 import pytest
 
+from evaluation.analysis import guideline_campaign
 from evaluation.analysis.guideline_campaign import (
     aggregate_guideline_seed,
     summarize_guideline_episode,
@@ -163,7 +165,7 @@ def _pilot_rows() -> list[dict]:
         "n_episodes_sampled": 512,
         "reset_digest": "reset-fixed",
         "guideline_geometry_digest": "geometry-fixed",
-        "reset_position_range_rad": [0.0, 0.0],
+        "reset_position_range_rad": (0.0, 0.0),
         "windup_enabled": False,
         "impedance_mode": "fixed",
         "imp_max_p": 0.0,
@@ -189,6 +191,35 @@ def _pilot_rows() -> list[dict]:
         dict(common, treatment="C-Gate", training_seed=1, r_gate_present=True, r_gate_weight=8.0, gate_reward_present=True,
              actual_gate_return_total_sampled=0.5, success_rate_sampled=0.10),
     ]
+
+
+def _write_pilot_csv(path, rows: list[dict]) -> None:
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=tuple(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+@pytest.mark.parametrize(
+    ("row_index", "field", "malformed"),
+    (
+        (0, "training_seed", "0.0"),
+        (0, "git_dirty", "false"),
+        (0, "reset_position_range_rad", "[0.0, 0.0]"),
+        (0, "windup_enabled", ""),
+        (2, "r_gate_weight", "nan"),
+    ),
+)
+def test_csv_loader_rejects_malformed_typed_fields(
+    tmp_path, row_index: int, field: str, malformed: str
+) -> None:
+    rows = _pilot_rows()
+    rows[row_index][field] = malformed
+    path = tmp_path / "summary.csv"
+    _write_pilot_csv(path, rows)
+
+    with pytest.raises(ValueError, match=field):
+        guideline_campaign.load_and_validate_guideline_pilot_csv(path)
 
 
 def test_pilot_contract_accepts_only_the_literal_four_rows_and_reports_continuation() -> None:
