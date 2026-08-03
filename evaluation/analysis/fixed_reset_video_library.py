@@ -834,6 +834,12 @@ def validate_substep_trace(trace: Mapping[str, Any]) -> dict:
     totals = _as_array(trace, "control_step_reward_total").astype(float)
     if totals.shape != (control_steps,) or not np.isfinite(totals).all():
         raise ValueError("control_step_reward_total must be finite, one value per control step")
+    tolerance = 1e-6 * max(1.0, float(np.abs(totals).max(initial=0.0)))
+    if not np.allclose(payouts.sum(axis=1), totals, atol=tolerance, rtol=0.0):
+        raise ValueError(
+            "control_step_reward_terms must sum to control_step_reward_total; a payout "
+            "matrix that disagrees with the recorded step reward was not measured together"
+        )
 
     entry = _as_array(trace, "guideline_entry_m").astype(float)
     nail = _as_array(trace, "guideline_nail_m").astype(float)
@@ -866,10 +872,17 @@ def validate_substep_trace(trace: Mapping[str, Any]) -> dict:
     # genuinely holds still: a still window contributes zero to numerator and
     # denominator alike.
     #
-    # Ceiling: this refutes repetition/upsampling of a control-rate array, which is the
-    # failure it exists to catch. It cannot refute a wholly synthetic path fabricated
-    # with smooth intra-window motion -- no content-only test can. Provenance (the
-    # renderer hook that wrote the file) is what rules that out.
+    # The share alone is NOT sufficient: a zero-order hold whose phase is offset by
+    # s != 0 puts every transition inside a window and scores 1.000. So the sample
+    # COUNT is checked too -- any hold, at any phase, can only produce as many distinct
+    # positions as there were control steps. The two clauses are complementary: noise
+    # sprinkled on a repeat inflates the count but leaves the motion on boundaries;
+    # a phase-shifted hold keeps motion interior but cannot inflate the count.
+    #
+    # Ceiling: together these refute repetition/upsampling of a control-rate array,
+    # which is the failure they exist to catch. They cannot refute a wholly synthetic
+    # path fabricated with smooth intra-window motion -- no content-only test can.
+    # Provenance (the renderer hook that wrote the file) is what rules that out.
     steps = np.linalg.norm(np.diff(positions, axis=0), axis=1)
     crosses_boundary = ((np.arange(1, substeps) % decimation) == 0)
     total_motion = float(steps.sum())
@@ -878,13 +891,19 @@ def validate_substep_trace(trace: Mapping[str, Any]) -> dict:
             "substep positions are not genuinely per-substep: the head never moved"
         )
     interior_motion_share = float(steps[~crosses_boundary].sum()) / total_motion
+    unique_positions = len(np.unique(positions, axis=0))
     if interior_motion_share < 0.5:
         raise ValueError(
             "substep positions are not genuinely per-substep: only "
             f"{interior_motion_share:.3f} of the head displacement happens inside "
             "control windows, which is the signature of a repeated control-rate path"
         )
-    unique_positions = len(np.unique(positions, axis=0))
+    if unique_positions <= control_steps + 1:
+        raise ValueError(
+            "substep positions are not genuinely per-substep: "
+            f"{unique_positions} distinct samples cannot come from {substeps} "
+            f"substeps unless a control-rate path was held across each window"
+        )
 
     return {
         "substep_count": substeps,

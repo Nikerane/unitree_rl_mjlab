@@ -346,9 +346,11 @@ def _run_wave1_substep_rollout(
         f"{str(bool((sensor.data.found[0] > 0).any())):>8} {float(rew[0]):>9.3f}"
       )
       if bool(dones[0]):
-        # auto_reset is disabled. Recording stays live and the episode counter
-        # advances, so any post-boundary substep would be stamped episode 1 and
-        # rejected by validate_substep_trace rather than silently dropped.
+        # auto_reset is disabled and we break immediately, so in practice no
+        # post-boundary substep occurs. The counter advances anyway as
+        # defence-in-depth: if the break is ever removed, a post-boundary substep
+        # would be stamped episode 1 and rejected by validate_substep_trace
+        # rather than silently folded into episode 0.
         state["episode"] += 1
         terminal_boundary = {
           "detected": True,

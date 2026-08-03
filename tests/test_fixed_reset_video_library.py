@@ -1501,7 +1501,11 @@ def test_wave1_trajectory_png_uses_tracker_geometry_not_single_strike_reference(
     assert report["gate_disk_count"] == 6
     assert report["contact_sample_count"] == 3
     assert report["control_boundary_marker_count"] == 4
-    # x-y must not be visually stretched relative to x-z.
+    # Each panel must be metrically square, and both panels must share one scale.
+    for panel in ("xz", "xy"):
+        assert report["axis_x_half_span_m"][panel] == pytest.approx(
+            report["axis_half_span_m"][panel]
+        )
     assert report["axis_half_span_m"]["xz"] == pytest.approx(
         report["axis_half_span_m"]["xy"]
     )
@@ -1853,3 +1857,39 @@ def test_wave1_substep_trace_accepts_a_trace_whose_arm_genuinely_settles():
 
     assert report["substep_count"] == 40
     assert report["interior_motion_share"] > 0.5
+
+
+def _zero_order_hold_fake(phase: int) -> dict:
+    """A 50 Hz path held across each control window, at an arbitrary phase.
+
+    Phases other than 0 put every transition INSIDE a window, which defeats a
+    motion-share test on its own; only the distinct-sample count catches them.
+    """
+    trace = _wave1_trace()
+    entry = trace["guideline_entry_m"]
+    nail = trace["guideline_nail_m"]
+    control = entry + np.linspace(0.0, 1.0, 5)[:, None] * (nail - entry)
+    index = np.clip((np.arange(40) + phase) // 10, 0, 4)
+    positions = control[index]
+    positions[0] = entry
+    trace["substep_head_position_m"] = positions
+    return trace
+
+
+@pytest.mark.parametrize("phase", [0, 1, 5, 9])
+def test_wave1_substep_trace_rejects_every_zero_order_hold_phase(phase):
+    """A held control-rate path must be refused at every alignment, not just phase 0."""
+    from evaluation.analysis.fixed_reset_video_library import validate_substep_trace
+
+    with pytest.raises(ValueError, match="not genuinely per-substep"):
+        validate_substep_trace(_zero_order_hold_fake(phase))
+
+
+def test_wave1_substep_trace_rejects_payouts_that_contradict_the_step_reward():
+    """A payout matrix pasted beside a real total was not measured with it."""
+    from evaluation.analysis.fixed_reset_video_library import validate_substep_trace
+
+    trace = _wave1_trace()
+    trace["control_step_reward_total"] = np.full(4, 0.25)
+    with pytest.raises(ValueError, match="must sum to"):
+        validate_substep_trace(trace)
