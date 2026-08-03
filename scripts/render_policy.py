@@ -88,6 +88,8 @@ class Cfg:
   device: str = "cpu"
   substep_trace: bool = False
   """Wave-1 mode: record 500 Hz substep evidence and encode slow-motion video."""
+  trace_only: bool = False
+  """Wave-1 screening: identical rollout and trace, but render no frames or video."""
   training_revision: str = ""
   """Revision the checkpoint was TRAINED at (Wave-1 mode; distinct from analysis)."""
   analysis_revision: str = ""
@@ -129,10 +131,18 @@ def validate_wave1_revisions(
   }
 
 
-def wave1_frame_substep_indices(substep_count: int, stride: int) -> np.ndarray:
-  """Substep indices that emit an RGB frame: the last substep of each stride group."""
+def wave1_frame_substep_indices(
+  substep_count: int, stride: int, *, capture: bool = True
+) -> np.ndarray:
+  """Substep indices that emit an RGB frame: the last substep of each stride group.
+
+  `capture=False` is the trace-only screening pass: the rollout, the reset and the
+  500 Hz trace are identical, but no image is rendered and no video is written.
+  """
   if substep_count <= 0 or stride <= 0:
     raise ValueError("substep_count and stride must be positive")
+  if not capture:
+    return np.empty(0, dtype=np.int64)
   return np.arange(stride - 1, substep_count, stride, dtype=np.int64)
 
 
@@ -316,7 +326,9 @@ def _run_wave1_substep_rollout(
       frames.append(np.asarray(frame))
 
   frame_indices = set(
-    wave1_frame_substep_indices(cfg.steps * control_decimation, stride).tolist()
+    wave1_frame_substep_indices(
+      cfg.steps * control_decimation, stride, capture=not cfg.trace_only
+    ).tolist()
   )
   payout_names = list(base_env.reward_manager.active_terms)
   payouts: list[np.ndarray] = []
@@ -381,6 +393,41 @@ def _run_wave1_substep_rollout(
     control_decimation=control_decimation,
     executed_control_steps=executed,
   )
+  if cfg.trace_only:
+    np.savez(out / "trace.npz", **trace)
+    write_metadata(
+      out / "metadata.json",
+      {
+        "campaign": cfg.campaign,
+        "arm": cfg.arm,
+        "training_seed": cfg.training_seed,
+        "task": cfg.task,
+        "checkpoint_sha256": checkpoint_sha256,
+        "training_revision": revisions["training"],
+        "asset_revision": revisions["asset"],
+        "analysis_revision": revisions["analysis"],
+        "reset_state_digest": fixed_reset["reset_state_digest"],
+        "trace_only": True,
+        "rollout": {
+          "requested_control_steps": cfg.steps,
+          "executed_control_steps": executed,
+          "substep_count": int(len(trace["substep_head_position_m"])),
+          "frame_count": 0,
+          "auto_reset_enabled": False,
+          "terminal_boundary": terminal_boundary,
+        },
+        "artifacts": {"trace.npz": _sha256(out / "trace.npz")},
+      },
+    )
+    contacted = bool(trace["substep_contact"].any())
+    print(
+      f"[screen] wave1 {cfg.arm}/seed{cfg.training_seed}: "
+      f"contact={contacted} gates={int(trace['substep_gate_index'].max())} "
+      f"nail_depth_max={float(trace['substep_nail_depth_m'].max()):.5f} "
+      f"substeps={len(trace['substep_head_position_m'])} steps={executed}"
+    )
+    return
+
   expected_frames = len(trace["substep_head_position_m"]) // stride
   if len(frames) != expected_frames:
     raise RuntimeError(

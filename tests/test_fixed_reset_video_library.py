@@ -1893,3 +1893,12 @@ def test_wave1_substep_trace_rejects_payouts_that_contradict_the_step_reward():
     trace["control_step_reward_total"] = np.full(4, 0.25)
     with pytest.raises(ValueError, match="must sum to"):
         validate_substep_trace(trace)
+
+
+def test_wave1_trace_only_capture_requests_no_frames():
+    """A trace-only screening pass must render nothing while still tracing."""
+    full = render_policy.wave1_frame_substep_indices(40, 2)
+    screening = render_policy.wave1_frame_substep_indices(40, 2, capture=False)
+
+    assert full.tolist() == list(range(1, 40, 2))
+    assert screening.size == 0
