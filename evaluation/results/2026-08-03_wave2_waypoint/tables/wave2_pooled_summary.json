@@ -1,0 +1,29 @@
+{
+  "max_cap_ratio": 0.127732,
+  "policies": 18,
+  "predeclared": {
+    "max_precontact_path_ratio": 1.15,
+    "max_precontact_perp_mm": 15.0,
+    "required_gates": 6
+  },
+  "primary_gate_completion": {
+    "C0": 0,
+    "G": 4,
+    "P": 5
+  },
+  "qvel_legal": 0,
+  "seeds_per_arm": 6,
+  "straight_label": {
+    "C0": [],
+    "G": [
+      3,
+      5,
+      7
+    ],
+    "P": [
+      2,
+      3,
+      7
+    ]
+  }
+}

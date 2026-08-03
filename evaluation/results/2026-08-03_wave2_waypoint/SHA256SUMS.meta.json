@@ -1,0 +1,28 @@
+{
+  "campaign": "2026-08-03_wave2_waypoint",
+  "frozen_on": "2026-08-03",
+  "inventory_file": "SHA256SUMS.txt",
+  "inventory_root_sha256": "fbec51b154a6bcdb3843d4d83860748b9b45ef2ec8413567bc62652325d65178",
+  "file_count": 233,
+  "total_bytes": 62498317,
+  "algorithm": "sha256",
+  "ordering": "LC_ALL=C byte-sort of the relative paths",
+  "excluded": [
+    ".DS_Store",
+    "SHA256SUMS.txt",
+    "SHA256SUMS.meta.json",
+    "__pycache__ (non-reproducible bytecode; not evidence)"
+  ],
+  "verify": "cd <this dir> && shasum -a 256 -c SHA256SUMS.txt",
+  "revisions": {
+    "wave2_training": "e1a0282c9dc7b0283ae632a46a78debfd80bdf8c",
+    "wave1_training": "a6a9c970ea9eca00b34e8e9be806d22d396a964a",
+    "analysis": "bf498ff3af992ed0f0c041484ecdbb4bf9d38a71",
+    "asset": "b58ccd2f81fd246f27c1e8d88cf86484cd888703"
+  },
+  "fixed_reset_digest": "bde511ec2adc42e5365e1e46f45ff1fb43223a93c31c6fbfb4580352e445e319",
+  "pooled_table_sha256": "57ff1ba7419b99cc13b55b23af94b87371d4790e7397b64ab4ae9f5f2f731862",
+  "frozen_wave1_projection_sha256": "4ab58b67658ef6c899a21ffbd200d4c568327352c72da0dd1c386437dda86268",
+  "policies": 18,
+  "seeds_per_arm": 6
+}

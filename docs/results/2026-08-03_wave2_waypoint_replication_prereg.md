@@ -1,8 +1,11 @@
 # Wave-2 waypoint-guidance replication — preregistration (2026-08-03)
 
-**Status: WRITTEN, NOT LAUNCHED.** No job has been submitted. This document is
-registered *before* any Wave-2 training so the endpoints and thresholds below cannot be
-chosen after seeing the data.
+**Status: LAUNCHED AND COMPLETE (2026-08-03).** Registered, and the training revision
+pinned, *before* any Wave-2 job was submitted, so the endpoints and thresholds below
+could not be chosen after seeing the data. All 12 runs have since completed; the ledger
+below carries their job IDs and final states, the only fields it reserved for fill-in.
+No endpoint, threshold, or design element has been altered. Result:
+`docs/results/2026-08-03_wave2_waypoint_replication_result.md`.
 
 ## Why
 
@@ -279,18 +282,18 @@ re-seeded.
 
 | # | Arm | Task ID | Seed | Run identity | Iters | Envs | Job ID | State |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | C0 | `…-Guideline-C0` | 4 | `wave2_wave2_c0_seed4` | 200 | 4096 | — | pending |
-| 2 | C0 | `…-Guideline-C0` | 5 | `wave2_wave2_c0_seed5` | 200 | 4096 | — | pending |
-| 3 | C0 | `…-Guideline-C0` | 6 | `wave2_wave2_c0_seed6` | 200 | 4096 | — | pending |
-| 4 | C0 | `…-Guideline-C0` | 7 | `wave2_wave2_c0_seed7` | 200 | 4096 | — | pending |
-| 5 | G | `…-Guideline-CGate` | 4 | `wave2_wave2_g_seed4` | 200 | 4096 | — | pending |
-| 6 | G | `…-Guideline-CGate` | 5 | `wave2_wave2_g_seed5` | 200 | 4096 | — | pending |
-| 7 | G | `…-Guideline-CGate` | 6 | `wave2_wave2_g_seed6` | 200 | 4096 | — | pending |
-| 8 | G | `…-Guideline-CGate` | 7 | `wave2_wave2_g_seed7` | 200 | 4096 | — | pending |
-| 9 | P | `…-Guideline-CProgress` | 4 | `wave2_wave2_p_seed4` | 200 | 4096 | — | pending |
-| 10 | P | `…-Guideline-CProgress` | 5 | `wave2_wave2_p_seed5` | 200 | 4096 | — | pending |
-| 11 | P | `…-Guideline-CProgress` | 6 | `wave2_wave2_p_seed6` | 200 | 4096 | — | pending |
-| 12 | P | `…-Guideline-CProgress` | 7 | `wave2_wave2_p_seed7` | 200 | 4096 | — | pending |
+| 1 | C0 | `…-Guideline-C0` | 4 | `wave2_wave2_c0_seed4` | 200 | 4096 | `40606838_0` | COMPLETED 0:0 |
+| 2 | C0 | `…-Guideline-C0` | 5 | `wave2_wave2_c0_seed5` | 200 | 4096 | `40606838_1` | COMPLETED 0:0 |
+| 3 | C0 | `…-Guideline-C0` | 6 | `wave2_wave2_c0_seed6` | 200 | 4096 | `40606838_2` | COMPLETED 0:0 |
+| 4 | C0 | `…-Guideline-C0` | 7 | `wave2_wave2_c0_seed7` | 200 | 4096 | `40606838_3` | COMPLETED 0:0 |
+| 5 | G | `…-Guideline-CGate` | 4 | `wave2_wave2_g_seed4` | 200 | 4096 | `40606839_0` | COMPLETED 0:0 |
+| 6 | G | `…-Guideline-CGate` | 5 | `wave2_wave2_g_seed5` | 200 | 4096 | `40606839_1` | COMPLETED 0:0 |
+| 7 | G | `…-Guideline-CGate` | 6 | `wave2_wave2_g_seed6` | 200 | 4096 | `40606839_2` | COMPLETED 0:0 |
+| 8 | G | `…-Guideline-CGate` | 7 | `wave2_wave2_g_seed7` | 200 | 4096 | `40606839_3` | COMPLETED 0:0 |
+| 9 | P | `…-Guideline-CProgress` | 4 | `wave2_wave2_p_seed4` | 200 | 4096 | `40606840_0` | COMPLETED 0:0 |
+| 10 | P | `…-Guideline-CProgress` | 5 | `wave2_wave2_p_seed5` | 200 | 4096 | `40606840_1` | COMPLETED 0:0 |
+| 11 | P | `…-Guideline-CProgress` | 6 | `wave2_wave2_p_seed6` | 200 | 4096 | `40606840_2` | COMPLETED 0:0 |
+| 12 | P | `…-Guideline-CProgress` | 7 | `wave2_wave2_p_seed7` | 200 | 4096 | `40606840_3` | COMPLETED 0:0 |
 
 Submission shape — one 4-job array per arm, seeds 4–7:
 
