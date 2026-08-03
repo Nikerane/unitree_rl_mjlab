@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import hashlib
 from pathlib import Path
+import platform as _platform
 
 import imageio.v3 as iio
 import numpy as np
@@ -36,6 +37,7 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 
 from evaluation.analysis.fixed_reset_video_library import (
   ARTIFACT_FILENAMES,
+  EXECUTION_DEVICE_CAMPAIGN_EXEMPT,
   FIXED_RESET_ENVELOPE,
   RENDERER_CONTRACT,
   SUBSTEP_RENDERER_CONTRACT,
@@ -128,6 +130,22 @@ def validate_wave1_revisions(
     "training": training_revision,
     "asset": asset_revision,
     "analysis": analysis_revision,
+  }
+
+
+def wave1_execution_device(*, requested: str, env_device, tensor) -> dict:
+  """Record the device this render actually ran on, not the one it asked for.
+
+  Wave 1 recorded nothing here and had to argue CPU provenance from a bridge.
+  The two `actual_*` fields are read back off the live environment and a real
+  tensor, so a silent accelerator promotion is recorded verbatim rather than
+  normalised away — the validator, not this function, is what rejects it.
+  """
+  return {
+    "requested": str(requested),
+    "actual_env_device": str(env_device),
+    "actual_tensor_device": str(getattr(tensor, "device", tensor)),
+    "platform": _platform.platform(),
   }
 
 
@@ -393,11 +411,25 @@ def _run_wave1_substep_rollout(
     control_decimation=control_decimation,
     executed_control_steps=executed,
   )
+  # Wave 1 is frozen with no device block and a documented inferred-CPU bridge;
+  # re-rendering it must stay byte-identical, so only later campaigns record one.
+  device_block = (
+    {}
+    if cfg.campaign in EXECUTION_DEVICE_CAMPAIGN_EXEMPT
+    else {
+      "execution_device": wave1_execution_device(
+        requested=cfg.device,
+        env_device=base_env.device,
+        tensor=nail.data.joint_pos,
+      )
+    }
+  )
   if cfg.trace_only:
     np.savez(out / "trace.npz", **trace)
     write_metadata(
       out / "metadata.json",
       {
+        **device_block,
         "campaign": cfg.campaign,
         "arm": cfg.arm,
         "training_seed": cfg.training_seed,
@@ -451,6 +483,7 @@ def _run_wave1_substep_rollout(
   write_metadata(
     out / "metadata.json",
     {
+      **device_block,
       "campaign": cfg.campaign,
       "arm": cfg.arm,
       "training_seed": cfg.training_seed,
@@ -683,9 +716,23 @@ def main(cfg: Cfg) -> None:
   }
   np.savez(out / "trace.npz", **trace)
   write_trajectory_png(trace, out / "trajectory.png")
+  # Same gating as the substep branch: the validator requires a device block for
+  # every non-exempt campaign, so BOTH metadata sites must emit one or a default
+  # render of a wave2 policy would fail validation it should pass.
   write_metadata(
     out / "metadata.json",
     {
+      **(
+        {}
+        if cfg.campaign in EXECUTION_DEVICE_CAMPAIGN_EXEMPT
+        else {
+          "execution_device": wave1_execution_device(
+            requested=cfg.device,
+            env_device=base_env.device,
+            tensor=nail.data.joint_pos,
+          )
+        }
+      ),
       "campaign": cfg.campaign,
       "arm": cfg.arm,
       "training_seed": cfg.training_seed,

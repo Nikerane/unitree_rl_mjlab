@@ -92,6 +92,22 @@ SUBSTEP_TRACE_KEYS = (
 )
 WAVE1_ARTIFACT_FILENAMES = ("policy.mp4", "montage.png", "trajectory.png", "trace.npz")
 WAVE1_REVISION_FIELDS = ("training_revision", "asset_revision", "analysis_revision")
+# Wave 1 recorded no execution device; its CPU provenance rests on a documented
+# inferred bridge (rendered on a CPU-only machine, bit-identical shared channels
+# against the hard-guarded CPU diagnostic). Every campaign AFTER wave1 must record
+# the device directly, so the bridge is never needed again. "requested" is what the
+# renderer was asked for; the two "actual_*" fields are read back off the live env
+# and a real tensor, which is what catches a silent accelerator promotion.
+EXECUTION_DEVICE_FIELDS = (
+    "requested",
+    "actual_env_device",
+    "actual_tensor_device",
+    "platform",
+)
+# Exempt = every campaign that predates the field, not merely wave1: fq4x8/fq3x8
+# artifacts were rendered before it existed, so requiring it would reject them
+# retroactively. Only campaigns from wave2 onward must record a device.
+EXECUTION_DEVICE_CAMPAIGN_EXEMPT = frozenset({"wave1", "fq4x8", "fq3x8"})
 # Mirrors src.tasks.hammer.mdp.guideline.GUIDELINE_GATE_RADIUS_M; duplicated so this
 # module stays import-light. test_wave1_gate_disk_radius_matches_the_tracker guards drift.
 GUIDELINE_GATE_RADIUS_M = 0.015
@@ -99,6 +115,9 @@ TASK_BY_CAMPAIGN_ARM = {
     ("wave1", "C0"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0",
     ("wave1", "G"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate",
     ("wave1", "P"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress",
+    ("wave2", "C0"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0",
+    ("wave2", "G"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate",
+    ("wave2", "P"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress",
     ("fq4x8", "F8"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear",
     ("fq4x8", "F0"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0",
     ("fq4x8", "D0"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0",
@@ -1042,10 +1061,31 @@ def write_substep_trajectory_png(
     return result
 
 
+def validate_execution_device(metadata: Mapping[str, Any], leaf: Path) -> dict:
+    """Require a directly recorded CPU execution device on this fixed-reset leaf."""
+    block = metadata.get("execution_device")
+    if not isinstance(block, Mapping) or set(block) != set(EXECUTION_DEVICE_FIELDS):
+        raise ValueError(f"execution device block missing or malformed: {leaf}")
+    platform_name = block.get("platform")
+    if not isinstance(platform_name, str) or not platform_name.strip():
+        raise ValueError(f"execution device platform not recorded: {leaf}")
+    for field in ("requested", "actual_env_device", "actual_tensor_device"):
+        value = block.get(field)
+        if not isinstance(value, str) or value.split(":")[0].strip().lower() != "cpu":
+            raise ValueError(
+                f"fixed-reset library must run on CPU; {field}={value!r}: {leaf}"
+            )
+    return dict(block)
+
+
 def validate_wave1_policy_artifacts(
-    leaf: str | Path, expectations: Mapping[str, Any]
+    leaf: str | Path, expectations: Mapping[str, Any], *, campaign: str = "wave1"
 ) -> dict:
-    """Validate one rendered Wave-1 leaf against the frozen policy manifest row."""
+    """Validate one rendered substep leaf against its frozen policy manifest row.
+
+    Named for the campaign that introduced the contract; `campaign` selects the
+    identity it is validated against. Only wave1 is exempt from recording a device.
+    """
     leaf = Path(leaf)
     metadata_path = leaf / "metadata.json"
     try:
@@ -1056,7 +1096,7 @@ def validate_wave1_policy_artifacts(
         raise ValueError(f"wave1 metadata is not an object: {metadata_path}")
 
     arm = str(expectations["arm"])
-    if metadata.get("campaign") != "wave1" or str(metadata.get("arm")) != arm:
+    if metadata.get("campaign") != campaign or str(metadata.get("arm")) != arm:
         raise ValueError(f"wave1 metadata identity mismatch: {leaf}")
     try:
         recorded_seed = int(metadata.get("training_seed"))
@@ -1064,7 +1104,7 @@ def validate_wave1_policy_artifacts(
         raise ValueError(f"wave1 metadata seed malformed: {leaf}") from error
     if recorded_seed != int(expectations["training_seed"]):
         raise ValueError(f"wave1 metadata seed mismatch: {leaf}")
-    if metadata.get("task") != expected_task("wave1", arm):
+    if metadata.get("task") != expected_task(campaign, arm):
         raise ValueError(f"wave1 metadata task mismatch: {leaf}")
     if metadata.get("checkpoint_sha256") != expectations["checkpoint_sha256"]:
         raise ValueError(f"wave1 checkpoint hash mismatch: {leaf}")
@@ -1087,6 +1127,11 @@ def validate_wave1_policy_artifacts(
         raise ValueError(f"wave1 timing contract mismatch: {leaf}")
     if metadata.get("metadata_payload_sha256") != _metadata_digest(metadata):
         raise ValueError(f"wave1 metadata payload digest mismatch: {leaf}")
+    execution_device = (
+        None
+        if campaign in EXECUTION_DEVICE_CAMPAIGN_EXEMPT
+        else validate_execution_device(metadata, leaf)
+    )
     rollout = metadata.get("rollout")
     if not isinstance(rollout, Mapping) or rollout.get("auto_reset_enabled") is not False:
         raise ValueError(f"wave1 rollout metadata malformed: {leaf}")
@@ -1148,6 +1193,7 @@ def validate_wave1_policy_artifacts(
         "measured_fps": fps,
         "measured_frame_count": frame_count,
         "revisions": revisions,
+        "execution_device": execution_device,
         "artifact_sha256": {
             name: _sha256(leaf / name) for name in WAVE1_ARTIFACT_FILENAMES
         },

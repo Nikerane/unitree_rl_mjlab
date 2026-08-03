@@ -1902,3 +1902,188 @@ def test_wave1_trace_only_capture_requests_no_frames():
 
     assert full.tolist() == list(range(1, 40, 2))
     assert screening.size == 0
+
+
+# --- Wave-2: recorded execution device (supersedes Wave-1's inferred CPU bridge) ---
+
+
+def _write_valid_wave2_leaf(tmp_path, *, device_block="default"):
+    """Wave-2 leaf: identical to a Wave-1 leaf plus a recorded execution device."""
+    from evaluation.analysis.fixed_reset_video_library import (
+        SUBSTEP_RENDERER_CONTRACT,
+        WAVE1_ARTIFACT_FILENAMES,
+        write_metadata,
+        write_substep_trajectory_png,
+    )
+
+    leaf = tmp_path / "p_seed4"
+    leaf.mkdir()
+    trace = _wave1_trace()
+    np.savez(leaf / "trace.npz", **trace)
+    write_substep_trajectory_png(trace, leaf / "trajectory.png")
+    frames = np.zeros((20, 720, 960, 3), dtype=np.uint8)
+    frames[:, ::2, ::2] = 255
+    iio.imwrite(leaf / "policy.mp4", frames, fps=50)
+    iio.imwrite(leaf / "montage.png", np.concatenate(list(frames[:6]), axis=1))
+    expectations = {
+        "arm": "P",
+        "training_seed": 4,
+        "checkpoint_sha256": "a" * 64,
+        "training_revision": "b" * 40,
+        "asset_revision": "c" * 40,
+        "analysis_revision": "d" * 40,
+        "reset_state_digest": FIXED_DIGEST,
+    }
+    payload = {
+        "campaign": "wave2",
+        "arm": "P",
+        "training_seed": 4,
+        "task": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress",
+        "checkpoint_sha256": "a" * 64,
+        "training_revision": "b" * 40,
+        "asset_revision": "c" * 40,
+        "analysis_revision": "d" * 40,
+        "reset_state_digest": FIXED_DIGEST,
+        "renderer_contract": SUBSTEP_RENDERER_CONTRACT,
+        "timing": TIMING,
+        "rollout": {
+            "requested_control_steps": 80,
+            "executed_control_steps": 4,
+            "substep_count": 40,
+            "frame_count": 20,
+            "auto_reset_enabled": False,
+            "terminal_boundary": {"detected": True, "step": 4, "reason": "terminated"},
+        },
+        "artifacts": {name: _sha256(leaf / name) for name in WAVE1_ARTIFACT_FILENAMES},
+    }
+    if device_block == "default":
+        device_block = {
+            "requested": "cpu",
+            "actual_env_device": "cpu",
+            "actual_tensor_device": "cpu",
+            "platform": "Darwin-25.5.0-arm64",
+        }
+    if device_block is not None:
+        payload["execution_device"] = device_block
+    write_metadata(leaf / "metadata.json", payload)
+    return leaf, expectations
+
+
+def test_expected_task_resolves_every_wave2_arm():
+    """Wave 2 replicates the same three tasks; the registry must know them."""
+    from evaluation.analysis.fixed_reset_video_library import expected_task
+
+    assert expected_task("wave2", "C0").endswith("Guideline-C0")
+    assert expected_task("wave2", "G").endswith("Guideline-CGate")
+    assert expected_task("wave2", "P").endswith("Guideline-CProgress")
+
+
+def test_wave2_artifact_validator_reports_the_recorded_execution_device(tmp_path):
+    """A Wave-2 leaf records its device directly instead of inferring it."""
+    from evaluation.analysis.fixed_reset_video_library import (
+        validate_wave1_policy_artifacts,
+    )
+
+    leaf, expectations = _write_valid_wave2_leaf(tmp_path)
+    report = validate_wave1_policy_artifacts(leaf, expectations, campaign="wave2")
+
+    assert report["execution_device"] == {
+        "requested": "cpu",
+        "actual_env_device": "cpu",
+        "actual_tensor_device": "cpu",
+        "platform": "Darwin-25.5.0-arm64",
+    }
+
+
+def test_wave2_artifact_validator_rejects_a_missing_device_block(tmp_path):
+    """Wave 2 may not fall back to Wave-1's inferred-CPU bridge."""
+    from evaluation.analysis.fixed_reset_video_library import (
+        validate_wave1_policy_artifacts,
+    )
+
+    leaf, expectations = _write_valid_wave2_leaf(tmp_path, device_block=None)
+    with pytest.raises(ValueError, match="execution device"):
+        validate_wave1_policy_artifacts(leaf, expectations, campaign="wave2")
+
+
+@pytest.mark.parametrize(
+    "field", ["requested", "actual_env_device", "actual_tensor_device"]
+)
+def test_wave2_artifact_validator_requires_cpu_in_every_device_field(tmp_path, field):
+    """A CUDA render must be rejected however the accelerator leaked in."""
+    from evaluation.analysis.fixed_reset_video_library import (
+        validate_wave1_policy_artifacts,
+    )
+
+    block = {
+        "requested": "cpu",
+        "actual_env_device": "cpu",
+        "actual_tensor_device": "cpu",
+        "platform": "Linux-x86_64",
+    }
+    block[field] = "cuda:0"
+    leaf, expectations = _write_valid_wave2_leaf(tmp_path, device_block=block)
+    with pytest.raises(ValueError, match="must run on CPU"):
+        validate_wave1_policy_artifacts(leaf, expectations, campaign="wave2")
+
+
+def test_wave2_artifact_validator_rejects_an_empty_platform(tmp_path):
+    """Platform is provenance, not decoration; a blank value records nothing."""
+    from evaluation.analysis.fixed_reset_video_library import (
+        validate_wave1_policy_artifacts,
+    )
+
+    leaf, expectations = _write_valid_wave2_leaf(
+        tmp_path,
+        device_block={
+            "requested": "cpu",
+            "actual_env_device": "cpu",
+            "actual_tensor_device": "cpu",
+            "platform": "",
+        },
+    )
+    with pytest.raises(ValueError, match="execution device"):
+        validate_wave1_policy_artifacts(leaf, expectations, campaign="wave2")
+
+
+def test_wave1_leaf_still_validates_without_a_device_block(tmp_path):
+    """Frozen Wave-1 artifacts keep their documented inferred-CPU bridge."""
+    from evaluation.analysis.fixed_reset_video_library import (
+        validate_wave1_policy_artifacts,
+    )
+
+    leaf, expectations = _write_valid_wave1_leaf(tmp_path)
+    report = validate_wave1_policy_artifacts(leaf, expectations)
+
+    assert report["execution_device"] is None
+
+
+def test_renderer_builds_a_device_block_its_own_validator_accepts():
+    """The producer and the validator must agree, or the field is decoration."""
+    import torch
+
+    from evaluation.analysis.fixed_reset_video_library import (
+        validate_execution_device,
+    )
+
+    block = render_policy.wave1_execution_device(
+        requested="cpu",
+        env_device="cpu",
+        tensor=torch.zeros(3),
+    )
+
+    assert validate_execution_device({"execution_device": block}, Path("leaf")) == block
+    assert block["platform"]
+
+
+def test_renderer_device_block_reports_a_promoted_tensor_device():
+    """A tensor that silently moved off CPU must be recorded, not normalised away."""
+
+    class _FakeTensor:
+        device = "cuda:0"
+
+    block = render_policy.wave1_execution_device(
+        requested="cpu", env_device="cpu", tensor=_FakeTensor()
+    )
+
+    assert block["actual_tensor_device"] == "cuda:0"
