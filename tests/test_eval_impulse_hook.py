@@ -1489,6 +1489,7 @@ def test_native_guideline_contract_rejects_tracker_drift(mutation, message):
     "next_gate_vector",
     "completed_gate_fraction",
     "guideline_perpendicular_error",
+    "waypoint_progress_state",
   ),
 )
 def test_native_guideline_contract_requires_each_guideline_observation_in_both_groups(
@@ -1508,6 +1509,8 @@ def test_native_guideline_contract_requires_each_guideline_observation_in_both_g
     ("next_gate_vector", "reader", object),
     ("completed_gate_fraction", "width", 2),
     ("guideline_perpendicular_error", "reader", object),
+    ("waypoint_progress_state", "reader", object),
+    ("waypoint_progress_state", "width", 1),
   ),
 )
 def test_native_guideline_contract_rejects_observation_reader_or_width_drift(
@@ -1578,3 +1581,52 @@ def test_fixed_action_tape_preserves_physics_across_strict_quality_arms():
   assert _first_payload_difference(
     instrumented_payload, uninstrumented_payload
   ) is None
+
+
+def test_native_guideline_contract_accepts_the_registered_four_observations():
+    """The evaluator must accept the shipped guideline observation block as-is."""
+    from src.tasks.hammer.mdp import waypoint_progress_state
+
+    for arm, task in GUIDELINE_TASKS.items():
+        cfg = eval_impulse.load_env_cfg(task, play=False)
+        eval_impulse._validate_native_guideline_env_contract(cfg, task)
+        for group_name in ("actor", "critic"):
+            terms = cfg.observations[group_name].terms
+            guideline = tuple(
+                name for name, term in terms.items()
+                if term.func is eval_impulse._guideline_observation
+            )
+            assert guideline == (
+                "next_gate_vector",
+                "completed_gate_fraction",
+                "guideline_perpendicular_error",
+                "waypoint_progress_state",
+            ), arm
+            assert tuple(terms)[-4:] == guideline, arm
+            assert terms["waypoint_progress_state"].params == {
+                "reader": waypoint_progress_state,
+                "width": 2,
+            }, arm
+
+
+def test_native_guideline_contract_rejects_progress_state_out_of_order():
+    """waypoint_progress_state must stay last; reordering is drift, not style."""
+    task = GUIDELINE_TASKS["C0"]
+    cfg = eval_impulse.load_env_cfg(task, play=False)
+    terms = cfg.observations["actor"].terms
+    moved = terms.pop("waypoint_progress_state")
+    reordered = {"waypoint_progress_state": moved, **terms}
+    cfg.observations["actor"].terms = reordered
+
+    with pytest.raises(ValueError, match="ordering"):
+        eval_impulse._validate_native_guideline_env_contract(cfg, task)
+
+
+def test_native_guideline_contract_rejects_a_missing_progress_state():
+    """Dropping the fourth observation must fail closed, not be tolerated."""
+    task = GUIDELINE_TASKS["C0"]
+    cfg = eval_impulse.load_env_cfg(task, play=False)
+    del cfg.observations["actor"].terms["waypoint_progress_state"]
+
+    with pytest.raises(ValueError, match="waypoint_progress_state"):
+        eval_impulse._validate_native_guideline_env_contract(cfg, task)

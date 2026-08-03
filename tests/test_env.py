@@ -112,8 +112,10 @@ class TestCartesianGuidelineConstruction:
         env = guideline_envs_cpu[task_id]
         obs, _ = env.reset(seed=20260801)
         assert env.action_manager.action.shape == (1, 3)
-        assert obs["actor"].shape == (1, 42)
-        assert obs["critic"].shape == (1, 42)
+        # 37 base + next_gate_vector(3) + completed_gate_fraction(1)
+        # + guideline_perpendicular_error(1) + waypoint_progress_state(2)
+        assert obs["actor"].shape == (1, 44)
+        assert obs["critic"].shape == (1, 44)
         assert torch.isfinite(obs["actor"]).all()
         assert torch.isfinite(obs["critic"]).all()
 
@@ -140,16 +142,27 @@ class TestCartesianGuidelineConstruction:
         nail_ids, _ = nail.find_sites(("nail_top",))
         head = robot.data.site_pos_w[:, head_ids].squeeze(1)
         nail_top = nail.data.site_pos_w[:, nail_ids].squeeze(1)
+        # The guideline block is the last SEVEN columns: next_gate_vector(3),
+        # completed_gate_fraction(1), guideline_perpendicular_error(1) and the
+        # dense waypoint_progress_state(2) = [d_start/reference_length, f_best].
+        # Every one of them previews the same post-forward geometry: at reset the
+        # head sits on the entry, so its distance to the first target is exactly
+        # one seventh of the entry->nail reference and no best fraction is banked.
+        first_target = head + (nail_top - head) / 7.0
+        reference_length = torch.linalg.vector_norm(nail_top - head, dim=-1, keepdim=True)
+        d_start = torch.linalg.vector_norm(first_target - head, dim=-1, keepdim=True)
         expected = torch.cat(
             (
                 (nail_top - head) / 7.0,
                 torch.zeros((1, 1), device=env.device),
                 torch.zeros((1, 1), device=env.device),
+                d_start / reference_length,
+                torch.zeros((1, 1), device=env.device),
             ),
             dim=-1,
         )
-        torch.testing.assert_close(obs["actor"][:, -5:], expected)
-        torch.testing.assert_close(obs["critic"][:, -5:], expected)
+        torch.testing.assert_close(obs["actor"][:, -7:], expected)
+        torch.testing.assert_close(obs["critic"][:, -7:], expected)
 
     @pytest.mark.parametrize("task_id", _GUIDELINE_TASK_IDS)
     def test_actor_and_critic_reads_cannot_advance_tracker(
@@ -192,6 +205,52 @@ class TestCartesianGuidelineConstruction:
                 env.observation_manager.compute_group("actor")
         finally:
             setattr(env, _ENV_GUIDELINE_ATTR, tracker)
+
+    def test_progress_state_tracks_live_tracker_geometry_after_motion(
+        self, guideline_envs_cpu
+    ):
+        """The reset-time assertion above is 1/7 by construction, so it cannot tell a
+        real reader from one returning a hardcoded 1/7. Once the head has moved and
+        gates have been crossed, target_start_distance is re-anchored to the NEW
+        active target and the 1/7 identity no longer holds, so this comparison
+        against the tracker's own live state does discriminate.
+        """
+        from src.tasks.hammer.mdp.guideline import (
+            GUIDELINE_NUM_GATES,
+            _ENV_GUIDELINE_ATTR,
+        )
+
+        env = guideline_envs_cpu[_GUIDELINE_TASK_IDS[0]]
+        env.reset(seed=20260803)
+        tracker = getattr(env, _ENV_GUIDELINE_ATTR)
+        descend = torch.tensor([[0.0, 0.0, -1.0]])
+        # Stop while the descent is MID-corridor. After all six gates complete the
+        # reader zeroes normalized_start (guideline.py), which would make a
+        # hardcoded-constant reader indistinguishable from the real one again.
+        for _ in range(3):
+            obs, *_ = env.step(descend)
+
+        reference_length = torch.linalg.vector_norm(
+            tracker.nail - tracker.entry, dim=-1
+        )
+        expected = torch.stack(
+            (
+                (tracker.target_start_distance / reference_length).clamp(0.0, 1.0),
+                tracker.best_target_fraction,
+            ),
+            dim=-1,
+        )
+        for group in ("actor", "critic"):
+            torch.testing.assert_close(obs[group][:, -2:], expected)
+
+        # Non-vacuity: the head has left the entry and the active target has been
+        # re-anchored, so the observed value is no longer the reset-time 1/7.
+        assert 0 < int(tracker.next_gate[0]) < GUIDELINE_NUM_GATES
+        assert not torch.allclose(
+            obs["actor"][0, -2],
+            torch.tensor(1.0 / (GUIDELINE_NUM_GATES + 1)),
+            atol=1e-4,
+        )
 
     def test_gate_crossing_tape_changes_only_one_shot_reward_payout(
         self, guideline_envs_cpu

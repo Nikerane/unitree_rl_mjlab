@@ -1122,12 +1122,15 @@ def _configured_reader_name(func: Any) -> str:
 def _validate_guideline_smoke_contract(
     training_cfg: Any, contract: ArmContract
 ) -> dict[str, Any]:
-    """Adapt the frozen C0/C-Gate validator to the shared progress-state observation."""
+    """Adapt the frozen C0/C-Gate validator to the P arm's extra reward term.
+
+    The shared progress-state OBSERVATION is no longer stripped before validation:
+    the evaluator now knows all four guideline observations, so what gets checked
+    here is the real registered block rather than a trimmed copy of it. Only the
+    P-only reward term is still lifted out, because the evaluator validates P's
+    rewards as "C0 plus the required progress payout".
+    """
     compatible_cfg = copy.deepcopy(training_cfg)
-    for group_name in ("actor", "critic"):
-        compatible_cfg.observations[group_name].terms.pop(
-            "waypoint_progress_state", None
-        )
 
     progress = compatible_cfg.rewards.pop("r_waypoint_progress", None)
     if contract.progress_reward_required:

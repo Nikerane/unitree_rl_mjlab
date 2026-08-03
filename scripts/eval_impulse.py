@@ -61,6 +61,7 @@ from src.tasks.hammer.mdp.guideline import (
   completed_gate_fraction,
   guideline_perpendicular_error,
   next_gate_vector,
+  waypoint_progress_state,
   ordered_gate_progress_reward,
 )
 from src.tasks.hammer.mdp.rewards import (
@@ -1022,10 +1023,14 @@ def _validate_native_guideline_env_contract(env_cfg, task: str) -> dict:
   ):
     raise ValueError(f"{task}: guideline nail site binding drift")
 
+  # Ordered: the dense progress state is registered last, after the three
+  # original guideline observations. Widths sum to 7, which is why the guideline
+  # actor/critic groups are 44 wide rather than the legacy 42.
   expected_observations = {
     "next_gate_vector": (next_gate_vector, 3),
     "completed_gate_fraction": (completed_gate_fraction, 1),
     "guideline_perpendicular_error": (guideline_perpendicular_error, 1),
+    "waypoint_progress_state": (waypoint_progress_state, 2),
   }
   expected_observation_names = tuple(expected_observations)
   for group_name in ("actor", "critic"):
