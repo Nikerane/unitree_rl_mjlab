@@ -60,7 +60,45 @@ TIMING_CONTRACT = {
     "control_decimation": 10,
     "control_dt_s": 0.02,
 }
+SUBSTEP_RENDERER_CONTRACT = {
+    **RENDERER_CONTRACT,
+    "fps": 50,
+    "frame_substep_stride": 2,
+}
+SUBSTEP_TRACE_KEYS = (
+    "substep_head_position_m",
+    "substep_contact",
+    "substep_nail_depth_m",
+    "substep_arm_qvel_rad_s",
+    "substep_arm_qvel_pre_rad_s",
+    "arm_joint_names",
+    "substep_gate_index",
+    "substep_perpendicular_error_m",
+    "substep_d_start_m",
+    "substep_f_best",
+    "substep_control_step",
+    "substep_is_control_boundary",
+    "substep_episode_index",
+    "control_step_reward_terms",
+    "control_step_reward_term_names",
+    "control_step_reward_total",
+    "guideline_entry_m",
+    "guideline_nail_m",
+    "guideline_gate_centers_m",
+    "guideline_reference_length_m",
+    "physics_dt_s",
+    "control_decimation",
+    "executed_control_steps",
+)
+WAVE1_ARTIFACT_FILENAMES = ("policy.mp4", "montage.png", "trajectory.png", "trace.npz")
+WAVE1_REVISION_FIELDS = ("training_revision", "asset_revision", "analysis_revision")
+# Mirrors src.tasks.hammer.mdp.guideline.GUIDELINE_GATE_RADIUS_M; duplicated so this
+# module stays import-light. test_wave1_gate_disk_radius_matches_the_tracker guards drift.
+GUIDELINE_GATE_RADIUS_M = 0.015
 TASK_BY_CAMPAIGN_ARM = {
+    ("wave1", "C0"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0",
+    ("wave1", "G"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate",
+    ("wave1", "P"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress",
     ("fq4x8", "F8"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear",
     ("fq4x8", "F0"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0",
     ("fq4x8", "D0"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0",
@@ -708,3 +746,390 @@ def validate_policy_artifacts(root: str | Path, rows: Sequence[Mapping[str, Any]
     if len(presentation_revisions) != 1:
         raise ValueError("artifact presentation generator revision differs")
     return {"fixed_reset": fixed_reset, "artifacts": validated}
+
+
+# --- Wave-1 500 Hz substep evidence -----------------------------------------
+
+
+def _as_array(trace: Mapping[str, Any], key: str) -> np.ndarray:
+    try:
+        return np.asarray(trace[key])
+    except KeyError as error:
+        raise ValueError(f"substep trace is missing {key}") from error
+
+
+def validate_substep_trace(trace: Mapping[str, Any]) -> dict:
+    """Prove a trace is genuinely per-physics-substep and first-episode only.
+
+    A 50 Hz control-rate array repeated to substep length is the failure this
+    guards against: it has the right shape and the wrong content.
+    """
+    for key in SUBSTEP_TRACE_KEYS:
+        if key not in trace:
+            raise ValueError(f"substep trace is missing {key}")
+
+    positions = _as_array(trace, "substep_head_position_m").astype(float)
+    if positions.ndim != 2 or positions.shape[1] != 3 or len(positions) == 0:
+        raise ValueError("substep_head_position_m must have shape [substeps, 3]")
+    if not np.isfinite(positions).all():
+        raise ValueError("substep_head_position_m must be finite")
+
+    decimation = int(_as_array(trace, "control_decimation"))
+    control_steps = int(_as_array(trace, "executed_control_steps"))
+    physics_dt = float(_as_array(trace, "physics_dt_s"))
+    if decimation <= 0 or control_steps <= 0 or not np.isfinite(physics_dt) or physics_dt <= 0:
+        raise ValueError("substep trace timing must be positive and finite")
+    substeps = len(positions)
+    if substeps != decimation * control_steps:
+        raise ValueError(
+            "substep trace does not sit on the control grid: "
+            f"{substeps} samples != {decimation} x {control_steps}"
+        )
+
+    per_substep = (
+        "substep_contact",
+        "substep_nail_depth_m",
+        "substep_perpendicular_error_m",
+        "substep_d_start_m",
+        "substep_f_best",
+        "substep_gate_index",
+        "substep_control_step",
+        "substep_is_control_boundary",
+        "substep_episode_index",
+    )
+    for key in per_substep:
+        values = _as_array(trace, key)
+        if values.shape != (substeps,):
+            raise ValueError(f"{key} must have one value per substep")
+    joint_names = _as_array(trace, "arm_joint_names")
+    for key in ("substep_arm_qvel_rad_s", "substep_arm_qvel_pre_rad_s"):
+        qvel = _as_array(trace, key).astype(float)
+        if qvel.ndim != 2 or len(qvel) != substeps or not np.isfinite(qvel).all():
+            raise ValueError(f"{key} must be finite with one row per substep")
+        if joint_names.ndim != 1 or qvel.shape[1] != len(joint_names):
+            raise ValueError(f"{key} columns must be named by arm_joint_names")
+    for key in ("substep_nail_depth_m", "substep_perpendicular_error_m",
+                "substep_d_start_m", "substep_f_best"):
+        if not np.isfinite(_as_array(trace, key).astype(float)).all():
+            raise ValueError(f"{key} must be finite")
+
+    episode = _as_array(trace, "substep_episode_index").astype(np.int64)
+    if int(episode.max(initial=0)) != 0 or int(episode.min(initial=0)) != 0:
+        raise ValueError("substep trace contains post-reset samples from a later episode")
+    control_step = _as_array(trace, "substep_control_step").astype(np.int64)
+    if not np.array_equal(control_step, np.arange(substeps) // decimation):
+        raise ValueError("substep_control_step must index its own control window")
+    boundary = _as_array(trace, "substep_is_control_boundary").astype(bool)
+    expected_boundary = np.zeros(substeps, dtype=bool)
+    expected_boundary[decimation - 1 :: decimation] = True
+    if not np.array_equal(boundary, expected_boundary):
+        raise ValueError("substep_is_control_boundary must mark every control window end")
+
+    payouts = _as_array(trace, "control_step_reward_terms").astype(float)
+    names = _as_array(trace, "control_step_reward_term_names")
+    if payouts.ndim != 2 or len(payouts) != control_steps or not np.isfinite(payouts).all():
+        raise ValueError("control_step_reward_terms must be finite [control_steps, terms]")
+    if names.ndim != 1 or len(names) != payouts.shape[1]:
+        raise ValueError("control_step_reward_term_names must name every payout column")
+    totals = _as_array(trace, "control_step_reward_total").astype(float)
+    if totals.shape != (control_steps,) or not np.isfinite(totals).all():
+        raise ValueError("control_step_reward_total must be finite, one value per control step")
+
+    entry = _as_array(trace, "guideline_entry_m").astype(float)
+    nail = _as_array(trace, "guideline_nail_m").astype(float)
+    gates = _as_array(trace, "guideline_gate_centers_m").astype(float)
+    if entry.shape != (3,) or nail.shape != (3,) or not np.isfinite(entry).all() or not np.isfinite(nail).all():
+        raise ValueError("guideline entry/nail must be finite 3-vectors")
+    if gates.shape != (6, 3) or not np.isfinite(gates).all():
+        raise ValueError("guideline_gate_centers_m must be six finite 3-vectors")
+    reference_length = float(_as_array(trace, "guideline_reference_length_m"))
+    if not np.isfinite(reference_length) or reference_length <= 0:
+        raise ValueError("guideline_reference_length_m must be positive and finite")
+
+    if not np.array_equal(positions[0], entry):
+        raise ValueError(
+            "guideline_entry_m must be the anchored first substep head position; "
+            "geometry from a different episode was pasted in"
+        )
+    gate_index = _as_array(trace, "substep_gate_index").astype(np.int64)
+    if gate_index.min(initial=0) < 0 or gate_index.max(initial=0) > 6:
+        raise ValueError("substep_gate_index must stay within [0, 6]")
+    if np.any(np.diff(gate_index) < 0):
+        raise ValueError("substep_gate_index must be non-decreasing within an episode")
+
+    # --- the 500 Hz proof -------------------------------------------------
+    # A control-rate path repeated to substep length puts ALL of its displacement on
+    # the transitions that cross a control-window boundary and none inside a window.
+    # With decimation d, an honestly sampled path puts ~(d-1)/d of its displacement on
+    # interior transitions. Measuring the SHARE of motion (rather than counting distinct
+    # values) is robust both to float noise sprinkled on a fake and to an arm that
+    # genuinely holds still: a still window contributes zero to numerator and
+    # denominator alike.
+    #
+    # Ceiling: this refutes repetition/upsampling of a control-rate array, which is the
+    # failure it exists to catch. It cannot refute a wholly synthetic path fabricated
+    # with smooth intra-window motion -- no content-only test can. Provenance (the
+    # renderer hook that wrote the file) is what rules that out.
+    steps = np.linalg.norm(np.diff(positions, axis=0), axis=1)
+    crosses_boundary = ((np.arange(1, substeps) % decimation) == 0)
+    total_motion = float(steps.sum())
+    if total_motion <= 0.0:
+        raise ValueError(
+            "substep positions are not genuinely per-substep: the head never moved"
+        )
+    interior_motion_share = float(steps[~crosses_boundary].sum()) / total_motion
+    if interior_motion_share < 0.5:
+        raise ValueError(
+            "substep positions are not genuinely per-substep: only "
+            f"{interior_motion_share:.3f} of the head displacement happens inside "
+            "control windows, which is the signature of a repeated control-rate path"
+        )
+    unique_positions = len(np.unique(positions, axis=0))
+
+    return {
+        "substep_count": substeps,
+        "executed_control_steps": control_steps,
+        "control_decimation": decimation,
+        "physics_dt_s": physics_dt,
+        "sample_rate_hz": 1.0 / physics_dt,
+        "unique_substep_positions": unique_positions,
+        "interior_motion_share": interior_motion_share,
+        "total_head_path_length_m": total_motion,
+        "reference_length_m": reference_length,
+    }
+
+
+def _wave1_axis_half_span(trace: Mapping[str, Any]) -> tuple[float, dict]:
+    positions = np.asarray(trace["substep_head_position_m"], dtype=float)
+    stacked = np.vstack((
+        positions,
+        np.asarray(trace["guideline_entry_m"], dtype=float)[None, :],
+        np.asarray(trace["guideline_nail_m"], dtype=float)[None, :],
+        np.asarray(trace["guideline_gate_centers_m"], dtype=float),
+    ))
+    span = float(np.max(np.ptp(stacked, axis=0)))
+    half = max(span, 0.02) * 0.6  # one shared metric scale for both panels
+    centers = {
+        axis: float(0.5 * (stacked[:, axis].max() + stacked[:, axis].min()))
+        for axis in (0, 1, 2)
+    }
+    return half, centers
+
+
+def write_substep_trajectory_png(
+    trace: Mapping[str, Any], path: str | Path, *, title: str = ""
+) -> dict:
+    """Plot the 500 Hz path against the tracker's frozen entry->nail guideline."""
+    report = validate_substep_trace(trace)
+    positions = np.asarray(trace["substep_head_position_m"], dtype=float)
+    contact = np.asarray(trace["substep_contact"], dtype=bool)
+    boundary = np.asarray(trace["substep_is_control_boundary"], dtype=bool)
+    entry = np.asarray(trace["guideline_entry_m"], dtype=float)
+    nail = np.asarray(trace["guideline_nail_m"], dtype=float)
+    gates = np.asarray(trace["guideline_gate_centers_m"], dtype=float)
+    reference = np.vstack((entry, nail))
+    half, centers = _wave1_axis_half_span(trace)
+
+    fig, axes = plt.subplots(1, 2, figsize=(11, 5.2))
+    for axis, ordinate, label in ((axes[0], 2, "z (m)"), (axes[1], 1, "y (m)")):
+        axis.plot(
+            reference[:, 0],
+            reference[:, ordinate],
+            color="black",
+            linestyle="--",
+            linewidth=1.0,
+            label="tracker guideline (entry -> nail)",
+            zorder=1,
+        )
+        for center in gates:
+            axis.add_patch(
+                plt.Circle(
+                    (center[0], center[ordinate]),
+                    GUIDELINE_GATE_RADIUS_M,
+                    facecolor="none",
+                    edgecolor="#1f77b4",
+                    linewidth=0.8,
+                    alpha=0.8,
+                    zorder=2,
+                )
+            )
+        if len(positions) > 1:
+            points = positions[:, [0, ordinate]].reshape(-1, 1, 2)
+            segments = np.concatenate([points[:-1], points[1:]], axis=1)
+            axis.add_collection(
+                LineCollection(
+                    segments,
+                    cmap="viridis",
+                    array=np.linspace(0.0, 1.0, len(segments)),
+                    linewidth=1.4,
+                    zorder=3,
+                )
+            )
+        axis.scatter(
+            positions[boundary, 0],
+            positions[boundary, ordinate],
+            facecolors="none",
+            edgecolors="#444444",
+            s=26,
+            linewidths=0.7,
+            label="control-step boundary",
+            zorder=4,
+        )
+        axis.scatter(positions[0, 0], positions[0, ordinate], c="#2ca02c", s=42, zorder=6,
+                     label="start")
+        if contact.any():
+            axis.scatter(positions[contact, 0], positions[contact, ordinate], c="#d62728",
+                         s=14, zorder=7, label="contact")
+        axis.set_xlim(centers[0] - half, centers[0] + half)
+        axis.set_ylim(centers[ordinate] - half, centers[ordinate] + half)
+        axis.set_aspect("equal", adjustable="box")
+        axis.set_xlabel("x (m)")
+        axis.set_ylabel(label)
+        axis.xaxis.set_major_formatter(FormatStrFormatter("%.3f"))
+        axis.yaxis.set_major_formatter(FormatStrFormatter("%.3f"))
+        axis.xaxis.set_major_locator(MaxNLocator(nbins=5))
+        axis.yaxis.set_major_locator(MaxNLocator(nbins=5))
+        axis.tick_params(labelsize=8)
+        axis.grid(alpha=0.25)
+    axes[0].set_title("x-z side view")
+    axes[1].set_title("x-y top view")
+    axes[0].legend(fontsize=7, loc="best")
+    fig.suptitle(
+        (title or "Hammer-head 500 Hz trajectory")
+        + f"\n{report['substep_count']} substeps @ {report['sample_rate_hz']:.0f} Hz"
+        " · dashed black = WaypointProgressTracker entry->nail · viridis = normalized time"
+    )
+    fig.tight_layout(rect=[0.0, 0.0, 1.0, 0.88])
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=160)
+
+    result = {
+        **report,
+        "reference_source": "waypoint_progress_tracker_entry_to_nail",
+        "reference_endpoints_m": reference,
+        "gate_disk_count": int(len(gates)),
+        "contact_sample_count": int(contact.sum()),
+        "control_boundary_marker_count": int(boundary.sum()),
+        "axis_half_span_m": {
+            "xz": float(0.5 * (axes[0].get_ylim()[1] - axes[0].get_ylim()[0])),
+            "xy": float(0.5 * (axes[1].get_ylim()[1] - axes[1].get_ylim()[0])),
+        },
+        "axis_x_half_span_m": {
+            "xz": float(0.5 * (axes[0].get_xlim()[1] - axes[0].get_xlim()[0])),
+            "xy": float(0.5 * (axes[1].get_xlim()[1] - axes[1].get_xlim()[0])),
+        },
+    }
+    plt.close(fig)
+    return result
+
+
+def validate_wave1_policy_artifacts(
+    leaf: str | Path, expectations: Mapping[str, Any]
+) -> dict:
+    """Validate one rendered Wave-1 leaf against the frozen policy manifest row."""
+    leaf = Path(leaf)
+    metadata_path = leaf / "metadata.json"
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"wave1 metadata unreadable: {metadata_path}") from error
+    if not isinstance(metadata, Mapping):
+        raise ValueError(f"wave1 metadata is not an object: {metadata_path}")
+
+    arm = str(expectations["arm"])
+    if metadata.get("campaign") != "wave1" or str(metadata.get("arm")) != arm:
+        raise ValueError(f"wave1 metadata identity mismatch: {leaf}")
+    try:
+        recorded_seed = int(metadata.get("training_seed"))
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"wave1 metadata seed malformed: {leaf}") from error
+    if recorded_seed != int(expectations["training_seed"]):
+        raise ValueError(f"wave1 metadata seed mismatch: {leaf}")
+    if metadata.get("task") != expected_task("wave1", arm):
+        raise ValueError(f"wave1 metadata task mismatch: {leaf}")
+    if metadata.get("checkpoint_sha256") != expectations["checkpoint_sha256"]:
+        raise ValueError(f"wave1 checkpoint hash mismatch: {leaf}")
+    if metadata.get("reset_state_digest") != expectations["reset_state_digest"]:
+        raise ValueError(f"wave1 fixed-reset digest mismatch: {leaf}")
+    revisions = {}
+    for field, key in zip(WAVE1_REVISION_FIELDS,
+                          ("training", "asset", "analysis"), strict=True):
+        value = metadata.get(field)
+        if not _is_revision(value) or value != expectations[field.replace("_revision", "") + "_revision"]:
+            raise ValueError(f"wave1 {field} mismatch: {leaf}")
+        revisions[key] = str(value)
+    if revisions["training"] == revisions["analysis"]:
+        raise ValueError(
+            f"wave1 analysis revision must be recorded separately from training: {leaf}"
+        )
+    if metadata.get("renderer_contract") != SUBSTEP_RENDERER_CONTRACT:
+        raise ValueError(f"wave1 renderer contract mismatch: {leaf}")
+    if metadata.get("timing") != TIMING_CONTRACT:
+        raise ValueError(f"wave1 timing contract mismatch: {leaf}")
+    if metadata.get("metadata_payload_sha256") != _metadata_digest(metadata):
+        raise ValueError(f"wave1 metadata payload digest mismatch: {leaf}")
+    rollout = metadata.get("rollout")
+    if not isinstance(rollout, Mapping) or rollout.get("auto_reset_enabled") is not False:
+        raise ValueError(f"wave1 rollout metadata malformed: {leaf}")
+    boundary = rollout.get("terminal_boundary")
+    if not isinstance(boundary, Mapping) or not isinstance(boundary.get("detected"), bool):
+        raise ValueError(f"wave1 terminal boundary malformed: {leaf}")
+    executed_declared = rollout.get("executed_control_steps")
+    if boundary["detected"]:
+        if boundary.get("step") != executed_declared or not isinstance(
+            boundary.get("reason"), str
+        ):
+            raise ValueError(f"wave1 terminal boundary mismatch: {leaf}")
+    elif boundary.get("step") is not None or boundary.get("reason") != "step_limit":
+        raise ValueError(f"wave1 terminal boundary mismatch: {leaf}")
+
+    recorded_hashes = metadata.get("artifacts")
+    if not isinstance(recorded_hashes, Mapping):
+        raise ValueError(f"wave1 artifact hashes missing: {leaf}")
+    for name in WAVE1_ARTIFACT_FILENAMES:
+        artifact = leaf / name
+        if not artifact.is_file() or artifact.stat().st_size == 0:
+            raise ValueError(f"wave1 artifact missing or empty: {artifact}")
+        if recorded_hashes.get(name) != _sha256(artifact):
+            raise ValueError(f"wave1 artifact SHA-256 mismatch: {artifact}")
+    try:
+        with np.load(leaf / "trace.npz") as loaded:
+            trace = {key: loaded[key] for key in loaded.files}
+    except (OSError, ValueError, KeyError) as error:
+        raise ValueError(f"wave1 trace unreadable: {leaf}") from error
+    report = validate_substep_trace(trace)
+
+    try:
+        video_metadata = iio.immeta(leaf / "policy.mp4")
+        fps = float(video_metadata["fps"])
+        width, height = tuple(video_metadata["size"])
+        frame_count = sum(1 for _ in iio.imiter(leaf / "policy.mp4"))
+        image = np.asarray(iio.imread(leaf / "trajectory.png"))
+    except (KeyError, OSError, TypeError, ValueError) as error:
+        raise ValueError(f"wave1 media properties unavailable: {leaf}") from error
+    stride = SUBSTEP_RENDERER_CONTRACT["frame_substep_stride"]
+    expected_frames = report["substep_count"] // stride
+    if (
+        abs(fps - SUBSTEP_RENDERER_CONTRACT["fps"]) > 1e-9
+        or (width, height) != (
+            SUBSTEP_RENDERER_CONTRACT["frame_width_px"],
+            SUBSTEP_RENDERER_CONTRACT["frame_height_px"],
+        )
+        or frame_count != expected_frames
+        or int(rollout.get("frame_count", -1)) != frame_count
+        or int(rollout.get("substep_count", -1)) != report["substep_count"]
+        or int(rollout.get("executed_control_steps", -1))
+        != report["executed_control_steps"]
+        or image.size == 0
+    ):
+        raise ValueError(f"wave1 media properties mismatch: {leaf}")
+
+    return {
+        **report,
+        "measured_fps": fps,
+        "measured_frame_count": frame_count,
+        "revisions": revisions,
+        "artifact_sha256": {
+            name: _sha256(leaf / name) for name in WAVE1_ARTIFACT_FILENAMES
+        },
+    }

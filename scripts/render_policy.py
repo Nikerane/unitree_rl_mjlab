@@ -38,14 +38,26 @@ from evaluation.analysis.fixed_reset_video_library import (
   ARTIFACT_FILENAMES,
   FIXED_RESET_ENVELOPE,
   RENDERER_CONTRACT,
+  SUBSTEP_RENDERER_CONTRACT,
   TIMING_CONTRACT,
+  WAVE1_ARTIFACT_FILENAMES,
   expected_task,
   load_fixed_reset,
+  validate_substep_trace,
   write_metadata,
+  write_substep_trajectory_png,
   write_trajectory_png,
 )
 from scripts.eval_impulse import restore_reset_state
-from src.assets.robots.unitree_z1.z1_constants import HAMMER_HEAD_SITE_NAME
+from src.assets.robots.unitree_z1.z1_constants import (
+  ARM_JOINT_NAMES,
+  HAMMER_HEAD_SITE_NAME,
+)
+from src.tasks.hammer.mdp.guideline import (
+  _ENV_GUIDELINE_ATTR,
+  GUIDELINE_NUM_GATES,
+  project_to_reference,
+)
 from src.tasks.hammer.mdp.references import get_strike_reference
 
 
@@ -74,10 +86,128 @@ class Cfg:
   metadata_provenance: str = ""
   """Free-form immutable provenance note for this rendering invocation."""
   device: str = "cpu"
+  substep_trace: bool = False
+  """Wave-1 mode: record 500 Hz substep evidence and encode slow-motion video."""
+  training_revision: str = ""
+  """Revision the checkpoint was TRAINED at (Wave-1 mode; distinct from analysis)."""
+  analysis_revision: str = ""
+  """Revision of the renderer/analysis code (Wave-1 mode; must differ from training)."""
 
 
 def _sha256(path: Path) -> str:
   return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _is_revision(value: object) -> bool:
+  text = str(value)
+  return len(text) == 40 and all(character in "0123456789abcdef" for character in text)
+
+
+def validate_wave1_revisions(
+  *, training_revision: str, asset_revision: str, analysis_revision: str
+) -> dict[str, str]:
+  """Require three well-formed revisions with analysis recorded separately.
+
+  The renderer runs at a later commit than the policies it inspects; collapsing the
+  two would make a re-render indistinguishable from the training state.
+  """
+  if not _is_revision(training_revision):
+    raise ValueError("training_revision must be a full 40-hex revision")
+  if not _is_revision(asset_revision):
+    raise ValueError("asset_revision must be a full 40-hex revision")
+  if not _is_revision(analysis_revision):
+    raise ValueError("analysis_revision must be a full 40-hex revision")
+  if analysis_revision == training_revision:
+    raise ValueError(
+      "analysis_revision must differ from training_revision: analysis provenance is "
+      "recorded separately from the frozen training revision"
+    )
+  return {
+    "training": training_revision,
+    "asset": asset_revision,
+    "analysis": analysis_revision,
+  }
+
+
+def wave1_frame_substep_indices(substep_count: int, stride: int) -> np.ndarray:
+  """Substep indices that emit an RGB frame: the last substep of each stride group."""
+  if substep_count <= 0 or stride <= 0:
+    raise ValueError("substep_count and stride must be positive")
+  return np.arange(stride - 1, substep_count, stride, dtype=np.int64)
+
+
+def build_wave1_substep_trace(
+  *,
+  head_positions,
+  contacts,
+  nail_depths,
+  arm_qvels,
+  arm_qvels_pre,
+  arm_joint_names,
+  gate_indices,
+  perpendicular_errors,
+  d_starts,
+  f_bests,
+  episode_indices,
+  control_step_payouts,
+  control_step_totals,
+  payout_names,
+  control_steps_recorded,
+  entry,
+  nail,
+  physics_dt_s: float,
+  control_decimation: int,
+  executed_control_steps: int,
+) -> dict[str, np.ndarray]:
+  """Assemble a validated 500 Hz trace from per-substep and per-control recordings.
+
+  Reward payouts stay at their real control-rate timing; broadcasting them to substep
+  length would invent measurements the manager never produced.
+  """
+  if (
+    len(control_step_payouts) != executed_control_steps
+    or len(control_step_totals) != executed_control_steps
+  ):
+    raise ValueError(
+      "reward payouts must be recorded at the control rate: expected "
+      f"{executed_control_steps} rows, got {len(control_step_payouts)}"
+    )
+  substeps = len(head_positions)
+  entry = np.asarray(entry, dtype=np.float64)
+  nail = np.asarray(nail, dtype=np.float64)
+  gate_centers = entry + (
+    np.arange(1, GUIDELINE_NUM_GATES + 1, dtype=np.float64)[:, None]
+    / (GUIDELINE_NUM_GATES + 1)
+  ) * (nail - entry)
+  boundary = np.zeros(substeps, dtype=bool)
+  boundary[control_decimation - 1 :: control_decimation] = True
+  trace = {
+    "substep_head_position_m": np.asarray(head_positions, dtype=np.float64),
+    "substep_contact": np.asarray(contacts, dtype=bool),
+    "substep_nail_depth_m": np.asarray(nail_depths, dtype=np.float64),
+    "substep_arm_qvel_rad_s": np.asarray(arm_qvels, dtype=np.float64),
+    "substep_arm_qvel_pre_rad_s": np.asarray(arm_qvels_pre, dtype=np.float64),
+    "arm_joint_names": np.asarray(list(arm_joint_names), dtype="<U32"),
+    "substep_gate_index": np.asarray(gate_indices, dtype=np.int64),
+    "substep_perpendicular_error_m": np.asarray(perpendicular_errors, dtype=np.float64),
+    "substep_d_start_m": np.asarray(d_starts, dtype=np.float64),
+    "substep_f_best": np.asarray(f_bests, dtype=np.float64),
+    "substep_control_step": np.asarray(control_steps_recorded, dtype=np.int64),
+    "substep_is_control_boundary": boundary,
+    "substep_episode_index": np.asarray(episode_indices, dtype=np.int64),
+    "control_step_reward_terms": np.asarray(control_step_payouts, dtype=np.float64),
+    "control_step_reward_term_names": np.asarray(payout_names, dtype="<U64"),
+    "control_step_reward_total": np.asarray(control_step_totals, dtype=np.float64),
+    "guideline_entry_m": entry,
+    "guideline_nail_m": nail,
+    "guideline_gate_centers_m": gate_centers,
+    "guideline_reference_length_m": np.float64(float(np.linalg.norm(nail - entry))),
+    "physics_dt_s": np.float64(physics_dt_s),
+    "control_decimation": np.int64(control_decimation),
+    "executed_control_steps": np.int64(executed_control_steps),
+  }
+  validate_substep_trace(trace)
+  return trace
 
 
 def _reference_polyline_m(reference, device: str) -> np.ndarray:
@@ -95,6 +225,228 @@ def _reference_polyline_m(reference, device: str) -> np.ndarray:
   )
 
 
+def _run_wave1_substep_rollout(
+  *,
+  cfg: Cfg,
+  out: Path,
+  contract: dict,
+  revisions: dict[str, str],
+  env,
+  base_env,
+  policy,
+  obs,
+  robot,
+  nail,
+  sensor,
+  head_cfg,
+  checkpoint_sha256: str,
+  fixed_reset: dict,
+  physics_dt_s: float,
+  control_decimation: int,
+) -> None:
+  """Record 500 Hz evidence by wrapping the production per-substep metrics call.
+
+  This reuses the same `metrics_manager.compute_substep` seam that
+  `evaluation/guideline/qualify_reference.py` already relies on, so the recorded
+  state is the one production physics actually produced.
+  """
+  stride = int(contract["frame_substep_stride"])
+  tracker = getattr(base_env, _ENV_GUIDELINE_ATTR, None)
+  if tracker is None:
+    raise RuntimeError(
+      "task has no WaypointProgressTracker; Wave-1 substep tracing requires a "
+      "registered guideline task"
+    )
+  arm_cfg = SceneEntityCfg("robot", joint_names=ARM_JOINT_NAMES)
+  arm_cfg.resolve(base_env.scene)
+
+  recorded: dict[str, list] = {
+    key: []
+    for key in (
+      "head_positions", "contacts", "nail_depths", "arm_qvels", "arm_qvels_pre",
+      "gate_indices", "perpendicular_errors", "d_starts", "f_bests",
+      "episode_indices", "control_steps_recorded",
+    )
+  }
+  frames: list[np.ndarray] = []
+  state = {"active": False, "episode": 0, "control_step": 0}
+  original_substep = base_env.metrics_manager.compute_substep
+  original_sim_step = base_env.sim.step
+
+  def arm_qvel() -> np.ndarray:
+    return (
+      robot.data.joint_vel[0, arm_cfg.joint_ids]
+      .detach().cpu().numpy().astype(np.float64).copy()
+    )
+
+  def preintegration_then_step() -> None:
+    # MuJoCo's semi-implicit integrator leaves qvel one substep ahead of site_xpos.
+    # qualify_reference.py solves this with the same pre-hook; without it the speed
+    # and the position in one trace row are 2 ms apart.
+    if state["active"]:
+      recorded["arm_qvels_pre"].append(arm_qvel())
+    original_sim_step()
+
+  def record_substep() -> None:
+    original_substep()  # post-integration, exactly as production sees it
+    if not state["active"]:
+      return
+    head_t = robot.data.site_pos_w[:, head_cfg.site_ids].squeeze(1)
+    if bool(tracker.initialized[0]):
+      _, error = project_to_reference(head_t, tracker.entry, tracker.nail)
+      error_m = float(error[0])
+    else:
+      error_m = 0.0
+    recorded["head_positions"].append(
+      head_t[0].detach().cpu().numpy().astype(np.float64).copy()
+    )
+    recorded["contacts"].append(bool((sensor.data.found[0] > 0).any()))
+    recorded["nail_depths"].append(float(nail.data.joint_pos[0, 0]))
+    recorded["arm_qvels"].append(arm_qvel())
+    recorded["gate_indices"].append(int(tracker.next_gate[0]))
+    recorded["perpendicular_errors"].append(error_m)
+    recorded["d_starts"].append(float(tracker.target_start_distance[0]))
+    recorded["f_bests"].append(float(tracker.best_target_fraction[0]))
+    recorded["episode_indices"].append(int(state["episode"]))
+    recorded["control_steps_recorded"].append(int(state["control_step"]))
+    if (len(recorded["head_positions"]) - 1) in frame_indices:
+      frame = base_env.render()
+      if frame is None:
+        raise RuntimeError("offscreen renderer returned no frame during a substep")
+      frames.append(np.asarray(frame))
+
+  frame_indices = set(
+    wave1_frame_substep_indices(cfg.steps * control_decimation, stride).tolist()
+  )
+  payout_names = list(base_env.reward_manager.active_terms)
+  payouts: list[np.ndarray] = []
+  totals: list[float] = []
+  reward_dt = physics_dt_s * control_decimation
+  terminal_boundary = {"detected": False, "step": None, "reason": "step_limit"}
+  rows = [f"{'step':>4} {'nail_mm':>8} {'contact':>8} {'reward':>9}"]
+  base_env.metrics_manager.compute_substep = record_substep
+  base_env.sim.step = preintegration_then_step
+  try:
+    state["active"] = True
+    for k in range(1, cfg.steps + 1):
+      state["control_step"] = k - 1
+      with torch.inference_mode():
+        actions = policy(obs)
+      step_out = env.step(actions)
+      obs, rew, dones = step_out[0], step_out[1], step_out[2]
+      # Control-rate manager payouts, kept at their real timing.
+      payouts.append(
+        base_env.reward_manager._step_reward[0]
+        .detach().cpu().numpy().astype(np.float64).copy()
+        * reward_dt  # _step_reward stores value/dt; restore the payout actually added
+      )
+      totals.append(float(rew[0]))
+      rows.append(
+        f"{k:>4} {float(nail.data.joint_pos[0, 0]) * 1000.0:>8.1f} "
+        f"{str(bool((sensor.data.found[0] > 0).any())):>8} {float(rew[0]):>9.3f}"
+      )
+      if bool(dones[0]):
+        # auto_reset is disabled. Recording stays live and the episode counter
+        # advances, so any post-boundary substep would be stamped episode 1 and
+        # rejected by validate_substep_trace rather than silently dropped.
+        state["episode"] += 1
+        terminal_boundary = {
+          "detected": True,
+          "step": k,
+          "reason": (
+            "terminated" if bool(base_env.reset_terminated[0])
+            else "timeout" if bool(base_env.reset_time_outs[0])
+            else "done"
+          ),
+        }
+        rows.append(f"  -- episode boundary after step {k}; no post-reset samples --")
+        break
+  finally:
+    state["active"] = False
+    base_env.metrics_manager.compute_substep = original_substep
+    base_env.sim.step = original_sim_step
+
+  executed = len(payouts)
+  trace = build_wave1_substep_trace(
+    **recorded,
+    arm_joint_names=ARM_JOINT_NAMES,
+    control_step_payouts=payouts,
+    control_step_totals=totals,
+    payout_names=payout_names,
+    entry=tracker.entry[0].detach().cpu().numpy().astype(np.float64).copy(),
+    nail=tracker.nail[0].detach().cpu().numpy().astype(np.float64).copy(),
+    physics_dt_s=physics_dt_s,
+    control_decimation=control_decimation,
+    executed_control_steps=executed,
+  )
+  expected_frames = len(trace["substep_head_position_m"]) // stride
+  if len(frames) != expected_frames:
+    raise RuntimeError(
+      f"frame/substep mismatch: {len(frames)} frames for "
+      f"{len(trace['substep_head_position_m'])} substeps at stride {stride}"
+    )
+
+  np.savez(out / "trace.npz", **trace)
+  iio.imwrite(out / "policy.mp4", np.stack(frames), fps=contract["fps"])
+  idx = np.linspace(0, len(frames) - 1, min(6, len(frames))).round().astype(int)
+  iio.imwrite(out / "montage.png", np.concatenate([frames[i] for i in idx], axis=1))
+  for j, i in enumerate(idx):
+    iio.imwrite(out / f"frame_{j}_substep{int(i) * stride + stride - 1:04d}.png", frames[i])
+  # Frame k shows the pose AFTER the substep its index names: the offscreen renderer
+  # runs its own mj_forward, so the image leads the trace row by one integration.
+  write_substep_trajectory_png(
+    trace,
+    out / "trajectory.png",
+    title=f"wave1 / {cfg.arm} / seed {cfg.training_seed}",
+  )
+  write_metadata(
+    out / "metadata.json",
+    {
+      "campaign": cfg.campaign,
+      "arm": cfg.arm,
+      "training_seed": cfg.training_seed,
+      "task": cfg.task,
+      "checkpoint_sha256": checkpoint_sha256,
+      "checkpoint_file": str(Path(cfg.checkpoint_file)),
+      "training_revision": revisions["training"],
+      "asset_revision": revisions["asset"],
+      "analysis_revision": revisions["analysis"],
+      "reset_state_digest": fixed_reset["reset_state_digest"],
+      "reset_envelope": str(cfg.fixed_reset_envelope),
+      "renderer_contract": contract,
+      "timing": TIMING_CONTRACT,
+      "rollout": {
+        "requested_control_steps": cfg.steps,
+        "executed_control_steps": executed,
+        "substep_count": int(len(trace["substep_head_position_m"])),
+        "frame_count": len(frames),
+        "auto_reset_enabled": False,
+        "terminal_boundary": terminal_boundary,
+      },
+      "video_seconds": len(frames) / float(contract["fps"]),
+      "simulated_seconds": executed * physics_dt_s * control_decimation,
+      "reward_term_names": payout_names,
+      "guideline_reference": "WaypointProgressTracker entry->nail (frozen)",
+      "frame_substep_alignment": (
+        "frame j shows the pose after substep j*stride+stride-1; the offscreen "
+        "renderer runs mj_forward, so an image leads its trace row by one integration"
+      ),
+      "reward_payout_semantics": (
+        "control_step_reward_terms are dt-scaled manager payouts (RewardManager "
+        "_step_reward * control_dt); control_step_reward_total is the env step reward"
+      ),
+      "metadata_provenance": cfg.metadata_provenance,
+      "artifacts": {name: _sha256(out / name) for name in WAVE1_ARTIFACT_FILENAMES},
+    },
+  )
+  print("\n".join(rows))
+  print(
+    f"\n[render] wave1 {cfg.arm}/seed{cfg.training_seed}: "
+    f"{len(trace['substep_head_position_m'])} substeps, {executed} control steps, "
+    f"{len(frames)} frames @ {contract['fps']} fps -> {out}/"
+  )
+
+
 def main(cfg: Cfg) -> None:
   out = Path(cfg.out_dir)
   out.mkdir(parents=True, exist_ok=True)
@@ -105,6 +457,16 @@ def main(cfg: Cfg) -> None:
     raise ValueError("code_revision and asset_revision are required")
   if cfg.steps <= 0:
     raise ValueError("steps must be positive")
+  contract = SUBSTEP_RENDERER_CONTRACT if cfg.substep_trace else RENDERER_CONTRACT
+  revisions = (
+    validate_wave1_revisions(
+      training_revision=cfg.training_revision,
+      asset_revision=cfg.asset_revision,
+      analysis_revision=cfg.analysis_revision,
+    )
+    if cfg.substep_trace
+    else None
+  )
   registered_task = expected_task(cfg.campaign, cfg.arm)
   if cfg.task != registered_task:
     raise ValueError(
@@ -124,11 +486,11 @@ def main(cfg: Cfg) -> None:
   # Keep the terminal strike state readable; auto-reset would replace it with
   # the next episode before its trajectory/contact/frame could be recorded.
   env_cfg.auto_reset = False
-  env_cfg.viewer.width = RENDERER_CONTRACT["frame_width_px"]
-  env_cfg.viewer.height = RENDERER_CONTRACT["frame_height_px"]
-  env_cfg.viewer.distance = RENDERER_CONTRACT["camera_distance_m"]
-  env_cfg.viewer.elevation = RENDERER_CONTRACT["camera_elevation_deg"]
-  env_cfg.viewer.azimuth = RENDERER_CONTRACT["camera_azimuth_deg"]
+  env_cfg.viewer.width = contract["frame_width_px"]
+  env_cfg.viewer.height = contract["frame_height_px"]
+  env_cfg.viewer.distance = contract["camera_distance_m"]
+  env_cfg.viewer.elevation = contract["camera_elevation_deg"]
+  env_cfg.viewer.azimuth = contract["camera_azimuth_deg"]
 
   agent_cfg = load_rl_cfg(cfg.task)
   base_env = ManagerBasedRlEnv(cfg=env_cfg, device=cfg.device, render_mode="rgb_array")
@@ -195,6 +557,29 @@ def main(cfg: Cfg) -> None:
   if not bool(reference._anchored[0]):
     raise RuntimeError("SingleStrikeReference was not anchored by reset observations")
   reference_polyline = _reference_polyline_m(reference, base_env.device)
+
+  if cfg.substep_trace:
+    assert revisions is not None
+    _run_wave1_substep_rollout(
+      cfg=cfg,
+      out=out,
+      contract=contract,
+      revisions=revisions,
+      env=env,
+      base_env=base_env,
+      policy=policy,
+      obs=obs,
+      robot=robot,
+      nail=nail,
+      sensor=sensor,
+      head_cfg=head_cfg,
+      checkpoint_sha256=checkpoint_sha256,
+      fixed_reset=fixed_reset,
+      physics_dt_s=physics_dt_s,
+      control_decimation=control_decimation,
+    )
+    return
+
   frames: list[np.ndarray] = []
   head_positions = [head()]
   contacts = [bool((sensor.data.found[0] > 0).any())]

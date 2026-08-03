@@ -1355,3 +1355,501 @@ def test_both_campaign_grids_use_one_limit_pair_from_all_56_traces(tmp_path):
     assert len(fq4["panel_limits"]) == 32
     assert len(fq3["panel_limits"]) == 24
     assert all(limits == shared for limits in (*fq4["panel_limits"], *fq3["panel_limits"]))
+
+
+# --- Wave-1 500 Hz substep evidence -----------------------------------------
+
+
+def _wave1_trace(
+    *,
+    control_steps: int = 4,
+    decimation: int = 10,
+    upsampled_50hz: bool = False,
+    episode_index_tail: int = 0,
+) -> dict[str, np.ndarray]:
+    """Build a synthetic but structurally honest Wave-1 substep trace."""
+    entry = np.array([0.5, 0.0, 0.25], dtype=np.float64)
+    nail = np.array([0.5, 0.0, 0.10], dtype=np.float64)
+    n = control_steps * decimation
+    if upsampled_50hz:
+        # One position per CONTROL step, each repeated `decimation` times.
+        control_path = entry + np.linspace(0.0, 1.0, control_steps)[:, None] * (
+            nail - entry
+        )
+        positions = np.repeat(control_path, decimation, axis=0)
+    else:
+        positions = entry + np.linspace(0.0, 1.0, n)[:, None] * (nail - entry)
+    gate_centers = entry + (
+        np.arange(1, 7, dtype=np.float64)[:, None] / 7.0
+    ) * (nail - entry)
+    contact = np.zeros(n, dtype=bool)
+    contact[-3:] = True
+    episode_index = np.zeros(n, dtype=np.int64)
+    if episode_index_tail:
+        episode_index[-episode_index_tail:] = 1
+    boundary = np.zeros(n, dtype=bool)
+    boundary[decimation - 1 :: decimation] = True
+    return {
+        "substep_head_position_m": positions,
+        "substep_contact": contact,
+        "substep_nail_depth_m": np.linspace(0.0, 0.032, n),
+        "substep_arm_qvel_rad_s": np.zeros((n, 6), dtype=np.float64),
+        "substep_arm_qvel_pre_rad_s": np.zeros((n, 6), dtype=np.float64),
+        "arm_joint_names": np.array([f"joint{i}" for i in range(1, 7)]),
+        "substep_gate_index": np.clip(
+            np.arange(n) // max(1, n // 7), 0, 6
+        ).astype(np.int64),
+        "substep_perpendicular_error_m": np.zeros(n, dtype=np.float64),
+        "substep_d_start_m": np.full(n, 0.021, dtype=np.float64),
+        "substep_f_best": np.linspace(0.0, 1.0, n),
+        "substep_control_step": (np.arange(n) // decimation).astype(np.int64),
+        "substep_is_control_boundary": boundary,
+        "substep_episode_index": episode_index,
+        "control_step_reward_terms": np.zeros((control_steps, 3), dtype=np.float64),
+        "control_step_reward_term_names": np.array(
+            ["approach", "completion", "r_gate"]
+        ),
+        "control_step_reward_total": np.zeros(control_steps, dtype=np.float64),
+        "guideline_entry_m": entry,
+        "guideline_nail_m": nail,
+        "guideline_gate_centers_m": gate_centers,
+        "guideline_reference_length_m": np.float64(
+            float(np.linalg.norm(nail - entry))
+        ),
+        "physics_dt_s": np.float64(0.002),
+        "control_decimation": np.int64(decimation),
+        "executed_control_steps": np.int64(control_steps),
+    }
+
+
+def test_wave1_substep_trace_accepts_a_genuine_500hz_trace():
+    """A trace with real intra-window motion is accepted and reports its rate."""
+    from evaluation.analysis.fixed_reset_video_library import validate_substep_trace
+
+    report = validate_substep_trace(_wave1_trace())
+
+    assert report["sample_rate_hz"] == pytest.approx(500.0)
+    assert report["substep_count"] == 40
+    assert report["executed_control_steps"] == 4
+    # 9 of every 10 transitions are interior, so an honest path puts ~0.9 of its
+    # displacement inside control windows.
+    assert report["interior_motion_share"] == pytest.approx(0.9, abs=0.05)
+
+
+def test_wave1_substep_trace_rejects_upsampled_50hz_positions():
+    """A 50 Hz array repeated to 500 Hz length must be refused, not relabeled."""
+    from evaluation.analysis.fixed_reset_video_library import validate_substep_trace
+
+    with pytest.raises(ValueError, match="not genuinely per-substep"):
+        validate_substep_trace(_wave1_trace(upsampled_50hz=True))
+
+
+def test_wave1_substep_trace_rejects_post_reset_samples():
+    """Any sample from a second episode invalidates the first-episode trace."""
+    from evaluation.analysis.fixed_reset_video_library import validate_substep_trace
+
+    with pytest.raises(ValueError, match="post-reset"):
+        validate_substep_trace(_wave1_trace(episode_index_tail=5))
+
+
+def test_wave1_substep_trace_rejects_substep_count_off_the_control_grid():
+    """The substep count must be exactly decimation x executed control steps."""
+    from evaluation.analysis.fixed_reset_video_library import validate_substep_trace
+
+    trace = _wave1_trace()
+    for key in ("substep_head_position_m", "substep_contact"):
+        trace[key] = trace[key][:-1]
+    with pytest.raises(ValueError, match="control grid"):
+        validate_substep_trace(trace)
+
+
+def test_wave1_substep_trace_requires_tracker_geometry_and_payouts():
+    """Missing tracker geometry or manager payouts must fail closed."""
+    from evaluation.analysis.fixed_reset_video_library import validate_substep_trace
+
+    for missing in (
+        "guideline_entry_m",
+        "guideline_nail_m",
+        "guideline_gate_centers_m",
+        "control_step_reward_terms",
+        "substep_f_best",
+        "substep_d_start_m",
+    ):
+        trace = _wave1_trace()
+        del trace[missing]
+        with pytest.raises(ValueError, match="missing"):
+            validate_substep_trace(trace)
+
+
+def test_wave1_trajectory_png_uses_tracker_geometry_not_single_strike_reference(tmp_path):
+    """The dashed guideline must be the tracker entry->nail segment."""
+    from evaluation.analysis.fixed_reset_video_library import (
+        write_substep_trajectory_png,
+    )
+
+    trace = _wave1_trace()
+    path = tmp_path / "trajectory.png"
+    report = write_substep_trajectory_png(trace, path)
+
+    assert path.is_file()
+    assert np.asarray(iio.imread(path)).size > 0
+    assert report["reference_source"] == "waypoint_progress_tracker_entry_to_nail"
+    np.testing.assert_allclose(
+        report["reference_endpoints_m"],
+        np.vstack((trace["guideline_entry_m"], trace["guideline_nail_m"])),
+    )
+    assert report["gate_disk_count"] == 6
+    assert report["contact_sample_count"] == 3
+    assert report["control_boundary_marker_count"] == 4
+    # x-y must not be visually stretched relative to x-z.
+    assert report["axis_half_span_m"]["xz"] == pytest.approx(
+        report["axis_half_span_m"]["xy"]
+    )
+
+
+def test_wave1_trajectory_png_refuses_a_trace_that_failed_validation(tmp_path):
+    """The plotter must not silently draw an upsampled 50 Hz trace."""
+    from evaluation.analysis.fixed_reset_video_library import (
+        write_substep_trajectory_png,
+    )
+
+    with pytest.raises(ValueError, match="not genuinely per-substep"):
+        write_substep_trajectory_png(
+            _wave1_trace(upsampled_50hz=True), tmp_path / "bad.png"
+        )
+
+
+def test_wave1_renderer_contract_is_50fps_stride_two():
+    """One RGB frame per two physics substeps, encoded at 50 fps."""
+    from evaluation.analysis.fixed_reset_video_library import (
+        SUBSTEP_RENDERER_CONTRACT,
+    )
+
+    assert SUBSTEP_RENDERER_CONTRACT["fps"] == 50
+    assert SUBSTEP_RENDERER_CONTRACT["frame_substep_stride"] == 2
+    for key in ("frame_width_px", "frame_height_px", "camera_distance_m",
+                "camera_elevation_deg", "camera_azimuth_deg"):
+        assert SUBSTEP_RENDERER_CONTRACT[key] == RENDER_CONTRACT[key]
+
+
+def test_wave1_campaign_arms_resolve_to_the_registered_guideline_tasks():
+    """Wave-1 arm identities must map to the exact trained task IDs."""
+    from evaluation.analysis.fixed_reset_video_library import expected_task
+
+    prefix = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
+    assert expected_task("wave1", "C0") == prefix + "C0"
+    assert expected_task("wave1", "G") == prefix + "CGate"
+    assert expected_task("wave1", "P") == prefix + "CProgress"
+
+
+def _write_valid_wave1_leaf(tmp_path):
+    """Render-free stand-in for a complete, self-consistent Wave-1 leaf."""
+    from evaluation.analysis.fixed_reset_video_library import (
+        SUBSTEP_RENDERER_CONTRACT,
+        WAVE1_ARTIFACT_FILENAMES,
+        write_metadata,
+        write_substep_trajectory_png,
+    )
+
+    leaf = tmp_path / "c0_seed2"
+    leaf.mkdir()
+    trace = _wave1_trace()
+    np.savez(leaf / "trace.npz", **trace)
+    write_substep_trajectory_png(trace, leaf / "trajectory.png")
+    frames = np.zeros((20, 720, 960, 3), dtype=np.uint8)
+    frames[:, ::2, ::2] = 255
+    iio.imwrite(leaf / "policy.mp4", frames, fps=50)
+    iio.imwrite(leaf / "montage.png", np.concatenate(list(frames[:6]), axis=1))
+    expectations = {
+        "arm": "C0",
+        "training_seed": 2,
+        "checkpoint_sha256": "a" * 64,
+        "training_revision": "b" * 40,
+        "asset_revision": "c" * 40,
+        "analysis_revision": "d" * 40,
+        "reset_state_digest": FIXED_DIGEST,
+    }
+    write_metadata(
+        leaf / "metadata.json",
+        {
+            "campaign": "wave1",
+            "arm": "C0",
+            "training_seed": 2,
+            "task": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0",
+            "checkpoint_sha256": "a" * 64,
+            "training_revision": "b" * 40,
+            "asset_revision": "c" * 40,
+            "analysis_revision": "d" * 40,
+            "reset_state_digest": FIXED_DIGEST,
+            "renderer_contract": SUBSTEP_RENDERER_CONTRACT,
+            "timing": TIMING,
+            "rollout": {
+                "requested_control_steps": 80,
+                "executed_control_steps": 4,
+                "substep_count": 40,
+                "frame_count": 20,
+                "auto_reset_enabled": False,
+                "terminal_boundary": {"detected": True, "step": 4, "reason": "terminated"},
+            },
+            "artifacts": {
+                name: _sha256(leaf / name) for name in WAVE1_ARTIFACT_FILENAMES
+            },
+        },
+    )
+    return leaf, expectations
+
+
+def test_wave1_artifact_validator_binds_checkpoint_reset_and_three_revisions(tmp_path):
+    """A rendered leaf must bind its checkpoint, fixed reset, and all revisions."""
+    from evaluation.analysis.fixed_reset_video_library import (
+        validate_wave1_policy_artifacts,
+    )
+
+    leaf, expectations = _write_valid_wave1_leaf(tmp_path)
+    report = validate_wave1_policy_artifacts(leaf, expectations)
+
+    assert report["substep_count"] == 40
+    assert report["measured_fps"] == pytest.approx(50.0)
+    assert report["measured_frame_count"] == 20
+    assert report["revisions"] == {
+        "training": "b" * 40, "asset": "c" * 40, "analysis": "d" * 40,
+    }
+
+
+def test_wave1_artifact_validator_rejects_swapped_media(tmp_path):
+    """Replacing a validated artifact must break its recorded content hash."""
+    from evaluation.analysis.fixed_reset_video_library import (
+        validate_wave1_policy_artifacts,
+    )
+
+    leaf, expectations = _write_valid_wave1_leaf(tmp_path)
+    frames = np.full((20, 720, 960, 3), 7, dtype=np.uint8)
+    frames[:, ::3, ::3] = 240
+    iio.imwrite(leaf / "policy.mp4", frames, fps=50)
+
+    with pytest.raises(ValueError, match="SHA-256 mismatch"):
+        validate_wave1_policy_artifacts(leaf, expectations)
+
+
+def test_wave1_artifact_validator_rejects_an_edited_metadata_payload(tmp_path):
+    """Editing metadata without re-deriving its payload digest must fail closed."""
+    from evaluation.analysis.fixed_reset_video_library import (
+        validate_wave1_policy_artifacts,
+    )
+
+    leaf, expectations = _write_valid_wave1_leaf(tmp_path)
+    metadata = json.loads((leaf / "metadata.json").read_text())
+    metadata["rollout"]["requested_control_steps"] = 999
+    (leaf / "metadata.json").write_text(json.dumps(metadata))
+
+    with pytest.raises(ValueError, match="payload digest mismatch"):
+        validate_wave1_policy_artifacts(leaf, expectations)
+
+
+def test_wave1_artifact_validator_rejects_a_boundary_that_contradicts_the_rollout(tmp_path):
+    """A terminal boundary must land on the last executed control step."""
+    from evaluation.analysis.fixed_reset_video_library import (
+        validate_wave1_policy_artifacts,
+        write_metadata,
+    )
+
+    leaf, expectations = _write_valid_wave1_leaf(tmp_path)
+    metadata = json.loads((leaf / "metadata.json").read_text())
+    metadata.pop("metadata_payload_sha256")
+    metadata["rollout"]["terminal_boundary"]["step"] = 3
+    write_metadata(leaf / "metadata.json", metadata)
+
+    with pytest.raises(ValueError, match="terminal boundary mismatch"):
+        validate_wave1_policy_artifacts(leaf, expectations)
+
+
+def test_wave1_artifact_validator_rejects_a_checkpoint_hash_mismatch(tmp_path):
+    """A leaf whose metadata hash differs from the frozen manifest must fail."""
+    from evaluation.analysis.fixed_reset_video_library import (
+        validate_wave1_policy_artifacts,
+    )
+
+    leaf, expectations = _write_valid_wave1_leaf(tmp_path)
+    metadata = json.loads((leaf / "metadata.json").read_text())
+    from evaluation.analysis.fixed_reset_video_library import write_metadata
+
+    metadata.pop("metadata_payload_sha256")
+    metadata["checkpoint_sha256"] = "e" * 64
+    write_metadata(leaf / "metadata.json", metadata)
+
+    with pytest.raises(ValueError, match="checkpoint hash mismatch"):
+        validate_wave1_policy_artifacts(leaf, expectations)
+
+
+def test_wave1_gate_disk_radius_matches_the_tracker():
+    """The plotted disk radius must not drift from the tracker's gate radius."""
+    from evaluation.analysis import fixed_reset_video_library as lib
+    from src.tasks.hammer.mdp.guideline import GUIDELINE_GATE_RADIUS_M
+
+    assert lib.GUIDELINE_GATE_RADIUS_M == GUIDELINE_GATE_RADIUS_M
+
+
+# --- Wave-1 renderer (scripts/render_policy.py) ------------------------------
+
+
+def _recorded_substeps(
+    *, control_steps: int = 4, decimation: int = 10, episode_tail: int = 0
+) -> dict:
+    """Per-substep recordings as the render hook accumulates them."""
+    entry = np.array([0.5, 0.0, 0.25])
+    nail = np.array([0.5, 0.0, 0.10])
+    n = control_steps * decimation
+    fractions = np.linspace(0.0, 1.0, n)
+    episode = [0] * n
+    for i in range(episode_tail):
+        episode[n - 1 - i] = 1
+    return {
+        "head_positions": [entry + f * (nail - entry) for f in fractions],
+        "contacts": [bool(f > 0.93) for f in fractions],
+        "nail_depths": list(np.linspace(0.0, 0.032, n)),
+        "arm_qvels": [np.zeros(6) for _ in range(n)],
+        "arm_qvels_pre": [np.zeros(6) for _ in range(n)],
+        "arm_joint_names": [f"joint{i}" for i in range(1, 7)],
+        "control_steps_recorded": [i // decimation for i in range(n)],
+        "gate_indices": [min(6, int(f * 7)) for f in fractions],
+        "perpendicular_errors": [0.0] * n,
+        "d_starts": [0.021] * n,
+        "f_bests": list(fractions),
+        "episode_indices": episode,
+        "control_step_payouts": [np.zeros(3) for _ in range(control_steps)],
+        "control_step_totals": [0.0] * control_steps,
+        "payout_names": ["approach", "completion", "r_gate"],
+        "entry": entry,
+        "nail": nail,
+        "physics_dt_s": 0.002,
+        "control_decimation": decimation,
+        "executed_control_steps": control_steps,
+    }
+
+
+def test_wave1_frame_indices_are_every_second_substep():
+    """One RGB frame per two physics substeps, taken at the end of each pair."""
+    indices = render_policy.wave1_frame_substep_indices(40, 2)
+
+    assert indices.tolist() == list(range(1, 40, 2))
+    assert len(indices) == 20
+
+
+def test_wave1_trace_builder_produces_a_validated_500hz_trace():
+    """The builder emits a trace the frozen validator accepts as genuine 500 Hz."""
+    from evaluation.analysis.fixed_reset_video_library import validate_substep_trace
+
+    trace = render_policy.build_wave1_substep_trace(**_recorded_substeps())
+    report = validate_substep_trace(trace)
+
+    assert report["substep_count"] == 40
+    assert report["executed_control_steps"] == 4
+    assert report["sample_rate_hz"] == pytest.approx(500.0)
+    assert trace["guideline_gate_centers_m"].shape == (6, 3)
+    # Payouts stay at CONTROL rate; they are never broadcast to substep length.
+    assert trace["control_step_reward_terms"].shape == (4, 3)
+
+
+def test_wave1_trace_builder_refuses_substep_broadcast_reward_payouts():
+    """Repeating a control-rate payout once per substep is fabrication, not data."""
+    recorded = _recorded_substeps()
+    recorded["control_step_payouts"] = [np.zeros(3) for _ in range(40)]
+    recorded["control_step_totals"] = [0.0] * 40
+
+    with pytest.raises(ValueError, match="control rate"):
+        render_policy.build_wave1_substep_trace(**recorded)
+
+
+def test_wave1_trace_builder_rejects_post_reset_substeps():
+    """Samples recorded after an episode boundary must not reach the trace."""
+    with pytest.raises(ValueError, match="post-reset"):
+        render_policy.build_wave1_substep_trace(**_recorded_substeps(episode_tail=4))
+
+
+def test_wave1_trace_builder_rejects_a_partial_control_window():
+    """A truncated final window would misalign every control-rate join."""
+    recorded = _recorded_substeps()
+    for key in ("head_positions", "contacts", "nail_depths", "arm_qvels",
+                "arm_qvels_pre", "gate_indices", "perpendicular_errors", "d_starts",
+                "f_bests", "episode_indices", "control_steps_recorded"):
+        recorded[key] = recorded[key][:-1]
+
+    with pytest.raises(ValueError, match="control grid"):
+        render_policy.build_wave1_substep_trace(**recorded)
+
+
+def test_wave1_renderer_requires_a_distinct_analysis_revision():
+    """Analysis provenance must be recorded separately from the training revision."""
+    training = "a" * 40
+    with pytest.raises(ValueError, match="analysis_revision"):
+        render_policy.validate_wave1_revisions(
+            training_revision=training, asset_revision="b" * 40,
+            analysis_revision=training,
+        )
+    with pytest.raises(ValueError, match="analysis_revision"):
+        render_policy.validate_wave1_revisions(
+            training_revision=training, asset_revision="b" * 40,
+            analysis_revision="",
+        )
+    assert render_policy.validate_wave1_revisions(
+        training_revision=training, asset_revision="b" * 40,
+        analysis_revision="c" * 40,
+    ) == {"training": training, "asset": "b" * 40, "analysis": "c" * 40}
+
+
+# --- reviewer-supplied attacks on the 500 Hz proof ---------------------------
+
+
+def _repeat_fake(noise: float = 0.0, hold: int = 10, seed: int = 0) -> dict:
+    """A control-rate path repeated to substep length, optionally perturbed."""
+    trace = _wave1_trace()
+    entry = trace["guideline_entry_m"]
+    nail = trace["guideline_nail_m"]
+    control = entry + np.linspace(0.0, 1.0, 4)[:, None] * (nail - entry)
+    positions = np.repeat(control, 10, axis=0)
+    if hold < 10:
+        # staircase: nudge the first few substeps of each window, then hold
+        for window in range(4):
+            for i in range(10 - hold):
+                positions[window * 10 + i] = control[window] + (i + 1) * 1e-9
+    if noise:
+        rng = np.random.default_rng(seed)
+        positions = positions + rng.normal(0.0, noise, positions.shape)
+    positions[0] = entry  # keep the anchored-entry invariant satisfied
+    trace["substep_head_position_m"] = positions
+    return trace
+
+
+@pytest.mark.parametrize(
+    "fake",
+    [
+        pytest.param(_repeat_fake(), id="exact-repeat"),
+        pytest.param(_repeat_fake(noise=1e-12), id="repeat-plus-float-noise"),
+        pytest.param(_repeat_fake(noise=1e-9, seed=3), id="repeat-plus-larger-noise"),
+        pytest.param(_repeat_fake(hold=8), id="staircase-with-nudges"),
+    ],
+)
+def test_wave1_substep_trace_rejects_every_repeated_control_rate_fake(fake):
+    """Sprinkling float noise on a repeated 50 Hz path must not buy acceptance."""
+    from evaluation.analysis.fixed_reset_video_library import validate_substep_trace
+
+    with pytest.raises(ValueError, match="not genuinely per-substep"):
+        validate_substep_trace(fake)
+
+
+def test_wave1_substep_trace_accepts_a_trace_whose_arm_genuinely_settles():
+    """An honest capture that moves, strikes, then holds still must NOT be rejected."""
+    from evaluation.analysis.fixed_reset_video_library import validate_substep_trace
+
+    trace = _wave1_trace()
+    positions = trace["substep_head_position_m"].copy()
+    positions[20:] = positions[20]  # arm parks after the strike; bitwise identical
+    trace["substep_head_position_m"] = positions
+    contact = np.zeros(40, dtype=bool)
+    contact[19:] = True
+    trace["substep_contact"] = contact
+
+    report = validate_substep_trace(trace)
+
+    assert report["substep_count"] == 40
+    assert report["interior_motion_share"] > 0.5
