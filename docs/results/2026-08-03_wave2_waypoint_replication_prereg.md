@@ -210,7 +210,7 @@ its own hash; the Wave-1 frozen CSV and its hash are not reissued.
 
 | Role | Revision |
 | --- | --- |
-| Wave-2 training | **PENDING** — pinned in the follow-up commit, and equal to the commit that first carries this preregistration. No placeholder hash is recorded here; an unpinned field is safer than a wrong one. |
+| **Wave-2 training** | **`e1a0282c9dc7b0283ae632a46a78debfd80bdf8c`** — the commit that first carried this preregistration. This is the revision Vega checks out. |
 | Asset (`safe_impact_manipulation`, `hammer-z1`) | `b58ccd2f81fd246f27c1e8d88cf86484cd888703` |
 | Wave-1 training (for comparison) | `a6a9c970ea9eca00b34e8e9be806d22d396a964a` |
 
@@ -222,11 +222,16 @@ Everything committed on `cartesian-guideline-fic` since Wave 1 trained is docume
 evaluation/analysis tooling, and tests. The training path is byte-identical, verified by
 git tree hash rather than by inspection:
 
-| Path | `a6a9c97` | Wave-2 training revision | |
+| Path | tree hash @ `a6a9c97` | tree hash @ `e1a0282` | |
 | --- | --- | --- | --- |
 | `src/` (entire tree) | `bf6596c712661009…` | `bf6596c712661009…` | **IDENTICAL** |
 | `scripts/slurm/vega_train.sbatch` | `e2b8abb6727f7532…` | `e2b8abb6727f7532…` | **IDENTICAL** |
 | `scripts/train.py` | `f727e2882269d01a…` | `f727e2882269d01a…` | **IDENTICAL** |
+
+Verified by `git rev-parse <rev>:<path>` at both revisions. The pin commit
+(`e1a0282`) is the tip of a docs-and-analysis-only sequence since `a6a9c97`; everything
+it changed is documentation, `evaluation/analysis/`, `scripts/` evaluation tooling, and
+`tests/`.
 
 `src/` covers the tasks, rewards, guideline MDP terms, tracker, observations, robot
 config and constraint machinery. Its tree hash being unchanged means **no
