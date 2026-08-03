@@ -1,0 +1,25 @@
+{
+  "campaign": "2026-08-02_wave1_waypoint",
+  "frozen_on": "2026-08-03",
+  "inventory_file": "SHA256SUMS.txt",
+  "inventory_root_sha256": "4d1e747353c2f136bd6254c623a635a5656fa7ca388dff584e7045b132a7c626",
+  "file_count": 190,
+  "total_bytes": 76824961,
+  "algorithm": "sha256",
+  "path_form": "relative to this directory, POSIX separators",
+  "ordering": "LC_ALL=C byte-sort of the relative paths",
+  "excluded": [
+    ".DS_Store (volatile macOS Finder metadata; would break reproducibility)",
+    "SHA256SUMS.txt (the inventory cannot list itself)",
+    "SHA256SUMS.meta.json (written after the inventory)"
+  ],
+  "reproduce": "cd <this dir> && find . -type f ! -name '.DS_Store' ! -name 'SHA256SUMS.txt' ! -name 'SHA256SUMS.meta.json' -print0 | LC_ALL=C sort -z | xargs -0 shasum -a 256 | sed 's|  \\./|  |'",
+  "verify": "cd <this dir> && shasum -a 256 -c SHA256SUMS.txt",
+  "revisions": {
+    "wave1_training": "a6a9c970ea9eca00b34e8e9be806d22d396a964a",
+    "analysis": "e40068ace92172978b52c801bf4f950c303d0787",
+    "asset": "b58ccd2f81fd246f27c1e8d88cf86484cd888703"
+  },
+  "fixed_reset_digest": "bde511ec2adc42e5365e1e46f45ff1fb43223a93c31c6fbfb4580352e445e319",
+  "comparison_table_sha256": "4ab58b67658ef6c899a21ffbd200d4c568327352c72da0dd1c386437dda86268"
+}

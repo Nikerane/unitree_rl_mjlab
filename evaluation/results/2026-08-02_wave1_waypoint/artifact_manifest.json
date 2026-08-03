@@ -1,0 +1,181 @@
+{
+  "asset_revision": "b58ccd2f81fd246f27c1e8d88cf86484cd888703",
+  "campaign": "wave1_waypoint_guidance",
+  "fixed_reset_evidence": {
+    "approved_fixed_reset_digest": "bde511ec2adc42e5365e1e46f45ff1fb43223a93c31c6fbfb4580352e445e319",
+    "envelope_relative_path": "fixed_reset/lambda_feasibility_stage0_inputs.json",
+    "excluded_large_payload": {
+      "bytes": 33093617,
+      "declared_sha256": "34b67de4c6bf81bceb8129fd9db234d8ef44c55dd572b6f33ec184583d222528",
+      "name": "lambda_feasibility_stage0.json.gz",
+      "reason": "not required by the renderer; digest carried instead of bytes"
+    },
+    "files": {
+      "ARTIFACTS.sha256": {
+        "bytes": 541,
+        "sha256": "abd4825bf539f0d25b6a3a9e6d86dd34c43eeb421a26c7095d208be017ef9d88",
+        "source_path": "/Users/nikerane/repos/unitree_rl_mjlab/docs/results/assets/2026-07-29_lambda_feasibility_stage0/ARTIFACTS.sha256"
+      },
+      "lambda_feasibility_stage0.json.sha256": {
+        "bytes": 97,
+        "sha256": "e21c0938ecc45b1bce6370bbccb61f54bb47bdb0016213aa06730b825e79d97f",
+        "source_path": "/Users/nikerane/repos/unitree_rl_mjlab/docs/results/assets/2026-07-29_lambda_feasibility_stage0/lambda_feasibility_stage0.json.sha256"
+      },
+      "lambda_feasibility_stage0_inputs.json": {
+        "bytes": 22767,
+        "sha256": "7a8093ab5142d5887d9dc86ba7504e53ed600e9d67063f7acac06750724a4948",
+        "source_path": "/Users/nikerane/repos/unitree_rl_mjlab/docs/results/assets/2026-07-29_lambda_feasibility_stage0/lambda_feasibility_stage0_inputs.json"
+      },
+      "lambda_feasibility_stage0_inputs.json.sha256": {
+        "bytes": 104,
+        "sha256": "c6c23cfed8468b96e0dbd597a9be25224478f1e183d73ddaf562f8be62fee3b6",
+        "source_path": "/Users/nikerane/repos/unitree_rl_mjlab/docs/results/assets/2026-07-29_lambda_feasibility_stage0/lambda_feasibility_stage0_inputs.json.sha256"
+      },
+      "lambda_feasibility_stage0_raw_equivalence.json": {
+        "bytes": 1199,
+        "sha256": "f6c600597f0b49f7db5ebd9039dd2957f111feff86935df19019a970c3a7570f",
+        "source_path": "/Users/nikerane/repos/unitree_rl_mjlab/docs/results/assets/2026-07-29_lambda_feasibility_stage0/lambda_feasibility_stage0_raw_equivalence.json"
+      },
+      "lambda_feasibility_stage0_raw_equivalence.json.sha256": {
+        "bytes": 113,
+        "sha256": "e899759283d001223c61e525676e9e27ef0e6230409a51c88cdb50c462b14ee0",
+        "source_path": "/Users/nikerane/repos/unitree_rl_mjlab/docs/results/assets/2026-07-29_lambda_feasibility_stage0/lambda_feasibility_stage0_raw_equivalence.json.sha256"
+      },
+      "lambda_feasibility_stage0_summary.png": {
+        "bytes": 182819,
+        "sha256": "996e326eb40b2f6bd96cc1c34f6d46e85ee15ebddf7a2de0e311bc766217ba78",
+        "source_path": "/Users/nikerane/repos/unitree_rl_mjlab/docs/results/assets/2026-07-29_lambda_feasibility_stage0/lambda_feasibility_stage0_summary.png"
+      }
+    },
+    "never_committed_on_any_branch": true,
+    "renderer_lookup_path": "docs/results/assets/2026-07-29_lambda_feasibility_stage0/lambda_feasibility_stage0_inputs.json",
+    "reset_state_digest": "bde511ec2adc42e5365e1e46f45ff1fb43223a93c31c6fbfb4580352e445e319",
+    "role": "analysis evidence \u2014 defines the identical physical reset replayed by every rendered policy; NOT part of training revision a6a9c970ea9eca00b34e8e9be806d22d396a964a",
+    "tracked_in_git": false
+  },
+  "identity_resolution": "Slurm log (job id, arm, seed, 'Logging experiment in directory') cross-checked against the run's own params/agent.yaml and the params/env.yaml reward-term discriminator; the task ID is derived from the reward terms, never from the run name.",
+  "policies": [
+    {
+      "arm": "C0",
+      "arm_short": "wave1_c0",
+      "asset_revision": "b58ccd2f81fd246f27c1e8d88cf86484cd888703",
+      "checkpoint_sha256": "efa603175b30c230c0d8325fdb1792815d2cf98fd2c748984269fd61c70936c6",
+      "completion_status": "COMPLETED",
+      "final_iteration": 199,
+      "host": "gn01",
+      "local_checkpoint_path": "evaluation/results/2026-08-02_wave1_waypoint/checkpoints/wave1_c0_seed2_model199.pt",
+      "return_code": 0,
+      "run_name": "wave1_wave1_c0_seed2",
+      "seed": 2,
+      "slurm_job_id": "40529882_0",
+      "slurm_log": "training_logs/slurm/z1-train-40529882_0.out",
+      "task_id": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0",
+      "training_revision": "a6a9c970ea9eca00b34e8e9be806d22d396a964a",
+      "treatment_reward_term": "none",
+      "vega_checkpoint_path": "/ceph/hpc/home/eunikhilr/repos/wave1_a6a9c97/unitree_rl_mjlab/logs/rsl_rl/z1_hammer/2026-08-02_22-37-05_wave1_wave1_c0_seed2/model_199.pt",
+      "vega_run_dir": "/ceph/hpc/home/eunikhilr/repos/wave1_a6a9c97/unitree_rl_mjlab/logs/rsl_rl/z1_hammer/2026-08-02_22-37-05_wave1_wave1_c0_seed2"
+    },
+    {
+      "arm": "C0",
+      "arm_short": "wave1_c0",
+      "asset_revision": "b58ccd2f81fd246f27c1e8d88cf86484cd888703",
+      "checkpoint_sha256": "3a63289b551b79463434890262965819f0048be9cd5d0f71c9cc9806ad23045f",
+      "completion_status": "COMPLETED",
+      "final_iteration": 199,
+      "host": "gn01",
+      "local_checkpoint_path": "evaluation/results/2026-08-02_wave1_waypoint/checkpoints/wave1_c0_seed3_model199.pt",
+      "return_code": 0,
+      "run_name": "wave1_wave1_c0_seed3",
+      "seed": 3,
+      "slurm_job_id": "40529882_1",
+      "slurm_log": "training_logs/slurm/z1-train-40529882_1.out",
+      "task_id": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0",
+      "training_revision": "a6a9c970ea9eca00b34e8e9be806d22d396a964a",
+      "treatment_reward_term": "none",
+      "vega_checkpoint_path": "/ceph/hpc/home/eunikhilr/repos/wave1_a6a9c97/unitree_rl_mjlab/logs/rsl_rl/z1_hammer/2026-08-02_22-37-05_wave1_wave1_c0_seed3/model_199.pt",
+      "vega_run_dir": "/ceph/hpc/home/eunikhilr/repos/wave1_a6a9c97/unitree_rl_mjlab/logs/rsl_rl/z1_hammer/2026-08-02_22-37-05_wave1_wave1_c0_seed3"
+    },
+    {
+      "arm": "G",
+      "arm_short": "wave1_g",
+      "asset_revision": "b58ccd2f81fd246f27c1e8d88cf86484cd888703",
+      "checkpoint_sha256": "93367734fce2f439e5569879491c0d317e476e77d746675f7f4f30a8c161c201",
+      "completion_status": "COMPLETED",
+      "final_iteration": 199,
+      "host": "gn01",
+      "local_checkpoint_path": "evaluation/results/2026-08-02_wave1_waypoint/checkpoints/wave1_g_seed2_model199.pt",
+      "return_code": 0,
+      "run_name": "wave1_wave1_g_seed2",
+      "seed": 2,
+      "slurm_job_id": "40529890_0",
+      "slurm_log": "training_logs/slurm/z1-train-40529890_0.out",
+      "task_id": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate",
+      "training_revision": "a6a9c970ea9eca00b34e8e9be806d22d396a964a",
+      "treatment_reward_term": "r_gate",
+      "vega_checkpoint_path": "/ceph/hpc/home/eunikhilr/repos/wave1_a6a9c97/unitree_rl_mjlab/logs/rsl_rl/z1_hammer/2026-08-02_22-37-05_wave1_wave1_g_seed2/model_199.pt",
+      "vega_run_dir": "/ceph/hpc/home/eunikhilr/repos/wave1_a6a9c97/unitree_rl_mjlab/logs/rsl_rl/z1_hammer/2026-08-02_22-37-05_wave1_wave1_g_seed2"
+    },
+    {
+      "arm": "G",
+      "arm_short": "wave1_g",
+      "asset_revision": "b58ccd2f81fd246f27c1e8d88cf86484cd888703",
+      "checkpoint_sha256": "e2612d61320f5609bc7aa8c01c6867a3c38d2873c8d98bfc1e8cc56f82e50a4d",
+      "completion_status": "COMPLETED",
+      "final_iteration": 199,
+      "host": "gn02",
+      "local_checkpoint_path": "evaluation/results/2026-08-02_wave1_waypoint/checkpoints/wave1_g_seed3_model199.pt",
+      "return_code": 0,
+      "run_name": "wave1_wave1_g_seed3",
+      "seed": 3,
+      "slurm_job_id": "40529890_1",
+      "slurm_log": "training_logs/slurm/z1-train-40529890_1.out",
+      "task_id": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate",
+      "training_revision": "a6a9c970ea9eca00b34e8e9be806d22d396a964a",
+      "treatment_reward_term": "r_gate",
+      "vega_checkpoint_path": "/ceph/hpc/home/eunikhilr/repos/wave1_a6a9c97/unitree_rl_mjlab/logs/rsl_rl/z1_hammer/2026-08-02_22-37-07_wave1_wave1_g_seed3/model_199.pt",
+      "vega_run_dir": "/ceph/hpc/home/eunikhilr/repos/wave1_a6a9c97/unitree_rl_mjlab/logs/rsl_rl/z1_hammer/2026-08-02_22-37-07_wave1_wave1_g_seed3"
+    },
+    {
+      "arm": "P",
+      "arm_short": "wave1_p",
+      "asset_revision": "b58ccd2f81fd246f27c1e8d88cf86484cd888703",
+      "checkpoint_sha256": "305a9476ecfef2bccbc7b3ee590af85432d56aa920f08cfb61578086c03e502d",
+      "completion_status": "COMPLETED",
+      "final_iteration": 199,
+      "host": "gn04",
+      "local_checkpoint_path": "evaluation/results/2026-08-02_wave1_waypoint/checkpoints/wave1_p_seed2_model199.pt",
+      "return_code": 0,
+      "run_name": "wave1_wave1_p_seed2",
+      "seed": 2,
+      "slurm_job_id": "40529893_0",
+      "slurm_log": "training_logs/slurm/z1-train-40529893_0.out",
+      "task_id": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress",
+      "training_revision": "a6a9c970ea9eca00b34e8e9be806d22d396a964a",
+      "treatment_reward_term": "r_waypoint_progress",
+      "vega_checkpoint_path": "/ceph/hpc/home/eunikhilr/repos/wave1_a6a9c97/unitree_rl_mjlab/logs/rsl_rl/z1_hammer/2026-08-02_22-37-07_wave1_wave1_p_seed2/model_199.pt",
+      "vega_run_dir": "/ceph/hpc/home/eunikhilr/repos/wave1_a6a9c97/unitree_rl_mjlab/logs/rsl_rl/z1_hammer/2026-08-02_22-37-07_wave1_wave1_p_seed2"
+    },
+    {
+      "arm": "P",
+      "arm_short": "wave1_p",
+      "asset_revision": "b58ccd2f81fd246f27c1e8d88cf86484cd888703",
+      "checkpoint_sha256": "88b842d5ad7e8cc6d246237b0b1b4db09bc6e6d4e0c805cdfcc5f6b24f05d077",
+      "completion_status": "COMPLETED",
+      "final_iteration": 199,
+      "host": "gn04",
+      "local_checkpoint_path": "evaluation/results/2026-08-02_wave1_waypoint/checkpoints/wave1_p_seed3_model199.pt",
+      "return_code": 0,
+      "run_name": "wave1_wave1_p_seed3",
+      "seed": 3,
+      "slurm_job_id": "40529893_1",
+      "slurm_log": "training_logs/slurm/z1-train-40529893_1.out",
+      "task_id": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress",
+      "training_revision": "a6a9c970ea9eca00b34e8e9be806d22d396a964a",
+      "treatment_reward_term": "r_waypoint_progress",
+      "vega_checkpoint_path": "/ceph/hpc/home/eunikhilr/repos/wave1_a6a9c97/unitree_rl_mjlab/logs/rsl_rl/z1_hammer/2026-08-02_22-37-07_wave1_wave1_p_seed3/model_199.pt",
+      "vega_run_dir": "/ceph/hpc/home/eunikhilr/repos/wave1_a6a9c97/unitree_rl_mjlab/logs/rsl_rl/z1_hammer/2026-08-02_22-37-07_wave1_wave1_p_seed3"
+    }
+  ],
+  "schema_version": "wave1-artifact-manifest-v1",
+  "training_revision": "a6a9c970ea9eca00b34e8e9be806d22d396a964a"
+}
