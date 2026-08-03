@@ -1,0 +1,829 @@
+{
+  "amendment": {
+    "amendment_id": "A1",
+    "no_change_to": [
+      "plant",
+      "actions",
+      "resets",
+      "caps",
+      "rewards",
+      "contact_model",
+      "eligibility_numeric_thresholds"
+    ],
+    "supersedes_failed_input_sha256": "86deebf186ef8360f515574b388cd52a834369f4d25f6246eaed4abfd848d588",
+    "supersedes_failed_output_sha256": "6755cdefb74aebfb704f2271af4b020dcfc1d83bba045c5b1a997922d7b21414"
+  },
+  "inputs_sha256": "b3ae77302ec6b3250cab3f9b2dcfc8da3d648572449dbf220f1d4fd93c7e680b",
+  "provenance": {
+    "asset": {
+      "asset_scope_clean": true,
+      "dirty": false,
+      "repository_dirty": true,
+      "repository_status": "?? .claude/settings.json\n?? CLAUDE.md",
+      "revision": "b58ccd2f81fd246f27c1e8d88cf86484cd888703",
+      "scope": [
+        "hammer_z1_env/assets"
+      ],
+      "status": ""
+    },
+    "asset_scope_clean": true,
+    "code": {
+      "asset_scope_clean": null,
+      "dirty": false,
+      "repository_dirty": false,
+      "repository_status": "",
+      "revision": "711757076c280a94bfbd4105ea2122e067a1cc48",
+      "scope": [],
+      "status": ""
+    },
+    "config": {
+      "allowed_delta_pos_scale": [
+        0.15,
+        0.3,
+        0.45
+      ],
+      "caps_n_m_s": [
+        1.64,
+        3.28,
+        1.64,
+        1.64,
+        1.64,
+        1.64
+      ],
+      "contact_liveness_semantics": "exact-plus-object-total-v2",
+      "decimation": 10,
+      "imp_max_p": 0.0,
+      "nonface_force_tolerance": 1e-06,
+      "physics_dt_s": 0.002,
+      "qvel_margin_fraction": 0.95,
+      "qvel_rail_rad_s": 3.1415,
+      "release_confirm_samples": [
+        2,
+        5,
+        10
+      ],
+      "reset_bank_seed": 2026072901,
+      "reset_bank_size": 16
+    },
+    "config_sha256": "4c702b042a9a995c5c9b8ca8d80dab182a9e18e64c4e80069d5302f42b21cbc8",
+    "tape_files_sha256": {
+      "whip_delta015.json": "b310e7d3e32ddffad314694c59847255ace8d5a48c0164739480f96b7baad9bd",
+      "whip_delta015_cma.json": "6a00a512e69209289f68cbc49d0b130a5999da727b72dbb42550569ba6dcdfa7",
+      "whip_delta030.json": "faad3a28af92d7b8e35534ed1e64d277f0bea739a35970dd23b1b684d7be647e",
+      "whip_delta045.json": "d2b36754cff2842f227cb8841b8c11094f50e4015a626a3dde8d2bb1d0683e09"
+    }
+  },
+  "resets": {
+    "fixed_reset": {
+      "reset_contract_version": 1,
+      "reset_state": {
+        "realized": {
+          "nail_joint_pos": [
+            0.0
+          ],
+          "nail_joint_vel": [
+            0.0
+          ],
+          "robot_joint_pos": [
+            0.0,
+            1.6059999465942383,
+            -0.4300999939441681,
+            -1.19760000705719,
+            -0.0013000000035390258,
+            1.5543999671936035,
+            -0.0010000000474974513
+          ],
+          "robot_joint_vel": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "regeneration_inputs": {
+          "reset_rng_call_index": 0,
+          "reset_rng_seed": 0
+        }
+      },
+      "reset_state_digest": "bde511ec2adc42e5365e1e46f45ff1fb43223a93c31c6fbfb4580352e445e319"
+    },
+    "interpretation": "shared-tape robustness diagnostics only; not independent rows and not a veto on fixed-reset existence",
+    "reset_envelope_sha256": "e283e2fe52bf9df1819bab8cf39629aa97ab4979062442f0e8bcc548916aeee4",
+    "robustness_bank": [
+      {
+        "reset_contract_version": 1,
+        "reset_state": {
+          "realized": {
+            "nail_joint_pos": [
+              0.0
+            ],
+            "nail_joint_vel": [
+              0.0
+            ],
+            "robot_joint_pos": [
+              0.02348792925477028,
+              1.6460952758789062,
+              -0.4076763093471527,
+              -1.2262190580368042,
+              0.03586569055914879,
+              1.5346245765686035,
+              0.0
+            ],
+            "robot_joint_vel": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "regeneration_inputs": {
+            "reset_rng_call_index": 0,
+            "reset_rng_seed": 2026072901
+          }
+        },
+        "reset_state_digest": "c2007c93246740ad22e189009ae0a6200358539e59036e1e74d2f5700341d359"
+      },
+      {
+        "reset_contract_version": 1,
+        "reset_state": {
+          "realized": {
+            "nail_joint_pos": [
+              0.0
+            ],
+            "nail_joint_vel": [
+              0.0
+            ],
+            "robot_joint_pos": [
+              -0.0021146759390830994,
+              1.5574220418930054,
+              -0.39806994795799255,
+              -1.2168163061141968,
+              0.010304678231477737,
+              1.551241159439087,
+              -0.04991523176431656
+            ],
+            "robot_joint_vel": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "regeneration_inputs": {
+            "reset_rng_call_index": 1,
+            "reset_rng_seed": 2026072901
+          }
+        },
+        "reset_state_digest": "deb6108254548cfab3594468eac091ae5fd83533226a366cb9772cb88c547091"
+      },
+      {
+        "reset_contract_version": 1,
+        "reset_state": {
+          "realized": {
+            "nail_joint_pos": [
+              0.0
+            ],
+            "nail_joint_vel": [
+              0.0
+            ],
+            "robot_joint_pos": [
+              0.024440903216600418,
+              1.6378898620605469,
+              -0.38899704813957214,
+              -1.150179386138916,
+              -0.009822163730859756,
+              1.5269337892532349,
+              -0.003380531445145607
+            ],
+            "robot_joint_vel": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "regeneration_inputs": {
+            "reset_rng_call_index": 2,
+            "reset_rng_seed": 2026072901
+          }
+        },
+        "reset_state_digest": "3ffb7133663d61cc469245cc757da2aea1b9dde1558937c0da53eef2cc2ffd37"
+      },
+      {
+        "reset_contract_version": 1,
+        "reset_state": {
+          "realized": {
+            "nail_joint_pos": [
+              0.0
+            ],
+            "nail_joint_vel": [
+              0.0
+            ],
+            "robot_joint_pos": [
+              0.005070339888334274,
+              1.600799560546875,
+              -0.4443669319152832,
+              -1.185003399848938,
+              0.038754504173994064,
+              1.5470789670944214,
+              -0.050841473042964935
+            ],
+            "robot_joint_vel": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "regeneration_inputs": {
+            "reset_rng_call_index": 3,
+            "reset_rng_seed": 2026072901
+          }
+        },
+        "reset_state_digest": "4e493c4e53d6b7cad689ab1d304d5ce9ebf78c268a31787ab8838f3257cfa00f"
+      },
+      {
+        "reset_contract_version": 1,
+        "reset_state": {
+          "realized": {
+            "nail_joint_pos": [
+              0.0
+            ],
+            "nail_joint_vel": [
+              0.0
+            ],
+            "robot_joint_pos": [
+              0.005074597895145416,
+              1.5838390588760376,
+              -0.4585510790348053,
+              -1.245948076248169,
+              0.007342762779444456,
+              1.5139976739883423,
+              0.0
+            ],
+            "robot_joint_vel": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "regeneration_inputs": {
+            "reset_rng_call_index": 4,
+            "reset_rng_seed": 2026072901
+          }
+        },
+        "reset_state_digest": "221d9660c7c397cf12be66a2788bb7696d5ce3194d89ca1303ee375a4dd27b8f"
+      },
+      {
+        "reset_contract_version": 1,
+        "reset_state": {
+          "realized": {
+            "nail_joint_pos": [
+              0.0
+            ],
+            "nail_joint_vel": [
+              0.0
+            ],
+            "robot_joint_pos": [
+              0.012916017323732376,
+              1.5937086343765259,
+              -0.4578740894794464,
+              -1.1839585304260254,
+              0.018622059375047684,
+              1.5389479398727417,
+              -0.019943732768297195
+            ],
+            "robot_joint_vel": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "regeneration_inputs": {
+            "reset_rng_call_index": 5,
+            "reset_rng_seed": 2026072901
+          }
+        },
+        "reset_state_digest": "756da4349c6fce876442f157a6ca2ea87ae4980b80b514d878795a92502609f6"
+      },
+      {
+        "reset_contract_version": 1,
+        "reset_state": {
+          "realized": {
+            "nail_joint_pos": [
+              0.0
+            ],
+            "nail_joint_vel": [
+              0.0
+            ],
+            "robot_joint_pos": [
+              -0.03934323042631149,
+              1.6534758806228638,
+              -0.4775305986404419,
+              -1.1872026920318604,
+              0.0031828838400542736,
+              1.5537126064300537,
+              -0.032300036400556564
+            ],
+            "robot_joint_vel": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "regeneration_inputs": {
+            "reset_rng_call_index": 6,
+            "reset_rng_seed": 2026072901
+          }
+        },
+        "reset_state_digest": "de364506ff26a77dc01b6401484e04d187efac1a940a28f1aba4e98394d28736"
+      },
+      {
+        "reset_contract_version": 1,
+        "reset_state": {
+          "realized": {
+            "nail_joint_pos": [
+              0.0
+            ],
+            "nail_joint_vel": [
+              0.0
+            ],
+            "robot_joint_pos": [
+              0.0005263611674308777,
+              1.594017505645752,
+              -0.40274864435195923,
+              -1.1904244422912598,
+              -0.04459736868739128,
+              1.5735273361206055,
+              -0.022581864148378372
+            ],
+            "robot_joint_vel": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "regeneration_inputs": {
+            "reset_rng_call_index": 7,
+            "reset_rng_seed": 2026072901
+          }
+        },
+        "reset_state_digest": "e9d13f5dd6dc9f89af89bd08a129e08b642d3c17fad7107a9482258964ddf2be"
+      },
+      {
+        "reset_contract_version": 1,
+        "reset_state": {
+          "realized": {
+            "nail_joint_pos": [
+              0.0
+            ],
+            "nail_joint_vel": [
+              0.0
+            ],
+            "robot_joint_pos": [
+              0.02368805930018425,
+              1.5873790979385376,
+              -0.47676828503608704,
+              -1.1508327722549438,
+              -0.007499628234654665,
+              1.5802770853042603,
+              -0.025479603558778763
+            ],
+            "robot_joint_vel": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "regeneration_inputs": {
+            "reset_rng_call_index": 8,
+            "reset_rng_seed": 2026072901
+          }
+        },
+        "reset_state_digest": "31a8b78656d8f2c92e6892a0f5ca7f25bbbc0e36dc3abca8366dc14dc874640d"
+      },
+      {
+        "reset_contract_version": 1,
+        "reset_state": {
+          "realized": {
+            "nail_joint_pos": [
+              0.0
+            ],
+            "nail_joint_vel": [
+              0.0
+            ],
+            "robot_joint_pos": [
+              0.018507178872823715,
+              1.5568788051605225,
+              -0.4528588354587555,
+              -1.20444655418396,
+              -0.0008540790295228362,
+              1.5434836149215698,
+              0.0
+            ],
+            "robot_joint_vel": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "regeneration_inputs": {
+            "reset_rng_call_index": 9,
+            "reset_rng_seed": 2026072901
+          }
+        },
+        "reset_state_digest": "ff82488d28357644e8dfe05aef921fd653558a2f1d9eedcde62de4830762260f"
+      },
+      {
+        "reset_contract_version": 1,
+        "reset_state": {
+          "realized": {
+            "nail_joint_pos": [
+              0.0
+            ],
+            "nail_joint_vel": [
+              0.0
+            ],
+            "robot_joint_pos": [
+              -0.014913719147443771,
+              1.5684072971343994,
+              -0.475077360868454,
+              -1.1936837434768677,
+              0.041146207600831985,
+              1.5234373807907104,
+              0.0
+            ],
+            "robot_joint_vel": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "regeneration_inputs": {
+            "reset_rng_call_index": 10,
+            "reset_rng_seed": 2026072901
+          }
+        },
+        "reset_state_digest": "b6671d2952b6ae5ac7a888245b1c2aff168b8344681f86703d2a588fb537a033"
+      },
+      {
+        "reset_contract_version": 1,
+        "reset_state": {
+          "realized": {
+            "nail_joint_pos": [
+              0.0
+            ],
+            "nail_joint_vel": [
+              0.0
+            ],
+            "robot_joint_pos": [
+              -0.03956323117017746,
+              1.5756970643997192,
+              -0.4101852476596832,
+              -1.1902812719345093,
+              0.022380035370588303,
+              1.5917413234710693,
+              0.0
+            ],
+            "robot_joint_vel": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "regeneration_inputs": {
+            "reset_rng_call_index": 11,
+            "reset_rng_seed": 2026072901
+          }
+        },
+        "reset_state_digest": "5423d7785f528291d044c915996dc0d97f7a877f09ed2ef63cec8bef150575a3"
+      },
+      {
+        "reset_contract_version": 1,
+        "reset_state": {
+          "realized": {
+            "nail_joint_pos": [
+              0.0
+            ],
+            "nail_joint_vel": [
+              0.0
+            ],
+            "robot_joint_pos": [
+              -0.04353536292910576,
+              1.6281503438949585,
+              -0.4179058074951172,
+              -1.1709904670715332,
+              0.038635630160570145,
+              1.5269609689712524,
+              -0.025768067687749863
+            ],
+            "robot_joint_vel": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "regeneration_inputs": {
+            "reset_rng_call_index": 12,
+            "reset_rng_seed": 2026072901
+          }
+        },
+        "reset_state_digest": "7a944f681bc339c2135de15dd6e843a49f12f8c95427cb363c6ee646960309bd"
+      },
+      {
+        "reset_contract_version": 1,
+        "reset_state": {
+          "realized": {
+            "nail_joint_pos": [
+              0.0
+            ],
+            "nail_joint_vel": [
+              0.0
+            ],
+            "robot_joint_pos": [
+              0.009833447635173798,
+              1.5652233362197876,
+              -0.4479559063911438,
+              -1.1519789695739746,
+              0.03168393298983574,
+              1.54900324344635,
+              -0.03993977978825569
+            ],
+            "robot_joint_vel": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "regeneration_inputs": {
+            "reset_rng_call_index": 13,
+            "reset_rng_seed": 2026072901
+          }
+        },
+        "reset_state_digest": "2a103573d1a45d35ba6a518b014e2b04fc91ef38bd0087c6dd4e59b6047d2906"
+      },
+      {
+        "reset_contract_version": 1,
+        "reset_state": {
+          "realized": {
+            "nail_joint_pos": [
+              0.0
+            ],
+            "nail_joint_vel": [
+              0.0
+            ],
+            "robot_joint_pos": [
+              -0.04623865708708763,
+              1.5896626710891724,
+              -0.44926324486732483,
+              -1.213800311088562,
+              -0.009841691702604294,
+              1.5259031057357788,
+              -0.05031166225671768
+            ],
+            "robot_joint_vel": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "regeneration_inputs": {
+            "reset_rng_call_index": 14,
+            "reset_rng_seed": 2026072901
+          }
+        },
+        "reset_state_digest": "38c63c7d1150ff32776f4e6cf89de412ca9739e3c947586c2d391ad355e53af5"
+      },
+      {
+        "reset_contract_version": 1,
+        "reset_state": {
+          "realized": {
+            "nail_joint_pos": [
+              0.0
+            ],
+            "nail_joint_vel": [
+              0.0
+            ],
+            "robot_joint_pos": [
+              0.004640810191631317,
+              1.6501469612121582,
+              -0.46834105253219604,
+              -1.2470030784606934,
+              -0.014829576015472412,
+              1.5952874422073364,
+              0.0
+            ],
+            "robot_joint_vel": [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "regeneration_inputs": {
+            "reset_rng_call_index": 15,
+            "reset_rng_seed": 2026072901
+          }
+        },
+        "reset_state_digest": "3b5a55eb39fcad08dda14f7e497d53596e40454026750554bab8b34e7a7154bd"
+      }
+    ],
+    "robustness_bank_seed": 2026072901,
+    "schema": "lambda-feasibility-reset-bank-v1"
+  },
+  "schema": "lambda-feasibility-stage0-inputs-v2",
+  "sources": [
+    {
+      "action_digest": "06c8ee6daf468f3d78b27c635186170de72768db6f5757b116d809d78007fb45",
+      "action_mode": "reference",
+      "delta": 0.15,
+      "source_aliases": [],
+      "source_field": "canonical_playback",
+      "source_id": "SingleStrikeReference-default",
+      "source_kind": "reference",
+      "source_path": "src/tasks/hammer/mdp/references.py"
+    },
+    {
+      "action_digest": "bc1f3ba1a25009ce3290fe644a6813ac3ca89699864c54ff39ac8da9820d5c28",
+      "action_mode": "tape",
+      "delta": 0.15,
+      "source_aliases": [
+        [
+          "whip_delta015.json",
+          "best_actions"
+        ]
+      ],
+      "source_field": "best_actions",
+      "source_id": "whip_delta015.json:best_actions",
+      "source_kind": "legacy",
+      "source_path": "evaluation/whip/data/whip_delta015.json"
+    },
+    {
+      "action_digest": "1452080e17b2726ed84d200a0bf9865381a1d46846f03e8a310d43dc9212b8b0",
+      "action_mode": "tape",
+      "delta": 0.15,
+      "source_aliases": [
+        [
+          "whip_delta015.json",
+          "best_actions_hw"
+        ]
+      ],
+      "source_field": "best_actions_hw",
+      "source_id": "whip_delta015.json:best_actions_hw",
+      "source_kind": "legacy",
+      "source_path": "evaluation/whip/data/whip_delta015.json"
+    },
+    {
+      "action_digest": "40e968e1fa3233e4053b37ff6d2ef295e403d1cb95a7883156fbd5cedf9ea2b3",
+      "action_mode": "tape",
+      "delta": 0.15,
+      "source_aliases": [
+        [
+          "whip_delta015_cma.json",
+          "best_actions"
+        ]
+      ],
+      "source_field": "best_actions",
+      "source_id": "whip_delta015_cma.json:best_actions",
+      "source_kind": "legacy",
+      "source_path": "evaluation/whip/data/whip_delta015_cma.json"
+    },
+    {
+      "action_digest": "ca0c6ac6fa34a6a60942647198ce0d04ca700c1e922a68e34c01b609cceb07cf",
+      "action_mode": "tape",
+      "delta": 0.15,
+      "source_aliases": [
+        [
+          "whip_delta015_cma.json",
+          "best_actions_hw"
+        ]
+      ],
+      "source_field": "best_actions_hw",
+      "source_id": "whip_delta015_cma.json:best_actions_hw",
+      "source_kind": "legacy",
+      "source_path": "evaluation/whip/data/whip_delta015_cma.json"
+    },
+    {
+      "action_digest": "381c1ee591e6cc38da339d01c800dc89714fb1e554b66b899b81d33fdbc91320",
+      "action_mode": "tape",
+      "delta": 0.3,
+      "source_aliases": [
+        [
+          "whip_delta030.json",
+          "best_actions"
+        ]
+      ],
+      "source_field": "best_actions",
+      "source_id": "whip_delta030.json:best_actions",
+      "source_kind": "legacy",
+      "source_path": "evaluation/whip/data/whip_delta030.json"
+    },
+    {
+      "action_digest": "b23af37cb85c097167876d51227c76bcf89e8f50b17fdaf0e89b67979b835d26",
+      "action_mode": "tape",
+      "delta": 0.3,
+      "source_aliases": [
+        [
+          "whip_delta030.json",
+          "best_actions_hw"
+        ]
+      ],
+      "source_field": "best_actions_hw",
+      "source_id": "whip_delta030.json:best_actions_hw",
+      "source_kind": "legacy",
+      "source_path": "evaluation/whip/data/whip_delta030.json"
+    },
+    {
+      "action_digest": "001fb7ac50e28aa92e74dc78dd727579cb39a4916e629ad6f2eeab2f0dcaee21",
+      "action_mode": "tape",
+      "delta": 0.45,
+      "source_aliases": [
+        [
+          "whip_delta045.json",
+          "best_actions"
+        ]
+      ],
+      "source_field": "best_actions",
+      "source_id": "whip_delta045.json:best_actions",
+      "source_kind": "legacy",
+      "source_path": "evaluation/whip/data/whip_delta045.json"
+    },
+    {
+      "action_digest": "c2dc6f45ae6ce247210b0ee3b637ad1da6a3d2d6394e40883eed06378f29556f",
+      "action_mode": "tape",
+      "delta": 0.45,
+      "source_aliases": [
+        [
+          "whip_delta045.json",
+          "best_actions_hw"
+        ]
+      ],
+      "source_field": "best_actions_hw",
+      "source_id": "whip_delta045.json:best_actions_hw",
+      "source_kind": "legacy",
+      "source_path": "evaluation/whip/data/whip_delta045.json"
+    }
+  ]
+}
