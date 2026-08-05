@@ -1492,8 +1492,13 @@ class TestImpulseSixScreen:
         assert cfg.rewards["r_waypoint_progress"].weight == pytest.approx(8.0)
         params = cfg.metrics["cat_soft"].params
         assert (params["use_vel"], params["vel_detection"]) == (True, "substep")
+        assert params["limit"] == pytest.approx(3.1415)
+        assert params["max_p"] == pytest.approx(0.5)
+        assert params["min_p"] == pytest.approx(0.0)
+        assert params["tau"] == pytest.approx(0.95)
         assert params["imp_max_p"] == 0.0
         assert tuple(params["imp_limit"]) == (1.64, 3.28, 1.64, 1.64, 1.64, 1.64)
+        assert tuple(params["robot_cfg"].joint_names) == tuple(ARM_JOINT_NAMES)
 
     @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
     @pytest.mark.parametrize("short,row", _IMPULSE6.items())
@@ -1521,16 +1526,45 @@ class TestImpulseSixScreen:
 
         assert task in list_tasks()
         assert load_rl_cfg(task).algorithm.class_name == "src.tasks.hammer.rl.cat_ppo:CatPPO"
+        params = cfg.metrics["cat_soft"].params
+        assert params["limit"] == pytest.approx(3.1415)
+        assert params["max_p"] == pytest.approx(0.5)
+        assert params["min_p"] == pytest.approx(0.0)
+        assert params["tau"] == pytest.approx(0.95)
+        assert tuple(params["robot_cfg"].joint_names) == tuple(ARM_JOINT_NAMES)
         assert set(cfg.actions) == {"ik_hammer_head"}
         assert "set_gains" not in cfg.actions
         ik = cfg.actions["ik_hammer_head"]
         assert isinstance(ik, DifferentialIKActionCfg)
+        assert ik.entity_name == "robot"
+        assert ik.frame_type == "site"
+        assert ik.frame_name == HAMMER_HEAD_SITE_NAME
+        assert ik.actuator_names == ARM_ACTUATOR_NAMES
+        assert ik.use_relative_mode is True
         assert ik.delta_pos_scale == pytest.approx(0.15)
+        assert ik.delta_ori_scale == pytest.approx(1.0)
+        assert ik.damping == pytest.approx(0.05)
+        assert ik.max_dq == pytest.approx(0.5)
+        assert ik.position_weight == pytest.approx(1.0)
+        assert ik.orientation_weight == pytest.approx(0.0)
+        assert ik.joint_limit_weight == pytest.approx(0.0)
+        assert ik.posture_weight == pytest.approx(0.0)
+        assert ik.posture_target is None
+        assert ik.clip is None
         for group in ("actor", "critic"):
             assert list(cfg.observations[group].terms) == list(
                 s8d4.observations[group].terms
             )
         assert cfg.events["reset_robot_joints"].params["position_range"] == (0.0, 0.0)
         assert TestCartesianGuidelineStudy._actuator_signature(cfg) == (
-            TestCartesianGuidelineStudy._actuator_signature(s8d4)
+            (
+                "BuiltinPositionActuatorCfg",
+                1000.0,
+                100.0,
+                30.0,
+                0.01,
+                ("joint1", "joint3", "joint4", "joint5", "joint6"),
+            ),
+            ("BuiltinPositionActuatorCfg", 1500.0, 150.0, 60.0, 0.02, ("joint2",)),
+            ("BuiltinPositionActuatorCfg", 100.0, 20.0, 30.0, 0.005, ("jointGripper",)),
         )

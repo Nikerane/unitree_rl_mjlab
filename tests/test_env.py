@@ -13,6 +13,8 @@ Warp kernels between tests.
 import pytest
 import torch
 
+from src.assets.robots.unitree_z1.z1_constants import ARM_JOINT_NAMES
+
 pytestmark = pytest.mark.integration
 
 
@@ -654,7 +656,34 @@ def test_impulse6_new_live_envs_have_substep_peaks_and_pv_observation_widths(
         tracker_index = keys.index("substep_peak_qv")
         hook_index = keys.index("cat_soft")
         tracker = env.metrics_manager._term_cfgs[tracker_index].func
+        hook = env.metrics_manager._term_cfgs[hook_index].func
 
         assert tracker_index < hook_index
         assert tracker.peak_qv_joint.shape == (env.num_envs, 6)
+        resolved_tracker_joints = tuple(
+            env.scene["robot"].joint_names[joint_id] for joint_id in tracker._joint_ids
+        )
+        resolved_hook_joints = tuple(
+            env.scene["robot"].joint_names[joint_id]
+            for joint_id in hook._robot_cfg.joint_ids
+        )
+        assert resolved_tracker_joints == tuple(ARM_JOINT_NAMES)
+        assert resolved_hook_joints == tuple(ARM_JOINT_NAMES)
         assert {group: value.shape[1] for group, value in obs.items()} == pv_widths
+
+
+def test_impulse6_screen_fails_closed_on_a_six_joint_identity_mismatch():
+    """The screen must reject a same-width replacement of joint6 with the gripper."""
+    from mjlab.envs import ManagerBasedRlEnv
+    from mjlab.managers.scene_entity_config import SceneEntityCfg
+    from mjlab.tasks.registry import load_env_cfg
+    import src.tasks.hammer.config.z1  # noqa: F401
+
+    cfg = load_env_cfg(_IMPULSE6_NEW_TASK_IDS[0], play=True)
+    cfg.scene.num_envs = 1
+    cfg.metrics["cat_soft"].params["robot_cfg"] = SceneEntityCfg(
+        "robot",
+        joint_names=("joint1", "joint2", "joint3", "joint4", "joint5", "jointGripper"),
+    )
+    with pytest.raises(RuntimeError, match="joint"):
+        ManagerBasedRlEnv(cfg, device="cpu")
