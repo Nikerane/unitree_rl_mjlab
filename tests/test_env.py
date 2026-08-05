@@ -21,6 +21,15 @@ _GUIDELINE_TASK_IDS = (
     "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate",
 )
 
+_IMPULSE6_NEW_TASK_IDS = (
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D0",
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D4",
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D16",
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S8-D0",
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S8-D16",
+)
+_PV_TASK_ID = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel"
+
 
 @pytest.fixture(scope="module")
 def guideline_envs_cpu():
@@ -33,6 +42,25 @@ def guideline_envs_cpu():
     try:
         for task_id in _GUIDELINE_TASK_IDS:
             cfg = load_env_cfg(task_id)
+            cfg.scene.num_envs = 1
+            envs[task_id] = ManagerBasedRlEnv(cfg, device="cpu")
+        yield envs
+    finally:
+        for env in envs.values():
+            env.close()
+
+
+@pytest.fixture(scope="module")
+def impulse6_envs_cpu():
+    """Build every new six-cell env alongside its P+V observation-width reference."""
+    from mjlab.envs import ManagerBasedRlEnv
+    from mjlab.tasks.registry import load_env_cfg
+    import src.tasks  # noqa: F401  # populate the task registry in isolated runs
+
+    envs = {}
+    try:
+        for task_id in (_PV_TASK_ID, *_IMPULSE6_NEW_TASK_IDS):
+            cfg = load_env_cfg(task_id, play=True)
             cfg.scene.num_envs = 1
             envs[task_id] = ManagerBasedRlEnv(cfg, device="cpu")
         yield envs
@@ -610,3 +638,23 @@ def test_presentation_phase_one_new_tasks_build_live_and_stay_impulse_log_only(
         assert set(env.action_manager.active_terms) == {"ik_hammer_head"}
     finally:
         env.close()
+
+
+def test_impulse6_new_live_envs_have_substep_peaks_and_pv_observation_widths(
+    impulse6_envs_cpu,
+):
+    """All five new cells must build the exact P+V sensing/control contract."""
+    pv_obs, _ = impulse6_envs_cpu[_PV_TASK_ID].reset()
+    pv_widths = {group: value.shape[1] for group, value in pv_obs.items()}
+
+    for task_id in _IMPULSE6_NEW_TASK_IDS:
+        env = impulse6_envs_cpu[task_id]
+        obs, _ = env.reset()
+        keys = list(env.metrics_manager.active_terms)
+        tracker_index = keys.index("substep_peak_qv")
+        hook_index = keys.index("cat_soft")
+        tracker = env.metrics_manager._term_cfgs[tracker_index].func
+
+        assert tracker_index < hook_index
+        assert tracker.peak_qv_joint.shape == (env.num_envs, 6)
+        assert {group: value.shape[1] for group, value in obs.items()} == pv_widths

@@ -68,6 +68,40 @@ from src.tasks.hammer.mdp.rewards import (
 )
 
 
+_IMPULSE6 = {
+    "s0d0": (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D0",
+        0.0,
+        0.0,
+    ),
+    "s0d4": (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D4",
+        0.0,
+        4.0,
+    ),
+    "s0d16": (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D16",
+        0.0,
+        16.0,
+    ),
+    "s8d0": (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S8-D0",
+        8.0,
+        0.0,
+    ),
+    "s8d4": (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4",
+        8.0,
+        4.0,
+    ),
+    "s8d16": (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S8-D16",
+        8.0,
+        16.0,
+    ),
+}
+
+
 # ---------------------------------------------------------------------------
 # Actuator configs
 # ---------------------------------------------------------------------------
@@ -639,6 +673,11 @@ class TestCartesianGuidelineStudy:
             self._C_PROGRESS + "-Vel",  # P+V (velocity-CaT wave); see TestProgressPlusVelocityArm
             self._C_PROGRESS + "-Delivered4",
             self._C_PROGRESS + "-Vel-Delivered4",
+            self._C_PROGRESS + "-Vel-S0-D0",
+            self._C_PROGRESS + "-Vel-S0-D4",
+            self._C_PROGRESS + "-Vel-S0-D16",
+            self._C_PROGRESS + "-Vel-S8-D0",
+            self._C_PROGRESS + "-Vel-S8-D16",
         }
 
     @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
@@ -1437,3 +1476,61 @@ class TestPresentationPhaseOne:
         assert cfg.metrics["cat_soft"].params["imp_max_p"] == 0.0
         assert "vel_hard" not in cfg.terminations
         assert "cat_vel" not in cfg.terminations
+
+
+class TestImpulseSixScreen:
+    """Balanced six-cell maximize-impact screen on the frozen P+V plant."""
+
+    _S8D4 = _IMPULSE6["s8d4"][0]
+
+    @pytest.mark.parametrize("short,row", _IMPULSE6.items())
+    def test_impulse6_cell_changes_only_the_two_declared_weights(self, short, row):
+        task, impact_w, delivered_w = row
+        cfg = load_env_cfg(task)
+        assert cfg.rewards["impact_progress"].weight == pytest.approx(impact_w)
+        assert cfg.rewards["delivered_impulse"].weight == pytest.approx(delivered_w)
+        assert cfg.rewards["r_waypoint_progress"].weight == pytest.approx(8.0)
+        params = cfg.metrics["cat_soft"].params
+        assert (params["use_vel"], params["vel_detection"]) == (True, "substep")
+        assert params["imp_max_p"] == 0.0
+        assert tuple(params["imp_limit"]) == (1.64, 3.28, 1.64, 1.64, 1.64, 1.64)
+
+    @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
+    @pytest.mark.parametrize("short,row", _IMPULSE6.items())
+    def test_impulse6_normalizes_onto_s8d4_after_only_weight_replacement(
+        self, short, row, play
+    ):
+        task, impact_w, delivered_w = row
+        cfg = copy.deepcopy(load_env_cfg(task, play=play))
+        s8d4 = load_env_cfg(self._S8D4, play=play)
+
+        cfg.rewards["impact_progress"].weight = 8.0
+        cfg.rewards["delivered_impulse"].weight = 4.0
+        assert TestCartesianGuidelineStudy._normalize(cfg) == (
+            TestCartesianGuidelineStudy._normalize(s8d4)
+        )
+
+    @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
+    @pytest.mark.parametrize("short,row", _IMPULSE6.items())
+    def test_impulse6_preserves_the_fixed_pv_contract(self, short, row, play):
+        from mjlab.tasks.registry import load_rl_cfg
+
+        task, _, _ = row
+        cfg = load_env_cfg(task, play=play)
+        s8d4 = load_env_cfg(self._S8D4, play=play)
+
+        assert task in list_tasks()
+        assert load_rl_cfg(task).algorithm.class_name == "src.tasks.hammer.rl.cat_ppo:CatPPO"
+        assert set(cfg.actions) == {"ik_hammer_head"}
+        assert "set_gains" not in cfg.actions
+        ik = cfg.actions["ik_hammer_head"]
+        assert isinstance(ik, DifferentialIKActionCfg)
+        assert ik.delta_pos_scale == pytest.approx(0.15)
+        for group in ("actor", "critic"):
+            assert list(cfg.observations[group].terms) == list(
+                s8d4.observations[group].terms
+            )
+        assert cfg.events["reset_robot_joints"].params["position_range"] == (0.0, 0.0)
+        assert TestCartesianGuidelineStudy._actuator_signature(cfg) == (
+            TestCartesianGuidelineStudy._actuator_signature(s8d4)
+        )
