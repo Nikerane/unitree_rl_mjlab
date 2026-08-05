@@ -14,7 +14,7 @@ from src.tasks.hammer.cat import CaT
 from src.tasks.hammer.cat.hook import CatSoftHook, _NEG_TERMS
 from src.tasks.hammer.cat.keys import CAT_DELTA_KEY, CAT_R_POS_KEY
 from src.tasks.hammer.mdp.impulse_bound import _ENV_SUBSTEP_IMPULSE_ATTR
-from src.tasks.hammer.mdp.velocity_bound import Z1_JOINT_VEL_LIMIT
+from src.tasks.hammer.mdp.velocity_bound import _ENV_SUBSTEP_ATTR, Z1_JOINT_VEL_LIMIT
 
 LIM = Z1_JOINT_VEL_LIMIT
 ACTIVE = ["approach", "nail_driven", "nail_depth_delta", "impact_progress", "completion",
@@ -22,7 +22,7 @@ ACTIVE = ["approach", "nail_driven", "nail_depth_delta", "impact_progress", "com
 I_ACTION_RATE, I_JOINT_LIM = ACTIVE.index("action_rate"), ACTIVE.index("joint_pos_limits")
 
 
-def _hook(max_p=0.5, tau=0.95, min_p=0.0):
+def _hook(max_p=0.5, tau=0.95, min_p=0.0, vel_detection="control_rate"):
   # Built via helpers.stub (loud failure on __init__ drift). Historical note: the bare
   # object.__new__ version of this factory omitted all five _imp_* fields the real __init__
   # unconditionally assigns — safe only because the vel-only paths never read them. stub()
@@ -36,6 +36,7 @@ def _hook(max_p=0.5, tau=0.95, min_p=0.0):
     _neg_idx=None,
     _use_vel=True,
     _use_impulse=False,
+    _vel_detection=vel_detection,
     # __init__ defaults for the impulse fields (unread on the vel-only paths, but real):
     _imp_limit=torch.as_tensor(0.1, dtype=torch.float32),
     _imp_max_p=0.0,
@@ -45,7 +46,8 @@ def _hook(max_p=0.5, tau=0.95, min_p=0.0):
   )
 
 
-def _ihook(imp_max_p=0.0, imp_seed=0.2, imp_limit=0.1, use_vel=False, tau=0.95, min_p=0.0, J=6):
+def _ihook(imp_max_p=0.0, imp_seed=0.2, imp_limit=0.1, use_vel=False, tau=0.95, min_p=0.0, J=6,
+           vel_detection="control_rate"):
   """Hook configured for the impulse arm (use_impulse=True). imp_max_p=0 ⇒ C0 log-only."""
   return stub(
     CatSoftHook,
@@ -56,6 +58,7 @@ def _ihook(imp_max_p=0.0, imp_seed=0.2, imp_limit=0.1, use_vel=False, tau=0.95, 
     _neg_idx=None,
     _use_vel=use_vel,
     _use_impulse=True,
+    _vel_detection=vel_detection,
     _imp_limit=imp_limit,
     _imp_max_p=imp_max_p,
     _imp_seed=imp_seed,
@@ -324,3 +327,163 @@ def test_validate_params_guards():
   CatSoftHook._validate_params(
     {"use_vel": False, "use_impulse": True, "imp_limit": 1.0, "imp_max_p": 0.5}
   )
+
+
+# --- Substep (500 Hz) per-joint velocity detection: the P+V treatment ---------------------------
+# The shipped hook reads CONTROL-RATE joint_vel, which aliases the within-window peak (the strike
+# spike). P+V enforces on the peak-held per-joint |q̇| the SubstepPeakJointVel tracker records at
+# 500 Hz. Detection must be OPT-IN and FAIL CLOSED: a missing tracker must never fall back to the
+# aliased signal, because that would silently train a different (weaker) treatment than the one
+# preregistered.
+
+def _substep_env(control_rate_qv, peak_qv_joint, step_reward=None, impulse=None):
+  """Env whose control-rate sample and substep peak DISAGREE, so the read source is provable."""
+  B = control_rate_qv.shape[0]
+  env = _env(control_rate_qv, torch.zeros(B, len(ACTIVE)) if step_reward is None else step_reward,
+             impulse=impulse)
+  setattr(env, _ENV_SUBSTEP_ATTR,
+          SimpleNamespace(peak_qv_joint=peak_qv_joint,
+                          peak_qv=peak_qv_joint.amax(dim=1),
+                          _joint_ids=list(range(peak_qv_joint.shape[1]))))
+  return env
+
+
+def test_substep_detection_reads_the_peak_not_the_control_rate_sample():
+  B = 4
+  # Control rate says LEGAL (1.0); the 500 Hz peak says grossly illegal. δ must follow the peak.
+  env = _substep_env(torch.full((B, 6), 1.0), torch.full((B, 6), 5.0))
+  out = _hook(vel_detection="substep")(env)
+  assert (out > 0).all(), out
+
+
+def test_substep_detection_ignores_an_illegal_control_rate_sample():
+  B = 4
+  # The mirror image: control rate says illegal, the peak-held window says legal. Under substep
+  # detection the peak is authoritative -- if this fired, the hook would be reading joint_vel.
+  env = _substep_env(torch.full((B, 6), 5.0), torch.full((B, 6), 1.0))
+  out = _hook(vel_detection="substep")(env)
+  assert torch.allclose(out, torch.zeros(B)), out
+
+
+def test_substep_detection_zero_delta_at_or_below_the_limit():
+  B = 3
+  # Control rate deliberately illegal, so this also fails if the peak is not the read source.
+  env = _substep_env(torch.full((B, 6), 5.0), torch.full((B, 6), LIM))   # peak exactly at limit
+  h = _hook(vel_detection="substep")
+  assert torch.allclose(h(env), torch.zeros(B))
+  assert torch.allclose(env.extras[CAT_DELTA_KEY], torch.zeros(B))
+
+
+def test_substep_detection_any_single_joint_over_the_limit_gives_positive_delta():
+  # Six independent one-joint violations: each joint on its own must be able to drive δ.
+  for j in range(6):
+    peak = torch.zeros(1, 6)
+    peak[0, j] = LIM + 0.5
+    out = _hook(vel_detection="substep")(_substep_env(torch.zeros(1, 6), peak))
+    assert float(out[0]) > 0.0, (j, out)
+
+
+def test_substep_detection_keeps_each_violating_joint_in_its_own_column():
+  # Two joints over by DIFFERENT amounts: the raw margin must stay per-joint (c_j = peak_j - limit),
+  # not be collapsed to the worst-joint scalar the legacy tracker interface exposes.
+  B = 2
+  peak = torch.full((B, 6), 1.0)
+  peak[:, 1] = LIM + 0.4
+  peak[:, 4] = LIM + 1.2
+  h = _hook(vel_detection="substep")
+  h(_substep_env(torch.zeros(B, 6), peak))
+  c = h._cat.raw_constraints["joint_velocity_excess"]
+  assert c.shape == (B, 6)
+  assert torch.allclose(c, peak - LIM, atol=1e-5), c
+
+
+def test_substep_detection_fails_closed_when_the_tracker_is_missing():
+  import pytest
+
+  B = 2
+  env = _env(torch.full((B, 6), 1.0), torch.zeros(B, len(ACTIVE)))   # no tracker stashed
+  with pytest.raises(RuntimeError, match="SubstepPeakJointVel"):
+    _hook(vel_detection="substep")(env)
+
+
+def test_substep_detection_fails_closed_on_a_joint_count_mismatch():
+  import pytest
+
+  B = 2
+  env = _substep_env(torch.zeros(B, 6), torch.full((B, 3), 5.0))     # tracker on a 3-joint set
+  with pytest.raises(RuntimeError, match="joint"):
+    _hook(vel_detection="substep")(env)
+
+
+def test_control_rate_detection_is_the_default_and_still_reads_joint_vel():
+  # Regression guard for Unitree-Z1-Hammer-CaT-Soft: the shipped arm must be untouched. A tracker
+  # is present and says LEGAL, but the control-rate sample says illegal -- default reads joint_vel.
+  B = 3
+  env = _substep_env(torch.full((B, 6), 5.0), torch.full((B, 6), 1.0))
+  assert (_hook()(env) > 0).all()                                    # default == control_rate
+  assert (_hook(vel_detection="control_rate")(env) > 0).all()
+
+
+def test_substep_detection_composes_with_the_impulse_soft_or():
+  # P+V is ONE hook carrying both constraints: substep velocity (enforcing) and impulse (log-only).
+  B = 4
+  peak = torch.full((B, 6), 5.0)                                     # velocity illegal
+  env = _substep_env(torch.full((B, 6), 1.0), peak, impulse=torch.zeros(B, 6))
+  h = _ihook(imp_max_p=0.0, use_vel=True, imp_limit=0.1, vel_detection="substep")
+  out = h(env)
+  assert (out > 0).all(), out                                        # velocity alone drives δ
+  assert "joint_impulse_excess" in h._cat.raw_constraints            # impulse still logged
+
+
+def test_validate_params_rejects_an_unknown_velocity_detection():
+  import pytest
+
+  with pytest.raises(RuntimeError, match="vel_detection"):
+    CatSoftHook._validate_params({"use_vel": True, "use_impulse": False,
+                                  "vel_detection": "substep_peak"})
+  # The two supported modes pass.
+  CatSoftHook._validate_params({"use_vel": True, "use_impulse": False,
+                                "vel_detection": "control_rate"})
+  CatSoftHook._validate_params({"use_vel": True, "use_impulse": False,
+                                "vel_detection": "substep"})
+
+
+def test_validate_params_rejects_substep_detection_without_velocity_enforcement():
+  # FAIL-OPEN (review finding): use_vel and vel_detection are tyro-exposed params. With
+  # use_vel=False the hook skips _vel_margin entirely and delta falls back to the impulse
+  # term, which imp_max_p=0.0 hard-zeroes -- so the arm trains as a bit-for-bit copy of the
+  # unenforced control while still LOOKING like the velocity arm. Six GPU runs later "CaT
+  # did not bound velocity" would be indistinguishable from "CaT was never on".
+  import pytest
+
+  with pytest.raises(RuntimeError, match="use_vel"):
+    CatSoftHook._validate_params(
+      {"use_vel": False, "use_impulse": True, "imp_limit": 1.0,
+       "vel_detection": "substep"}
+    )
+
+
+def test_validate_params_rejects_velocity_enforcement_at_a_zero_ceiling():
+  # Same fail-open by a different flag: max_p=0 makes delta_vel identically zero.
+  import pytest
+
+  with pytest.raises(RuntimeError, match="max_p"):
+    CatSoftHook._validate_params(
+      {"use_vel": True, "use_impulse": False, "max_p": 0.0}
+    )
+  # ... and it must not fire for an arm that genuinely runs no velocity constraint.
+  CatSoftHook._validate_params({"use_vel": False, "use_impulse": True,
+                                "imp_limit": 1.0, "max_p": 0.0})
+
+
+def test_substep_detection_checks_joint_IDENTITY_not_merely_column_count():
+  # A same-width but DIFFERENT (or permuted) joint set passes a shape check while every
+  # margin column is normalized by, and attributed to, the wrong joint's EMA -- silently.
+  import pytest
+
+  B = 2
+  env = _substep_env(torch.zeros(B, 6), torch.full((B, 6), 5.0))
+  getattr(env, _ENV_SUBSTEP_ATTR)._joint_ids = [5, 4, 3, 2, 1, 0]  # permuted, same width
+  h = _hook(vel_detection="substep")
+  with pytest.raises(RuntimeError, match="joint"):
+    h(env)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
@@ -125,7 +126,130 @@ TASK_BY_CAMPAIGN_ARM = {
     ("fq3x8", "F8"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear",
     ("fq3x8", "B8"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Bounded",
     ("fq3x8", "FQ"): "Unitree-Z1-Hammer-CaT-Impulse-Event-Quality",
+    ("wave3", "P+V"): (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel"
+    ),
 }
+
+# --- Treatment-faithful plot semantics ----------------------------------------------------------
+# A figure asserts a treatment. Drawing gate disks for an arm that was never paid for crossing a
+# gate is a false claim about what the policy learned, so geometry and title are derived from the
+# validated TASK (and, via the drift guard in tests, from the registered reward configuration) --
+# never from a directory name.
+#   none      trajectory only: the arm received no guidance payout at all.
+#   gates     entry->nail line + six 15 mm disks: r_gate pays a one-shot pulse for CROSSING a disk,
+#             so the radius is the tolerance the policy was actually rewarded against.
+#   waypoints entry->nail line + six ordered point markers: r_waypoint_progress pays shaped credit
+#             for APPROACHING ordered target points; there is no radius in its payout, so drawing
+#             disks would invent a tolerance the reward never had.
+GEOMETRY_NONE = "none"
+GEOMETRY_GATES = "gates"
+GEOMETRY_WAYPOINTS = "waypoints"
+GUIDELINE_GATE_COUNT = 6
+QVEL_LIMIT_RAD_S = 3.1415
+_GEOMETRY_CAPTION = {
+    GEOMETRY_NONE: "no guidance geometry drawn (none was rewarded)",
+    GEOMETRY_GATES: "dashed black = tracker entry->nail · blue disks = 15 mm gates",
+    GEOMETRY_WAYPOINTS: (
+        "dashed black = tracker entry->nail · numbered diamonds = ordered waypoints"
+    ),
+}
+
+
+@dataclasses.dataclass(frozen=True)
+class Treatment:
+    """What a policy was actually trained on — the only honest source for plot geometry."""
+
+    headline: str
+    guidance: str
+    velocity: str
+    impulse: str
+    geometry: str
+
+
+_VELOCITY_MEASURED_ONLY = "velocity measured, not enforced"
+_VELOCITY_SOFT_CAT = "velocity max_p 0.5 (500 Hz substep peak)"
+_IMPULSE_LOG_ONLY = "impulse log-only"
+_NO_GUIDELINE = Treatment(
+    headline="unguided strike (pre-guideline campaign)",
+    guidance="no guideline state, no guidance reward",
+    velocity=_VELOCITY_MEASURED_ONLY,
+    impulse=_IMPULSE_LOG_ONLY,
+    geometry=GEOMETRY_NONE,
+)
+TREATMENT_BY_TASK: dict[str, Treatment] = {
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0": Treatment(
+        headline="unguided strike (guideline state observed only)",
+        guidance="guideline state observed; no guidance reward",
+        velocity=_VELOCITY_MEASURED_ONLY,
+        impulse=_IMPULSE_LOG_ONLY,
+        geometry=GEOMETRY_NONE,
+    ),
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate": Treatment(
+        headline="gate-guided strike",
+        guidance="ordered gate reward, weight 8.0",
+        velocity=_VELOCITY_MEASURED_ONLY,
+        impulse=_IMPULSE_LOG_ONLY,
+        geometry=GEOMETRY_GATES,
+    ),
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress": Treatment(
+        headline="progress-guided strike",
+        guidance="progress weight 8.0",
+        velocity=_VELOCITY_MEASURED_ONLY,
+        impulse=_IMPULSE_LOG_ONLY,
+        geometry=GEOMETRY_WAYPOINTS,
+    ),
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel": Treatment(
+        headline="progress-guided strike with soft velocity-CaT",
+        guidance="progress weight 8.0",
+        velocity=_VELOCITY_SOFT_CAT,
+        impulse=_IMPULSE_LOG_ONLY,
+        geometry=GEOMETRY_WAYPOINTS,
+    ),
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear": _NO_GUIDELINE,
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0": _NO_GUIDELINE,
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0": _NO_GUIDELINE,
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Quality": _NO_GUIDELINE,
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Bounded": _NO_GUIDELINE,
+}
+
+
+def treatment_for_task(task: str) -> Treatment:
+    """Return the plot treatment for a registered task, or fail closed."""
+    try:
+        return TREATMENT_BY_TASK[task]
+    except KeyError as error:
+        raise ValueError(f"unregistered task treatment identity: {task}") from error
+
+
+def trajectory_outcome(trace: Mapping[str, Any], *, success: bool) -> dict:
+    """Read the plotted outcome off the trace itself, never off a caller's claim."""
+    return {
+        "gates": int(np.asarray(trace["substep_gate_index"]).max()),
+        "peak_qvel_rad_s": float(
+            np.abs(np.asarray(trace["substep_arm_qvel_rad_s"], dtype=float)).max()
+        ),
+        "success": bool(success),
+    }
+
+
+def compose_trajectory_title(
+    *,
+    campaign: str,
+    arm: str,
+    training_seed: int,
+    treatment: Treatment,
+    outcome: Mapping[str, Any],
+) -> str:
+    """Three lines: who this is, what it was trained on, and what it actually did."""
+    peak = float(outcome["peak_qvel_rad_s"])
+    return (
+        f"{campaign} · {arm} · seed {training_seed} · {treatment.headline}\n"
+        f"Training: {treatment.guidance} · {treatment.velocity} · {treatment.impulse}\n"
+        f"Result: gates {int(outcome['gates'])}/{GUIDELINE_GATE_COUNT}"
+        f" · peak |q̇| {peak:.4f}/{QVEL_LIMIT_RAD_S} rad/s"
+        f" · {'success' if outcome['success'] else 'no success'}"
+    )
 
 
 def _canonical_json(value: object) -> bytes:
@@ -955,10 +1079,20 @@ def _wave1_axis_half_span(trace: Mapping[str, Any]) -> tuple[float, dict]:
 
 
 def write_substep_trajectory_png(
-    trace: Mapping[str, Any], path: str | Path, *, title: str = ""
+    trace: Mapping[str, Any],
+    path: str | Path,
+    *,
+    title: str = "",
+    treatment: Treatment | None = None,
 ) -> dict:
-    """Plot the 500 Hz path against the tracker's frozen entry->nail guideline."""
+    """Plot the 500 Hz path against the tracker's frozen entry->nail guideline.
+
+    ``treatment=None`` reproduces the LEGACY figure byte-for-byte (line + six gate disks). The
+    Wave-1/Wave-2 leaves record their trajectory.png SHA-256 inside hash-bound manifests, so that
+    path must never drift. Pass a ``Treatment`` to draw only the geometry the arm was paid for.
+    """
     report = validate_substep_trace(trace)
+    geometry = GEOMETRY_GATES if treatment is None else treatment.geometry
     positions = np.asarray(trace["substep_head_position_m"], dtype=float)
     contact = np.asarray(trace["substep_contact"], dtype=bool)
     boundary = np.asarray(trace["substep_is_control_boundary"], dtype=bool)
@@ -970,27 +1104,51 @@ def write_substep_trajectory_png(
 
     fig, axes = plt.subplots(1, 2, figsize=(11, 5.2))
     for axis, ordinate, label in ((axes[0], 2, "z (m)"), (axes[1], 1, "y (m)")):
-        axis.plot(
-            reference[:, 0],
-            reference[:, ordinate],
-            color="black",
-            linestyle="--",
-            linewidth=1.0,
-            label="tracker guideline (entry -> nail)",
-            zorder=1,
-        )
-        for center in gates:
-            axis.add_patch(
-                plt.Circle(
-                    (center[0], center[ordinate]),
-                    GUIDELINE_GATE_RADIUS_M,
-                    facecolor="none",
-                    edgecolor="#1f77b4",
-                    linewidth=0.8,
-                    alpha=0.8,
+        if geometry != GEOMETRY_NONE:
+            axis.plot(
+                reference[:, 0],
+                reference[:, ordinate],
+                color="black",
+                linestyle="--",
+                linewidth=1.0,
+                label="tracker guideline (entry -> nail)",
+                zorder=1,
+            )
+        if geometry == GEOMETRY_GATES:
+            for center in gates:
+                axis.add_patch(
+                    plt.Circle(
+                        (center[0], center[ordinate]),
+                        GUIDELINE_GATE_RADIUS_M,
+                        facecolor="none",
+                        edgecolor="#1f77b4",
+                        linewidth=0.8,
+                        alpha=0.8,
+                        zorder=2,
+                    )
+                )
+        elif geometry == GEOMETRY_WAYPOINTS:
+            # Ordered target POINTS -- r_waypoint_progress rewards approach, not disk entry.
+            for order, center in enumerate(gates, start=1):
+                axis.scatter(
+                    center[0],
+                    center[ordinate],
+                    marker="D",
+                    facecolors="none",
+                    edgecolors="#1f77b4",
+                    s=22,
+                    linewidths=0.9,
                     zorder=2,
                 )
-            )
+                axis.annotate(
+                    str(order),
+                    (center[0], center[ordinate]),
+                    fontsize=6,
+                    color="#1f77b4",
+                    xytext=(3, 3),
+                    textcoords="offset points",
+                    zorder=2,
+                )
         if len(positions) > 1:
             points = positions[:, [0, ordinate]].reshape(-1, 1, 2)
             segments = np.concatenate([points[:-1], points[1:]], axis=1)
@@ -1032,20 +1190,36 @@ def write_substep_trajectory_png(
     axes[0].set_title("x-z side view")
     axes[1].set_title("x-y top view")
     axes[0].legend(fontsize=7, loc="best")
-    fig.suptitle(
-        (title or "Hammer-head 500 Hz trajectory")
-        + f"\n{report['substep_count']} substeps @ {report['sample_rate_hz']:.0f} Hz"
-        " · dashed black = WaypointProgressTracker entry->nail · viridis = normalized time"
-    )
-    fig.tight_layout(rect=[0.0, 0.0, 1.0, 0.88])
+    if treatment is None:
+        caption = (
+            f"\n{report['substep_count']} substeps @ {report['sample_rate_hz']:.0f} Hz"
+            " · dashed black = WaypointProgressTracker entry->nail · viridis = normalized time"
+        )
+    else:
+        caption = (
+            f"\n{report['substep_count']} substeps @ {report['sample_rate_hz']:.0f} Hz"
+            f" · {_GEOMETRY_CAPTION[geometry]} · viridis = normalized time"
+        )
+    fig.suptitle((title or "Hammer-head 500 Hz trajectory") + caption)
+    fig.tight_layout(rect=[0.0, 0.0, 1.0, 0.88 if treatment is None else 0.80])
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=160)
 
     result = {
         **report,
-        "reference_source": "waypoint_progress_tracker_entry_to_nail",
-        "reference_endpoints_m": reference,
-        "gate_disk_count": int(len(gates)),
+        "reference_source": (
+            None
+            if geometry == GEOMETRY_NONE
+            else "waypoint_progress_tracker_entry_to_nail"
+        ),
+        # None when nothing was drawn, so a downstream consumer cannot cite a guideline the
+        # figure deliberately does not show (2026-08 review).
+        "reference_endpoints_m": None if geometry == GEOMETRY_NONE else reference,
+        "gate_disk_count": int(len(gates)) if geometry == GEOMETRY_GATES else 0,
+        "waypoint_marker_count": (
+            int(len(gates)) if geometry == GEOMETRY_WAYPOINTS else 0
+        ),
+        "geometry": geometry,
         "contact_sample_count": int(contact.sum()),
         "control_boundary_marker_count": int(boundary.sum()),
         "axis_half_span_m": {

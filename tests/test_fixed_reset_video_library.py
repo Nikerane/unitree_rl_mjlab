@@ -2087,3 +2087,276 @@ def test_renderer_device_block_reports_a_promoted_tensor_device():
     )
 
     assert block["actual_tensor_device"] == "cuda:0"
+
+
+# --- Treatment-faithful plot semantics (P+V wave) ------------------------------------------------
+# A plot that draws gate disks for an arm that was never paid for crossing gates asserts a
+# treatment the policy never received. Geometry and title must be DERIVED from the validated
+# task/reward configuration, never from a directory name, and the frozen Wave-1/Wave-2 renders
+# must stay byte-identical (they are hash-bound inside their manifests).
+
+_C0_TASK = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0"
+_G_TASK = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate"
+_P_TASK = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress"
+_PV_TASK = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel"
+
+
+def test_treatment_geometry_follows_the_reward_the_arm_actually_received():
+    from evaluation.analysis.fixed_reset_video_library import treatment_for_task
+
+    assert treatment_for_task(_C0_TASK).geometry == "none"
+    assert treatment_for_task(_G_TASK).geometry == "gates"
+    assert treatment_for_task(_P_TASK).geometry == "waypoints"
+    assert treatment_for_task(_PV_TASK).geometry == "waypoints"
+
+
+def test_c0_treatment_states_the_state_is_observed_but_not_rewarded():
+    from evaluation.analysis.fixed_reset_video_library import treatment_for_task
+
+    assert (
+        treatment_for_task(_C0_TASK).guidance
+        == "guideline state observed; no guidance reward"
+    )
+
+
+def test_only_the_velocity_arm_reports_velocity_cat_enforcement():
+    from evaluation.analysis.fixed_reset_video_library import treatment_for_task
+
+    for task in (_C0_TASK, _G_TASK, _P_TASK):
+        velocity = treatment_for_task(task).velocity
+        assert "not enforced" in velocity and "max_p" not in velocity
+    velocity = treatment_for_task(_PV_TASK).velocity
+    assert "max_p 0.5" in velocity and "500 Hz" in velocity
+
+
+def test_every_guideline_arm_reports_the_impulse_constraint_as_log_only():
+    from evaluation.analysis.fixed_reset_video_library import treatment_for_task
+
+    for task in (_C0_TASK, _G_TASK, _P_TASK, _PV_TASK):
+        assert treatment_for_task(task).impulse == "impulse log-only"
+
+
+def test_treatment_lookup_fails_closed_on_an_unregistered_task():
+    from evaluation.analysis.fixed_reset_video_library import treatment_for_task
+
+    with pytest.raises(ValueError, match="unregistered"):
+        treatment_for_task("Unitree-Z1-Hammer-Some-Future-Arm")
+
+
+def test_title_carries_identity_treatment_and_outcome():
+    from evaluation.analysis.fixed_reset_video_library import (
+        compose_trajectory_title,
+        treatment_for_task,
+    )
+
+    title = compose_trajectory_title(
+        campaign="wave3",
+        arm="P+V",
+        training_seed=4,
+        treatment=treatment_for_task(_PV_TASK),
+        outcome={"gates": 6, "peak_qvel_rad_s": 3.02, "success": True},
+    )
+    assert "wave3" in title and "P+V" in title and "seed 4" in title
+    assert "progress weight 8.0" in title            # guidance treatment
+    assert "max_p 0.5" in title                      # velocity treatment
+    assert "impulse log-only" in title               # impulse treatment
+    assert "gates 6/6" in title                      # outcome: gates
+    assert "3.1415" in title and "3.02" in title     # outcome: peak qvel vs the limit
+    assert "success" in title
+
+
+def test_title_does_not_claim_success_when_the_rollout_hit_the_step_limit():
+    from evaluation.analysis.fixed_reset_video_library import (
+        compose_trajectory_title,
+        treatment_for_task,
+    )
+
+    title = compose_trajectory_title(
+        campaign="wave3",
+        arm="P+V",
+        training_seed=6,
+        treatment=treatment_for_task(_PV_TASK),
+        outcome={"gates": 0, "peak_qvel_rad_s": 4.9, "success": False},
+    )
+    assert "no success" in title
+    assert "gates 0/6" in title
+
+
+def test_outcome_is_read_off_the_trace_not_asserted_by_the_caller():
+    from evaluation.analysis.fixed_reset_video_library import trajectory_outcome
+
+    trace = _wave1_trace()
+    outcome = trajectory_outcome(trace, success=True)
+    assert outcome["gates"] == int(np.asarray(trace["substep_gate_index"]).max())
+    assert outcome["peak_qvel_rad_s"] == pytest.approx(
+        float(np.abs(np.asarray(trace["substep_arm_qvel_rad_s"])).max())
+    )
+    assert outcome["success"] is True
+
+
+def test_c0_plot_draws_no_reference_line_gate_disks_or_waypoints(tmp_path):
+    from evaluation.analysis.fixed_reset_video_library import (
+        treatment_for_task,
+        write_substep_trajectory_png,
+    )
+
+    report = write_substep_trajectory_png(
+        _wave1_trace(), tmp_path / "c0.png", treatment=treatment_for_task(_C0_TASK)
+    )
+    assert report["reference_source"] is None
+    assert report["gate_disk_count"] == 0
+    assert report["waypoint_marker_count"] == 0
+    assert (tmp_path / "c0.png").is_file()
+
+
+def test_gate_arm_plot_draws_the_reference_line_and_six_gate_disks(tmp_path):
+    from evaluation.analysis.fixed_reset_video_library import (
+        treatment_for_task,
+        write_substep_trajectory_png,
+    )
+
+    report = write_substep_trajectory_png(
+        _wave1_trace(), tmp_path / "g.png", treatment=treatment_for_task(_G_TASK)
+    )
+    assert report["reference_source"] == "waypoint_progress_tracker_entry_to_nail"
+    assert report["gate_disk_count"] == 6
+    assert report["waypoint_marker_count"] == 0
+
+
+def test_progress_arms_draw_the_reference_line_and_six_ordered_waypoints(tmp_path):
+    from evaluation.analysis.fixed_reset_video_library import (
+        treatment_for_task,
+        write_substep_trajectory_png,
+    )
+
+    for name, task in (("p", _P_TASK), ("pv", _PV_TASK)):
+        report = write_substep_trajectory_png(
+            _wave1_trace(), tmp_path / f"{name}.png", treatment=treatment_for_task(task)
+        )
+        assert report["reference_source"] == "waypoint_progress_tracker_entry_to_nail"
+        assert report["waypoint_marker_count"] == 6
+        assert report["gate_disk_count"] == 0
+
+
+def test_frozen_render_path_reproduces_a_REAL_frozen_figure_byte_for_byte(tmp_path):
+    """Re-render a frozen Wave-2 leaf's trace and match the SHA-256 in its own manifest.
+
+    Rendering the same trace twice with the CURRENT code only proves determinism: edit the
+    legacy branch (layout rect, caption text, artist order) and both renders shift together
+    while every hash-bound frozen manifest silently breaks. This pins an EXTERNAL hash
+    recorded before the treatment work existed, so the legacy path cannot drift.
+    """
+    from evaluation.analysis.fixed_reset_video_library import (
+        write_substep_trajectory_png,
+    )
+
+    leaf = Path("evaluation/results/2026-08-03_wave2_waypoint/videos/wave2_p_seed4")
+    if not (leaf / "trace.npz").is_file():
+        pytest.skip("frozen Wave-2 evidence tree not present in this checkout")
+    recorded = json.loads((leaf / "metadata.json").read_text())["artifacts"]["trajectory.png"]
+    with np.load(leaf / "trace.npz") as loaded:
+        trace = {key: loaded[key] for key in loaded.files}
+
+    path = tmp_path / "trajectory.png"
+    report = write_substep_trajectory_png(
+        trace, path, title=f"wave1 / P / seed 4"
+    )
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == recorded
+    assert report["reference_source"] == "waypoint_progress_tracker_entry_to_nail"
+    assert report["gate_disk_count"] == 6
+    assert report["waypoint_marker_count"] == 0
+
+
+def test_the_velocity_arm_has_a_registered_campaign_task_identity():
+    from evaluation.analysis.fixed_reset_video_library import expected_task
+
+    assert expected_task("wave3", "P+V") == _PV_TASK
+
+
+def test_treatment_table_matches_the_registered_environment_configuration():
+    """Drift guard: the plot labels are only honest if they match the real configs."""
+    from mjlab.tasks.registry import load_env_cfg
+
+    from evaluation.analysis.fixed_reset_video_library import treatment_for_task
+    import src.tasks.hammer.config.z1  # noqa: F401
+
+    for task, reward_key, geometry in (
+        (_C0_TASK, None, "none"),
+        (_G_TASK, "r_gate", "gates"),
+        (_P_TASK, "r_waypoint_progress", "waypoints"),
+        (_PV_TASK, "r_waypoint_progress", "waypoints"),
+    ):
+        cfg = load_env_cfg(task)
+        treatment = treatment_for_task(task)
+        assert treatment.geometry == geometry
+        guidance_rewards = {"r_gate", "r_waypoint_progress"} & set(cfg.rewards)
+        assert guidance_rewards == ({reward_key} if reward_key else set())
+        if reward_key:
+            assert f"{cfg.rewards[reward_key].weight:.1f}" in treatment.guidance
+        # Velocity label must match whether the hook actually enforces velocity.
+        params = cfg.metrics["cat_soft"].params
+        enforced = bool(params["use_vel"])
+        assert ("max_p" in treatment.velocity) is enforced
+        if enforced:
+            assert f"max_p {params['max_p']}" in treatment.velocity
+            assert params["vel_detection"] == "substep"
+        # Impulse label must match the log-only invariant.
+        assert params["imp_max_p"] == 0.0
+        assert treatment.impulse == "impulse log-only"
+
+
+# --- render_policy plot wiring -------------------------------------------------------------------
+
+def _render_cfg(campaign, arm, seed=4):
+    return render_policy.Cfg(
+        checkpoint_file="model.pt",
+        campaign=campaign,
+        arm=arm,
+        training_seed=seed,
+        checkpoint_sha256="0" * 64,
+        code_revision="a" * 40,
+        asset_revision="b" * 40,
+    )
+
+
+def test_frozen_campaigns_keep_the_legacy_substep_plot_call():
+    # Wave-1/Wave-2 trajectory.png hashes live in frozen manifests: re-rendering must not
+    # change the call, so no treatment is passed and the legacy title is preserved verbatim.
+    for campaign, arm in (("wave1", "P"), ("wave2", "P"), ("wave2", "C0")):
+        kwargs = render_policy.substep_plot_kwargs(
+            _render_cfg(campaign, arm), _wave1_trace(), terminal_reason="terminated"
+        )
+        assert kwargs == {"title": f"wave1 / {arm} / seed 4"}
+
+
+def test_new_campaigns_get_treatment_faithful_geometry_and_a_full_title():
+    kwargs = render_policy.substep_plot_kwargs(
+        _render_cfg("wave3", "P+V"), _wave1_trace(), terminal_reason="terminated"
+    )
+    assert kwargs["treatment"].geometry == "waypoints"
+    title = kwargs["title"]
+    assert "wave3" in title and "P+V" in title and "seed 4" in title
+    assert "progress weight 8.0" in title
+    assert "max_p 0.5" in title
+    assert "impulse log-only" in title
+    assert "3.1415" in title
+    assert "success" in title and "no success" not in title
+
+
+def test_plot_success_comes_from_the_terminal_reason_not_an_assumption():
+    for reason, expected in (
+        ("terminated", "· success"),
+        ("timeout", "· no success"),
+        ("step_limit", "· no success"),
+    ):
+        title = render_policy.substep_plot_kwargs(
+            _render_cfg("wave3", "P+V"), _wave1_trace(), terminal_reason=reason
+        )["title"]
+        assert title.endswith(expected), (reason, title)
+
+
+def test_plot_wiring_fails_closed_on_an_unregistered_campaign_arm():
+    with pytest.raises(ValueError, match="unregistered"):
+        render_policy.substep_plot_kwargs(
+            _render_cfg("wave3", "G+P"), _wave1_trace(), terminal_reason="terminated"
+        )

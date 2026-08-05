@@ -9,8 +9,10 @@ from types import SimpleNamespace
 
 import torch
 
+from tests.helpers import stub
 from src.tasks.hammer.mdp.velocity_bound import (
   CaTJointVelConstraint,
+  SubstepPeakJointVel,
   Z1_JOINT_VEL_LIMIT,
   joint_vel_excess_penalty,
   joint_vel_hard_termination,
@@ -107,3 +109,98 @@ def test_hard_term_fires_past_warmup_only_over_limit():
   qv = torch.tensor([[5.0, 1, 1, 1, 1, 1], [2.0, 2, 2, 2, 2, 2]])
   out = joint_vel_hard_termination(_env_step(qv, 4000), warmup_steps=3600, robot_cfg=_rcfg(), detection="control_rate")
   assert bool(out[0]) and not bool(out[1]), out
+
+
+# --- Per-joint 500 Hz substep peak hold (P+V wave) -----------------------------------------------
+# The scalar worst-joint `peak_qv` aliases WHICH joint sped: a per-joint soft-CaT margin needs its
+# own column per joint, peak-held at substep rate over the same control window.
+
+def _tracker(B: int = 3, J: int = 6, dec: int = 10):
+  """SubstepPeakJointVel without __init__ (no real scene); drive it via `robot.data.joint_vel`."""
+  robot = SimpleNamespace(data=SimpleNamespace(joint_vel=torch.zeros(B, J)))
+  return stub(
+    SubstepPeakJointVel,
+    _robot=robot,
+    _joint_ids=list(range(J)),
+    _dec=dec,
+    peak_qv=torch.zeros(B),
+    peak_qv_joint=torch.zeros(B, J),
+    _i=0,
+  )
+
+
+def _feed(tracker, qv: torch.Tensor):
+  tracker._robot.data.joint_vel = qv
+  return tracker(None)
+
+
+def test_substep_peak_holds_every_joint_independently():
+  # Each joint peaks on a DIFFERENT substep; the per-joint buffer must keep all six maxima,
+  # not just the column that happened to win the last substep.
+  t = _tracker(B=1, J=6, dec=10)
+  peaks = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+  for j, v in enumerate(peaks):
+    qv = torch.full((1, 6), 0.1)
+    qv[0, j] = v
+    _feed(t, qv)
+  assert torch.allclose(t.peak_qv_joint, torch.tensor([peaks])), t.peak_qv_joint
+
+
+def test_substep_peak_uses_absolute_value_per_joint():
+  # Negative joint velocity is just as illegal as positive.
+  t = _tracker(B=1, J=6, dec=10)
+  qv = torch.zeros(1, 6)
+  qv[0, 2] = -4.2
+  _feed(t, qv)
+  assert torch.allclose(t.peak_qv_joint[0, 2], torch.tensor(4.2))
+
+
+def test_substep_peak_scalar_interface_stays_the_worst_joint():
+  # diag_policy_trace.py reads `.peak_qv` (B,) -- the legacy consumer must keep working.
+  t = _tracker(B=2, J=6, dec=10)
+  qv = torch.tensor([[0.5, 4.4, 0.1, 0.2, 0.3, 0.4], [1.0, 1.0, 1.0, 1.0, 1.0, 2.7]])
+  _feed(t, qv)
+  assert t.peak_qv.shape == (2,)
+  assert torch.allclose(t.peak_qv, torch.tensor([4.4, 2.7]))
+  assert torch.allclose(t.peak_qv, t.peak_qv_joint.amax(dim=1))
+
+
+def test_substep_peak_resets_at_every_control_window_boundary():
+  # The window is `decimation` substeps long. Substep `dec` opens a NEW window: the previous
+  # window's peak must not leak into it (otherwise the peak is monotone for the whole episode).
+  dec = 4
+  t = _tracker(B=1, J=6, dec=dec)
+  hot = torch.full((1, 6), 5.0)
+  cold = torch.full((1, 6), 0.5)
+  for _ in range(dec):                       # window 0: hot
+    _feed(t, hot)
+  assert torch.allclose(t.peak_qv_joint, hot)
+  _feed(t, cold)                             # window 1, first substep -> reset then record
+  assert torch.allclose(t.peak_qv_joint, cold), t.peak_qv_joint
+  assert torch.allclose(t.peak_qv, torch.tensor([0.5]))
+  for _ in range(dec - 1):                   # rest of window 1 stays cold
+    _feed(t, cold)
+  assert torch.allclose(t.peak_qv_joint, cold)
+
+
+def test_substep_peak_resets_across_episode_resets():
+  t = _tracker(B=3, J=6, dec=10)
+  _feed(t, torch.full((3, 6), 4.9))
+  t.reset(torch.tensor([1]))                 # partial reset: only env 1 clears
+  assert torch.allclose(t.peak_qv_joint[1], torch.zeros(6))
+  assert torch.allclose(t.peak_qv_joint[0], torch.full((6,), 4.9))
+  assert torch.allclose(t.peak_qv, torch.tensor([4.9, 0.0, 4.9]))
+  t.reset(None)                              # full reset
+  assert torch.allclose(t.peak_qv_joint, torch.zeros(3, 6))
+  assert torch.allclose(t.peak_qv, torch.zeros(3))
+
+
+def test_substep_peak_buffers_keep_their_identity_in_place():
+  # CatSoftHook holds a reference to the tracker, not to the tensor -- but diag tooling grabs
+  # `.peak_qv` once. Both buffers must be updated IN PLACE, never rebound.
+  t = _tracker(B=2, J=6, dec=10)
+  scalar_ref, joint_ref = t.peak_qv, t.peak_qv_joint
+  _feed(t, torch.full((2, 6), 3.3))
+  t.reset(None)
+  _feed(t, torch.full((2, 6), 1.1))
+  assert t.peak_qv is scalar_ref and t.peak_qv_joint is joint_ref

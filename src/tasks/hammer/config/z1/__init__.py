@@ -200,6 +200,37 @@ register_mjlab_task(
     runner_cls=HammerOnPolicyRunner,
 )
 
+# P+V: the CProgress arm plus faithful soft velocity-CaT on the per-joint 500 Hz substep peak.
+# Wave-2 showed all 18 C0/G/P policies exceed the 3.1415 rad/s Z1 joint-velocity limit while the
+# impulse constraint stayed at 0.128 of cap — but velocity enforcement was OFF, so that is not
+# evidence that CaT fails. This arm turns it on (max_p=0.5, min_p=0.0, tau=0.95, no curriculum) and
+# changes NOTHING else: the impulse constraint stays log-only (imp_max_p=0), the caps are unchanged,
+# and there is no deterministic termination or action clipping — legality must come from behaviour.
+register_mjlab_task(
+    task_id="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel",
+    env_cfg=z1_hammer_env_cfg(
+        cat_impulse=True,
+        event_correct=True,
+        event_linear=True,
+        guideline=True,
+        progress_reward=True,
+        cat_soft=True,
+        vel_cat_substep=True,
+    ),
+    play_env_cfg=z1_hammer_env_cfg(
+        play=True,
+        cat_impulse=True,
+        event_correct=True,
+        event_linear=True,
+        guideline=True,
+        progress_reward=True,
+        cat_soft=True,
+        vel_cat_substep=True,
+    ),
+    rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+    runner_cls=HammerOnPolicyRunner,
+)
+
 # F0 and D0 are fresh copies of F8 with exactly one maximize-term weight
 # removed.  They retain the linear event readers and fixed-impedance plant.
 _f0_env_cfg = z1_hammer_env_cfg(

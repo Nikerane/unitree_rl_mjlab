@@ -96,6 +96,7 @@ def z1_hammer_env_cfg(
   guideline: bool = False,
   gate_reward: bool = False,
   progress_reward: bool = False,
+  vel_cat_substep: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Create Z1 hammer-nail task configuration.
 
@@ -158,6 +159,12 @@ def z1_hammer_env_cfg(
   if progress_reward and not guideline:
     raise ValueError(
       "z1_hammer_env_cfg: progress_reward requires guideline=True"
+    )
+  if vel_cat_substep and not cat_soft:
+    raise ValueError(
+      "z1_hammer_env_cfg: vel_cat_substep requires cat_soft=True — the velocity constraint lives "
+      "on the CatSoftHook, so without it the substep tracker would be installed but nothing would "
+      "read it (a silently unenforced arm)."
     )
   cfg = make_hammer_env_cfg(imitation=imitation)
 
@@ -266,9 +273,11 @@ def z1_hammer_env_cfg(
       },
     )
 
-  if cat_substep or vel_hard_term:
+  if cat_substep or vel_hard_term or vel_cat_substep:
     # per_substep metric: peak-hold |q̇| inside the decimation loop so the constraint reads the
     # true 500 Hz peak instead of the aliased post-decimation sample. Stashes itself on env.
+    # Registered HERE (before either cat_soft block) because the metrics manager constructs terms
+    # in dict-insertion order and CatSoftHook resolves the tracker in its own __init__.
     cfg.metrics["substep_peak_qv"] = MetricsTermCfg(
       func=hammer_mdp.SubstepPeakJointVel,
       per_substep=True,
@@ -509,6 +518,16 @@ def z1_hammer_env_cfg(
       cfg.rewards["delivered_impulse"].func = (
         hammer_mdp.FirstStrikeLegacyDeliveredRewardTerm
       )
+
+  if vel_cat_substep:
+    # Point the (already-built) soft-CaT hook at the 500 Hz per-joint peak instead of the aliased
+    # post-decimation joint_vel. Applies to whichever cat_soft block above installed the hook.
+    cfg.metrics["cat_soft"].params["vel_detection"] = "substep"
+    _mk = list(cfg.metrics)
+    assert _mk.index("substep_peak_qv") < _mk.index("cat_soft"), (
+      "substep_peak_qv must be registered BEFORE cat_soft (insertion-order construction; the hook "
+      "resolves the tracker in its own __init__ and fails closed if it is not yet stashed)."
+    )
 
   if guideline:
     if "first_strike" not in cfg.metrics:

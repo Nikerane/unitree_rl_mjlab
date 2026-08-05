@@ -60,6 +60,12 @@ class SubstepPeakJointVel(ManagerTermBase):
 
   Pattern mirrors the ContactSensor history+max. Window resets at the first substep of each
   control step (i % decimation == 0); episode reset clears it too.
+
+  TWO buffers are peak-held over the same window:
+    ``peak_qv``       (B,)   worst-joint scalar — the original interface (diag_policy_trace.py).
+    ``peak_qv_joint`` (B, J) per-joint columns — what a per-joint CaT margin ``|q̇_j| − limit``
+                            needs. The scalar aliases WHICH joint sped, so a soft-CaT arm that
+                            normalizes each joint by its own EMA cannot be built from it.
   """
 
   def __init__(self, cfg: ManagerTermBaseCfg, env: "ManagerBasedRlEnv"):
@@ -69,22 +75,29 @@ class SubstepPeakJointVel(ManagerTermBase):
     self._robot: Entity = env.scene["robot"]
     self._joint_ids = arm.joint_ids
     self._dec = int(env.cfg.decimation)
+    n_joints = self._robot.data.joint_vel[:, self._joint_ids].shape[1]
     self.peak_qv: torch.Tensor = torch.zeros(env.num_envs, device=env.device)
+    self.peak_qv_joint: torch.Tensor = torch.zeros(env.num_envs, n_joints, device=env.device)
     self._i = 0
     setattr(env, _ENV_SUBSTEP_ATTR, self)
 
   def reset(self, env_ids: torch.Tensor | slice | None) -> None:
     if env_ids is None:
       self.peak_qv.zero_()
+      self.peak_qv_joint.zero_()
     else:
       self.peak_qv[env_ids] = 0.0
+      self.peak_qv_joint[env_ids] = 0.0
     return None
 
   def __call__(self, env: "ManagerBasedRlEnv") -> torch.Tensor:
     if self._i % self._dec == 0:        # first substep of a new control window -> reset peak
       self.peak_qv.zero_()
-    qv = self._robot.data.joint_vel[:, self._joint_ids].abs().amax(dim=1)  # (B,)
-    torch.maximum(self.peak_qv, qv, out=self.peak_qv)                       # in-place: keep identity
+      self.peak_qv_joint.zero_()
+    qv_joint = self._robot.data.joint_vel[:, self._joint_ids].abs()          # (B, J)
+    torch.maximum(self.peak_qv_joint, qv_joint, out=self.peak_qv_joint)      # in-place: keep identity
+    qv = qv_joint.amax(dim=1)                                                # (B,)
+    torch.maximum(self.peak_qv, qv, out=self.peak_qv)                        # in-place: keep identity
     self._i += 1
     return qv
 

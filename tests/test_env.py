@@ -512,3 +512,64 @@ class TestTermination:
             f"Expected done=True with nail at {target_depth:.4f} m "
             f"(threshold={NAIL_SUCCESS_THRESHOLD})"
         )
+
+
+def test_pv_env_fails_closed_at_BUILD_when_the_substep_tracker_is_missing():
+    """The eager resolve in CatSoftHook.__init__ must be load-bearing, not decorative.
+
+    Every other hook test builds via helpers.stub, which bypasses __init__ entirely, so the
+    construction-time guard had no coverage: deleting it left the suite green while a
+    mis-wired arm would only fail deep into a GPU run. This exercises the real __init__.
+    """
+    from mjlab.envs import ManagerBasedRlEnv
+    from mjlab.tasks.registry import load_env_cfg
+    import src.tasks.hammer.config.z1  # noqa: F401
+
+    cfg = load_env_cfg(
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel", play=True
+    )
+    cfg.scene.num_envs = 1
+    assert cfg.metrics.pop("substep_peak_qv") is not None  # the tracker the hook requires
+    with pytest.raises(RuntimeError, match="SubstepPeakJointVel"):
+        ManagerBasedRlEnv(cfg, device="cpu")
+
+
+def test_pv_env_fails_closed_at_BUILD_on_a_joint_set_mismatch():
+    """A same-width but DIFFERENT joint set must be rejected by identity, not by width.
+
+    (A mere permutation is harmless: SceneEntityCfg.resolve normalises names to model order,
+    so reversed names resolve to the same ids. The reachable hazard is a different six-joint
+    selection -- the Z1 has seven joints, so swapping joint6 for jointGripper still gives six
+    columns while shifting what every margin column means.)
+    """
+    from mjlab.envs import ManagerBasedRlEnv
+    from mjlab.managers.scene_entity_config import SceneEntityCfg
+    from mjlab.tasks.registry import load_env_cfg
+    import src.tasks.hammer.config.z1  # noqa: F401
+
+    cfg = load_env_cfg(
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel", play=True
+    )
+    cfg.scene.num_envs = 1
+    # Still six columns, but the gripper replaces joint6: a pure column-count check waves
+    # this through and every margin column is then attributed to the wrong joint.
+    cfg.metrics["cat_soft"].params["robot_cfg"] = SceneEntityCfg(
+        "robot",
+        joint_names=("joint1", "joint2", "joint3", "joint4", "joint5", "jointGripper"),
+    )
+    with pytest.raises(RuntimeError, match="joint"):
+        ManagerBasedRlEnv(cfg, device="cpu")
+
+
+def test_wave3_pv_smoke_gate_passes_on_cpu():
+    """Rehearse the Vega launch gate locally: every check must pass before it reaches CUDA.
+
+    The smoke script is the last thing standing between a mis-wired arm and six GPU runs, so
+    it must itself be exercised. If any check here fails, the gate would have failed on Vega.
+    """
+    from scripts.smoke_wave3_pv import run_checks
+
+    results = run_checks(device="cpu", num_envs=4, steps=2)
+    failed = [name for name, ok, _ in results if not ok]
+    assert not failed, failed
+    assert len(results) >= 20  # the gate must not silently shrink to a trivial pass

@@ -25,7 +25,11 @@ from src.tasks.hammer.cat.constraint_manager import CaT
 from src.tasks.hammer.cat.constraints import joint_impulse_excess, joint_velocity_excess
 from src.tasks.hammer.cat.keys import CAT_DELTA_KEY, CAT_R_POS_KEY
 from src.tasks.hammer.mdp.impulse_bound import Z1_JOINT_IMPULSE_LIMIT, _joint_count
-from src.tasks.hammer.mdp.velocity_bound import Z1_JOINT_VEL_LIMIT, _ARM_CFG
+from src.tasks.hammer.mdp.velocity_bound import (
+  _ARM_CFG,
+  _ENV_SUBSTEP_ATTR,
+  Z1_JOINT_VEL_LIMIT,
+)
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -34,6 +38,13 @@ if TYPE_CHECKING:
 # positive task return is multiplied by (1−δ). This is the complete negative set (CLAUDE.md live
 # weights: action_rate=-0.01, joint_pos_limits=-10; every other term is positive).
 _NEG_TERMS: tuple[str, ...] = ("action_rate", "joint_pos_limits")
+
+# Where the velocity margin |q̇_j| is sampled. "control_rate" is the shipped signal (post-decimation
+# joint_vel — it ALIASES the within-window strike spike). "substep" reads the per-joint 500 Hz peak
+# the SubstepPeakJointVel tracker holds over the control window. Opt-in and FAIL-CLOSED: a missing
+# tracker raises rather than falling back, because a silent fallback trains a weaker treatment than
+# the configured one, indistinguishably.
+_VEL_DETECTION_MODES: tuple[str, ...] = ("control_rate", "substep")
 
 
 class CatSoftHook(ManagerTermBase):
@@ -75,6 +86,30 @@ class CatSoftHook(ManagerTermBase):
       raise RuntimeError(f"CatSoftHook: min_p={min_p} > max_p={max_p} — the δ floor exceeds its ceiling.")
     if not (0.0 <= tau < 1.0):
       raise RuntimeError(f"CatSoftHook: tau={tau} out of range — the EMA factor must be in [0, 1).")
+    vel_detection = str(p.get("vel_detection", "control_rate"))
+    if vel_detection not in _VEL_DETECTION_MODES:
+      raise RuntimeError(
+        f"CatSoftHook: vel_detection={vel_detection!r} is not one of {_VEL_DETECTION_MODES}. "
+        "A typo must never silently degrade to the aliased control-rate signal."
+      )
+    # FAIL-OPEN guards (2026-08 review): use_vel/max_p/vel_detection are all tyro-exposed
+    # (see env_cfgs.py's --env.metrics.cat-soft.params.* note), and BOTH of the settings below
+    # make δ_vel identically zero while the arm still looks like the velocity arm. With the
+    # impulse constraint log-only (imp_max_p=0), δ would then be ≡0 and the arm would train as
+    # a bit-for-bit copy of its unenforced control — making "CaT did not bound velocity"
+    # indistinguishable from "CaT was never on". Fail at construction instead.
+    if vel_detection == "substep" and not use_vel:
+      raise RuntimeError(
+        "CatSoftHook: vel_detection='substep' with use_vel=False — the substep tracker would be "
+        "installed and read by nothing, yielding δ_vel ≡ 0. Set use_vel=True or drop the "
+        "substep detection; a silently unenforced velocity arm is not an experiment."
+      )
+    if use_vel and max_p == 0.0:
+      raise RuntimeError(
+        "CatSoftHook: use_vel=True with max_p=0.0 — the velocity constraint is measured but "
+        "δ_vel ≡ 0, so nothing is enforced. Use use_vel=False for a log-only velocity arm so "
+        "the intent is explicit and recorded."
+      )
     if not (imp_seed == imp_seed and imp_seed not in (float("inf"), float("-inf")) and imp_seed > 0.0):
       raise RuntimeError(f"CatSoftHook: imp_seed={imp_seed} must be finite and > 0 (normalizer floor).")
     if use_impulse and 0.0 < imp_max_p < min_p:
@@ -120,6 +155,13 @@ class CatSoftHook(ManagerTermBase):
     # physically correlated, so a combined arm cannot attribute the safety gain — combined is C5).
     self._use_vel: bool = bool(p.get("use_vel", True))
     self._use_impulse: bool = bool(p.get("use_impulse", False))
+    # Velocity sampling rate (see _VEL_DETECTION_MODES). Resolve the tracker NOW when substep is
+    # requested so a missing per_substep metric fails at env build, not on the first training step.
+    # Ordering holds because cfg.metrics inserts substep_peak_qv before cat_soft, and the metrics
+    # manager constructs terms in dict order.
+    self._vel_detection: str = str(p.get("vel_detection", "control_rate"))
+    if self._use_vel and self._vel_detection == "substep":
+      self._assert_joint_sets_match(self._substep_tracker(env))
     # Normalize the limit to a device-resident tensor: the C2 per-joint caps arrive as a (6,)
     # tensor or list from cfg params — a CPU tensor on a CUDA env or a plain list would only
     # detonate at the first constraint eval on GPU.
@@ -175,6 +217,41 @@ class CatSoftHook(ManagerTermBase):
           f"(penalty-evasion exploit, Decision 1). Add it to _NEG_TERMS."
         )
     return self._neg_idx
+
+  @staticmethod
+  def _substep_tracker(env: "ManagerBasedRlEnv"):
+    tracker = getattr(env, _ENV_SUBSTEP_ATTR, None)
+    if tracker is None:
+      raise RuntimeError(
+        "CatSoftHook: vel_detection='substep' requires the SubstepPeakJointVel per_substep metric "
+        "wired into cfg.metrics (env_cfgs.py vel_cat_substep). Refusing to fall back to the "
+        "control-rate sample — that would enforce a weaker constraint than the one configured."
+      )
+    return tracker
+
+  def _vel_margin(self, env: "ManagerBasedRlEnv") -> torch.Tensor:
+    """Raw per-joint velocity margin ``c_j = |q̇_j| − limit``, shape (B, J)."""
+    if self._vel_detection != "substep":
+      return joint_velocity_excess(env, limit=self._limit, robot_cfg=self._robot_cfg)
+    tracker = self._substep_tracker(env)
+    self._assert_joint_sets_match(tracker)
+    return tracker.peak_qv_joint - self._limit  # (B, J) 500 Hz peak-held over the window
+
+  def _assert_joint_sets_match(self, tracker) -> None:
+    """Compare joint IDENTITY, not merely column count (2026-08 review).
+
+    The tracker fixes its joint set from the module-global ``_ARM_CFG``; this hook takes
+    ``robot_cfg`` from cfg params, which is overridable. A same-width but permuted or
+    different six-joint set passes a shape check while every margin column is normalized by
+    (and attributed to) the wrong joint's EMA — silently, and forever.
+    """
+    theirs, ours = list(tracker._joint_ids), list(self._robot_cfg.joint_ids)
+    if theirs != ours:
+      raise RuntimeError(
+        f"CatSoftHook: the substep tracker peak-holds joint ids {theirs} but this hook's "
+        f"robot_cfg selects {ours} — the joint sets must match exactly (same joints, same "
+        "order), or each margin column would be attributed to the wrong joint."
+      )
 
   def _compute_r_pos(self, env: "ManagerBasedRlEnv") -> torch.Tensor:
     """r_pos (sum of positive reward terms), dt-scaled to match the reward CatPPO discounts.
@@ -239,7 +316,7 @@ class CatSoftHook(ManagerTermBase):
   def __call__(self, env: "ManagerBasedRlEnv", **params) -> torch.Tensor:
     # δ: feed each enabled constraint's RAW per-joint margin into the CaT math (soft-OR over terms/cols).
     if self._use_vel:
-      c = joint_velocity_excess(env, limit=self._limit, robot_cfg=self._robot_cfg)  # (B, J)
+      c = self._vel_margin(env)                     # (B, J), control-rate or 500 Hz substep peak
       self._cat.add("joint_velocity_excess", c, max_p=self._max_p)
     if self._use_impulse:
       self._add_impulse_constraint(env)

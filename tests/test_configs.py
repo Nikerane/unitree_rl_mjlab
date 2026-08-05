@@ -38,11 +38,13 @@ from src.tasks.hammer.nail_block import (
     get_nail_block_entity_cfg,
 )
 from src.tasks.hammer.config.z1.env_cfgs import (
+    IMP_J_LIMIT,
     I_REF_DELIVERED,
     I_REF_FIRST_STRIKE_SUCCESS,
     _guideline_observation,
     z1_hammer_env_cfg,
 )
+from src.tasks.hammer.mdp.velocity_bound import SubstepPeakJointVel
 from src.tasks.hammer.mdp.first_strike import FirstStrikeEventTracker
 from src.tasks.hammer.mdp.guideline import (
     WaypointProgressTracker,
@@ -611,6 +613,7 @@ class TestCartesianGuidelineStudy:
             "guideline",
             "gate_reward",
             "progress_reward",
+            "vel_cat_substep",
         )
         assert all(
             parameters[name].default is False
@@ -619,12 +622,13 @@ class TestCartesianGuidelineStudy:
         assert parameters["guideline"].default is False
         assert parameters["gate_reward"].default is False
         assert parameters["progress_reward"].default is False
+        assert parameters["vel_cat_substep"].default is False
 
     def test_progress_reward_requires_guideline_tracker(self):
         with pytest.raises(ValueError, match="progress_reward.*guideline"):
             z1_hammer_env_cfg(progress_reward=True)
 
-    def test_new_registration_adds_only_three_task_ids(self):
+    def test_new_registration_adds_only_the_guideline_task_ids(self):
         registered_z1 = {
             task for task in list_tasks() if task.startswith("Unitree-Z1-Hammer")
         }
@@ -632,6 +636,7 @@ class TestCartesianGuidelineStudy:
             self._C0,
             self._C_GATE,
             self._C_PROGRESS,
+            self._C_PROGRESS + "-Vel",  # P+V (velocity-CaT wave); see TestProgressPlusVelocityArm
         }
 
     @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
@@ -1235,3 +1240,146 @@ class TestImitationFlag:
         track_play = z1_hammer_env_cfg(play=True, imitation=True)
         assert "r_imit" in track_play.rewards
         assert not track_play.curriculum
+
+
+class TestProgressPlusVelocityArm:
+    """P+V: the frozen CProgress arm plus faithful soft velocity-CaT on the 500 Hz per-joint peak.
+
+    P+V must differ from the frozen P control in EXACTLY two places -- the hook's velocity
+    enforcement and the substep peak tracker it requires. Everything the Wave-2 result rests on
+    (rewards, weights, observations, guideline geometry, reset, actuators, impulse caps,
+    imp_max_p=0) has to be byte-identical, or the paired comparison is confounded.
+    """
+
+    _P = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress"
+    _PV = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel"
+
+    def test_registered_and_selects_catppo(self):
+        from mjlab.tasks.registry import load_rl_cfg
+
+        assert self._PV in list_tasks()
+        rl = load_rl_cfg(self._PV)
+        assert rl.algorithm.class_name == "src.tasks.hammer.rl.cat_ppo:CatPPO"
+        assert rl.algorithm.class_name == load_rl_cfg(self._P).algorithm.class_name
+
+    def test_vel_cat_substep_requires_the_soft_cat_hook(self):
+        with pytest.raises(ValueError, match="vel_cat_substep.*cat_soft"):
+            z1_hammer_env_cfg(
+                cat_impulse=True,
+                event_correct=True,
+                event_linear=True,
+                guideline=True,
+                progress_reward=True,
+                vel_cat_substep=True,
+            )
+
+    @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
+    def test_pv_differs_from_frozen_p_only_by_velocity_cat_and_its_tracker(self, play):
+        p = load_env_cfg(self._P, play=play)
+        pv = load_env_cfg(self._PV, play=play)
+
+        # The two intended differences ...
+        assert pv.metrics["cat_soft"].params["use_vel"] is True
+        assert p.metrics["cat_soft"].params["use_vel"] is False
+        assert pv.metrics["cat_soft"].params["vel_detection"] == "substep"
+        assert set(pv.metrics) - set(p.metrics) == {"substep_peak_qv"}
+        assert set(p.metrics) - set(pv.metrics) == set()
+        tracker = pv.metrics["substep_peak_qv"]
+        assert tracker.func is SubstepPeakJointVel
+        assert tracker.per_substep is True
+        # ... the tracker must be BUILT before the hook that reads it (dict-order construction).
+        keys = list(pv.metrics)
+        assert keys.index("substep_peak_qv") < keys.index("cat_soft")
+
+        # ... and nothing else. Normalize P onto P+V and demand canonical equality.
+        # NOTE: _normalize returns plain dicts, so this compares CONTENT, not dict insertion
+        # order. Metrics order is pinned separately by the keys.index assertion above and
+        # observation order by test_pv_shares_the_exact_guideline_observations_with_p.
+        p.metrics["substep_peak_qv"] = tracker
+        p.metrics = {k: p.metrics[k] for k in keys}
+        p.metrics["cat_soft"].params["use_vel"] = True
+        p.metrics["cat_soft"].params["vel_detection"] = "substep"
+        assert TestCartesianGuidelineStudy._normalize(pv) == (
+            TestCartesianGuidelineStudy._normalize(p)
+        )
+
+    def test_pv_keeps_the_progress_treatment_and_no_gate_reward(self):
+        pv = load_env_cfg(self._PV)
+        reward = pv.rewards["r_waypoint_progress"]
+        assert reward.func is ordered_waypoint_progress_reward
+        assert reward.weight == pytest.approx(8.0)
+        assert reward.params == {}
+        assert "r_gate" not in pv.rewards
+
+    def test_pv_keeps_the_eight_base_reward_terms_and_weights(self):
+        pv = load_env_cfg(self._PV)
+        base = TestCartesianGuidelineStudy._F8_REWARDS
+        assert set(pv.rewards) == set(base) | {"r_waypoint_progress"}
+        assert {name: pv.rewards[name].weight for name in base} == base
+
+    def test_pv_shares_the_exact_guideline_observations_with_p(self):
+        p = load_env_cfg(self._P)
+        pv = load_env_cfg(self._PV)
+        for group in ("actor", "critic"):
+            assert list(pv.observations[group].terms) == list(p.observations[group].terms)
+            for name, term in pv.observations[group].terms.items():
+                other = p.observations[group].terms[name]
+                assert term.func is other.func
+                assert TestCartesianGuidelineStudy._normalize(term.params) == (
+                    TestCartesianGuidelineStudy._normalize(other.params)
+                )
+
+    def test_pv_velocity_cat_is_frozen_at_the_preregistered_dose(self):
+        params = load_env_cfg(self._PV).metrics["cat_soft"].params
+        assert params["limit"] == pytest.approx(3.1415)
+        assert params["max_p"] == pytest.approx(0.5)
+        assert params["min_p"] == pytest.approx(0.0)
+        assert params["tau"] == pytest.approx(0.95)
+
+    def test_pv_leaves_the_impulse_constraint_log_only_with_unchanged_caps(self):
+        params = load_env_cfg(self._PV).metrics["cat_soft"].params
+        assert params["use_impulse"] is True
+        assert params["imp_max_p"] == 0.0
+        assert isinstance(params["imp_max_p"], float)
+        assert tuple(params["imp_limit"]) == (1.640, 3.280, 1.640, 1.640, 1.640, 1.640)
+        # ... and that literal is still the single-sourced module constant, not a drifted copy.
+        assert list(params["imp_limit"]) == list(IMP_J_LIMIT)
+
+    @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
+    def test_pv_has_no_deterministic_velocity_termination_or_action_clipping(self, play):
+        pv = load_env_cfg(self._PV, play=play)
+        assert "vel_hard" not in pv.terminations
+        assert "cat_vel" not in pv.terminations
+        assert set(pv.terminations) == set(load_env_cfg(self._P, play=play).terminations)
+        assert set(pv.actions) == {"ik_hammer_head"}
+        assert "set_gains" not in pv.actions
+        ik = pv.actions["ik_hammer_head"]
+        assert isinstance(ik, DifferentialIKActionCfg)
+        assert ik.delta_pos_scale == pytest.approx(0.15)
+
+    def test_pv_uses_the_same_fixed_nominal_reset_as_p(self):
+        for play in (False, True):
+            pv = load_env_cfg(self._PV, play=play)
+            assert pv.events["reset_robot_joints"].params["position_range"] == (0.0, 0.0)
+
+    def test_frozen_p_arm_still_reads_the_control_rate_signal(self):
+        # The Wave-2 controls must not be retro-fitted with substep detection.
+        for task_id in (
+            TestCartesianGuidelineStudy._C0,
+            TestCartesianGuidelineStudy._C_GATE,
+            self._P,
+        ):
+            cfg = load_env_cfg(task_id)
+            assert "substep_peak_qv" not in cfg.metrics
+            assert cfg.metrics["cat_soft"].params["use_vel"] is False
+            assert cfg.metrics["cat_soft"].params.get("vel_detection", "control_rate") == (
+                "control_rate"
+            )
+
+    def test_shipped_soft_cat_arm_is_unchanged(self):
+        # Unitree-Z1-Hammer-CaT-Soft is a published arm; its detection must stay control-rate.
+        cfg = load_env_cfg("Unitree-Z1-Hammer-CaT-Soft")
+        assert "substep_peak_qv" not in cfg.metrics
+        assert cfg.metrics["cat_soft"].params.get("vel_detection", "control_rate") == (
+            "control_rate"
+        )

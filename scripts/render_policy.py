@@ -43,8 +43,11 @@ from evaluation.analysis.fixed_reset_video_library import (
   SUBSTEP_RENDERER_CONTRACT,
   TIMING_CONTRACT,
   WAVE1_ARTIFACT_FILENAMES,
+  compose_trajectory_title,
   expected_task,
   load_fixed_reset,
+  trajectory_outcome,
+  treatment_for_task,
   validate_substep_trace,
   write_metadata,
   write_substep_trajectory_png,
@@ -96,6 +99,33 @@ class Cfg:
   """Revision the checkpoint was TRAINED at (Wave-1 mode; distinct from analysis)."""
   analysis_revision: str = ""
   """Revision of the renderer/analysis code (Wave-1 mode; must differ from training)."""
+
+
+# Campaigns whose rendered artifacts are already frozen with recorded SHA-256 hashes. Their
+# trajectory.png must re-render byte-identically, so they keep the legacy plot call; every later
+# campaign gets treatment-faithful geometry and a full title.
+FROZEN_RENDER_CAMPAIGNS = frozenset({"wave1", "wave2", "fq4x8", "fq3x8"})
+
+
+def substep_plot_kwargs(cfg: "Cfg", trace: dict, *, terminal_reason: str) -> dict:
+  """Plot arguments for one substep leaf, derived from the VALIDATED task, not the directory.
+
+  Success is read off the rollout's terminal reason (``terminated`` == the nail_driven success
+  termination fired), matching the frozen analysis definition — never assumed from contact.
+  """
+  if cfg.campaign in FROZEN_RENDER_CAMPAIGNS:
+    return {"title": f"wave1 / {cfg.arm} / seed {cfg.training_seed}"}
+  treatment = treatment_for_task(expected_task(cfg.campaign, cfg.arm))
+  return {
+    "treatment": treatment,
+    "title": compose_trajectory_title(
+      campaign=cfg.campaign,
+      arm=cfg.arm,
+      training_seed=cfg.training_seed,
+      treatment=treatment,
+      outcome=trajectory_outcome(trace, success=terminal_reason == "terminated"),
+    ),
+  }
 
 
 def _sha256(path: Path) -> str:
@@ -478,7 +508,7 @@ def _run_wave1_substep_rollout(
   write_substep_trajectory_png(
     trace,
     out / "trajectory.png",
-    title=f"wave1 / {cfg.arm} / seed {cfg.training_seed}",
+    **substep_plot_kwargs(cfg, trace, terminal_reason=str(terminal_boundary["reason"])),
   )
   write_metadata(
     out / "metadata.json",

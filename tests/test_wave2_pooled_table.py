@@ -156,16 +156,24 @@ def test_build_rows_shares_one_precontact_window_with_the_tested_helper():
         )
 
 
-def test_pre_wave1_campaigns_are_exempt_from_the_device_requirement():
-    """fq4x8/fq3x8 artifacts predate the field; requiring it would reject them."""
+def test_only_campaigns_predating_the_device_field_are_exempt():
+    """The exemption is a closed historical list, never a default for new campaigns.
+
+    wave1/fq4x8/fq3x8 artifacts were rendered before ``execution_device`` existed, so
+    requiring it would reject them retroactively. Every campaign from wave2 onward MUST
+    record the device directly. Stated positively on purpose: the earlier subtractive
+    form (``all campaigns - {"wave2"}``) silently classified every newly registered
+    campaign as pre-wave1, which would have exempted wave3 from recording its device.
+    """
     from evaluation.analysis.fixed_reset_video_library import (
         EXECUTION_DEVICE_CAMPAIGN_EXEMPT,
         TASK_BY_CAMPAIGN_ARM,
     )
 
-    pre_wave1 = {campaign for campaign, _ in TASK_BY_CAMPAIGN_ARM} - {"wave2"}
-    assert pre_wave1 <= EXECUTION_DEVICE_CAMPAIGN_EXEMPT
-    assert "wave2" not in EXECUTION_DEVICE_CAMPAIGN_EXEMPT
+    assert EXECUTION_DEVICE_CAMPAIGN_EXEMPT == frozenset({"wave1", "fq4x8", "fq3x8"})
+    registered = {campaign for campaign, _ in TASK_BY_CAMPAIGN_ARM}
+    assert {"wave2", "wave3"} <= registered
+    assert not ({"wave2", "wave3"} & EXECUTION_DEVICE_CAMPAIGN_EXEMPT)
 
 
 def test_join_identity_is_checked_not_assumed(tmp_path):
