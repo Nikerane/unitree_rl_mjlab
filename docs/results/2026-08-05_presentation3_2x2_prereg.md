@@ -86,15 +86,15 @@ registering V+I or V+I+D4.
 
 | Role | Revision |
 | --- | --- |
-| Presentation3 training | **to be pinned by the immediate follow-up commit before submission** |
+| Presentation3 training | `ba6119c767fe92a8eb4b6131e0c0b0d3c120f0fe` |
 | Asset | `b58ccd2f81fd246f27c1e8d88cf86484cd888703` |
 | Frozen P seeds 2–3 training | `a6a9c970ea9eca00b34e8e9be806d22d396a964a` |
 | Frozen P seeds 4–7 training | `e1a0282c9dc7b0283ae632a46a78debfd80bdf8c` |
 | Frozen Wave-2 result | `cc125c08bfbdd7e75c2db83204c8eda8008464c9` |
 
 The training revision is the first commit containing this preregistration and implementation.
-The follow-up commit records that already-fixed revision; Vega checks out the training revision,
-not the follow-up documentation commit.
+This follow-up documentation commit records that already-fixed revision; Vega checks out
+`ba6119c767fe92a8eb4b6131e0c0b0d3c120f0fe`, not the follow-up commit.
 
 ## Frozen launch ledger
 
