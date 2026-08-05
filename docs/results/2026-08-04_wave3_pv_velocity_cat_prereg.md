@@ -190,7 +190,7 @@ already in the frozen P arm.
 
 | Role | Revision |
 | --- | --- |
-| **Wave-3 training** | the commit that first carries this preregistration — recorded in the follow-up pin commit before submission. This is the revision Vega checks out. |
+| **Wave-3 training** | `fa685d4967e9c70cc7647d2218d8a5f5e9ef57c1` — the first commit carrying this preregistration and the training implementation. This is the revision Vega checks out. |
 | Asset (`safe_impact_manipulation`, `hammer-z1`) | `b58ccd2f81fd246f27c1e8d88cf86484cd888703` — **identical to Waves 1 and 2.** No asset change is permitted. |
 | Wave-2 training (frozen P controls, seeds 4–7) | `e1a0282c9dc7b0283ae632a46a78debfd80bdf8c` |
 | Wave-1 training (frozen P controls, seeds 2–3) | `a6a9c970ea9eca00b34e8e9be806d22d396a964a` |
