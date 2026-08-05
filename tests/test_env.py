@@ -573,3 +573,40 @@ def test_wave3_pv_smoke_gate_passes_on_cpu():
     failed = [name for name, ok, _ in results if not ok]
     assert not failed, failed
     assert len(results) >= 20  # the gate must not silently shrink to a trivial pass
+
+
+@pytest.mark.parametrize(
+    "task, expected_use_vel",
+    (
+        (
+            "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
+            "CProgress-Delivered4",
+            False,
+        ),
+        (
+            "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
+            "CProgress-Vel-Delivered4",
+            True,
+        ),
+    ),
+)
+def test_presentation_phase_one_new_tasks_build_live_and_stay_impulse_log_only(
+    task, expected_use_vel
+):
+    """The two new registered configs must survive real manager construction."""
+    from mjlab.envs import ManagerBasedRlEnv
+    from mjlab.tasks.registry import load_env_cfg
+    import src.tasks.hammer.config.z1  # noqa: F401
+
+    cfg = load_env_cfg(task, play=True)
+    cfg.scene.num_envs = 1
+    env = ManagerBasedRlEnv(cfg, device="cpu")
+    try:
+        hook_index = list(env.metrics_manager.active_terms).index("cat_soft")
+        hook = env.metrics_manager._term_cfgs[hook_index].func
+        assert hook._use_vel is expected_use_vel
+        assert hook._imp_max_p == 0.0
+        assert env.reward_manager.get_term_cfg("delivered_impulse").weight == 4.0
+        assert set(env.action_manager.active_terms) == {"ik_hammer_head"}
+    finally:
+        env.close()

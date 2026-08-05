@@ -637,6 +637,8 @@ class TestCartesianGuidelineStudy:
             self._C_GATE,
             self._C_PROGRESS,
             self._C_PROGRESS + "-Vel",  # P+V (velocity-CaT wave); see TestProgressPlusVelocityArm
+            self._C_PROGRESS + "-Delivered4",
+            self._C_PROGRESS + "-Vel-Delivered4",
         }
 
     @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
@@ -1275,8 +1277,8 @@ class TestProgressPlusVelocityArm:
 
     @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
     def test_pv_differs_from_frozen_p_only_by_velocity_cat_and_its_tracker(self, play):
-        p = load_env_cfg(self._P, play=play)
-        pv = load_env_cfg(self._PV, play=play)
+        p = copy.deepcopy(load_env_cfg(self._P, play=play))
+        pv = copy.deepcopy(load_env_cfg(self._PV, play=play))
 
         # The two intended differences ...
         assert pv.metrics["cat_soft"].params["use_vel"] is True
@@ -1383,3 +1385,55 @@ class TestProgressPlusVelocityArm:
         assert cfg.metrics["cat_soft"].params.get("vel_detection", "control_rate") == (
             "control_rate"
         )
+
+
+class TestPresentationPhaseOne:
+    """Matched I-off 2x2: velocity CaT off/on x delivered weight 2/4."""
+
+    _P = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress"
+    _PV = f"{_P}-Vel"
+    _PD4 = f"{_P}-Delivered4"
+    _PVD4 = f"{_PV}-Delivered4"
+
+    @pytest.mark.parametrize("task", (_PV, _PD4, _PVD4))
+    def test_every_phase_one_arm_is_registered_and_uses_catppo(self, task):
+        from mjlab.tasks.registry import load_rl_cfg
+
+        assert task in list_tasks()
+        assert load_rl_cfg(task).algorithm.class_name == "src.tasks.hammer.rl.cat_ppo:CatPPO"
+
+    @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
+    def test_delivered4_is_the_only_p_to_pd4_change(self, play):
+        p = load_env_cfg(self._P, play=play)
+        pd4 = load_env_cfg(self._PD4, play=play)
+        assert p.rewards["delivered_impulse"].weight == pytest.approx(2.0)
+        assert pd4.rewards["delivered_impulse"].weight == pytest.approx(4.0)
+        assert pd4.metrics["cat_soft"].params["imp_max_p"] == 0.0
+
+        p.rewards["delivered_impulse"].weight = 4.0
+        assert TestCartesianGuidelineStudy._normalize(pd4) == (
+            TestCartesianGuidelineStudy._normalize(p)
+        )
+
+    @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
+    def test_delivered4_is_the_only_pv_to_pvd4_change(self, play):
+        pv = load_env_cfg(self._PV, play=play)
+        pvd4 = load_env_cfg(self._PVD4, play=play)
+        assert pv.rewards["delivered_impulse"].weight == pytest.approx(2.0)
+        assert pvd4.rewards["delivered_impulse"].weight == pytest.approx(4.0)
+        assert pvd4.metrics["cat_soft"].params["imp_max_p"] == 0.0
+
+        pv.rewards["delivered_impulse"].weight = 4.0
+        assert TestCartesianGuidelineStudy._normalize(pvd4) == (
+            TestCartesianGuidelineStudy._normalize(pv)
+        )
+
+    @pytest.mark.parametrize("task", (_PV, _PD4, _PVD4))
+    def test_phase_one_keeps_fixed_impedance_nominal_reset_and_impulse_log_only(self, task):
+        cfg = load_env_cfg(task)
+        assert set(cfg.actions) == {"ik_hammer_head"}
+        assert "set_gains" not in cfg.actions
+        assert cfg.events["reset_robot_joints"].params["position_range"] == (0.0, 0.0)
+        assert cfg.metrics["cat_soft"].params["imp_max_p"] == 0.0
+        assert "vel_hard" not in cfg.terminations
+        assert "cat_vel" not in cfg.terminations

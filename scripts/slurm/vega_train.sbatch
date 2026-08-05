@@ -22,6 +22,16 @@
 #   Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0    / f0
 #   Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0    / d0
 #   Unitree-Z1-Hammer-CaT-Impulse-Event-Quality      / fq
+#
+# presentation3: submit one six-seed array for each exact task/short pair below.
+# Reward overrides must be absent; D4 is carried by the registered task identity.
+#   env -u IMPACT_W -u DELIVERED_W -u NAIL_DRIVEN_W \
+#     CAMPAIGN=presentation3 SEEDS="2 3 4 5 6 7" ITERS=200 \
+#     SINGLE_TASK=<task> SINGLE_SHORT=<short> \
+#     EXPECTED_CODE_REVISION=<40hex> EXPECTED_ASSET_REVISION=<40hex> \
+#     sbatch --array=0-5 --export=ALL,CAMPAIGN,SEEDS,ITERS,SINGLE_TASK,SINGLE_SHORT,EXPECTED_CODE_REVISION,EXPECTED_ASSET_REVISION scripts/slurm/vega_train.sbatch
+# Task/short pairs: CProgress-Vel / pv; CProgress-Delivered4 / pd4;
+# CProgress-Vel-Delivered4 / pvd4 (all with the full task prefix used below).
 #SBATCH --job-name=z1-train
 #SBATCH --account=d2026d06-166-users
 #SBATCH --partition=gpu
@@ -74,6 +84,10 @@ if [ "$CAMPAIGN_LC" = "fsr4x8" ] && [ "$CAMPAIGN" != "fsr4x8" ]; then
   echo "FSR4X8_FAIL: CAMPAIGN '$CAMPAIGN' looks like fsr4x8 but is not an exact, case-sensitive match"
   exit 2
 fi
+if [ "$CAMPAIGN_LC" = "presentation3" ] && [ "$CAMPAIGN" != "presentation3" ]; then
+  echo "PRESENTATION3_FAIL: CAMPAIGN '$CAMPAIGN' looks like presentation3 but is not an exact match"
+  exit 2
+fi
 read -ra SEEDARR <<< "${SEEDS:-0 1 2}"
 # nail_driven=0.5 is now the BAKED default (farm-cut). Optional per-run reward-weight overrides:
 #   DELIVERED_W=0  -> F2 arm (delivered-impulse reward off, tests its contribution to the strike).
@@ -87,6 +101,10 @@ EXTRA_FLAGS=""
 ARM_TASK=(Unitree-Z1-Hammer-CaT-Impulse-Track Unitree-Z1-Hammer-CaT-Impulse)
 ARM_SHORT=(track none)
 t=${SLURM_ARRAY_TASK_ID:?must run as an array}
+if [ "$CAMPAIGN" = "presentation3" ] && ! [[ "$t" =~ ^[0-5]$ ]]; then
+  echo "PRESENTATION3_FAIL: array index must be exactly 0..5"
+  exit 2
+fi
 # SINGLE_TASK mode (Option B / any one-arm campaign): array index == seed index, one fixed task.
 # Default (paired) mode: index -> (seed = SEEDS[t/2], arm = track/none by t%2).
 if [ -n "${SINGLE_TASK:-}" ]; then
@@ -173,6 +191,29 @@ if [ "$CAMPAIGN" = "fq3x8" ]; then
     *) echo "FQ3X8_FAIL: SINGLE_TASK/SINGLE_SHORT is not a frozen fq3x8 arm"; exit 2 ;;
   esac
 fi
+
+# Phase-1 presentation study: the three missing cells around the frozen P control.
+# Impulse CaT remains explicitly log-only until a new C2 dose calibration is frozen.
+if [ "$CAMPAIGN" = "presentation3" ]; then
+  [ "${SEEDS:-}" = "2 3 4 5 6 7" ] \
+    || { echo "PRESENTATION3_FAIL: seeds must be exactly 2..7"; exit 2; }
+  [ "${ITERS:-}" = "200" ] \
+    || { echo "PRESENTATION3_FAIL: ITERS must be exactly 200"; exit 2; }
+  for override in IMPACT_W DELIVERED_W NAIL_DRIVEN_W; do
+    [ -z "${!override+x}" ] \
+      || { echo "PRESENTATION3_FAIL: $override must be unset"; exit 2; }
+  done
+  [[ "${EXPECTED_CODE_REVISION:-}" =~ ^[0-9a-f]{40}$ ]] \
+    || { echo "PRESENTATION3_FAIL: EXPECTED_CODE_REVISION must be a clean 40-hex revision"; exit 2; }
+  [[ "${EXPECTED_ASSET_REVISION:-}" =~ ^[0-9a-f]{40}$ ]] \
+    || { echo "PRESENTATION3_FAIL: EXPECTED_ASSET_REVISION must be a clean 40-hex revision"; exit 2; }
+  case "$task:$short" in
+    Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel:pv|\
+    Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Delivered4:pd4|\
+    Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4:pvd4) ;;
+    *) echo "PRESENTATION3_FAIL: task/short is not a frozen presentation3 arm"; exit 2 ;;
+  esac
+fi
 RUN="${CAMPAIGN}_${short}_seed${seed}"
 # Provenance: record the exact code state that trains (git hash + '-dirty' if the tree has uncommitted
 # tracked edits). Deploy via git pull, NOT scp, so this hash is trustworthy (2026-07-19 provenance fix).
@@ -204,6 +245,12 @@ if [ "$CAMPAIGN" = "fq3x8" ]; then
     || { echo "FQ3X8_FAIL: code revision does not equal expected code revision"; exit 2; }
   [ "$ASSET_HASH" = "$EXPECTED_ASSET_REVISION" ] \
     || { echo "FQ3X8_FAIL: asset revision does not equal expected asset revision"; exit 2; }
+fi
+if [ "$CAMPAIGN" = "presentation3" ]; then
+  [ "$GITHASH" = "$EXPECTED_CODE_REVISION" ] \
+    || { echo "PRESENTATION3_FAIL: code revision does not equal expected code revision"; exit 2; }
+  [ "$ASSET_HASH" = "$EXPECTED_ASSET_REVISION" ] \
+    || { echo "PRESENTATION3_FAIL: asset revision does not equal expected asset revision"; exit 2; }
 fi
 $PY -c "import torch; assert torch.cuda.is_available() and 'A100' in torch.cuda.get_device_name(0), 'no A100'; print('A100 ok:', torch.cuda.get_device_name(0))" || { echo "### NO GPU/A100 on $(hostname) — requeue+exit"; scontrol requeue "${SLURM_JOB_ID}" 2>/dev/null; exit 1; }
 $PY scripts/train.py "$task" --gpu-ids [0] --agent.logger tensorboard \

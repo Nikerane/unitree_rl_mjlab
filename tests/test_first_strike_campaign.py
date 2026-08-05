@@ -3954,7 +3954,11 @@ exit 0
     )
     env.pop("NAIL_DRIVEN_W", None)
     env.pop("ASSET_REPO", None)
-    env.update({key: str(value) for key, value in overrides.items()})
+    for key, value in overrides.items():
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = str(value)
     result = subprocess.run(
         ["/bin/bash", str(ROOT / "scripts" / "slurm" / "vega_train.sbatch")],
         env=env,
@@ -3985,6 +3989,88 @@ def test_training_launcher_executes_one_exact_frozen_matrix_row(tmp_path):
     assert (
         tmp_path / "valid-home" / ".cache" / "unitree_rl_mjlab" / "warp" / "probe"
     ).is_file()
+
+
+@pytest.mark.parametrize(
+    "task, short",
+    (
+        ("Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel", "pv"),
+        ("Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Delivered4", "pd4"),
+        ("Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4", "pvd4"),
+    ),
+)
+def test_presentation3_launcher_executes_each_exact_i_off_row(tmp_path, task, short):
+    result, calls = _run_training_launcher(
+        tmp_path / short,
+        CAMPAIGN="presentation3",
+        SEEDS="2 3 4 5 6 7",
+        SLURM_ARRAY_TASK_ID="0",
+        SINGLE_TASK=task,
+        SINGLE_SHORT=short,
+        IMPACT_W=None,
+        DELIVERED_W=None,
+        NAIL_DRIVEN_W=None,
+        ITERS="200",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    train_calls = [line for line in calls.splitlines() if "scripts/train.py" in line]
+    assert len(train_calls) == 1
+    call = train_calls[0]
+    assert f"scripts/train.py {task}" in call
+    assert f"--agent.run-name presentation3_{short}_seed2" in call
+    assert "--agent.seed 2" in call
+    assert "--agent.max-iterations 200" in call
+    assert "--env.scene.num-envs 4096" in call
+    assert "--env.metrics.cat-soft.params.imp-max-p 0" in call
+    assert "--env.rewards.impact-progress.weight" not in call
+    assert "--env.rewards.delivered-impulse.weight" not in call
+    assert "--env.rewards.nail-driven.weight" not in call
+
+
+@pytest.mark.parametrize(
+    "overrides, message",
+    (
+        ({"SEEDS": "2 3 4"}, "seeds"),
+        ({"ITERS": "500"}, "ITERS"),
+        ({"SINGLE_SHORT": "wrong"}, "task/short"),
+        ({"IMPACT_W": "8"}, "IMPACT_W"),
+        ({"IMPACT_W": ""}, "IMPACT_W"),
+        ({"DELIVERED_W": "4"}, "DELIVERED_W"),
+        ({"NAIL_DRIVEN_W": ""}, "NAIL_DRIVEN_W"),
+        ({"EXPECTED_CODE_REVISION": "a" * 39}, "EXPECTED_CODE_REVISION"),
+        ({"EXPECTED_ASSET_REVISION": "b" * 39}, "EXPECTED_ASSET_REVISION"),
+        ({"EXPECTED_CODE_REVISION": "c" * 40}, "code revision"),
+        ({"EXPECTED_ASSET_REVISION": "c" * 40}, "asset revision"),
+        ({"SLURM_ARRAY_TASK_ID": "6"}, "array index"),
+        (
+            {
+                "SINGLE_TASK": (
+                    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
+                    "CProgress-Vel-ImpEnforced"
+                ),
+                "SINGLE_SHORT": "pvi",
+            },
+            "task/short",
+        ),
+    ),
+)
+def test_presentation3_launcher_rejects_matrix_drift(tmp_path, overrides, message):
+    values = dict(
+        CAMPAIGN="presentation3",
+        SEEDS="2 3 4 5 6 7",
+        SLURM_ARRAY_TASK_ID="0",
+        SINGLE_TASK="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel",
+        SINGLE_SHORT="pv",
+        IMPACT_W=None,
+        DELIVERED_W=None,
+        NAIL_DRIVEN_W=None,
+        ITERS="200",
+    )
+    values.update(overrides)
+    result, calls = _run_training_launcher(tmp_path / message.lower(), **values)
+    assert result.returncode == 2
+    assert f"PRESENTATION3_FAIL: {message}" in result.stdout
+    assert "scripts/train.py" not in calls
 
 
 def test_training_launcher_rejects_legacy_reward_override(tmp_path):

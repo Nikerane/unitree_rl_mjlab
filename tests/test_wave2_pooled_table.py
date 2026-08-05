@@ -172,8 +172,8 @@ def test_only_campaigns_predating_the_device_field_are_exempt():
 
     assert EXECUTION_DEVICE_CAMPAIGN_EXEMPT == frozenset({"wave1", "fq4x8", "fq3x8"})
     registered = {campaign for campaign, _ in TASK_BY_CAMPAIGN_ARM}
-    assert {"wave2", "wave3"} <= registered
-    assert not ({"wave2", "wave3"} & EXECUTION_DEVICE_CAMPAIGN_EXEMPT)
+    assert {"wave2", "wave3", "presentation3"} <= registered
+    assert not ({"wave2", "wave3", "presentation3"} & EXECUTION_DEVICE_CAMPAIGN_EXEMPT)
 
 
 def test_join_identity_is_checked_not_assumed(tmp_path):

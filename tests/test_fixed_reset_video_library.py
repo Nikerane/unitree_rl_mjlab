@@ -2099,6 +2099,8 @@ _C0_TASK = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0"
 _G_TASK = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate"
 _P_TASK = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress"
 _PV_TASK = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel"
+_PD4_TASK = f"{_P_TASK}-Delivered4"
+_PVD4_TASK = f"{_PV_TASK}-Delivered4"
 
 
 def test_treatment_geometry_follows_the_reward_the_arm_actually_received():
@@ -2273,6 +2275,14 @@ def test_the_velocity_arm_has_a_registered_campaign_task_identity():
     assert expected_task("wave3", "P+V") == _PV_TASK
 
 
+def test_presentation3_resolves_all_three_registered_task_identities():
+    from evaluation.analysis.fixed_reset_video_library import expected_task
+
+    assert expected_task("presentation3", "P+V") == _PV_TASK
+    assert expected_task("presentation3", "P+D4") == _PD4_TASK
+    assert expected_task("presentation3", "P+V+D4") == _PVD4_TASK
+
+
 def test_treatment_table_matches_the_registered_environment_configuration():
     """Drift guard: the plot labels are only honest if they match the real configs."""
     from mjlab.tasks.registry import load_env_cfg
@@ -2285,6 +2295,8 @@ def test_treatment_table_matches_the_registered_environment_configuration():
         (_G_TASK, "r_gate", "gates"),
         (_P_TASK, "r_waypoint_progress", "waypoints"),
         (_PV_TASK, "r_waypoint_progress", "waypoints"),
+        (_PD4_TASK, "r_waypoint_progress", "waypoints"),
+        (_PVD4_TASK, "r_waypoint_progress", "waypoints"),
     ):
         cfg = load_env_cfg(task)
         treatment = treatment_for_task(task)
@@ -2303,6 +2315,9 @@ def test_treatment_table_matches_the_registered_environment_configuration():
         # Impulse label must match the log-only invariant.
         assert params["imp_max_p"] == 0.0
         assert treatment.impulse == "impulse log-only"
+        if task.endswith("Delivered4"):
+            assert cfg.rewards["delivered_impulse"].weight == 4.0
+            assert "delivered weight 4.0" in treatment.headline
 
 
 # --- render_policy plot wiring -------------------------------------------------------------------
@@ -2341,6 +2356,23 @@ def test_new_campaigns_get_treatment_faithful_geometry_and_a_full_title():
     assert "impulse log-only" in title
     assert "3.1415" in title
     assert "success" in title and "no success" not in title
+
+
+@pytest.mark.parametrize(
+    "arm, expected_phrase",
+    (
+        ("P+V", "soft velocity-CaT"),
+        ("P+D4", "delivered weight 4.0"),
+        ("P+V+D4", "delivered weight 4.0"),
+    ),
+)
+def test_presentation3_titles_describe_the_actual_training_treatment(arm, expected_phrase):
+    kwargs = render_policy.substep_plot_kwargs(
+        _render_cfg("presentation3", arm), _wave1_trace(), terminal_reason="terminated"
+    )
+    assert kwargs["treatment"].geometry == "waypoints"
+    assert expected_phrase in kwargs["title"]
+    assert "impulse log-only" in kwargs["title"]
 
 
 def test_plot_success_comes_from_the_terminal_reason_not_an_assumption():
