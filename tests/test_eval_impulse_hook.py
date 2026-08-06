@@ -115,6 +115,65 @@ def test_unscoped_evaluation_preserves_historical_rng_flexibility():
   )
 
 
+PRESENTATION3_CAMPAIGN = "presentation3"
+PRESENTATION3_RNG = {
+  "reset_seed": 2036072919,
+  "observation_seed": 2046072933,
+  "action_seed": 2056072941,
+}
+
+
+@pytest.mark.parametrize(
+  "task",
+  (
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Delivered4",
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel",
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4",
+  ),
+)
+def test_presentation3_campaign_accepts_only_its_three_tasks_with_frozen_rng(task):
+  """Removing the campaign arm allowlist or frozen tuple must fail this call."""
+  eval_impulse._validate_evaluation_campaign(
+    PRESENTATION3_CAMPAIGN,
+    task=task,
+    **PRESENTATION3_RNG,
+  )
+
+
+def test_presentation3_campaign_rejects_unscoped_execution():
+  """A P3 task may never fall through the historical unscoped evaluator."""
+  with pytest.raises(ValueError, match="presentation3.*requires --campaign"):
+    eval_impulse._validate_evaluation_campaign(
+      None,
+      task="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel",
+      reset_seed=11,
+      observation_seed=22,
+      action_seed=33,
+    )
+
+
+@pytest.mark.parametrize("stream", tuple(PRESENTATION3_RNG))
+def test_presentation3_campaign_rejects_each_rng_stream_mutation(stream):
+  """Each RNG stream is independently load-bearing for the shared population."""
+  streams = dict(PRESENTATION3_RNG)
+  streams[stream] += 1
+  with pytest.raises(ValueError, match=f"presentation3.*{stream.removesuffix('_seed')}"):
+    eval_impulse._validate_evaluation_campaign(
+      PRESENTATION3_CAMPAIGN,
+      task="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel",
+      **streams,
+    )
+
+
+def test_presentation3_campaign_rejects_a_nonpresentation_task():
+  with pytest.raises(ValueError, match="presentation3.*task"):
+    eval_impulse._validate_evaluation_campaign(
+      PRESENTATION3_CAMPAIGN,
+      task=eval_impulse.QUALITY_ARM_TASKS["FQ"],
+      **PRESENTATION3_RNG,
+    )
+
+
 def test_fq3x8_main_rejects_rng_drift_before_checkpoint_or_rollout(monkeypatch):
   """The CLI contract fires before the evaluator can load a checkpoint."""
   monkeypatch.setattr(
@@ -339,6 +398,79 @@ _PRESENTATION3_CONTRACTS = (
 )
 
 
+def _presentation3_identity_kwargs(arm="V", **overrides):
+  task = next(task for name, task, _, _ in _PRESENTATION3_CONTRACTS if name == arm)
+  asset_revision = "b" * 40
+  values = {
+    "campaign": PRESENTATION3_CAMPAIGN,
+    "env_cfg": eval_impulse.load_env_cfg(task, play=False),
+    "task": task,
+    "training_seed": 2,
+    "expected_checkpoint_sha256": "c" * 64,
+    "accepted_manifest_sha256": "d" * 64,
+    # Deliberately differs from clean evaluation code revision below.
+    "training_code_revision": "e" * 40,
+    "training_asset_revision": asset_revision,
+    "code_git": {"revision": "a" * 40, "dirty": False, "status": ""},
+    "asset_git": {
+      "revision": asset_revision,
+      "dirty": False,
+      "status": "",
+    },
+  }
+  values.update(overrides)
+  return values
+
+
+@pytest.mark.parametrize("arm", ("M", "V", "V+M"))
+def test_presentation3_row_identity_accepts_each_arm_and_distinct_evaluation_revision(arm):
+  """Requiring eval/training code equality would wrongly reject reviewed evaluators."""
+  validator = getattr(eval_impulse, "_validate_presentation3_identity", None)
+  assert callable(validator), "Presentation3 row identity validator is missing"
+
+  contract = validator(**_presentation3_identity_kwargs(arm))
+
+  assert contract["treatment"] == arm
+  assert contract["training_seed"] == 2
+  assert contract["expected_checkpoint_sha256"] == "c" * 64
+  assert contract["accepted_manifest_sha256"] == "d" * 64
+
+
+@pytest.mark.parametrize(
+  ("overrides", "message"),
+  (
+    ({"campaign": None}, "exact campaign"),
+    ({"training_seed": 1}, "seeds 2..7"),
+    ({"training_seed": 8}, "seeds 2..7"),
+    ({"training_seed": True}, "seeds 2..7"),
+    ({"expected_checkpoint_sha256": ""}, "checkpoint SHA-256"),
+    ({"expected_checkpoint_sha256": "z" * 64}, "checkpoint SHA-256"),
+    ({"accepted_manifest_sha256": ""}, "manifest SHA-256"),
+    ({"accepted_manifest_sha256": "z" * 64}, "manifest SHA-256"),
+    ({"training_code_revision": ""}, "training code revision"),
+    ({"training_code_revision": "z" * 40}, "training code revision"),
+    ({"training_asset_revision": ""}, "training asset revision"),
+    ({"training_asset_revision": "z" * 40}, "training asset revision"),
+    (
+      {"code_git": {"revision": "a" * 40, "dirty": True, "status": " M file"}},
+      "clean code provenance",
+    ),
+    (
+      {"asset_git": {"revision": "b" * 40, "dirty": True, "status": " M asset"}},
+      "clean asset provenance",
+    ),
+    ({"training_asset_revision": "f" * 40}, "asset revision mismatch"),
+  ),
+)
+def test_presentation3_row_identity_rejects_unfrozen_or_dirty_inputs(
+  overrides, message
+):
+  validator = getattr(eval_impulse, "_validate_presentation3_identity", None)
+  assert callable(validator), "Presentation3 row identity validator is missing"
+  with pytest.raises((ValueError, RuntimeError), match=message):
+    validator(**_presentation3_identity_kwargs(**overrides))
+
+
 @pytest.mark.parametrize(
   ("arm", "task", "delivered_weight", "velocity_cat"),
   _PRESENTATION3_CONTRACTS,
@@ -415,6 +547,133 @@ def test_sampled_contract_rejects_presentation3_identity_mutations(
     eval_impulse._validate_sampled_env_contract(cfg, task)
 
 
+@pytest.mark.parametrize(
+  ("mutate", "message"),
+  (
+    (
+      lambda cfg: cfg.events["reset_robot_joints"].params.__setitem__(
+        "position_range", (-0.05, 0.05)
+      ),
+      "reset range",
+    ),
+    (
+      lambda cfg: cfg.events["reset_robot_joints"].params.__setitem__(
+        "velocity_range", (-1.0, 1.0)
+      ),
+      "reset velocity",
+    ),
+    (lambda cfg: setattr(cfg, "scale_rewards_by_dt", 1), "reward dt scaling"),
+    (
+      lambda cfg: setattr(cfg.rewards["r_waypoint_progress"], "func", object),
+      "guidance reward",
+    ),
+    (
+      lambda cfg: setattr(cfg.rewards["r_waypoint_progress"], "weight", 7.0),
+      "guidance reward",
+    ),
+    (
+      lambda cfg: cfg.metrics["waypoint_progress"].params.__setitem__("extra", 1),
+      "WaypointProgressTracker params",
+    ),
+    (
+      lambda cfg: setattr(
+        cfg.metrics["waypoint_progress"].params["robot_cfg"],
+        "site_names",
+        ("wrong",),
+      ),
+      "robot site binding",
+    ),
+    (
+      lambda cfg: setattr(
+        cfg.metrics["waypoint_progress"].params["nail_cfg"],
+        "site_names",
+        ("wrong",),
+      ),
+      "nail site binding",
+    ),
+    (
+      lambda cfg: setattr(cfg.observations["actor"], "enable_corruption", 1),
+      "literal observation corruption",
+    ),
+    (
+      lambda cfg: setattr(cfg.observations["critic"], "enable_corruption", 0),
+      "literal observation corruption",
+    ),
+    (
+      lambda cfg: cfg.observations["critic"].terms.pop("waypoint_progress_state"),
+      "critic guideline observation",
+    ),
+    (
+      lambda cfg: setattr(cfg.metrics["cat_soft"], "func", object),
+      "CaT metric",
+    ),
+    (
+      lambda cfg: setattr(cfg.metrics["cat_soft"], "per_substep", True),
+      "CaT metric",
+    ),
+    (
+      lambda cfg: cfg.metrics["cat_soft"].params.__setitem__("use_impulse", 1),
+      "literal CaT booleans",
+    ),
+    (
+      lambda cfg: cfg.metrics["cat_soft"].params.__setitem__("use_vel", 1),
+      "literal CaT booleans",
+    ),
+    (
+      lambda cfg: cfg.metrics["cat_soft"].params.__setitem__("imp_seed", 0.002),
+      "impulse-CaT setting",
+    ),
+    (
+      lambda cfg: setattr(
+        cfg.metrics["cat_soft"].params["robot_cfg"], "name", "wrong"
+      ),
+      "CaT robot binding",
+    ),
+    (
+      lambda cfg: cfg.metrics["cat_soft"].params.__setitem__("limit", 3.0),
+      "velocity-CaT setting",
+    ),
+    (
+      lambda cfg: cfg.metrics["cat_soft"].params.__setitem__("max_p", 0.4),
+      "velocity-CaT setting",
+    ),
+    (
+      lambda cfg: cfg.metrics["cat_soft"].params.__setitem__("min_p", 0.1),
+      "velocity-CaT setting",
+    ),
+    (
+      lambda cfg: cfg.metrics["cat_soft"].params.__setitem__("tau", 0.9),
+      "velocity-CaT setting",
+    ),
+    (
+      lambda cfg: setattr(cfg.metrics["substep_peak_qv"], "func", object),
+      "velocity-CaT setting",
+    ),
+    (
+      lambda cfg: setattr(cfg.actions["ik_hammer_head"], "max_dq", 0.29),
+      "fixed action signature",
+    ),
+    (
+      lambda cfg: setattr(
+        cfg.scene.entities["robot"].articulation.actuators[0], "stiffness", 1.0
+      ),
+      "fixed-impedance actuator signature",
+    ),
+  ),
+)
+def test_presentation3_contract_rejects_every_frozen_axis_mutation(mutate, message):
+  """Each mutation changes behavior or identity and must fail before rollout."""
+  task = (
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
+    "CProgress-Vel-Delivered4"
+  )
+  cfg = eval_impulse.load_env_cfg(task, play=False)
+  mutate(cfg)
+
+  with pytest.raises(ValueError, match=message):
+    eval_impulse._validate_sampled_env_contract(cfg, task)
+
+
 def test_presentation3_main_rejects_native_imp_max_before_evaluator_overwrite(
   monkeypatch
 ):
@@ -423,6 +682,11 @@ def test_presentation3_main_rejects_native_imp_max_before_evaluator_overwrite(
   cfg = eval_impulse.load_env_cfg(task, play=False)
   cfg.metrics["cat_soft"].params["imp_max_p"] = 0.25
   monkeypatch.setattr(eval_impulse, "load_env_cfg", lambda *args, **kwargs: cfg)
+  monkeypatch.setattr(
+    eval_impulse,
+    "_git_provenance",
+    lambda path: {"revision": "b" * 40, "dirty": False, "status": ""},
+  )
 
   def reached_post_validation(*args, **kwargs):
     raise RuntimeError("past-presentation3-validation")
@@ -433,13 +697,44 @@ def test_presentation3_main_rejects_native_imp_max_before_evaluator_overwrite(
     "argv",
     [
       "eval_impulse.py",
+      "--campaign", PRESENTATION3_CAMPAIGN,
       "--task", task,
       "--ckpt", "model_499.pt",
       "--training-seed", "2",
+      "--expected-checkpoint-sha256", "c" * 64,
+      "--accepted-manifest-sha256", "d" * 64,
+      "--training-code-revision", "e" * 40,
+      "--training-asset-revision", "b" * 40,
     ],
   )
 
   with pytest.raises(ValueError, match="imp_max_p"):
+    eval_impulse.main()
+
+
+def test_presentation3_main_requires_full_row_identity_before_checkpoint_load(
+  monkeypatch
+):
+  """Calling main without frozen hashes/revisions must stop before runner setup."""
+  task = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel"
+
+  def reached_runner_setup(*args, **kwargs):
+    raise RuntimeError("past-presentation3-row-identity")
+
+  monkeypatch.setattr(eval_impulse, "load_rl_cfg", reached_runner_setup)
+  monkeypatch.setattr(
+    sys,
+    "argv",
+    [
+      "eval_impulse.py",
+      "--campaign", PRESENTATION3_CAMPAIGN,
+      "--task", task,
+      "--ckpt", "model_199.pt",
+      "--training-seed", "2",
+    ],
+  )
+
+  with pytest.raises(ValueError, match="checkpoint SHA-256"):
     eval_impulse.main()
 
 
@@ -1140,6 +1435,196 @@ def guideline_autoreset_records():
     finally:
       env.close()
   return records
+
+
+@pytest.fixture(scope="module")
+def presentation3_autoreset_records():
+  """One real timeout completion from every registered Presentation3 task."""
+  records = {}
+  for arm, task, _, _ in _PRESENTATION3_CONTRACTS:
+    cfg = eval_impulse.load_env_cfg(task, play=False)
+    contract = eval_impulse._validate_sampled_env_contract(cfg, task)
+    cfg.scene.num_envs = 1
+    cfg.episode_length_s = float(cfg.sim.mujoco.timestep * cfg.decimation)
+    env = ManagerBasedRlEnv(cfg=cfg, device="cpu", render_mode=None)
+    snapshot = eval_impulse._install_episode_hook(env)
+    collector = eval_impulse._SampledTraceCollector(
+      env,
+      snapshot=snapshot,
+      treatment=arm,
+      task=task,
+      gamma=0.99,
+      event_i_ref_n_s=0.3088,
+      nail_geometry={
+        "nail_axis": [0.0, 0.0, -1.0],
+        "nail_xy_m": [0.5, 0.0],
+        "nail_radius_m": 0.012,
+        "source_sha256": "0" * 64,
+      },
+    )
+    try:
+      env.reset()
+      action = torch.zeros(
+        (1, env.action_manager.total_action_dim), device=env.device
+      )
+      env.step(action)
+      assert len(collector.completed) == 1
+      records[arm] = {
+        "task": task,
+        "contract": contract,
+        "trace": copy.deepcopy(collector.completed[0]),
+      }
+    finally:
+      env.close()
+  return records
+
+
+@pytest.mark.parametrize("arm", ("M", "V", "V+M"))
+def test_presentation3_real_completion_validates_and_persists_progress_schema(
+  tmp_path, presentation3_autoreset_records, arm
+):
+  """A real completion must survive validation and schema-v3 persistence."""
+  record = presentation3_autoreset_records[arm]
+  trace = record["trace"]
+  assert eval_impulse._validated_physical_trace_digest(
+    trace, require_recorded_digest=True
+  ) == trace["trace_digest"]
+  assert set(trace["guideline"]) == {
+    "entry_m",
+    "nail_m",
+    "next_gate",
+    "perpendicular_error_m",
+    "disarmed",
+    "progress_reward_name",
+    "progress_reward_present",
+    "progress_payout",
+  }
+  assert trace["guideline"]["progress_reward_name"] == "r_waypoint_progress"
+  assert trace["guideline"]["progress_reward_present"] is True
+  assert len(trace["guideline"]["progress_payout"]) == len(trace["action_tape"])
+
+  artifact = eval_impulse._persist_sampled_traces(
+    out_dir=tmp_path,
+    name=f"presentation3-{arm}-seed2",
+    sampled_rec={"control_steps": 1, "episodes": [trace]},
+    task=record["task"],
+    contract=record["contract"],
+    training_seed=2,
+    reset_seed=PRESENTATION3_RNG["reset_seed"],
+    observation_seed=PRESENTATION3_RNG["observation_seed"],
+    action_seed=PRESENTATION3_RNG["action_seed"],
+    nail_geometry=trace["nail_geometry"],
+    provenance={"checkpoint_sha256": "c" * 64},
+    mean_rollout_invariants={},
+  )
+  with eval_impulse.np.load(artifact["path"], allow_pickle=False) as saved:
+    payload = json.loads(eval_impulse.decode_payload_json(saved))
+  assert payload["guideline_trace_contract_version"] == 1
+  assert payload["weights"]["r_waypoint_progress"] == 8.0
+  assert payload["episodes"][0]["guideline"] == trace["guideline"]
+
+
+def test_presentation3_collector_records_actual_waypoint_progress_payout():
+  """Swapping the progress reward index for r_gate/zero must fail this test."""
+  arm, task, _, _ = _PRESENTATION3_CONTRACTS[0]
+  cfg = eval_impulse.load_env_cfg(task, play=False)
+  cfg.scene.num_envs = 1
+  env = ManagerBasedRlEnv(cfg=cfg, device="cpu", render_mode=None)
+  snapshot = eval_impulse._install_episode_hook(env)
+  collector = eval_impulse._SampledTraceCollector(
+    env,
+    snapshot=snapshot,
+    treatment=arm,
+    task=task,
+    gamma=0.99,
+    event_i_ref_n_s=0.3088,
+    nail_geometry={
+      "nail_axis": [0.0, 0.0, -1.0],
+      "nail_xy_m": [0.5, 0.0],
+      "nail_radius_m": 0.012,
+      "source_sha256": "0" * 64,
+    },
+  )
+  try:
+    env.reset()
+    env.sim.step()
+    env.metrics_manager.compute_substep()
+    tracker = getattr(env, eval_impulse._ENV_GUIDELINE_ATTR)
+    tracker.window_new_credit[:] = 0.25
+    before = env.reward_manager._episode_sums["r_waypoint_progress"].clone()
+    env.reward_manager.compute(env.step_dt)
+    actual = env.reward_manager._episode_sums["r_waypoint_progress"] - before
+    assert float(actual[0]) > 0.0
+
+    env.reset_buf = torch.ones(1, dtype=torch.bool, device=env.device)
+    env.reset_terminated = torch.zeros(1, dtype=torch.bool, device=env.device)
+    env.metrics_manager.compute()
+    assert collector.completed[0]["guideline"]["progress_payout"] == pytest.approx(
+      actual.tolist()
+    )
+  finally:
+    env.close()
+
+
+def test_presentation3_progress_identity_and_payout_are_digest_bound(
+  presentation3_autoreset_records,
+):
+  trace = copy.deepcopy(presentation3_autoreset_records["V"]["trace"])
+  baseline = eval_impulse._physical_trace_digest(trace)
+  wrong_name = copy.deepcopy(trace)
+  wrong_name["guideline"]["progress_reward_name"] = "r_gate"
+  assert eval_impulse._physical_trace_digest(wrong_name) != baseline
+  with pytest.raises(ValueError, match="progress reward identity"):
+    eval_impulse._validated_physical_trace_digest(
+      wrong_name, require_recorded_digest=False
+    )
+
+  wrong_payout = copy.deepcopy(trace)
+  wrong_payout["guideline"]["progress_payout"][0] += 0.125
+  assert eval_impulse._physical_trace_digest(wrong_payout) != baseline
+
+
+def test_presentation3_guideline_seed_fields_reduce_progress_not_gate_return(
+  presentation3_autoreset_records,
+):
+  record = presentation3_autoreset_records["M"]
+  fields = eval_impulse._guideline_seed_trace_fields(
+    [record["trace"]], contract=record["contract"], expected_episode_count=1
+  )
+  assert fields["waypoint_progress_reward_present"] is True
+  assert "actual_gate_return_total_sampled" not in fields
+  assert fields["actual_waypoint_progress_return_total_sampled"] == pytest.approx(
+    sum(record["trace"]["guideline"]["progress_payout"])
+  )
+
+
+def test_presentation3_row_fields_name_progress_without_gate_alias(
+  presentation3_autoreset_records,
+):
+  record = presentation3_autoreset_records["V+M"]
+  contract = eval_impulse._validate_presentation3_identity(
+    **_presentation3_identity_kwargs("V+M")
+  )
+  guideline_fields = eval_impulse._guideline_seed_trace_fields(
+    [record["trace"]], contract=contract, expected_episode_count=1
+  )
+  builder = getattr(eval_impulse, "_guideline_row_fields", None)
+  assert callable(builder), "guideline row-field builder is missing"
+
+  row_fields = builder(
+    task=record["task"],
+    checkpoint_path="model_199.pt",
+    contract=contract,
+    sampled_rec={"guideline_fields": guideline_fields},
+  )
+
+  assert row_fields["r_waypoint_progress_present"] is True
+  assert row_fields["r_waypoint_progress_weight"] == 8.0
+  assert row_fields["waypoint_progress_reward_present"] is True
+  assert "actual_waypoint_progress_return_total_sampled" in row_fields
+  assert "r_gate_present" not in row_fields
+  assert "actual_gate_return_total_sampled" not in row_fields
+  assert set(row_fields) <= set(eval_impulse.FIELDNAMES)
 
 
 def _synthetic_guideline_trace(source, *, arm="C0"):

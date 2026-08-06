@@ -46,6 +46,7 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 import mjlab.tasks  # noqa: F401  (register builtin tasks)
 import src.tasks  # noqa: F401  (register hammer tasks)
 from src.assets.robots.unitree_z1.z1_constants import HAMMER_HEAD_SITE_NAME
+from src.tasks.hammer.cat.hook import CatSoftHook
 from src.tasks.hammer.config.z1.env_cfgs import IMP_J_LIMIT, _guideline_observation
 from src.tasks.hammer.mdp.first_strike import (
   FirstStrikeEventTracker,
@@ -121,6 +122,12 @@ PRESENTATION3_ARM_TASKS = {
 }
 PRESENTATION3_TASK_TO_ARM = {
   task: arm for arm, task in PRESENTATION3_ARM_TASKS.items()
+}
+PRESENTATION3_CAMPAIGN = "presentation3"
+PRESENTATION3_EVALUATION_RNG = {
+  "reset": 2036072919,
+  "observation": 2046072933,
+  "action": 2056072941,
 }
 QUALITY_EVALUATION_REFERENCE_TASK = QUALITY_ARM_TASKS["FQ"]
 FQ3X8_TASKS = frozenset(
@@ -198,12 +205,26 @@ _TRACE_GUIDELINE_KEYS = (
   "entry_m", "nail_m", "next_gate", "perpendicular_error_m", "disarmed",
   "gate_reward_present", "gate_payout",
 )
+_TRACE_PRESENTATION3_GUIDELINE_KEYS = (
+  "entry_m", "nail_m", "next_gate", "perpendicular_error_m", "disarmed",
+  "progress_reward_name", "progress_reward_present", "progress_payout",
+)
+_GUIDELINE_TREATMENTS = frozenset(GUIDELINE_ARM_TASKS) | frozenset(
+  PRESENTATION3_ARM_TASKS
+)
 _GUIDELINE_SAMPLED_FIELDS = (
   "q90_terminal_descent_perpendicular_error_m_sampled",
   "all_six_gates_rate_sampled",
   "corridor_occupancy_mean_sampled",
   "backward_progress_count_mean_sampled",
   "actual_gate_return_total_sampled",
+)
+_PRESENTATION3_GUIDELINE_SAMPLED_FIELDS = (
+  "q90_terminal_descent_perpendicular_error_m_sampled",
+  "all_six_gates_rate_sampled",
+  "corridor_occupancy_mean_sampled",
+  "backward_progress_count_mean_sampled",
+  "actual_waypoint_progress_return_total_sampled",
 )
 _INSTRUMENTATION_ONLY_TRACE_KEYS = {
   "physical": {
@@ -256,11 +277,14 @@ FIELDNAMES = [
   "sampled_trace_path", "sampled_trace_digest",
   "sampled_trace_artifact_sha256", "campaign_config_sha256",
   "treatment_config_sha256",
-  "checkpoint_filename", "reset_position_range_rad", "windup_enabled",
-  "impedance_mode", "r_gate_present", "r_gate_weight",
-  "treatment_base_identity", "gate_reward_present", "reset_digest",
+  "checkpoint_filename", "reset_position_range_rad", "reset_velocity_range_rad",
+  "windup_enabled", "impedance_mode", "r_gate_present", "r_gate_weight",
+  "r_waypoint_progress_present", "r_waypoint_progress_weight",
+  "treatment_base_identity", "gate_reward_present",
+  "waypoint_progress_reward_present", "reset_digest",
   "guideline_geometry_digest",
   *_GUIDELINE_SAMPLED_FIELDS,
+  "actual_waypoint_progress_return_total_sampled",
   "nail_asset_sha256", "host", "timestamp_utc",
   "git_hash", "git_revision", "git_dirty",
   "asset_git_hash", "asset_git_revision", "asset_git_dirty",
@@ -338,9 +362,12 @@ def _physical_trace_payload(trace: Mapping) -> dict:
     guideline = trace.get("guideline")
     if not isinstance(guideline, Mapping):
       raise ValueError("guideline trace missing guideline mapping")
-    missing_guideline = [
-      key for key in _TRACE_GUIDELINE_KEYS if key not in guideline
-    ]
+    guideline_keys = (
+      _TRACE_PRESENTATION3_GUIDELINE_KEYS
+      if str(trace.get("task", "")) in PRESENTATION3_TASK_TO_ARM
+      else _TRACE_GUIDELINE_KEYS
+    )
+    missing_guideline = [key for key in guideline_keys if key not in guideline]
     if missing_guideline:
       raise ValueError(
         f"guideline trace missing channels: {missing_guideline}"
@@ -350,7 +377,7 @@ def _physical_trace_payload(trace: Mapping) -> dict:
       raise ValueError("guideline trace missing impulse_limits_n_m_s")
     payload["impulse_limits_n_m_s"] = trace["impulse_limits_n_m_s"]
     payload["guideline"] = {
-      key: guideline[key] for key in _TRACE_GUIDELINE_KEYS
+      key: guideline[key] for key in guideline_keys
     }
   return payload
 
@@ -363,9 +390,14 @@ def _validate_guideline_trace(trace: Mapping) -> None:
   """Fail closed on the additive, treatment-aware guideline trace contract."""
   task = str(trace.get("task", ""))
   arm = str(trace.get("arm", ""))
-  expected_arm = GUIDELINE_TASK_TO_ARM.get(task)
+  presentation3 = task in PRESENTATION3_TASK_TO_ARM
+  expected_arm = (
+    PRESENTATION3_TASK_TO_ARM.get(task)
+    if presentation3
+    else GUIDELINE_TASK_TO_ARM.get(task)
+  )
   has_version = "guideline_trace_contract_version" in trace
-  if expected_arm is None and arm not in GUIDELINE_ARM_TASKS:
+  if expected_arm is None and arm not in _GUIDELINE_TREATMENTS:
     if has_version or "guideline" in trace:
       raise ValueError("guideline trace contract cannot label a legacy task")
     return
@@ -374,8 +406,15 @@ def _validate_guideline_trace(trace: Mapping) -> None:
   if not has_version:
     raise ValueError("guideline trace missing guideline_trace_contract_version")
   guideline = trace["guideline"]
+  summary_trace = trace
+  if presentation3:
+    summary_trace = dict(trace)
+    summary_guideline = dict(guideline)
+    summary_guideline["gate_reward_present"] = True
+    summary_guideline["gate_payout"] = guideline["progress_payout"]
+    summary_trace["guideline"] = summary_guideline
   try:
-    summarize_guideline_episode(trace)
+    summarize_guideline_episode(summary_trace)
   except ValueError as error:
     raise ValueError(f"guideline trace invalid: {error}") from error
 
@@ -409,14 +448,25 @@ def _validate_guideline_trace(trace: Mapping) -> None:
   if not np.allclose(errors, expected_errors, rtol=0.0, atol=1e-6):
     raise ValueError("guideline perpendicular error disagrees with frozen geometry")
 
-  gate_reward_present = guideline["gate_reward_present"]
-  payouts = np.asarray(guideline["gate_payout"], dtype=np.float64)
   control_count = len(trace.get("action_tape", ()))
-  if payouts.shape != (control_count,):
-    raise ValueError("guideline.gate_payout must be a control-rate stream")
-  expected_present = arm == "C-Gate"
-  if gate_reward_present is not expected_present:
-    raise ValueError("guideline gate-reward presence disagrees with treatment")
+  if presentation3:
+    if guideline["progress_reward_name"] != "r_waypoint_progress":
+      raise ValueError("guideline progress reward identity drift")
+    if guideline["progress_reward_present"] is not True:
+      raise ValueError("guideline progress reward presence drift")
+    payouts = np.asarray(guideline["progress_payout"], dtype=np.float64)
+    if payouts.shape != (control_count,):
+      raise ValueError(
+        "guideline.progress_payout must be a control-rate stream"
+      )
+  else:
+    gate_reward_present = guideline["gate_reward_present"]
+    payouts = np.asarray(guideline["gate_payout"], dtype=np.float64)
+    if payouts.shape != (control_count,):
+      raise ValueError("guideline.gate_payout must be a control-rate stream")
+    expected_present = arm == "C-Gate"
+    if gate_reward_present is not expected_present:
+      raise ValueError("guideline gate-reward presence disagrees with treatment")
 
 
 def _validated_physical_trace_digest(
@@ -1203,6 +1253,34 @@ def _validate_presentation3_env_contract(env_cfg, task: str, treatment: str) -> 
   metric_names = tuple(env_cfg.metrics)
   if metric_names.index("waypoint_progress") != metric_names.index("first_strike") + 1:
     raise ValueError(f"{task}: waypoint guidance metric ordering drift")
+  if set(waypoint.params) != {"robot_cfg", "nail_cfg"}:
+    raise ValueError(f"{task}: WaypointProgressTracker params drift")
+  waypoint_robot_cfg = waypoint.params["robot_cfg"]
+  waypoint_nail_cfg = waypoint.params["nail_cfg"]
+  if (
+    waypoint_robot_cfg.name != "robot"
+    or tuple(waypoint_robot_cfg.site_names or ()) != (HAMMER_HEAD_SITE_NAME,)
+  ):
+    raise ValueError(f"{task}: waypoint robot site binding drift")
+  if (
+    waypoint_nail_cfg.name != "nail_block"
+    or tuple(waypoint_nail_cfg.site_names or ()) != ("nail_top",)
+  ):
+    raise ValueError(f"{task}: waypoint nail site binding drift")
+
+  reset_velocity_range = tuple(
+    float(value)
+    for value in env_cfg.events["reset_robot_joints"].params["velocity_range"]
+  )
+  if reset_velocity_range != (0.0, 0.0):
+    raise ValueError(f"{task}: fixed reset velocity must remain (0.0, 0.0)")
+  if env_cfg.scale_rewards_by_dt is not True:
+    raise ValueError(f"{task}: reward dt scaling must be literal True")
+  if (
+    env_cfg.observations["actor"].enable_corruption is not True
+    or env_cfg.observations["critic"].enable_corruption is not False
+  ):
+    raise ValueError(f"{task}: literal observation corruption flags drift")
 
   expected_observations = {
     "next_gate_vector": (next_gate_vector, 3),
@@ -1232,10 +1310,35 @@ def _validate_presentation3_env_contract(env_cfg, task: str, treatment: str) -> 
 
   cat_soft = env_cfg.metrics["cat_soft"]
   params = cat_soft.params
-  if bool(params.get("use_impulse")) is not True:
+  expected_cat_params = {
+    "use_vel", "use_impulse", "imp_limit", "imp_max_p", "imp_seed",
+    "robot_cfg", "limit", "max_p", "min_p", "tau",
+  }
+  if expected_velocity_cat:
+    expected_cat_params.add("vel_detection")
+  if (
+    cat_soft.func is not CatSoftHook
+    or cat_soft.per_substep is not False
+    or set(params) != expected_cat_params
+  ):
+    raise ValueError(f"{task}: CaT metric configuration drift")
+  if (
+    type(params.get("use_impulse")) is not bool
+    or type(params.get("use_vel")) is not bool
+  ):
+    raise ValueError(f"{task}: literal CaT booleans required")
+  if params["use_impulse"] is not True:
+    raise ValueError(f"{task}: impulse-CaT setting drift")
+  cat_robot_cfg = params["robot_cfg"]
+  if (
+    cat_robot_cfg.name != "robot"
+    or tuple(cat_robot_cfg.joint_names or ()) != ARM_JOINTS
+  ):
+    raise ValueError(f"{task}: CaT robot binding drift")
+  if float(params["imp_seed"]) != 1e-3:
     raise ValueError(f"{task}: impulse-CaT setting drift")
   if (
-    bool(params.get("use_vel")) is not expected_velocity_cat
+    params["use_vel"] is not expected_velocity_cat
     or float(params.get("limit", float("nan"))) != 3.1415
     or float(params.get("max_p", float("nan"))) != 0.5
     or float(params.get("min_p", float("nan"))) != 0.0
@@ -1264,6 +1367,9 @@ def _validate_presentation3_env_contract(env_cfg, task: str, treatment: str) -> 
     "guideline_observation_width": sum(
       width for _, width in expected_observations.values()
     ),
+    "reset_velocity_noise_min_rad_s": reset_velocity_range[0],
+    "reset_velocity_noise_max_rad_s": reset_velocity_range[1],
+    "scale_rewards_by_dt": True,
   }
 
 
@@ -1602,6 +1708,7 @@ class _SampledTraceCollector:
     self._impact_payout: list[torch.Tensor] = []
     self._delivered_payout: list[torch.Tensor] = []
     self._gate_payout: list[torch.Tensor] = []
+    self._progress_payout: list[torch.Tensor] = []
 
     robot = env.scene["robot"]
     nail = env.scene["nail_block"]
@@ -1623,7 +1730,7 @@ class _SampledTraceCollector:
     if self._tracker is None:
       raise RuntimeError("sampled evaluator requires FirstStrikeEventTracker")
     self._guideline_tracker = getattr(env, _ENV_GUIDELINE_ATTR, None)
-    if self.treatment in GUIDELINE_ARM_TASKS and not isinstance(
+    if self.treatment in _GUIDELINE_TREATMENTS and not isinstance(
       self._guideline_tracker, WaypointProgressTracker
     ):
       raise RuntimeError(
@@ -1637,10 +1744,19 @@ class _SampledTraceCollector:
     self._impact_idx = names.index("impact_progress")
     self._delivered_idx = names.index("delivered_impulse")
     self._gate_idx = names.index("r_gate") if "r_gate" in names else None
+    self._progress_idx = (
+      names.index("r_waypoint_progress")
+      if "r_waypoint_progress" in names else None
+    )
     if self.treatment == "C0" and self._gate_idx is not None:
       raise RuntimeError("C0 sampled evaluator requires literal r_gate absence")
     if self.treatment == "C-Gate" and self._gate_idx is None:
       raise RuntimeError("C-Gate sampled evaluator requires r_gate")
+    if self.treatment in PRESENTATION3_ARM_TASKS:
+      if self._progress_idx is None or self._gate_idx is not None:
+        raise RuntimeError(
+          "Presentation3 sampled evaluator requires only r_waypoint_progress"
+        )
     self._axis = torch.tensor(
       self.nail_geometry["nail_axis"], dtype=torch.float32, device=env.device
     )
@@ -1807,14 +1923,20 @@ class _SampledTraceCollector:
         (step_reward[:, self._delivered_idx] * self.env.step_dt).detach().clone()
       )
       if isinstance(self._guideline_tracker, WaypointProgressTracker):
-        gate_payout = (
-          step_reward[:, self._gate_idx] * self.env.step_dt
-          if self._gate_idx is not None
-          else torch.zeros(
-            self.env.num_envs, device=self.env.device, dtype=step_reward.dtype
+        if self.treatment in PRESENTATION3_ARM_TASKS:
+          progress_payout = (
+            step_reward[:, self._progress_idx] * self.env.step_dt
           )
-        )
-        self._gate_payout.append(gate_payout.detach().clone())
+          self._progress_payout.append(progress_payout.detach().clone())
+        else:
+          gate_payout = (
+            step_reward[:, self._gate_idx] * self.env.step_dt
+            if self._gate_idx is not None
+            else torch.zeros(
+              self.env.num_envs, device=self.env.device, dtype=step_reward.dtype
+            )
+          )
+          self._gate_payout.append(gate_payout.detach().clone())
       done_ids = torch.nonzero(self.env.reset_buf, as_tuple=False).flatten()
       for env_id in done_ids.tolist():
         self._capture_completed(env_id)
@@ -1954,27 +2076,39 @@ class _SampledTraceCollector:
       "episode_depth_m": float(self.snapshot["depth"][env_id]),
     }
     if isinstance(self._guideline_tracker, WaypointProgressTracker):
-      gate_payout = self._slice_control(self._gate_payout, env_id)
+      common_guideline = {
+        "entry_m": _json_values(self._guideline_tracker.entry[env_id]),
+        "nail_m": _json_values(self._guideline_tracker.nail[env_id]),
+        "next_gate": _json_values(
+          self._slice_guideline_substep("next_gate", env_id)
+        ),
+        "perpendicular_error_m": _json_values(
+          self._slice_guideline_substep("perpendicular_error_m", env_id)
+        ),
+        "disarmed": _json_values(
+          self._slice_guideline_substep("disarmed", env_id)
+        ),
+      }
+      if self.treatment in PRESENTATION3_ARM_TASKS:
+        progress_payout = self._slice_control(self._progress_payout, env_id)
+        reward_guideline = {
+          "progress_reward_name": "r_waypoint_progress",
+          "progress_reward_present": True,
+          "progress_payout": _json_values(progress_payout),
+        }
+      else:
+        gate_payout = self._slice_control(self._gate_payout, env_id)
+        reward_guideline = {
+          "gate_reward_present": self._gate_idx is not None,
+          "gate_payout": _json_values(gate_payout),
+        }
       trace.update(
         {
           "guideline_trace_contract_version": GUIDELINE_TRACE_CONTRACT_VERSION,
           "impulse_limits_n_m_s": list(self.impulse_limits_n_m_s),
           "guideline": {
-            "entry_m": _json_values(self._guideline_tracker.entry[env_id]),
-            "nail_m": _json_values(self._guideline_tracker.nail[env_id]),
-            "next_gate": _json_values(
-              self._slice_guideline_substep("next_gate", env_id)
-            ),
-            "perpendicular_error_m": _json_values(
-              self._slice_guideline_substep(
-                "perpendicular_error_m", env_id
-              )
-            ),
-            "disarmed": _json_values(
-              self._slice_guideline_substep("disarmed", env_id)
-            ),
-            "gate_reward_present": self._gate_idx is not None,
-            "gate_payout": _json_values(gate_payout),
+            **common_guideline,
+            **reward_guideline,
           },
         }
       )
@@ -2128,13 +2262,25 @@ def _guideline_seed_trace_fields(
   expected_episode_count: int = EXPECTED_EPISODES_PER_SEED,
 ) -> dict:
   """Reduce one fixed-reset guideline seed and bind shared trace identities."""
-  if str(contract.get("treatment")) not in GUIDELINE_ARM_TASKS:
-    raise ValueError("guideline seed fields require a C0/C-Gate contract")
-  summary = aggregate_guideline_seed(
-    episodes, expected_count=expected_episode_count
-  )
+  treatment = str(contract.get("treatment"))
+  if treatment not in _GUIDELINE_TREATMENTS:
+    raise ValueError("guideline seed fields require a guideline treatment")
+  presentation3 = treatment in PRESENTATION3_ARM_TASKS
   for trace in episodes:
     _validated_physical_trace_digest(trace, require_recorded_digest=False)
+  summary_episodes = episodes
+  if presentation3:
+    summary_episodes = []
+    for trace in episodes:
+      summary_trace = dict(trace)
+      summary_guideline = dict(trace["guideline"])
+      summary_guideline["gate_reward_present"] = True
+      summary_guideline["gate_payout"] = summary_guideline["progress_payout"]
+      summary_trace["guideline"] = summary_guideline
+      summary_episodes.append(summary_trace)
+  summary = aggregate_guideline_seed(
+    summary_episodes, expected_count=expected_episode_count
+  )
 
   reset_digests = {str(trace.get("reset_state_digest", "")) for trace in episodes}
   if "" in reset_digests or len(reset_digests) != 1:
@@ -2151,6 +2297,33 @@ def _guideline_seed_trace_fields(
   }
   if len(geometry_digests) != 1:
     raise ValueError("guideline geometry drift across sampled episodes")
+  common = {
+    **{
+      key: summary[key]
+      for key in _GUIDELINE_SAMPLED_FIELDS
+      if key != "actual_gate_return_total_sampled"
+    },
+    "reset_digest": next(iter(reset_digests)),
+    "guideline_geometry_digest": next(iter(geometry_digests)),
+  }
+  if presentation3:
+    names = {
+      trace["guideline"]["progress_reward_name"] for trace in episodes
+    }
+    presence = {
+      trace["guideline"]["progress_reward_present"] for trace in episodes
+    }
+    if names != {"r_waypoint_progress"} or presence != {True}:
+      raise ValueError(
+        "guideline waypoint-progress identity drift across sampled episodes"
+      )
+    return {
+      **common,
+      "actual_waypoint_progress_return_total_sampled": summary[
+        "actual_gate_return_total_sampled"
+      ],
+      "waypoint_progress_reward_present": True,
+    }
   gate_presence = {
     trace["guideline"]["gate_reward_present"] for trace in episodes
   }
@@ -2158,10 +2331,11 @@ def _guideline_seed_trace_fields(
   if gate_presence != {expected_presence}:
     raise ValueError("guideline gate-reward presence drift across sampled episodes")
   return {
-    **{key: summary[key] for key in _GUIDELINE_SAMPLED_FIELDS},
+    **common,
+    "actual_gate_return_total_sampled": summary[
+      "actual_gate_return_total_sampled"
+    ],
     "gate_reward_present": expected_presence,
-    "reset_digest": next(iter(reset_digests)),
-    "guideline_geometry_digest": next(iter(geometry_digests)),
   }
 
 
@@ -2253,15 +2427,18 @@ def _rollout_balanced_sampled(
     episode_metrics, expected_episode_count=EXPECTED_EPISODES_PER_SEED
   )
   guideline_fields = {}
-  if contract["treatment"] in GUIDELINE_ARM_TASKS:
+  if contract["treatment"] in _GUIDELINE_TREATMENTS:
     guideline_fields = _guideline_seed_trace_fields(
       selected,
       contract=contract,
       expected_episode_count=EXPECTED_EPISODES_PER_SEED,
     )
-    aggregate.update(
-      {key: guideline_fields[key] for key in _GUIDELINE_SAMPLED_FIELDS}
+    sampled_fields = (
+      _PRESENTATION3_GUIDELINE_SAMPLED_FIELDS
+      if contract["treatment"] in PRESENTATION3_ARM_TASKS
+      else _GUIDELINE_SAMPLED_FIELDS
     )
+    aggregate.update({key: guideline_fields[key] for key in sampled_fields})
   result = {
     "lam": [
       torch.tensor(trace["episode_peak_lambda"], dtype=torch.float32)
@@ -2311,6 +2488,8 @@ def _persist_sampled_traces(
   }
   if bool(contract.get("r_gate_present")):
     weights["r_gate"] = contract["r_gate_weight"]
+  if contract["treatment"] in PRESENTATION3_ARM_TASKS:
+    weights["r_waypoint_progress"] = contract["guidance_weight"]
   payload = {
     "schema_version": 3,
     "selection": "first two completed episodes from each of 256 environments",
@@ -2334,7 +2513,7 @@ def _persist_sampled_traces(
     "control_steps_until_quota": sampled_rec["control_steps"],
     "episodes": sampled_rec["episodes"],
   }
-  if contract["treatment"] in GUIDELINE_ARM_TASKS:
+  if contract["treatment"] in _GUIDELINE_TREATMENTS:
     payload["guideline_trace_contract_version"] = (
       GUIDELINE_TRACE_CONTRACT_VERSION
     )
@@ -2441,6 +2620,10 @@ def _validate_evaluation_campaign(
       raise ValueError(
         "guideline evaluation requires --campaign cartesian-guideline-pilot"
       )
+    if task in PRESENTATION3_TASK_TO_ARM:
+      raise ValueError(
+        "presentation3 evaluation requires --campaign presentation3"
+      )
     return
   if campaign == "fq3x8":
     allowed_tasks = FQ3X8_TASKS
@@ -2450,6 +2633,10 @@ def _validate_evaluation_campaign(
     allowed_tasks = frozenset(GUIDELINE_TASK_TO_ARM)
     expected_rng = GUIDELINE_PILOT_EVALUATION_RNG
     label = "guideline pilot"
+  elif campaign == PRESENTATION3_CAMPAIGN:
+    allowed_tasks = frozenset(PRESENTATION3_TASK_TO_ARM)
+    expected_rng = PRESENTATION3_EVALUATION_RNG
+    label = "presentation3"
   else:
     raise ValueError(f"unknown evaluation campaign {campaign!r}")
   if task not in allowed_tasks:
@@ -2550,6 +2737,113 @@ def _validate_guideline_pilot_identity(
   return contract
 
 
+def _validate_presentation3_identity(
+  *,
+  campaign: str | None,
+  env_cfg,
+  task: str,
+  training_seed: int,
+  expected_checkpoint_sha256: str,
+  accepted_manifest_sha256: str,
+  training_code_revision: str,
+  training_asset_revision: str,
+  code_git: Mapping,
+  asset_git: Mapping,
+) -> dict:
+  """Bind one Presentation3 row to its native treatment and provenance."""
+  if campaign != PRESENTATION3_CAMPAIGN or task not in PRESENTATION3_TASK_TO_ARM:
+    raise ValueError(
+      "presentation3 row identity requires its exact campaign and registered task"
+    )
+  contract = dict(_validate_sampled_env_contract(env_cfg, task))
+  if (
+    isinstance(training_seed, bool)
+    or not isinstance(training_seed, int)
+    or training_seed not in range(2, 8)
+  ):
+    raise ValueError("presentation3 permits only training seeds 2..7")
+
+  frozen_inputs = (
+    ("checkpoint SHA-256", expected_checkpoint_sha256, 64),
+    ("manifest SHA-256", accepted_manifest_sha256, 64),
+    ("training code revision", training_code_revision, 40),
+    ("training asset revision", training_asset_revision, 40),
+  )
+  for label, value, length in frozen_inputs:
+    if len(value) != length or any(
+      character not in "0123456789abcdefABCDEF" for character in value
+    ):
+      raise ValueError(f"presentation3 {label} must be frozen and hexadecimal")
+
+  for label, provenance in (("code", code_git), ("asset", asset_git)):
+    revision = str(provenance.get("revision", "unknown"))
+    if (
+      bool(provenance.get("dirty", True))
+      or len(revision) != 40
+      or any(
+        character not in "0123456789abcdefABCDEF" for character in revision
+      )
+    ):
+      raise RuntimeError(f"presentation3 requires clean {label} provenance")
+  if str(asset_git["revision"]) != training_asset_revision:
+    raise RuntimeError("presentation3 asset revision mismatch")
+
+  contract.update(
+    {
+      "training_seed": training_seed,
+      "expected_checkpoint_sha256": expected_checkpoint_sha256,
+      "accepted_manifest_sha256": accepted_manifest_sha256,
+      "training_code_revision": training_code_revision,
+      "training_asset_revision": training_asset_revision,
+      "reset_position_range_rad": (0.0, 0.0),
+      "reset_velocity_range_rad": (
+        contract["reset_velocity_noise_min_rad_s"],
+        contract["reset_velocity_noise_max_rad_s"],
+      ),
+      "windup_enabled": False,
+      "impedance_mode": "fixed",
+      "r_waypoint_progress_present": True,
+      "r_waypoint_progress_weight": contract["guidance_weight"],
+      "payout_semantics": PAYOUT_SEMANTICS[contract["treatment"]],
+    }
+  )
+  return contract
+
+
+def _guideline_row_fields(
+  *, task: str, checkpoint_path: str | Path, contract: Mapping,
+  sampled_rec: Mapping,
+) -> dict:
+  """Return treatment-specific guideline CSV fields without reward aliases."""
+  if task in GUIDELINE_TASK_TO_ARM:
+    return {
+      "checkpoint_filename": Path(checkpoint_path).name,
+      "reset_position_range_rad": contract["reset_position_range_rad"],
+      "windup_enabled": contract["windup_enabled"],
+      "impedance_mode": contract["impedance_mode"],
+      "r_gate_present": contract["r_gate_present"],
+      "r_gate_weight": contract["r_gate_weight"],
+      "treatment_base_identity": contract["treatment_base_identity"],
+      **sampled_rec["guideline_fields"],
+    }
+  if task in PRESENTATION3_TASK_TO_ARM:
+    return {
+      "checkpoint_filename": Path(checkpoint_path).name,
+      "reset_position_range_rad": contract["reset_position_range_rad"],
+      "reset_velocity_range_rad": contract["reset_velocity_range_rad"],
+      "windup_enabled": contract["windup_enabled"],
+      "impedance_mode": contract["impedance_mode"],
+      "r_waypoint_progress_present": contract[
+        "r_waypoint_progress_present"
+      ],
+      "r_waypoint_progress_weight": contract[
+        "r_waypoint_progress_weight"
+      ],
+      **sampled_rec["guideline_fields"],
+    }
+  return {}
+
+
 def _enforce_postwrite_invariants(
   *,
   name: str,
@@ -2613,11 +2907,12 @@ def main() -> None:
                   help="exact registered C/D-prime/F/E treatment task used to train this checkpoint")
   ap.add_argument(
     "--campaign",
-    choices=("fq3x8", GUIDELINE_PILOT_CAMPAIGN),
+    choices=("fq3x8", GUIDELINE_PILOT_CAMPAIGN, PRESENTATION3_CAMPAIGN),
     default=None,
     help=(
       "optional frozen evaluation contract; fq3x8 binds its three arms and RNG "
-      "streams, while cartesian-guideline-pilot exclusively admits C0/C-Gate"
+      "streams, cartesian-guideline-pilot exclusively admits C0/C-Gate, and "
+      "presentation3 binds M/V/V+M to its frozen RNG population"
     ),
   )
   ap.add_argument("--ckpt", required=True, help="checkpoint .pt path")
@@ -2753,6 +3048,23 @@ def main() -> None:
       code_git=code_git,
       asset_git=asset_git,
     )
+  elif args.task in PRESENTATION3_TASK_TO_ARM:
+    code_repo = Path(__file__).resolve().parents[1]
+    asset_repo = Path(args.nail_asset).resolve().parents[2]
+    code_git = _git_provenance(code_repo)
+    asset_git = _git_provenance(asset_repo)
+    contract = _validate_presentation3_identity(
+      campaign=args.campaign,
+      env_cfg=env_cfg,
+      task=args.task,
+      training_seed=training_seed,
+      expected_checkpoint_sha256=args.expected_checkpoint_sha256,
+      accepted_manifest_sha256=args.accepted_manifest_sha256,
+      training_code_revision=args.training_code_revision,
+      training_asset_revision=args.training_asset_revision,
+      code_git=code_git,
+      asset_git=asset_git,
+    )
   env_cfg.scene.num_envs = args.num_envs
   env_cfg.episode_length_s = args.episode_len_s
   if (
@@ -2762,7 +3074,10 @@ def main() -> None:
     env_cfg.metrics["cat_soft"].params["imp_max_p"] = args.imp_max_p
   if args.task not in QUALITY_TASK_TO_ARM:
     _ensure_first_strike_instrumentation(env_cfg)
-  if args.task not in GUIDELINE_TASK_TO_ARM:
+  if (
+    args.task not in GUIDELINE_TASK_TO_ARM
+    and args.task not in PRESENTATION3_TASK_TO_ARM
+  ):
     contract = _validate_sampled_env_contract(env_cfg, args.task)
   agent_cfg = load_rl_cfg(args.task)
   runner_cls = load_runner_cls(args.task) or MjlabOnPolicyRunner
@@ -2961,18 +3276,12 @@ def main() -> None:
     if asset_git["dirty"]
     else str(asset_git["revision"])
   )
-  guideline_row_fields = {}
-  if args.task in GUIDELINE_TASK_TO_ARM:
-    guideline_row_fields = {
-      "checkpoint_filename": Path(checkpoint_path).name,
-      "reset_position_range_rad": contract["reset_position_range_rad"],
-      "windup_enabled": contract["windup_enabled"],
-      "impedance_mode": contract["impedance_mode"],
-      "r_gate_present": contract["r_gate_present"],
-      "r_gate_weight": contract["r_gate_weight"],
-      "treatment_base_identity": contract["treatment_base_identity"],
-      **sampled_rec["guideline_fields"],
-    }
+  guideline_row_fields = _guideline_row_fields(
+    task=args.task,
+    checkpoint_path=checkpoint_path,
+    contract=contract,
+    sampled_rec=sampled_rec,
+  )
 
   row = {
     "name": name,
