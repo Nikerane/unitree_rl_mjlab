@@ -314,6 +314,135 @@ _QUALITY_CONTRACT_WEIGHTS = (
 )
 
 
+# These are the three already-trained Presentation3 identities.  The evaluator
+# must bind their task semantics before a stochastic sampled rollout, rather
+# than treating the task ID as an interchangeable label.
+_PRESENTATION3_CONTRACTS = (
+  (
+    "M",
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Delivered4",
+    4.0,
+    False,
+  ),
+  (
+    "V",
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel",
+    2.0,
+    True,
+  ),
+  (
+    "V+M",
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4",
+    4.0,
+    True,
+  ),
+)
+
+
+@pytest.mark.parametrize(
+  ("arm", "task", "delivered_weight", "velocity_cat"),
+  _PRESENTATION3_CONTRACTS,
+)
+def test_sampled_contract_binds_each_presentation3_task_identity(
+  arm, task, delivered_weight, velocity_cat
+):
+  """Wrong task mapping, dose, CaT setting, caps, or observations must fail.
+
+  This catches a future change that admits a Presentation3 checkpoint under a
+  different registered task contract.  All expected values are hand-frozen
+  from the preregistered 2x2, not derived by the evaluator.
+  """
+  cfg = eval_impulse.load_env_cfg(task, play=False)
+
+  contract = eval_impulse._validate_sampled_env_contract(cfg, task)
+
+  assert contract["treatment"] == arm
+  assert contract["guidance_weight"] == 8.0
+  assert contract["delivered_weight"] == delivered_weight
+  assert contract["velocity_cat_enabled"] is velocity_cat
+  assert contract["velocity_detection"] == (
+    "substep" if velocity_cat else "disabled"
+  )
+  assert contract["imp_max_p"] == 0.0
+  assert contract["impulse_limits_n_m_s"] == [1.64, 3.28, 1.64, 1.64, 1.64, 1.64]
+  assert contract["reset_position_noise_min_rad"] == 0.0
+  assert contract["reset_position_noise_max_rad"] == 0.0
+  assert contract["guideline_observation_width"] == 7
+
+
+@pytest.mark.parametrize(
+  ("task", "mutate", "message"),
+  (
+    (
+      "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Delivered4",
+      lambda cfg: cfg.rewards["delivered_impulse"].__setattr__("weight", 2.0),
+      "configured maximize weights",
+    ),
+    (
+      "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel",
+      lambda cfg: cfg.metrics["cat_soft"].params.__setitem__(
+        "vel_detection", "control_rate"
+      ),
+      "velocity-CaT",
+    ),
+    (
+      "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4",
+      lambda cfg: cfg.metrics["cat_soft"].params.__setitem__(
+        "imp_limit", [1.0] * 6
+      ),
+      "impulse limits",
+    ),
+    (
+      "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Delivered4",
+      lambda cfg: cfg.metrics["cat_soft"].params.__setitem__("use_impulse", False),
+      "impulse-CaT",
+    ),
+    (
+      "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4",
+      lambda cfg: cfg.observations["actor"].terms.pop("waypoint_progress_state"),
+      "guideline observation",
+    ),
+  ),
+)
+def test_sampled_contract_rejects_presentation3_identity_mutations(
+  task, mutate, message
+):
+  """Mutation probes: every frozen Presentation3 axis is fail-closed."""
+  cfg = eval_impulse.load_env_cfg(task, play=False)
+  mutate(cfg)
+
+  with pytest.raises(ValueError, match=message):
+    eval_impulse._validate_sampled_env_contract(cfg, task)
+
+
+def test_presentation3_main_rejects_native_imp_max_before_evaluator_overwrite(
+  monkeypatch
+):
+  """The evaluator must not heal an active-impulse training config to log-only."""
+  task = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel"
+  cfg = eval_impulse.load_env_cfg(task, play=False)
+  cfg.metrics["cat_soft"].params["imp_max_p"] = 0.25
+  monkeypatch.setattr(eval_impulse, "load_env_cfg", lambda *args, **kwargs: cfg)
+
+  def reached_post_validation(*args, **kwargs):
+    raise RuntimeError("past-presentation3-validation")
+
+  monkeypatch.setattr(eval_impulse, "load_rl_cfg", reached_post_validation)
+  monkeypatch.setattr(
+    sys,
+    "argv",
+    [
+      "eval_impulse.py",
+      "--task", task,
+      "--ckpt", "model_499.pt",
+      "--training-seed", "2",
+    ],
+  )
+
+  with pytest.raises(ValueError, match="imp_max_p"):
+    eval_impulse.main()
+
+
 @pytest.mark.parametrize(
   ("arm", "expected_treatment", "expected_weights"), _QUALITY_CONTRACT_WEIGHTS
 )

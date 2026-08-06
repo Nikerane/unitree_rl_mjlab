@@ -61,6 +61,7 @@ from src.tasks.hammer.mdp.guideline import (
   completed_gate_fraction,
   guideline_perpendicular_error,
   next_gate_vector,
+  ordered_waypoint_progress_reward,
   waypoint_progress_state,
   ordered_gate_progress_reward,
 )
@@ -69,6 +70,7 @@ from src.tasks.hammer.mdp.rewards import (
   FirstStrikeImpactRewardTerm,
   clamped_nail_depth,
 )
+from src.tasks.hammer.mdp.velocity_bound import SubstepPeakJointVel
 from evaluation.analysis.terminal_funnel import (
     decode_payload_json,
     encode_payload_json,
@@ -112,6 +114,14 @@ GUIDELINE_ARM_TASKS = {
 GUIDELINE_TASK_TO_ARM = {
   task: arm for arm, task in GUIDELINE_ARM_TASKS.items()
 }
+PRESENTATION3_ARM_TASKS = {
+  "M": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Delivered4",
+  "V": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel",
+  "V+M": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4",
+}
+PRESENTATION3_TASK_TO_ARM = {
+  task: arm for arm, task in PRESENTATION3_ARM_TASKS.items()
+}
 QUALITY_EVALUATION_REFERENCE_TASK = QUALITY_ARM_TASKS["FQ"]
 FQ3X8_TASKS = frozenset(
   QUALITY_ARM_TASKS[arm] for arm in ("F8", "B8", "FQ")
@@ -152,6 +162,9 @@ PAYOUT_SEMANTICS = {
   "B8": "actual_event_center_blind_bounded",
   "C0": "actual_event_linear_gate_absent",
   "C-Gate": "actual_event_linear_plus_actual_ordered_gate",
+  "M": "actual_event_linear_waypoint_progress_delivered4",
+  "V": "actual_event_linear_waypoint_progress_velocity_cat",
+  "V+M": "actual_event_linear_waypoint_progress_velocity_cat_delivered4",
 }
 
 _TRACE_PHYSICAL_KEYS = (
@@ -1150,13 +1163,123 @@ def _validate_native_guideline_env_contract(env_cfg, task: str) -> dict:
   }
 
 
-def _validate_sampled_env_contract(env_cfg, task: str) -> dict:
-  if task not in TASK_TO_ARM and task not in QUALITY_TASK_TO_ARM:
-    raise ValueError(
-      "sampled first-strike evaluation requires a registered legacy or strict "
-      f"quality task, got {task!r}"
+def _validate_presentation3_env_contract(env_cfg, task: str, treatment: str) -> dict:
+  """Bind the sampled Presentation3 arms to their preregistered 2x2 cells."""
+  expected_velocity_cat = treatment in ("V", "V+M")
+  guidance = env_cfg.rewards.get("r_waypoint_progress")
+  if (
+    guidance is None
+    or guidance.func is not ordered_waypoint_progress_reward
+    or float(guidance.weight) != 8.0
+    or guidance.params != {}
+    or "r_gate" in env_cfg.rewards
+    or "r_imit" in env_cfg.rewards
+  ):
+    raise ValueError(f"{task}: waypoint guidance reward drift")
+
+  impact = env_cfg.rewards["impact_progress"]
+  delivered = env_cfg.rewards["delivered_impulse"]
+  if (
+    impact.func is not FirstStrikeImpactRewardTerm
+    or float(impact.params.get("v_expected", float("nan"))) != 1.0
+    or delivered.func is not FirstStrikeDeliveredRewardTerm
+    or delivered.params.get("saturate") is not False
+    or float(delivered.params.get("i_ref", float("nan"))) != 0.3088
+  ):
+    raise ValueError(f"{task}: first-strike reward semantics drift")
+
+  first_strike = env_cfg.metrics.get("first_strike")
+  waypoint = env_cfg.metrics.get("waypoint_progress")
+  if (
+    first_strike is None
+    or first_strike.func is not FirstStrikeEventTracker
+    or first_strike.per_substep is not True
+    or first_strike.reduce != "last"
+    or waypoint is None
+    or waypoint.func is not WaypointProgressTracker
+    or waypoint.per_substep is not True
+  ):
+    raise ValueError(f"{task}: waypoint guidance instrumentation drift")
+  metric_names = tuple(env_cfg.metrics)
+  if metric_names.index("waypoint_progress") != metric_names.index("first_strike") + 1:
+    raise ValueError(f"{task}: waypoint guidance metric ordering drift")
+
+  expected_observations = {
+    "next_gate_vector": (next_gate_vector, 3),
+    "completed_gate_fraction": (completed_gate_fraction, 1),
+    "guideline_perpendicular_error": (guideline_perpendicular_error, 1),
+    "waypoint_progress_state": (waypoint_progress_state, 2),
+  }
+  expected_observation_names = tuple(expected_observations)
+  for group_name in ("actor", "critic"):
+    terms = env_cfg.observations[group_name].terms
+    configured_names = tuple(
+      name for name, term in terms.items() if term.func is _guideline_observation
     )
-  treatment = TASK_TO_ARM.get(task, QUALITY_TASK_TO_ARM.get(task))
+    if (
+      configured_names != expected_observation_names
+      or tuple(terms)[-len(expected_observation_names):]
+      != expected_observation_names
+    ):
+      raise ValueError(f"{task}: {group_name} guideline observation drift")
+    for name, (reader, width) in expected_observations.items():
+      term = terms[name]
+      if term.func is not _guideline_observation or term.params != {
+        "reader": reader,
+        "width": width,
+      }:
+        raise ValueError(f"{task}: {group_name} guideline observation drift")
+
+  cat_soft = env_cfg.metrics["cat_soft"]
+  params = cat_soft.params
+  if bool(params.get("use_impulse")) is not True:
+    raise ValueError(f"{task}: impulse-CaT setting drift")
+  if (
+    bool(params.get("use_vel")) is not expected_velocity_cat
+    or float(params.get("limit", float("nan"))) != 3.1415
+    or float(params.get("max_p", float("nan"))) != 0.5
+    or float(params.get("min_p", float("nan"))) != 0.0
+    or float(params.get("tau", float("nan"))) != 0.95
+  ):
+    raise ValueError(f"{task}: velocity-CaT setting drift")
+  substep_peak = env_cfg.metrics.get("substep_peak_qv")
+  if expected_velocity_cat:
+    if (
+      params.get("vel_detection") != "substep"
+      or substep_peak is None
+      or substep_peak.func is not SubstepPeakJointVel
+      or substep_peak.per_substep is not True
+    ):
+      raise ValueError(f"{task}: velocity-CaT setting drift")
+    velocity_detection = "substep"
+  else:
+    if "vel_detection" in params or substep_peak is not None:
+      raise ValueError(f"{task}: velocity-CaT setting drift")
+    velocity_detection = "disabled"
+
+  return {
+    "guidance_weight": float(guidance.weight),
+    "velocity_cat_enabled": expected_velocity_cat,
+    "velocity_detection": velocity_detection,
+    "guideline_observation_width": sum(
+      width for _, width in expected_observations.values()
+    ),
+  }
+
+
+def _validate_sampled_env_contract(env_cfg, task: str) -> dict:
+  if (
+    task not in TASK_TO_ARM
+    and task not in QUALITY_TASK_TO_ARM
+    and task not in PRESENTATION3_TASK_TO_ARM
+  ):
+    raise ValueError(
+      "sampled first-strike evaluation requires a registered legacy, strict "
+      f"quality, or Presentation3 task, got {task!r}"
+    )
+  treatment = TASK_TO_ARM.get(
+    task, QUALITY_TASK_TO_ARM.get(task, PRESENTATION3_TASK_TO_ARM.get(task))
+  )
   impact = env_cfg.rewards["impact_progress"]
   delivered = env_cfg.rewards["delivered_impulse"]
   impact_weight = float(impact.weight)
@@ -1172,6 +1295,9 @@ def _validate_sampled_env_contract(env_cfg, task: str) -> dict:
     "D0": (8.0, 0.0),
     "FQ": (8.0, 0.0),
     "B8": (8.0, 0.0),
+    "M": (8.0, 4.0),
+    "V": (8.0, 2.0),
+    "V+M": (8.0, 4.0),
   }
   if treatment not in expected_weights_by_treatment:
     raise ValueError(
@@ -1205,9 +1331,13 @@ def _validate_sampled_env_contract(env_cfg, task: str) -> dict:
     float(value)
     for value in env_cfg.events["reset_robot_joints"].params["position_range"]
   )
-  if reset_range != (-0.05, 0.05):
+  expected_reset_range = (
+    (0.0, 0.0) if task in PRESENTATION3_TASK_TO_ARM else (-0.05, 0.05)
+  )
+  if reset_range != expected_reset_range:
     raise ValueError(
-      f"{task}: sampled evaluation requires training reset noise (-0.05, 0.05)"
+      f"{task}: sampled evaluation requires training reset range "
+      f"{expected_reset_range}"
     )
   actor_corruption = bool(env_cfg.observations["actor"].enable_corruption)
   critic_corruption = bool(env_cfg.observations["critic"].enable_corruption)
@@ -1275,6 +1405,11 @@ def _validate_sampled_env_contract(env_cfg, task: str) -> dict:
   decimation = int(env_cfg.decimation)
   if decimation != EXPECTED_CONTROL_DECIMATION:
     raise ValueError(f"{task}: control decimation must remain 10")
+  presentation3_contract = {}
+  if task in PRESENTATION3_TASK_TO_ARM:
+    presentation3_contract = _validate_presentation3_env_contract(
+      env_cfg, task, treatment
+    )
   return {
     "treatment": treatment,
     "impact_weight": impact_weight,
@@ -1295,6 +1430,8 @@ def _validate_sampled_env_contract(env_cfg, task: str) -> dict:
       EXPECTED_FIXED_IMPEDANCE_SIGNATURE_SHA256
     ),
     "fixed_action_signature_sha256": EXPECTED_FIXED_ACTION_SIGNATURE_SHA256,
+    "imp_max_p": float(env_cfg.metrics["cat_soft"].params["imp_max_p"]),
+    **presentation3_contract,
   }
 
 
@@ -1362,6 +1499,17 @@ def _treatment_config_digest(*, task: str, contract: dict) -> str:
         "delivered_reader": str(contract["delivered_reader"]),
         "impact_v_expected_n_s": float(contract["impact_v_expected_n_s"]),
         "delivered_saturate": bool(contract["delivered_saturate"]),
+      }
+    )
+  elif treatment in PRESENTATION3_ARM_TASKS:
+    identity.update(
+      {
+        "guidance_weight": float(contract["guidance_weight"]),
+        "velocity_cat_enabled": bool(contract["velocity_cat_enabled"]),
+        "velocity_detection": str(contract["velocity_detection"]),
+        "guideline_observation_width": int(
+          contract["guideline_observation_width"]
+        ),
       }
     )
   elif treatment in GUIDELINE_ARM_TASKS:
@@ -2457,7 +2605,10 @@ def main() -> None:
   ap = argparse.ArgumentParser()
   ap.add_argument("--task", default="Unitree-Z1-Hammer-CaT-Impulse",
                   choices=tuple(
-                    TASK_TO_ARM | QUALITY_TASK_TO_ARM | GUIDELINE_TASK_TO_ARM
+                    TASK_TO_ARM
+                    | QUALITY_TASK_TO_ARM
+                    | GUIDELINE_TASK_TO_ARM
+                    | PRESENTATION3_TASK_TO_ARM
                   ),
                   help="exact registered C/D-prime/F/E treatment task used to train this checkpoint")
   ap.add_argument(
@@ -2604,7 +2755,10 @@ def main() -> None:
     )
   env_cfg.scene.num_envs = args.num_envs
   env_cfg.episode_length_s = args.episode_len_s
-  if args.task not in GUIDELINE_TASK_TO_ARM:
+  if (
+    args.task not in GUIDELINE_TASK_TO_ARM
+    and args.task not in PRESENTATION3_TASK_TO_ARM
+  ):
     env_cfg.metrics["cat_soft"].params["imp_max_p"] = args.imp_max_p
   if args.task not in QUALITY_TASK_TO_ARM:
     _ensure_first_strike_instrumentation(env_cfg)
