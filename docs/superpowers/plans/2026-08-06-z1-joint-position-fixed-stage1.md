@@ -427,8 +427,12 @@ Read the six live model joint limits and assert they equal the physical contract
 listed above before constructing `physical_clip_map`; never let a duplicated
 constant silently override a changed asset. Normalize each recorded target with
 `(q_target-q_default)/scale`, call the normal environment `step()` once per target,
-and let the action term hold it for ten substeps. Read the public applied target
-after clipping; do not reconstruct it for evidence.
+and let the action term hold it for ten substeps. If the Cartesian source terminated
+before all ten scheduled post-reference holds, the replay may repeat only the last
+captured causal target for the remaining scheduled holds; this is zero-order hold
+of an observed target, not a fabricated target. Record source and replay executed
+hold counts separately and stop each at its own terminal transition or scheduled
+maximum. Read the public applied target after clipping; do not reconstruct it for evidence.
 
 Set `auto_reset=False` here as well. Record the source and replay P geometry:
 entry point, frozen nail point, and all six gate centers. Require source/replay
@@ -444,7 +448,9 @@ replay for every seed `1000` through `1015`:
 - action, target, state, reward, and metrics all finite;
 - identical source target-tape SHA-256 across seeds;
 - exactly ten applied substeps per target;
-- zero normalized-action saturation;
+- zero six-joint normalized-action saturation under the derived joint scale, for
+  both the captured source tape and replay. Log saturation of the legacy parent’s
+  three-dimensional Cartesian playback input separately; it is not this joint-action gate;
 - zero physical target clipping;
 - zero joint-limit violation;
 - full-rate peak arm speed `<= 3.1415 rad/s`;
