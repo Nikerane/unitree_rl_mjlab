@@ -342,6 +342,10 @@ payload_sha256
 source task's action, observations, rewards, metrics, events, actuators, timing,
 and reset fields. The loader must recompute `source_task_config_sha256` from that
 projection; accepting an arbitrary well-formed digest is not sufficient.
+Preserve behaviorally significant manager insertion order: represent observations,
+rewards, metrics, and events as ordered name/config records or include explicit
+term-order arrays. Never recursively sort these mappings before the projection;
+reordering terms must change the digest.
 
 Serialize with sorted keys and `allow_nan=False`. Define `payload_sha256` as the
 SHA-256 of canonical JSON after removing the `payload_sha256` field itself; use the
@@ -467,6 +471,13 @@ replay for every seed `1000` through `1015`:
 The bank passes only if all 16 source rows and all 16 replay rows pass. Success
 during a later slow terminal hold cannot rescue a nonproductive first event. Do not
 weaken the gate to eventual contact or merely positive nail progress.
+
+Any G1 failure must still write a finite diagnostic artifact with `decision=FAIL`,
+including an early source terminal before the full playback tape, unavailable
+replay evidence, or a setup/identity failure. Never fabricate unseen commands to
+fill missing rows, and never let an expected scientific failure escape before the
+requested output is serialized. Environment cleanup must cover every exception
+after construction, including setup and live-contract validation.
 
 - [ ] **Step 5: Run a local preliminary replay**
 
