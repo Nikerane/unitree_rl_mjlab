@@ -91,8 +91,19 @@ On a position-servo action space driving a friction-resisted nail, "drive the na
 
 Captured now so the transition is cheap when the time comes:
 
-- **Trigger condition (quantitative):** multi-strike becomes *mandatory* when the work to finish the nail exceeds one achievable impact's kinetic energy. Work ≈ `frictionloss × depth`; one honest impact KE ≈ ½·m·v² with m≈0.5 kg and v ≤ ~1.8 m/s → **≈ 0.8 J ceiling per strike**. So a single strike suffices only while `frictionloss × depth ≲ 0.8 J` (≈30 N × 27 mm = 0.81 J today — right at the edge). Raise friction, raise required depth, or use a heavier/stiffer nail past that line and one strike can no longer finish → multi-strike.
-- **Pressing-dead and multi-strike are the SAME regime:** the only way to make the press *physically* fail is friction above the arm's sustainable quasi-static push (~50–80 N). But that same friction makes one 0.8 J strike insufficient (needs >2 J of work) → ~3+ strikes. **So "pressing physically impossible" ⇒ multi-strike.** If a future requirement is "press can never succeed," that decision automatically selects Option M.
+- **Trigger condition (historical heuristic, corrected for current mass):**
+  multi-strike becomes *mandatory* when the work to finish the nail exceeds one
+  achievable impact's energy. The old point-mass estimate in this record used the
+  superseded heavier gripper-era hammer. With the current **0.2 kg whole-hammer
+  body** and `v ≤ ~1.8 m/s`, `½·m·v² ≈ 0.32 J`. However,
+  `frictionloss × depth` is not a validated energy model for this actuated
+  contact, so neither the old nor the rescaled number should decide the regime.
+  Use measured single-strike depth, contact impulse, and scripted-press behavior.
+- **Pressing-dead and multi-strike remain coupled qualitatively:** making a press
+  physically fail by raising friction also increases the work demanded from each
+  strike. The old numerical strike-count estimate depended on the superseded mass
+  heuristic and is retired. If a future requirement is "press can never succeed,"
+  empirically re-establish whether repeated strikes are required.
 - **Good news — the behaviour already emerges:** the `--no-term` press-basin/rollout probes show the trained policy *already* strikes → **retracts ~7 cm → re-strikes** with no rhythm reward. This resolves the old **Q2** (does retract-and-restrike emerge naturally? → **yes, observed**) and matches the literature (Liu 2025, Karbasi 2024, Robot Drummer 2025: repetitive striking emerges from the task, not an explicit rhythm term). So Option M likely needs *no new reward terms* — just a higher success bar (deeper/harder nail) and the reference/latch changes below.
 - **Scope when we switch to M:** make the reference cyclic (`SingleStrikeReference` → re-arming phase; the monotone latch at `references.py:150` must reset per strike) and re-arm the r_imit ante-impact latch (`rewards.py:255-261`, currently permanent — but r_imit is annealed off and had no V1 effect, so low risk). Re-validate that the press fails at the new friction (`test_single_strike.py` + scripted press). Literature precedent for the regime: **ARMADA** (15 N dry friction, ~10 strikes for 20 mm) and **Adroit hammer** (15 N, full nail length, staged insertion bonuses).
 - **Cheapest experiment to confirm M is viable when wanted:** raise `frictionloss` above the push force + re-pin threshold, retrain, and check the policy converges to repeated strikes (not a stall) and the scripted press stalls below threshold.

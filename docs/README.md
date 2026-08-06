@@ -51,7 +51,12 @@ Dated research records kept in place (bannered, bodies frozen):
 - 2026-06-22 — L6 fixture EE change (gripper → 3D-printed bracket in the sibling repo) → all gate numbers EE-dependent (re-derive per `docs/research/reward-design/IMPULSE_CAT_IMPL_PLAN.md` C0 findings); the NEAR_NAIL re-solve blocker is tracked in `docs/research/reward-design/OPEN_QUESTIONS.md` ("Remaining blockers")
 - 2026-07-05 — two deep code-review rounds hardened the impulse arm (per-event pulse Λ, episode-cumulative capped delivered, first-violation seeding, log-only invariant); docs consolidated into this index (`docs/superpowers/plans/2026-07-05-docs-consolidation.md`)
 - 2026-07-06 — L6 NEAR_NAIL reset re-solved (windup pose; vertical-at-floor infeasible with the fixture grasp); fixture-era `IMP_J_LIMIT`/`i_ref` re-derived; Khadiv verbal go-ahead for soft-CaT as the impulse mechanism
-- 2026-07-10 — Track-2 efc-row ground truth shipped (joint3 sign-cancellation finding); C2 enforcement gate PASS, `imp_max_p=0.5` chosen (`docs/results/2026-07-10_c2_enforcement_record.md`); feasibility gate re-greened via `playback_reference.py` (`test_single_strike.py` probe retired)
+- 2026-07-10 — L6 asset correction pins the **complete rigid hammer body at 0.2 kg**
+  and the separate printed fixture at **0.045 kg**; the older heavier gripper-era
+  mass is historical only. Track-2 efc-row ground truth shipped (joint3
+  sign-cancellation finding); C2 enforcement gate PASS, `imp_max_p=0.5` chosen
+  (`docs/results/2026-07-10_c2_enforcement_record.md`); feasibility gate re-greened
+  via `playback_reference.py` (`test_single_strike.py` probe retired)
 - 2026-07-12/13 — **vacuity finding**: the impulse constraint is vacuous for reachable ballistic impacts on fixed impedance (velocity effort-clamped); the *windowed press-through* reaction is what binds, conditional on the window/cap pairing → the Λ-quantity is Khadiv decision (e) (`docs/results/2026-07-12_impulse_vacuity.md`, `2026-07-12_state_of_everything.md`, `2026-07-12_khadiv_vic_addendum.md`). Λ re-semanticized as a time-based **sliding window** after an adversarial review falsified the prefix cap (masking bypass). Reference prior fixed (follow-through strike, `i_ref` 0.0811→0.6094)
 
 ## 4. Code entry map (`src/tasks/hammer/` — suggested read order)
