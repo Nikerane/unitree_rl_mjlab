@@ -5,10 +5,8 @@
 
 This preregistration implements the owner-approved design at commit `ab35715`.
 The required asset revision is
-`b58ccd2f81fd246f27c1e8d88cf86484cd888703`. The exact training revision is
-the implementation commit containing this campaign, which is intentionally not
-invented in this commit. A docs-only follow-up commit will pin its 40-hex SHA
-before any submission.
+`b58ccd2f81fd246f27c1e8d88cf86484cd888703`. The exact training revision
+(`TRAIN_REV`) is `1926e3bdea66c1ca5cc3955b7ea851efc2541861`.
 
 ## Frozen controller and launch contract
 
