@@ -207,6 +207,13 @@ def _freeze_json(value: Any) -> Any:
     return value
 
 
+def _immutable_array(value: np.ndarray) -> np.ndarray:
+    contiguous = np.ascontiguousarray(value)
+    return np.frombuffer(contiguous.tobytes(order="C"), dtype=contiguous.dtype).reshape(
+        contiguous.shape
+    )
+
+
 def load_joint_position_contract(path: str | Path) -> JointPositionContract:
     """Load only a complete PASS artifact whose content and causal tape are intact."""
     try:
@@ -301,13 +308,10 @@ def load_joint_position_contract(path: str | Path) -> JointPositionContract:
         if row.get("source_target_tape_sha256") != source_target_tape_sha256:
             raise ValueError("per-seed replay rows must bind the same source target tape")
 
-    for array in (
-        default_joint_pos_rad,
-        physical_clip_rad,
-        scale_rad,
-        source_target_tape_rad,
-    ):
-        array.setflags(write=False)
+    default_joint_pos_rad = _immutable_array(default_joint_pos_rad)
+    physical_clip_rad = _immutable_array(physical_clip_rad)
+    scale_rad = _immutable_array(scale_rad)
+    source_target_tape_rad = _immutable_array(source_target_tape_rad)
     frozen_source_task_config_projection = _freeze_json(source_task_config_projection)
     frozen_rows = tuple(_freeze_json(row) for row in rows)
 

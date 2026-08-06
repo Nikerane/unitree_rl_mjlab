@@ -195,6 +195,34 @@ def test_loader_returns_read_only_scientific_arrays(tmp_path: Path) -> None:
             array.flat[0] = 123.0
 
 
+@pytest.mark.parametrize(
+    "field",
+    (
+        "default_joint_pos_rad",
+        "physical_clip_rad",
+        "scale_rad",
+        "source_target_tape_rad",
+    ),
+)
+def test_loader_scientific_arrays_cannot_be_made_writeable(
+    tmp_path: Path, field: str
+) -> None:
+    """Backing validated arrays with owned mutable memory would make this fail."""
+    artifact = tmp_path / "joint_position.json"
+    _write_payload(artifact, _passing_payload())
+    array = getattr(load_joint_position_contract(artifact), field)
+
+    try:
+        array.setflags(write=True)
+    except ValueError:
+        assert array.flags.writeable is False
+    else:
+        before = float(array.flat[0])
+        array.flat[0] = before + 1.0
+        assert float(array.flat[0]) != before
+        pytest.fail(f"{field} accepted setflags(write=True) and mutation")
+
+
 def test_loader_accepts_projection_bound_config_identity(tmp_path: Path) -> None:
     """Ignoring the explicit source-config projection would make this fail."""
     payload = _passing_payload()
