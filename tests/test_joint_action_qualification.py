@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Mapping
 import hashlib
 import json
 from pathlib import Path
@@ -34,9 +35,26 @@ TAPE = [
     [0.0, 0.5, -0.5, 0.0, 0.1, -0.1],
     [0.1, 0.6, -0.6, 0.1, 0.2, -0.2],
 ]
-TAPE_SHA256 = hashlib.sha256(
-    json.dumps(TAPE, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
-).hexdigest()
+SOURCE_TASK_CONFIG_PROJECTION = {
+    "action": {"name": "hammer_ik", "dimension": 3},
+    "observations": {"policy": {"dimension": 44}},
+    "rewards": {"nail_depth_delta": {"weight": 600.0}},
+    "metrics": {"first_strike": {"enabled": True}},
+    "events": {"reset": {"mode": "fixed"}},
+    "actuators": {"arm": {"joint_names": JOINT_NAMES}},
+    "timing": {"physics_dt_s": 0.002, "control_decimation": 10},
+    "reset": {"joint_pos_offset": [0.0, 0.0]},
+}
+
+
+def _canonical_sha256(value: object) -> str:
+    canonical = json.dumps(
+        value, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+TAPE_SHA256 = _canonical_sha256(TAPE)
 
 
 def _canonical_payload_sha256(payload: dict[str, object]) -> str:
@@ -67,23 +85,39 @@ def _passing_payload() -> dict[str, object]:
         "source_task_id": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4",
         "source_code_revision": "a" * 40,
         "source_asset_revision": "b" * 40,
-        "source_task_config_sha256": "c" * 64,
-        "joint_names": JOINT_NAMES,
-        "actuator_names": JOINT_NAMES,
+        "source_task_config_projection": copy.deepcopy(SOURCE_TASK_CONFIG_PROJECTION),
+        "source_task_config_sha256": _canonical_sha256(SOURCE_TASK_CONFIG_PROJECTION),
+        "joint_names": copy.deepcopy(JOINT_NAMES),
+        "actuator_names": copy.deepcopy(JOINT_NAMES),
         "default_joint_pos_rad": [0.0, 0.5, -0.5, 0.0, 0.1, -0.1],
-        "physical_clip_rad": PHYSICAL_CLIPS,
+        "physical_clip_rad": copy.deepcopy(PHYSICAL_CLIPS),
         "scale_rad": [0.165, 0.165, 0.165, 0.165, 0.165, 0.165],
         "physics_dt_s": 0.002,
         "control_decimation": 10,
         "post_reference_hold_control_steps": 10,
         "seeds": list(range(1000, 1016)),
-        "source_target_tape_rad": TAPE,
+        "source_target_tape_rad": copy.deepcopy(TAPE),
         "source_target_tape_sha256": TAPE_SHA256,
         "per_seed_replay_rows": _passing_rows(),
         "decision": "PASS",
     }
     payload["payload_sha256"] = _canonical_payload_sha256(payload)
     return payload
+
+
+def _add_source_task_config_projection(payload: dict[str, object]) -> None:
+    projection = copy.deepcopy(SOURCE_TASK_CONFIG_PROJECTION)
+    payload["source_task_config_projection"] = projection
+    payload["source_task_config_sha256"] = _canonical_sha256(projection)
+    payload["payload_sha256"] = _canonical_payload_sha256(payload)
+
+
+def _refresh_tape_binding(payload: dict[str, object]) -> None:
+    tape_sha256 = _canonical_sha256(payload["source_target_tape_rad"])
+    payload["source_target_tape_sha256"] = tape_sha256
+    for row in payload["per_seed_replay_rows"]:
+        row["source_target_tape_sha256"] = tape_sha256
+    payload["payload_sha256"] = _canonical_payload_sha256(payload)
 
 
 def _write_payload(path: Path, payload: dict[str, object]) -> None:
@@ -159,6 +193,82 @@ def test_loader_returns_read_only_scientific_arrays(tmp_path: Path) -> None:
         assert array.flags.writeable is False
         with pytest.raises(ValueError, match="read-only"):
             array.flat[0] = 123.0
+
+
+def test_loader_accepts_projection_bound_config_identity(tmp_path: Path) -> None:
+    """Ignoring the explicit source-config projection would make this fail."""
+    payload = _passing_payload()
+    _add_source_task_config_projection(payload)
+    artifact = tmp_path / "projected_config.json"
+    _write_payload(artifact, payload)
+
+    contract = load_joint_position_contract(artifact)
+
+    assert contract.source_task_config_projection["timing"]["control_decimation"] == 10
+    assert contract.source_task_config_sha256 == _canonical_sha256(
+        SOURCE_TASK_CONFIG_PROJECTION
+    )
+    with pytest.raises(TypeError):
+        contract.source_task_config_projection["timing"]["control_decimation"] = 11
+
+
+def test_loader_rejects_arbitrary_rehashed_task_config_digest(tmp_path: Path) -> None:
+    """Trusting a well-formed but projection-unbound config digest would make this fail."""
+    payload = _passing_payload()
+    _add_source_task_config_projection(payload)
+    payload["source_task_config_sha256"] = "d" * 64
+    payload["payload_sha256"] = _canonical_payload_sha256(payload)
+    artifact = tmp_path / "unbound_config_digest.json"
+    _write_payload(artifact, payload)
+
+    with pytest.raises(ValueError, match="does not match source_task_config_projection"):
+        load_joint_position_contract(artifact)
+
+
+@pytest.mark.parametrize(
+    ("field", "index"),
+    (
+        ("default_joint_pos_rad", 0),
+        ("physical_clip_rad", (0, 0)),
+        ("scale_rad", 0),
+        ("source_target_tape_rad", (0, 0)),
+    ),
+)
+def test_loader_rejects_json_booleans_in_numeric_arrays(
+    tmp_path: Path, field: str, index: int | tuple[int, int]
+) -> None:
+    """Letting NumPy coerce JSON booleans into physical numbers would make this fail."""
+    payload = _passing_payload()
+    if isinstance(index, tuple):
+        payload[field][index[0]][index[1]] = False
+    else:
+        payload[field][index] = False
+    _refresh_tape_binding(payload)
+    artifact = tmp_path / f"boolean_{field}.json"
+    _write_payload(artifact, payload)
+
+    with pytest.raises(ValueError, match="must not contain JSON booleans"):
+        load_joint_position_contract(artifact)
+
+
+def test_loader_returns_deeply_immutable_replay_rows(tmp_path: Path) -> None:
+    """Mutating validated replay evidence through nested mappings would make this fail."""
+    payload = _passing_payload()
+    payload["per_seed_replay_rows"][0]["metrics"] = {"waypoint_hits": [1, 2, 3]}
+    payload["payload_sha256"] = _canonical_payload_sha256(payload)
+    artifact = tmp_path / "nested_rows.json"
+    _write_payload(artifact, payload)
+
+    contract = load_joint_position_contract(artifact)
+    row = contract.per_seed_replay_rows[0]
+
+    assert isinstance(row, Mapping)
+    assert row.get("seed") == 1000
+    assert row["metrics"]["waypoint_hits"] == (1, 2, 3)
+    with pytest.raises(TypeError):
+        row["passed"] = False
+    with pytest.raises(TypeError):
+        row["metrics"]["waypoint_hits"] = ()
 
 
 @pytest.mark.parametrize(

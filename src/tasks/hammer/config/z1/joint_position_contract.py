@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 import hashlib
 import json
 import math
 from pathlib import Path
 import re
+from types import MappingProxyType
 from typing import Any
 
 import numpy as np
@@ -32,6 +34,18 @@ ACTION_SEMANTICS = "absolute_default_offset_joint_position"
 SOURCE_TASK_ID = (
     "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4"
 )
+SOURCE_TASK_CONFIG_PROJECTION_FIELDS = frozenset(
+    {
+        "action",
+        "observations",
+        "rewards",
+        "metrics",
+        "events",
+        "actuators",
+        "timing",
+        "reset",
+    }
+)
 _REQUIRED_FIELDS = frozenset(
     {
         "schema_version",
@@ -39,6 +53,7 @@ _REQUIRED_FIELDS = frozenset(
         "source_task_id",
         "source_code_revision",
         "source_asset_revision",
+        "source_task_config_projection",
         "source_task_config_sha256",
         "joint_names",
         "actuator_names",
@@ -65,6 +80,7 @@ class JointPositionContract:
     source_task_id: str
     source_code_revision: str
     source_asset_revision: str
+    source_task_config_projection: Mapping[str, Any]
     source_task_config_sha256: str
     joint_names: tuple[str, ...]
     actuator_names: tuple[str, ...]
@@ -77,7 +93,7 @@ class JointPositionContract:
     seeds: tuple[int, ...]
     source_target_tape_rad: np.ndarray
     source_target_tape_sha256: str
-    per_seed_replay_rows: tuple[dict[str, Any], ...]
+    per_seed_replay_rows: tuple[Mapping[str, Any], ...]
     payload_sha256: str
 
 
@@ -115,7 +131,17 @@ def _require_revision(value: object, *, name: str) -> str:
     return value
 
 
+def _contains_json_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return True
+    if isinstance(value, list):
+        return any(_contains_json_bool(item) for item in value)
+    return False
+
+
 def _finite_vector(value: object, *, name: str) -> np.ndarray:
+    if _contains_json_bool(value):
+        raise ValueError(f"{name} must not contain JSON booleans")
     try:
         vector = np.asarray(value, dtype=np.float64)
     except (TypeError, ValueError) as exc:
@@ -126,6 +152,8 @@ def _finite_vector(value: object, *, name: str) -> np.ndarray:
 
 
 def _finite_matrix(value: object, *, name: str) -> np.ndarray:
+    if _contains_json_bool(value):
+        raise ValueError(f"{name} must not contain JSON booleans")
     try:
         matrix = np.asarray(value, dtype=np.float64)
     except (TypeError, ValueError) as exc:
@@ -138,6 +166,8 @@ def _finite_matrix(value: object, *, name: str) -> np.ndarray:
 
 
 def _finite_clip_matrix(value: object) -> np.ndarray:
+    if _contains_json_bool(value):
+        raise ValueError("physical_clip_rad must not contain JSON booleans")
     try:
         matrix = np.asarray(value, dtype=np.float64)
     except (TypeError, ValueError) as exc:
@@ -151,6 +181,30 @@ def _require_exact_joint_order(value: object, *, name: str) -> tuple[str, ...]:
     if not isinstance(value, list) or tuple(value) != JOINT_NAMES:
         raise ValueError(f"{name} must be exactly {JOINT_NAMES}")
     return tuple(value)
+
+
+def _require_task_config_projection(value: object) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError("source_task_config_projection must be a JSON object")
+    missing = sorted(SOURCE_TASK_CONFIG_PROJECTION_FIELDS - set(value))
+    unexpected = sorted(set(value) - SOURCE_TASK_CONFIG_PROJECTION_FIELDS)
+    if missing or unexpected:
+        raise ValueError(
+            "source_task_config_projection must contain exactly action, observations, "
+            "rewards, metrics, events, actuators, timing, and reset; "
+            f"missing={missing}, unexpected={unexpected}"
+        )
+    if any(not isinstance(value[name], dict) for name in SOURCE_TASK_CONFIG_PROJECTION_FIELDS):
+        raise ValueError("each source_task_config_projection section must be a JSON object")
+    return value
+
+
+def _freeze_json(value: Any) -> Any:
+    if isinstance(value, dict):
+        return MappingProxyType({key: _freeze_json(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze_json(item) for item in value)
+    return value
 
 
 def load_joint_position_contract(path: str | Path) -> JointPositionContract:
@@ -187,9 +241,16 @@ def load_joint_position_contract(path: str | Path) -> JointPositionContract:
     source_asset_revision = _require_revision(
         payload["source_asset_revision"], name="source_asset_revision"
     )
+    source_task_config_projection = _require_task_config_projection(
+        payload["source_task_config_projection"]
+    )
     source_task_config_sha256 = _require_hash(
         payload["source_task_config_sha256"], name="source_task_config_sha256"
     )
+    if _sha256(source_task_config_projection) != source_task_config_sha256:
+        raise ValueError(
+            "source_task_config_sha256 does not match source_task_config_projection"
+        )
     joint_names = _require_exact_joint_order(payload["joint_names"], name="joint_names")
     actuator_names = _require_exact_joint_order(payload["actuator_names"], name="actuator_names")
 
@@ -247,11 +308,14 @@ def load_joint_position_contract(path: str | Path) -> JointPositionContract:
         source_target_tape_rad,
     ):
         array.setflags(write=False)
+    frozen_source_task_config_projection = _freeze_json(source_task_config_projection)
+    frozen_rows = tuple(_freeze_json(row) for row in rows)
 
     return JointPositionContract(
         source_task_id=payload["source_task_id"],
         source_code_revision=source_code_revision,
         source_asset_revision=source_asset_revision,
+        source_task_config_projection=frozen_source_task_config_projection,
         source_task_config_sha256=source_task_config_sha256,
         joint_names=joint_names,
         actuator_names=actuator_names,
@@ -264,6 +328,6 @@ def load_joint_position_contract(path: str | Path) -> JointPositionContract:
         seeds=REQUIRED_SEEDS,
         source_target_tape_rad=source_target_tape_rad,
         source_target_tape_sha256=source_target_tape_sha256,
-        per_seed_replay_rows=tuple(rows),
+        per_seed_replay_rows=frozen_rows,
         payload_sha256=supplied_payload_sha256,
     )
