@@ -7,6 +7,7 @@ import inspect
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -4132,10 +4133,21 @@ def test_impulse6_launcher_executes_each_frozen_identity_row(
     "overrides, message",
     (
         ({"CAMPAIGN": "Impulse6"}, "IMPULSE6_FAIL: CAMPAIGN"),
+        ({"CAMPAIGN": "IMPULSE6"}, "IMPULSE6_FAIL: CAMPAIGN"),
+        ({"CAMPAIGN": "impulse6 "}, "IMPULSE6_FAIL: CAMPAIGN"),
+        ({"CAMPAIGN": "impulse6-anything"}, "IMPULSE6_FAIL: CAMPAIGN"),
+        ({"CAMPAIGN": "ImPuLsE6suffix"}, "IMPULSE6_FAIL: CAMPAIGN"),
         ({"SEEDS": "2 3 4 5 6"}, "IMPULSE6_FAIL: seeds"),
         ({"ITERS": "201"}, "IMPULSE6_FAIL: ITERS"),
+        ({"ITERS": None}, "IMPULSE6_FAIL: ITERS"),
+        ({"ITERS": ""}, "IMPULSE6_FAIL: ITERS"),
         ({"SLURM_ARRAY_TASK_ID": "6"}, "IMPULSE6_FAIL: array index"),
         ({"SINGLE_SHORT": "wrong"}, "IMPULSE6_FAIL: task/short"),
+        ({"SINGLE_SHORT": "s0d4"}, "IMPULSE6_FAIL: task/short"),
+        (
+            {"SINGLE_TASK": _IMPULSE6["s0d4"], "SINGLE_SHORT": "s0d0"},
+            "IMPULSE6_FAIL: task/short",
+        ),
         ({"IMPACT_W": "8"}, "IMPULSE6_FAIL: IMPACT_W"),
         ({"IMPACT_W": ""}, "IMPULSE6_FAIL: IMPACT_W"),
         ({"DELIVERED_W": "4"}, "IMPULSE6_FAIL: DELIVERED_W"),
@@ -4146,6 +4158,10 @@ def test_impulse6_launcher_executes_each_frozen_identity_row(
         ({"EXPECTED_ASSET_REVISION": None}, "IMPULSE6_FAIL: EXPECTED_ASSET_REVISION"),
         ({"EXPECTED_CODE_REVISION": "a" * 39}, "IMPULSE6_FAIL: EXPECTED_CODE_REVISION"),
         ({"EXPECTED_ASSET_REVISION": "b" * 39}, "IMPULSE6_FAIL: EXPECTED_ASSET_REVISION"),
+        ({"EXPECTED_CODE_REVISION": "A" * 40}, "IMPULSE6_FAIL: EXPECTED_CODE_REVISION"),
+        ({"EXPECTED_ASSET_REVISION": "B" * 40}, "IMPULSE6_FAIL: EXPECTED_ASSET_REVISION"),
+        ({"EXPECTED_CODE_REVISION": "g" * 40}, "IMPULSE6_FAIL: EXPECTED_CODE_REVISION"),
+        ({"EXPECTED_ASSET_REVISION": "z" * 40}, "IMPULSE6_FAIL: EXPECTED_ASSET_REVISION"),
         ({"EXPECTED_CODE_REVISION": "c" * 40}, "IMPULSE6_FAIL: code revision"),
         ({"EXPECTED_ASSET_REVISION": "c" * 40}, "IMPULSE6_FAIL: asset revision"),
         ({"FAKE_CODE_GIT_DIRTY": "1"}, "code provenance is unknown or dirty"),
@@ -4163,6 +4179,56 @@ def test_impulse6_launcher_rejects_contract_drift(tmp_path, overrides, message):
     assert result.returncode == 2
     assert message in result.stdout
     assert "scripts/train.py" not in calls
+
+
+@pytest.mark.parametrize("short, task", tuple(_IMPULSE6.items()))
+@pytest.mark.parametrize("campaign", (None, "nf", "unrelated"))
+def test_impulse6_registered_tasks_cannot_escape_through_another_campaign(
+    tmp_path, short, task, campaign
+):
+    result, calls = _run_training_launcher(
+        tmp_path / f"{campaign or 'unset'}-{short}",
+        CAMPAIGN=campaign,
+        SINGLE_TASK=task,
+        SINGLE_SHORT=short,
+        SEEDS="99 100 101 102 103 104",
+        SLURM_ARRAY_TASK_ID="0",
+        ITERS="999",
+        EXPECTED_CODE_REVISION=None,
+        EXPECTED_ASSET_REVISION=None,
+    )
+
+    assert result.returncode == 2
+    assert "IMPULSE6_FAIL: registered screen task" in result.stdout
+    assert "scripts/train.py" not in calls
+
+
+def test_impulse6_prereg_test_matrix_and_shell_allowlist_have_identical_pairs():
+    expected_pairs = {(task, short) for short, task in _IMPULSE6.items()}
+    prereg = (ROOT / "docs" / "results" / "2026-08-06_impulse6_prereg.md").read_text()
+    prereg_rows = re.findall(
+        r"^\| (?:0|8) \| (?:0|4|16) \| [2-7] \| `([^`]+)` \| `([^`]+)` \|$",
+        prereg,
+        flags=re.MULTILINE,
+    )
+    assert len(prereg_rows) == 36
+    assert set(prereg_rows) == expected_pairs
+
+    launcher = (ROOT / "scripts" / "slurm" / "vega_train.sbatch").read_text()
+    guard = re.search(
+        r'if \[ "\$CAMPAIGN" = "impulse6" \]; then\n(?P<body>.*?)\nfi\nRUN=',
+        launcher,
+        flags=re.DOTALL,
+    )
+    assert guard is not None
+    shell_pairs = set(
+        re.findall(
+            r"^\s+(Unitree-[^:]+):([a-z0-9]+)(?:\||\))",
+            guard.group("body"),
+            flags=re.MULTILINE,
+        )
+    )
+    assert shell_pairs == expected_pairs
 
 
 def test_impulse6_launcher_logs_the_registered_task_not_array_index(tmp_path):

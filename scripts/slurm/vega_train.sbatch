@@ -93,10 +93,14 @@ if [ "$CAMPAIGN_LC" = "presentation3" ] && [ "$CAMPAIGN" != "presentation3" ]; t
   echo "PRESENTATION3_FAIL: CAMPAIGN '$CAMPAIGN' looks like presentation3 but is not an exact match"
   exit 2
 fi
-if [ "$CAMPAIGN_LC" = "impulse6" ] && [ "$CAMPAIGN" != "impulse6" ]; then
-  echo "IMPULSE6_FAIL: CAMPAIGN '$CAMPAIGN' looks like impulse6 but is not an exact match"
-  exit 2
-fi
+case "$CAMPAIGN_LC" in
+  impulse6*)
+    if [ "$CAMPAIGN" != "impulse6" ]; then
+      echo "IMPULSE6_FAIL: CAMPAIGN '$CAMPAIGN' looks like impulse6 but is not an exact match"
+      exit 2
+    fi
+    ;;
+esac
 read -ra SEEDARR <<< "${SEEDS:-0 1 2}"
 # nail_driven=0.5 is now the BAKED default (farm-cut). Optional per-run reward-weight overrides:
 #   DELIVERED_W=0  -> F2 arm (delivered-impulse reward off, tests its contribution to the strike).
@@ -125,6 +129,27 @@ if [ -n "${SINGLE_TASK:-}" ]; then
 else
   seed=${SEEDARR[$((t/2))]}; ai=$((t%2)); task=${ARM_TASK[$ai]}; short=${ARM_SHORT[$ai]}
 fi
+
+# These registered tasks are scientifically meaningful only inside their frozen
+# campaign contracts. Prevent the generic launcher path from running them with
+# arbitrary seeds, iterations, overrides, or absent revision pins. The S8/D4
+# registration is shared with presentation3; the other five are impulse6-only.
+case "$task" in
+  Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D0|\
+  Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D4|\
+  Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D16|\
+  Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S8-D0|\
+  Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S8-D16)
+    [ "$CAMPAIGN" = "impulse6" ] \
+      || { echo "IMPULSE6_FAIL: registered screen task requires CAMPAIGN=impulse6"; exit 2; }
+    ;;
+  Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4)
+    case "$CAMPAIGN" in
+      impulse6|presentation3) ;;
+      *) echo "IMPULSE6_FAIL: registered screen task requires CAMPAIGN=impulse6 or presentation3"; exit 2 ;;
+    esac
+    ;;
+esac
 
 # Fail closed on any drift from the frozen 4x8 matrix. Other historical
 # campaigns retain the launcher's existing behavior.
