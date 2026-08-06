@@ -51,6 +51,8 @@ compute budgets so implementation sessions do not invent scientific choices.
 - [Freeze the controlled-drop reference setup](tickets/freeze-controlled-drop-reference-setup.md) — use the centered simulation-only 0.200 kg cylindrical primary drop from rest at `h0`.
 - [Use a diagnostic windowed reaction-impulse constraint](tickets/use-diagnostic-windowed-reaction-impulse-constraint.md) — validate CaT with lowered diagnostic per-joint thresholds and defer a rigorous ballistic estimator.
 - [Freeze the high-level VIC architecture](tickets/freeze-high-level-vic-architecture.md) — add bounded per-joint stiffness and coupled damping to the same joint targets, guidance, and `r_tt`, with VIC last.
+- [Map paper VIC semantics onto a safe Z1 gain contract](tickets/map-paper-vic-semantics-onto-a-safe-z1-gain-contract.md) — use centered logarithmic stiffness with square-root damping and preserve the native actuator path; prototype the numeric bound.
+- [Identify defensible curriculum and randomization axes](tickets/identify-defensible-curriculum-and-randomization-axes.md) — qualify reset-pose variation first, keep observation noise matched, and defer unsupported physics ranges.
 
 ## Not yet specified
 

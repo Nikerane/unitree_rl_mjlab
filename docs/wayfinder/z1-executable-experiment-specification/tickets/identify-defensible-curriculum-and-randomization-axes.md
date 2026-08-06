@@ -4,7 +4,7 @@
   "id": "wf-z1-exp-dr-research",
   "kind": "ticket",
   "title": "Identify defensible curriculum and randomization axes",
-  "status": "open",
+  "status": "closed",
   "labels": ["wayfinder:research"],
   "parent": {"id": "wf-z1-executable-experiments", "title": "Z1 executable experiment specification", "href": "../map.md"},
   "assignee": "codex/wayfinder-dr-research",
@@ -12,8 +12,8 @@
   "blocked_by": [],
   "rank": 50,
   "created_at": "2026-08-06T22:32:04+02:00",
-  "closed_at": null,
-  "resolution_comment": null
+  "closed_at": "2026-08-06T23:01:25+02:00",
+  "resolution_comment": {"title": "Resolution for Identify defensible curriculum and randomization axes", "href": "../comments/identify-defensible-curriculum-and-randomization-axes/2026-08-06T230125+0200-resolution.md"}
 }
 -->
 
