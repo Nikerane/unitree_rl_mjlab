@@ -473,6 +473,96 @@ def test_failed_contract_still_serializes_but_loader_rejects_it(
         load_joint_position_contract(artifact)
 
 
+def test_cli_serializes_partial_source_terminal_without_fabricating_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Raising on an incomplete source tape would lose the requested FAIL evidence."""
+    seeds = tuple(range(1000, 1016))
+    source_rows = []
+    tapes = {}
+    for seed in seeds:
+        row = _passing_rollout_record()
+        row.update(
+            {
+                "seed": seed,
+                "playback_length": 6,
+                "target_count": 2,
+                "applied_substeps_per_target": [10, 10],
+                "executed_post_reference_hold_control_steps": 0,
+                "terminal_reason": "non_timeout_termination",
+                "first_strike_productive": False,
+                "success_within_first_event": False,
+                "success": False,
+            }
+        )
+        source_rows.append(row)
+        tapes[seed] = np.asarray(TAPE, dtype=np.float64)
+
+    def fake_rollout(
+        cfg: object,
+        *,
+        seeds: tuple[int, ...],
+        mode: str,
+        **kwargs: object,
+    ) -> tuple[list[dict[str, object]], dict[int, np.ndarray], np.ndarray, np.ndarray]:
+        del cfg, kwargs
+        assert seeds == tuple(range(1000, 1016))
+        if mode != "source":
+            raise AssertionError("replay must remain unavailable after early terminal")
+        return (
+            source_rows,
+            tapes,
+            np.asarray([0.0, 0.5, -0.5, 0.0, 0.1, -0.1]),
+            np.asarray(PHYSICAL_CLIPS),
+        )
+
+    monkeypatch.setattr(qualifier, "_rollout_mode", fake_rollout)
+    output = tmp_path / "early-terminal.json"
+
+    exit_code = qualifier.main(
+        ["--seeds", "1000:1016", "--out", str(output)]
+    )
+
+    assert exit_code == 1
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["decision"] == "FAIL"
+    assert payload["source_target_tape_rad"] == TAPE
+    assert all(row["source"]["target_count"] == 2 for row in payload["per_seed_replay_rows"])
+    assert all(row["replay"]["available"] is False for row in payload["per_seed_replay_rows"])
+    assert all(
+        "source terminated before its playback targets were observed"
+        in row["replay"]["unavailable_reason"]
+        for row in payload["per_seed_replay_rows"]
+    )
+    json.dumps(payload, sort_keys=True, allow_nan=False)
+
+
+def test_cli_serializes_setup_failure_as_unavailable_finite_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Letting a live identity failure escape would omit the diagnostic artifact."""
+    monkeypatch.setattr(
+        qualifier,
+        "run_qualification",
+        lambda seeds: (_ for _ in ()).throw(RuntimeError("live identity mismatch")),
+    )
+    output = tmp_path / "setup-failure.json"
+
+    exit_code = qualifier.main(
+        ["--seeds", "1000:1016", "--out", str(output)]
+    )
+
+    assert exit_code == 1
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["decision"] == "FAIL"
+    assert payload["diagnostic_failures"] == [
+        "RuntimeError: live identity mismatch"
+    ]
+    assert all(row["source"]["available"] is False for row in payload["per_seed_replay_rows"])
+    assert all(row["replay"]["available"] is False for row in payload["per_seed_replay_rows"])
+    json.dumps(payload, sort_keys=True, allow_nan=False)
+
+
 def test_seed_range_parser_is_half_open_and_rejects_selection() -> None:
     """Inclusive end parsing or duplicate seed selection would alter the frozen bank."""
     assert qualifier.parse_seed_spec("1000:1016") == tuple(range(1000, 1016))
@@ -513,9 +603,14 @@ def test_source_config_projection_binds_all_eight_scientific_sections() -> None:
     assert projection["reset"]["reset_robot_joints"]["params"][
         "position_range"
     ] == [0.0, 0.0]
-    assert "first_strike" in projection["metrics"]
-    assert "r_waypoint_progress" in projection["rewards"]
-    assert "actor" in projection["observations"]
+    assert "first_strike" in projection["metrics"]["terms"]
+    assert "r_waypoint_progress" in projection["rewards"]["terms"]
+    assert "actor" in projection["observations"]["terms"]
+    assert projection["observations"]["term_order"] == ["actor", "critic"]
+    assert projection["observations"]["group_term_order"]["actor"][0:2] == [
+        "joint_pos",
+        "joint_vel",
+    ]
     assert len(projection["actuators"]["robot"]) == 3
     json.dumps(projection, sort_keys=True, allow_nan=False)
 
@@ -524,6 +619,69 @@ def test_source_config_projection_binds_all_eight_scientific_sections() -> None:
     assert qualifier.canonical_sha256(
         qualifier.source_task_config_projection(changed)
     ) != qualifier.canonical_sha256(projection)
+
+
+@pytest.mark.parametrize("section", ("observations", "rewards", "metrics", "events"))
+def test_manager_projection_digest_preserves_insertion_order(section: str) -> None:
+    """Recursively sorting manager mappings would hide behavioral term reordering."""
+    import src.tasks  # noqa: F401
+    from mjlab.tasks.registry import load_env_cfg
+
+    cfg = load_env_cfg(
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4",
+        play=True,
+    )
+    cfg.auto_reset = False
+    changed = copy.deepcopy(cfg)
+    if section == "observations":
+        terms = changed.observations["actor"].terms
+        changed.observations["actor"].terms = dict(reversed(list(terms.items())))
+    else:
+        terms = getattr(changed, section)
+        setattr(changed, section, dict(reversed(list(terms.items()))))
+
+    original_digest = qualifier.canonical_sha256(
+        qualifier.source_task_config_projection(cfg)
+    )
+    changed_digest = qualifier.canonical_sha256(
+        qualifier.source_task_config_projection(changed)
+    )
+
+    assert changed_digest != original_digest
+
+
+def test_rollout_setup_exception_closes_environment_exactly_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keeping setup outside the cleanup guard would leak a constructed environment."""
+    import mjlab.envs
+
+    class ExplodingScene:
+        num_envs = 0
+
+        def __getitem__(self, name: str) -> object:
+            raise RuntimeError(f"setup failed while resolving {name}")
+
+    class ConstructedEnv:
+        def __init__(self) -> None:
+            self.scene = ExplodingScene()
+            self.close_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    constructed = ConstructedEnv()
+    monkeypatch.setattr(
+        mjlab.envs,
+        "ManagerBasedRlEnv",
+        lambda cfg, device: constructed,
+    )
+    cfg = SimpleNamespace(scene=SimpleNamespace(num_envs=0), auto_reset=True)
+
+    with pytest.raises(RuntimeError, match="setup failed while resolving robot"):
+        qualifier._rollout_mode(cfg, seeds=(1000,), mode="source")
+
+    assert constructed.close_calls == 1
 
 
 def test_replay_cfg_uses_formula_scales_and_live_physical_clips() -> None:

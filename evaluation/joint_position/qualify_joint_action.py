@@ -157,6 +157,15 @@ def rollout_gate_failures(
     record: dict[str, Any], *, expected_geometry: object | None = None
 ) -> list[str]:
     """Apply every frozen source/replay G1 gate to one diagnostic record."""
+    if record.get("available") is False:
+        mode = record.get("mode", "rollout")
+        reason = record.get("unavailable_reason")
+        if not isinstance(reason, str) or not reason:
+            reason = "no finite unavailability reason was recorded"
+        failures = [f"{mode} unavailable: {reason}"]
+        if not _finite_json(record):
+            failures.append("unavailable evidence contains a non-finite value")
+        return failures
     failures: list[str] = []
     if tuple(record.get("joint_names", ())) != JOINT_NAMES:
         failures.append("joint names must be exactly joint1 through joint6")
@@ -347,6 +356,74 @@ def build_contract_payload(
     return payload
 
 
+def unavailable_rollout_record(
+    *, seed: int, mode: str, reason: str, tape_sha256: str
+) -> dict[str, Any]:
+    """Represent an unexecuted rollout without inventing scientific evidence."""
+    if mode not in {"source", "replay"}:
+        raise ValueError("unavailable rollout mode must be source or replay")
+    return {
+        "seed": int(seed),
+        "mode": mode,
+        "available": False,
+        "unavailable_reason": str(reason),
+        "source_target_tape_sha256": tape_sha256,
+        "finite": True,
+        "passed": False,
+    }
+
+
+def build_unavailable_diagnostic_payload(
+    *, seeds: tuple[int, ...], reason: str
+) -> dict[str, Any]:
+    """Build finite CLI evidence when qualification fails before source capture."""
+    tape: list[Any] = []
+    tape_sha256 = canonical_sha256(tape)
+    rows = []
+    for seed in seeds:
+        source = unavailable_rollout_record(
+            seed=seed, mode="source", reason=reason, tape_sha256=tape_sha256
+        )
+        replay = unavailable_rollout_record(
+            seed=seed, mode="replay", reason=reason, tape_sha256=tape_sha256
+        )
+        rows.append(
+            {
+                "seed": seed,
+                "passed": False,
+                "failures": [reason],
+                "source_target_tape_sha256": tape_sha256,
+                "source": source,
+                "replay": replay,
+            }
+        )
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "action_semantics": "absolute_default_offset_joint_position",
+        "source_task_id": SOURCE_TASK_ID,
+        "source_code_revision": None,
+        "source_asset_revision": None,
+        "source_task_config_projection": None,
+        "source_task_config_sha256": None,
+        "joint_names": list(JOINT_NAMES),
+        "actuator_names": list(JOINT_NAMES),
+        "default_joint_pos_rad": None,
+        "physical_clip_rad": None,
+        "scale_rad": None,
+        "physics_dt_s": 0.002,
+        "control_decimation": 10,
+        "post_reference_hold_control_steps": POST_REFERENCE_HOLD_CONTROL_STEPS,
+        "seeds": list(seeds),
+        "source_target_tape_rad": tape,
+        "source_target_tape_sha256": tape_sha256,
+        "per_seed_replay_rows": rows,
+        "diagnostic_failures": [reason],
+        "decision": "FAIL",
+    }
+    payload["payload_sha256"] = canonical_sha256(payload)
+    return payload
+
+
 def write_canonical_json(path: str | Path, payload: object) -> None:
     """Serialize deterministically while rejecting NaN and infinities."""
     destination = Path(path)
@@ -410,6 +487,24 @@ def _json_projection(value: object) -> Any:
     raise TypeError(f"cannot project config value of type {type(value).__name__}")
 
 
+def _manager_section_projection(
+    value: object, *, observation_groups: bool = False
+) -> dict[str, Any]:
+    """Project manager config while preserving behaviorally significant order."""
+    if not isinstance(value, dict):
+        raise TypeError("manager configuration section must be a mapping")
+    projection = {
+        "term_order": [str(name) for name in value],
+        "terms": _json_projection(value),
+    }
+    if observation_groups:
+        projection["group_term_order"] = {
+            str(name): [str(term_name) for term_name in group.terms]
+            for name, group in value.items()
+        }
+    return projection
+
+
 def source_task_config_projection(cfg: Any) -> dict[str, Any]:
     """Bind every task-defining section needed to reproduce source capture."""
     robot_cfg = cfg.scene.entities["robot"]
@@ -418,10 +513,12 @@ def source_task_config_projection(cfg: Any) -> dict[str, Any]:
         raise ValueError("source robot configuration has no articulation")
     projection = {
         "action": _json_projection(cfg.actions),
-        "observations": _json_projection(cfg.observations),
-        "rewards": _json_projection(cfg.rewards),
-        "metrics": _json_projection(cfg.metrics),
-        "events": _json_projection(cfg.events),
+        "observations": _manager_section_projection(
+            cfg.observations, observation_groups=True
+        ),
+        "rewards": _manager_section_projection(cfg.rewards),
+        "metrics": _manager_section_projection(cfg.metrics),
+        "events": _manager_section_projection(cfg.events),
         "actuators": {
             "robot": _json_projection(articulation.actuators),
         },
@@ -619,9 +716,51 @@ def _rollout_mode(
     np.ndarray,
     np.ndarray,
 ]:
-    """Execute source capture or direct-joint replay with 500 Hz evidence."""
-    import torch
+    """Execute a rollout while owning cleanup from the moment env construction ends."""
     from mjlab.envs import ManagerBasedRlEnv
+
+    if mode not in {"source", "replay"}:
+        raise ValueError(f"unsupported rollout mode {mode!r}")
+    if mode == "replay" and (source_tape_rad is None or playback_lengths is None):
+        raise ValueError("replay requires a source tape and playback lengths")
+
+    cfg.scene.num_envs = 1
+    cfg.auto_reset = False
+    env = ManagerBasedRlEnv(cfg, device="cpu")
+    hook_state: dict[str, Any] = {"installed": False}
+    try:
+        return _rollout_mode_open_env(
+            env,
+            cfg,
+            seeds=seeds,
+            mode=mode,
+            source_tape_rad=source_tape_rad,
+            playback_lengths=playback_lengths,
+            hook_state=hook_state,
+        )
+    finally:
+        if hook_state["installed"]:
+            hook_state["manager"].compute_substep = hook_state["original"]
+        env.close()
+
+
+def _rollout_mode_open_env(
+    env: Any,
+    cfg: Any,
+    *,
+    seeds: tuple[int, ...],
+    mode: str,
+    source_tape_rad: np.ndarray | None,
+    playback_lengths: dict[int, int] | None,
+    hook_state: dict[str, Any],
+) -> tuple[
+    list[dict[str, Any]],
+    dict[int, np.ndarray],
+    np.ndarray,
+    np.ndarray,
+]:
+    """Execute against an owned open env; the caller restores hooks and closes it."""
+    import torch
     from mjlab.managers.scene_entity_config import SceneEntityCfg
 
     from src.assets.robots.unitree_z1.z1_constants import (
@@ -640,14 +779,6 @@ def _rollout_mode(
     from src.tasks.hammer.mdp.rewards import clamped_nail_depth
     from src.tasks.hammer.nail_block import NAIL_SUCCESS_THRESHOLD
 
-    if mode not in {"source", "replay"}:
-        raise ValueError(f"unsupported rollout mode {mode!r}")
-    if mode == "replay" and (source_tape_rad is None or playback_lengths is None):
-        raise ValueError("replay requires a source tape and playback lengths")
-
-    cfg.scene.num_envs = 1
-    cfg.auto_reset = False
-    env = ManagerBasedRlEnv(cfg, device="cpu")
     robot = env.scene["robot"]
     nail = env.scene["nail_block"]
     contact_sensor = env.scene["hammer_nail_contact"]
@@ -784,6 +915,11 @@ def _rollout_mode(
         active["finite"] &= bool(np.isfinite(metric_values).all())
 
     env.metrics_manager.compute_substep = record_substep
+    hook_state.update(
+        installed=True,
+        manager=env.metrics_manager,
+        original=original_substep,
+    )
 
     try:
         for seed in seeds:
@@ -1036,8 +1172,6 @@ def _rollout_mode(
             rows.append(row)
     finally:
         active = None
-        env.metrics_manager.compute_substep = original_substep
-        env.close()
     return rows, captured_tapes, default_joint_pos, physical_limits
 
 
@@ -1048,6 +1182,9 @@ def run_qualification(seeds: tuple[int, ...]) -> dict[str, Any]:
     import src.tasks  # noqa: F401 - populate registry
     from src.assets.robots.unitree_z1.z1_constants import Z1_HAMMER_XML
 
+    root = Path(__file__).resolve().parents[2]
+    source_code_revision = _git_revision(root)
+    source_asset_revision = _external_asset_revision(Path(Z1_HAMMER_XML))
     source_cfg = load_env_cfg(SOURCE_TASK_ID, play=True)
     source_cfg.scene.num_envs = 1
     source_cfg.auto_reset = False
@@ -1077,11 +1214,33 @@ def run_qualification(seeds: tuple[int, ...]) -> dict[str, Any]:
             np.sum(np.any(np.abs(normalized) > 1.0, axis=1))
         )
         row["normalized_action_peak_abs"] = float(np.max(np.abs(normalized)))
-    scheduled_tape = scheduled_replay_targets(
-        canonical_tape,
-        playback_length=playback_lengths[seeds[0]],
-        hold_control_steps=POST_REFERENCE_HOLD_CONTROL_STEPS,
-    )
+    try:
+        scheduled_tape = scheduled_replay_targets(
+            canonical_tape,
+            playback_length=playback_lengths[seeds[0]],
+            hold_control_steps=POST_REFERENCE_HOLD_CONTROL_STEPS,
+        )
+    except ValueError as exc:
+        reason = str(exc)
+        unavailable_replay = [
+            unavailable_rollout_record(
+                seed=seed,
+                mode="replay",
+                reason=reason,
+                tape_sha256=canonical_hash,
+            )
+            for seed in seeds
+        ]
+        return build_contract_payload(
+            source_code_revision=source_code_revision,
+            source_asset_revision=source_asset_revision,
+            source_task_config_projection=projection,
+            default_joint_pos_rad=default,
+            physical_clip_rad=physical,
+            source_target_tape_rad=canonical_tape,
+            source_rows=source_rows,
+            replay_rows=unavailable_replay,
+        )
     replay_parent = load_env_cfg(SOURCE_TASK_ID, play=True)
     replay_cfg = configure_replay_cfg(
         replay_parent, scale_rad=scale, physical_clip_rad=physical
@@ -1100,10 +1259,9 @@ def run_qualification(seeds: tuple[int, ...]) -> dict[str, Any]:
     for row in replay_rows:
         row["source_target_tape_sha256"] = canonical_hash
 
-    root = Path(__file__).resolve().parents[2]
     return build_contract_payload(
-        source_code_revision=_git_revision(root),
-        source_asset_revision=_external_asset_revision(Path(Z1_HAMMER_XML)),
+        source_code_revision=source_code_revision,
+        source_asset_revision=source_asset_revision,
         source_task_config_projection=projection,
         default_joint_pos_rad=default,
         physical_clip_rad=physical,
@@ -1118,7 +1276,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seeds", required=True, type=parse_seed_spec)
     parser.add_argument("--out", required=True, type=Path)
     args = parser.parse_args(argv)
-    payload = run_qualification(args.seeds)
+    try:
+        payload = run_qualification(args.seeds)
+    except Exception as exc:
+        reason = f"{type(exc).__name__}: {exc}"
+        payload = build_unavailable_diagnostic_payload(
+            seeds=args.seeds, reason=reason
+        )
     write_canonical_json(args.out, payload)
     print("seed source replay failures")
     for row in payload["per_seed_replay_rows"]:
