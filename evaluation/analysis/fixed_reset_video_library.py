@@ -91,6 +91,11 @@ SUBSTEP_TRACE_KEYS = (
     "control_decimation",
     "executed_control_steps",
 )
+IMPULSE6_TERMINAL_TRACE_KEYS = (
+    "impulse6_success_censored_productive_first_event_impulse_n_s",
+    "impulse6_episode_cumulative_impulse_n_s",
+    "impulse6_max_lambda_cap_ratio",
+)
 WAVE1_ARTIFACT_FILENAMES = ("policy.mp4", "montage.png", "trajectory.png", "trace.npz")
 WAVE1_REVISION_FIELDS = ("training_revision", "asset_revision", "analysis_revision")
 # Wave 1 recorded no execution device; its CPU provenance rests on a documented
@@ -326,6 +331,11 @@ def treatment_for_task(task: str) -> Treatment:
 
 def treatment_for_campaign_arm(campaign: str, arm: str, task: str) -> Treatment:
     """Select a campaign label while deriving the plot geometry from the registered task."""
+    required_task = expected_task(campaign, arm)
+    if task != required_task:
+        raise ValueError(
+            f"{campaign}/{arm} requires registered task {required_task}, got {task}"
+        )
     task_treatment = treatment_for_task(task)
     treatment = TREATMENT_BY_CAMPAIGN_ARM.get((campaign, arm), task_treatment)
     if treatment.geometry != task_treatment.geometry:
@@ -336,14 +346,31 @@ def treatment_for_campaign_arm(campaign: str, arm: str, task: str) -> Treatment:
     return treatment
 
 
-def trajectory_outcome(trace: Mapping[str, Any], *, success: bool) -> dict:
+def trajectory_outcome(
+    trace: Mapping[str, Any], *, success: bool, campaign: str | None = None
+) -> dict:
     """Read the plotted outcome off the trace itself, never off a caller's claim."""
+    gate_index = np.asarray(trace["substep_gate_index"])
+    if campaign == "impulse6":
+        contact = np.asarray(trace["substep_contact"], dtype=bool)
+        if gate_index.ndim != 1 or contact.shape != gate_index.shape or len(gate_index) == 0:
+            raise ValueError(
+                "impulse6 gate/contact traces must be nonempty one-dimensional peers"
+            )
+        onset_indices = np.flatnonzero(contact)
+        stop = int(onset_indices[0]) + 1 if len(onset_indices) else len(gate_index)
+        gates = int(gate_index[:stop].max())
+        terminal = _validated_impulse6_terminal_outcomes(trace, required=True)
+    else:
+        gates = int(gate_index.max())
+        terminal = {}
     return {
-        "gates": int(np.asarray(trace["substep_gate_index"]).max()),
+        "gates": gates,
         "peak_qvel_rad_s": float(
             np.abs(np.asarray(trace["substep_arm_qvel_rad_s"], dtype=float)).max()
         ),
         "success": bool(success),
+        **terminal,
     }
 
 
@@ -355,8 +382,24 @@ def compose_trajectory_title(
     treatment: Treatment,
     outcome: Mapping[str, Any],
 ) -> str:
-    """Three lines: who this is, what it was trained on, and what it actually did."""
+    """State who this is, what it was trained on, and what it actually did."""
     peak = float(outcome["peak_qvel_rad_s"])
+    if campaign == "impulse6":
+        first_event = float(
+            outcome["success_censored_productive_first_event_impulse_n_s"]
+        )
+        cumulative = float(outcome["episode_cumulative_impulse_n_s"])
+        utilization = float(outcome["max_lambda_cap_ratio"])
+        return (
+            f"{campaign} · {arm} · seed {training_seed} · {treatment.headline}\n"
+            f"Training: {treatment.guidance} · {treatment.velocity} · {treatment.impulse}\n"
+            "Result: success-censored productive first-event impulse "
+            f"{first_event:.4f} N·s · episode-cumulative impulse {cumulative:.4f} N·s\n"
+            f"Outcome: gates {int(outcome['gates'])}/{GUIDELINE_GATE_COUNT}"
+            f" · peak |q̇| {peak:.4f}/{QVEL_LIMIT_RAD_S} rad/s"
+            f" · max Lambda/cap {utilization:.4f}"
+            f" · {'success' if outcome['success'] else 'no success'}"
+        )
     return (
         f"{campaign} · {arm} · seed {training_seed} · {treatment.headline}\n"
         f"Training: {treatment.guidance} · {treatment.velocity} · {treatment.impulse}\n"
@@ -1015,6 +1058,31 @@ def _as_array(trace: Mapping[str, Any], key: str) -> np.ndarray:
         raise ValueError(f"substep trace is missing {key}") from error
 
 
+def _validated_impulse6_terminal_outcomes(
+    trace: Mapping[str, Any], *, required: bool
+) -> dict[str, float]:
+    present = tuple(key for key in IMPULSE6_TERMINAL_TRACE_KEYS if key in trace)
+    if not present:
+        if required:
+            raise ValueError("impulse6 trace is missing all terminal outcome fields")
+        return {}
+    if len(present) != len(IMPULSE6_TERMINAL_TRACE_KEYS):
+        raise ValueError("impulse6 trace must contain all terminal outcome fields")
+
+    values = {}
+    for key in IMPULSE6_TERMINAL_TRACE_KEYS:
+        raw = np.asarray(trace[key])
+        if raw.shape != ():
+            raise ValueError(f"{key} must be a scalar")
+        value = float(raw)
+        if not np.isfinite(value):
+            raise ValueError(f"{key} must be finite")
+        if value < 0.0:
+            raise ValueError(f"{key} must be nonnegative")
+        values[key.removeprefix("impulse6_")] = value
+    return values
+
+
 def validate_substep_trace(trace: Mapping[str, Any]) -> dict:
     """Prove a trace is genuinely per-physics-substep and first-episode only.
 
@@ -1024,6 +1092,7 @@ def validate_substep_trace(trace: Mapping[str, Any]) -> dict:
     for key in SUBSTEP_TRACE_KEYS:
         if key not in trace:
             raise ValueError(f"substep trace is missing {key}")
+    _validated_impulse6_terminal_outcomes(trace, required=False)
 
     positions = _as_array(trace, "substep_head_position_m").astype(float)
     if positions.ndim != 2 or positions.shape[1] != 3 or len(positions) == 0:
@@ -1338,7 +1407,12 @@ def write_substep_trajectory_png(
         ),
         "geometry": geometry,
         "contact_sample_count": int(contact.sum()),
-        "control_boundary_marker_count": int(boundary.sum()),
+        "control_boundary_marker_count": (
+            0
+            if treatment is not None and treatment.screen_target_markers_only
+            else int(boundary.sum())
+        ),
+        "control_boundary_sample_count": int(boundary.sum()),
         "axis_half_span_m": {
             "xz": float(0.5 * (axes[0].get_ylim()[1] - axes[0].get_ylim()[0])),
             "xy": float(0.5 * (axes[1].get_ylim()[1] - axes[1].get_ylim()[0])),

@@ -35,6 +35,8 @@
 - `tests/test_first_strike_campaign.py`: fail-closed launcher matrix and task-log regression.
 - `evaluation/guideline/reward_config_digest.py`: prove frozen C0/G/P/P+V identities remain unchanged and emit six screen identities.
 - `evaluation/analysis/fixed_reset_video_library.py`: `impulse6` task/arm mappings and truthful treatment titles.
+- `scripts/render_policy.py`: minimal impulse6-only terminal trace extension using the already-wired
+  first-strike, delivered-impulse, and per-joint impulse accumulator state from the same rollout.
 - `tests/test_fixed_reset_video_library.py`: mappings, waypoint-only plot geometry, and title content.
 - `docs/results/2026-08-06_impulse6_prereg.md`: frozen matrix, endpoints, anti-farming gates, provenance, and retry rule.
 - `evaluation/results/2026-08-06_impulse6/build_impulse_screen_table.py`: result-local aggregation from validated renderer and diagnostic leaves.
@@ -213,11 +215,13 @@ Expected: all selected tests pass, including the historical presentation guard.
 **Files:**
 - Modify: `evaluation/guideline/reward_config_digest.py`
 - Modify: `evaluation/analysis/fixed_reset_video_library.py:115-245`
+- Modify: `scripts/render_policy.py`
 - Modify: `tests/test_fixed_reset_video_library.py:2270-2400`
 
 **Interfaces:**
 - Consumes: exact task IDs and screen labels from Task 1.
-- Produces: `expected_task("impulse6", arm)`, treatment descriptors, old-digest invariance, and six new canonical digests.
+- Produces: `expected_task("impulse6", arm)`, treatment descriptors, old-digest invariance,
+  six new canonical digests, and impulse6-only terminal outcome fields on the existing renderer trace.
 
 - [ ] **Step 1: Add RED tests for mappings and visual truthfulness**
 
@@ -233,9 +237,14 @@ conda run -n unitree_mjlab pytest -q tests/test_fixed_reset_video_library.py -k 
 
 Expected: missing campaign/task mappings.
 
-- [ ] **Step 3: Add only mappings and treatment descriptors**
+- [ ] **Step 3: Add mappings, treatment descriptors, and the minimal trace extension**
 
-Extend the existing dictionaries; do not change renderer rollout logic, trajectory arithmetic, or frozen-campaign behavior. All screen arms have waypoint geometry enabled and `gate=False`.
+Extend the existing dictionaries and, after the same rollout ends, append the impulse6-only
+productive first-event impulse, episode-cumulative impulse, and maximum Lambda/cap fields from
+the already-wired production tracker/accumulators. This is the minimal `scripts/render_policy.py`
+scope extension; it does not add an evaluator or a second rollout. Do not change trajectory
+arithmetic or frozen-campaign behavior. All screen arms have waypoint geometry enabled and
+`gate=False`.
 
 - [ ] **Step 4: Extend the reward digest command**
 
@@ -253,12 +262,18 @@ conda run -n unitree_mjlab pytest -q tests/test_fixed_reset_video_library.py \
 
 Expected: old digests `MATCH`; six screen rows print distinct expected treatment identities; frozen render-hash test passes byte-identically.
 
+The frozen-render test may skip in a clean checkout whose untracked historical evidence is
+absent. That skip is not Task-4 evidence: Task 4 must execute the real hash assertion with the
+historical Wave-2 evidence present and record a non-skipped pass. Do not make ordinary clean
+checkout tests fail solely because that untracked evidence is unavailable.
+
 ---
 
 ### Task 4: Verify, review, commit, and deploy
 
 **Files:**
-- Modify: only files named in Tasks 1--3 and the preregistration.
+- Modify: only files named in Tasks 1--3, the preregistration, and this plan's scope
+  acknowledgement.
 
 **Interfaces:**
 - Consumes: complete implementation diff.
@@ -317,8 +332,10 @@ git add -- \
   tests/test_configs.py tests/test_env.py tests/test_first_strike_campaign.py \
   evaluation/guideline/reward_config_digest.py \
   evaluation/analysis/fixed_reset_video_library.py \
+  scripts/render_policy.py \
   tests/test_fixed_reset_video_library.py \
-  docs/results/2026-08-06_impulse6_prereg.md
+  docs/results/2026-08-06_impulse6_prereg.md \
+  docs/superpowers/plans/2026-08-06-overnight-impulse-screen.md
 git diff --cached --check
 git commit -m "feat: add reference-guided impulse reward screen"
 ```

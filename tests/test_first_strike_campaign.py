@@ -4084,6 +4084,24 @@ _IMPULSE6 = {
     "s8d16": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S8-D16",
 }
 
+_IMPULSE6_WEIGHTS = {
+    "s0d0": (0, 0),
+    "s0d4": (0, 4),
+    "s0d16": (0, 16),
+    "s8d0": (8, 0),
+    "s8d4": (8, 4),
+    "s8d16": (8, 16),
+}
+
+_HISTORICAL_S8D4_CHECKPOINT_SHA256 = {
+    2: "196fcbf075094274d8f0473e06d2df849edc121a7662ad96bc66c1c8f7ef169c",
+    3: "28ba731278f7b274c41e85b1251321ec5957bfcc8037099b98721f19af95ae2f",
+    4: "3de858b97017f5a47d0e457f69bf3582daf19f00359f84b85e0386d761a311c4",
+    5: "01cc5a82b0e95778ed66e45d981f697f07b7c930c1eba551102d5ddc906d319a",
+    6: "cd4d0c7ab593aded80fe6d89707daa1fb024574768ffac792e8015e1d20af2a1",
+    7: "d11f77f74b41979b473be8cbb4264fb90b2da11cd2330f556b81e1501a6aa564",
+}
+
 
 def _run_impulse6_launcher(root: Path, *, task: str, short: str, **overrides):
     values = {
@@ -4203,7 +4221,26 @@ def test_impulse6_registered_tasks_cannot_escape_through_another_campaign(
     assert "scripts/train.py" not in calls
 
 
-def test_impulse6_prereg_test_matrix_and_shell_allowlist_have_identical_pairs():
+def test_impulse6_prereg_matrix_is_the_exact_36_row_cartesian_product():
+    prereg = (ROOT / "docs" / "results" / "2026-08-06_impulse6_prereg.md").read_text()
+    prereg_rows = [
+        (int(s), int(d), int(seed), task, short)
+        for s, d, seed, task, short in re.findall(
+            r"^\| (\d+) \| (\d+) \| (\d+) \| `([^`]+)` \| `([^`]+)` \|$",
+            prereg,
+            flags=re.MULTILINE,
+        )
+    ]
+    expected_rows = [
+        (s, d, seed, _IMPULSE6[short], short)
+        for short, (s, d) in _IMPULSE6_WEIGHTS.items()
+        for seed in range(2, 8)
+    ]
+
+    assert prereg_rows == expected_rows
+
+
+def test_impulse6_prereg_matrix_and_shell_allowlist_have_identical_pairs():
     expected_pairs = {(task, short) for short, task in _IMPULSE6.items()}
     prereg = (ROOT / "docs" / "results" / "2026-08-06_impulse6_prereg.md").read_text()
     prereg_rows = re.findall(
@@ -4229,6 +4266,54 @@ def test_impulse6_prereg_test_matrix_and_shell_allowlist_have_identical_pairs():
         )
     )
     assert shell_pairs == expected_pairs
+
+
+def test_impulse6_s8d4_reuse_evidence_pins_historical_provenance_and_checkpoints():
+    prereg = (ROOT / "docs" / "results" / "2026-08-06_impulse6_prereg.md").read_text()
+
+    assert "`ba6119c767fe92a8eb4b6131e0c0b0d3c120f0fe`" in prereg
+    assert "`b58ccd2f81fd246f27c1e8d88cf86484cd888703`" in prereg
+    checkpoint_rows = {
+        int(seed): digest
+        for seed, digest in re.findall(
+            r"^\| ([2-7]) \| `([0-9a-f]{64})` \|$", prereg, flags=re.MULTILINE
+        )
+    }
+    assert checkpoint_rows == _HISTORICAL_S8D4_CHECKPOINT_SHA256
+    assert "reuse remains conditional on Task 5" in prereg
+    assert "files, final YAML, and provenance" in prereg
+
+
+def test_impulse6_preregisters_seed2_for_matched_slide_video_without_outcome_selection():
+    prereg = (ROOT / "docs" / "results" / "2026-08-06_impulse6_prereg.md").read_text()
+    match = re.search(
+        r"Matched slide-video seed: `(?P<seed>\d+)` \(canonical smallest-seed ordering; "
+        r"not outcome selection\)\.",
+        prereg,
+    )
+
+    assert match is not None
+    assert int(match.group("seed")) == 2
+
+
+def test_reward_digest_gate_binds_live_s8d4_to_the_historical_training_revision():
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "evaluation" / "guideline" / "reward_config_digest.py"),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (
+        "s8d4 historical ba6119c reward-config digest: "
+        "cc52cd7319a2845d85da3ea22b685a329c51a927b9edd2ac93d283460323b3d9  MATCH"
+        in result.stdout
+    )
 
 
 def test_impulse6_launcher_logs_the_registered_task_not_array_index(tmp_path):

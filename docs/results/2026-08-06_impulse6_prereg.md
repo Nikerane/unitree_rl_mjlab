@@ -74,6 +74,48 @@ No completed weak seed is replaced.
 | 8 | 16 | 6 | `Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S8-D16` | `s8d16` |
 | 8 | 16 | 7 | `Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S8-D16` | `s8d16` |
 
+## Conditional historical S8/D4 reuse evidence
+
+The existing S8/D4 policies were trained at
+`ba6119c767fe92a8eb4b6131e0c0b0d3c120f0fe` against asset revision
+`b58ccd2f81fd246f27c1e8d88cf86484cd888703`. An independent detached export of
+that training revision produced reward-config SHA-256
+`cc52cd7319a2845d85da3ea22b685a329c51a927b9edd2ac93d283460323b3d9` for the
+registered P+V+D4 task. The candidate checkpoints are:
+
+| seed | checkpoint SHA-256 |
+|---:|---|
+| 2 | `196fcbf075094274d8f0473e06d2df849edc121a7662ad96bc66c1c8f7ef169c` |
+| 3 | `28ba731278f7b274c41e85b1251321ec5957bfcc8037099b98721f19af95ae2f` |
+| 4 | `3de858b97017f5a47d0e457f69bf3582daf19f00359f84b85e0386d761a311c4` |
+| 5 | `01cc5a82b0e95778ed66e45d981f697f07b7c930c1eba551102d5ddc906d319a` |
+| 6 | `cd4d0c7ab593aded80fe6d89707daa1fb024574768ffac792e8015e1d20af2a1` |
+| 7 | `d11f77f74b41979b473be8cbb4264fb90b2da11cd2330f556b81e1501a6aa564` |
+
+These hashes bank candidates, not a reuse decision. S8/D4 reuse remains conditional on Task 5
+verifying the checkpoint files, final YAML, and provenance against the frozen controller,
+task, seed, iteration, environment-count, CaT, code, and asset identities. Any failed identity
+check triggers fresh S8/D4 training under the impulse6 training revision.
+
+## Presentation seed
+
+Matched slide-video seed: `2` (canonical smallest-seed ordering; not outcome selection).
+The same seed is used across all displayed arms; any separately selected representative video
+must be labelled as selected.
+
+## Minimal renderer scope extension
+
+`scripts/render_policy.py` is an explicit minimal extension to the implementation boundary. At
+the end of the existing impulse6 fixed-reset rollout, it records the success-censored productive
+first-event impulse, episode-cumulative impulse, and maximum Lambda/cap from the already-wired
+`FirstStrikeEventTracker`, `SubstepDeliveredImpulse`, and `SubstepImpulseAccumulator` state. It
+does not run a second rollout or introduce a new evaluator, and it adds no keys to historical
+campaign traces.
+
+The historical frozen-render regression remains clean-checkout-safe: it may skip when its
+untracked Wave-2 evidence is absent. Such a skip is not launch evidence. Task 4 must run the real
+hash assertion with that evidence present and record a non-skipped byte-identical pass.
+
 ## Endpoints, estimand, and anti-farming gates
 
 The primary endpoint is productive first-strike nail-axis delivered impulse from

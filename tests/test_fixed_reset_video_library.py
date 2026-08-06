@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+from types import SimpleNamespace
 
 import imageio.v3 as iio
 import numpy as np
@@ -1422,6 +1423,20 @@ def _wave1_trace(
     }
 
 
+def _impulse6_trace() -> dict[str, np.ndarray]:
+    trace = _wave1_trace()
+    trace.update(
+        {
+            "impulse6_success_censored_productive_first_event_impulse_n_s": np.float64(
+                0.1234
+            ),
+            "impulse6_episode_cumulative_impulse_n_s": np.float64(0.4567),
+            "impulse6_max_lambda_cap_ratio": np.float64(0.75),
+        }
+    )
+    return trace
+
+
 def test_wave1_substep_trace_accepts_a_genuine_500hz_trace():
     """A trace with real intra-window motion is accepted and reports its rate."""
     from evaluation.analysis.fixed_reset_video_library import validate_substep_trace
@@ -2224,6 +2239,117 @@ def test_outcome_is_read_off_the_trace_not_asserted_by_the_caller():
     assert outcome["success"] is True
 
 
+def test_impulse6_gate_count_stops_at_the_first_contact_onset():
+    from evaluation.analysis.fixed_reset_video_library import trajectory_outcome
+
+    trace = _impulse6_trace()
+    trace["substep_contact"][:] = False
+    trace["substep_contact"][12:15] = True
+    trace["substep_gate_index"][:] = 0
+    for index, value in ((4, 1), (8, 2), (12, 3), (18, 4), (24, 5), (30, 6)):
+        trace["substep_gate_index"][index:] = value
+
+    outcome = trajectory_outcome(trace, success=True, campaign="impulse6")
+
+    assert int(trace["substep_gate_index"].max()) == 6
+    assert outcome["gates"] == 3
+
+
+@pytest.mark.parametrize(
+    "key,bad_value,message",
+    (
+        (
+            "impulse6_success_censored_productive_first_event_impulse_n_s",
+            np.asarray([0.1]),
+            "scalar",
+        ),
+        ("impulse6_episode_cumulative_impulse_n_s", np.float64(np.nan), "finite"),
+        ("impulse6_max_lambda_cap_ratio", np.float64(-0.1), "nonnegative"),
+    ),
+)
+def test_impulse6_terminal_trace_values_must_be_scalar_finite_and_nonnegative(
+    key, bad_value, message
+):
+    from evaluation.analysis.fixed_reset_video_library import validate_substep_trace
+
+    trace = _impulse6_trace()
+    trace[key] = bad_value
+
+    with pytest.raises(ValueError, match=message):
+        validate_substep_trace(trace)
+
+
+def test_impulse6_terminal_trace_values_are_an_all_or_nothing_extension():
+    from evaluation.analysis.fixed_reset_video_library import validate_substep_trace
+
+    trace = _impulse6_trace()
+    del trace["impulse6_episode_cumulative_impulse_n_s"]
+
+    with pytest.raises(ValueError, match="all terminal outcome fields"):
+        validate_substep_trace(trace)
+
+
+def _renderer_terminal_state(*, reason: int = 1, productive: bool = True):
+    return SimpleNamespace(
+        _hammer_first_strike=SimpleNamespace(
+            productive=torch.tensor([productive], dtype=torch.bool),
+            reason=torch.tensor([reason], dtype=torch.int64),
+            delivered=torch.tensor([0.24], dtype=torch.float64),
+        ),
+        _hammer_substep_delivered=SimpleNamespace(
+            delivered=torch.tensor([0.75], dtype=torch.float64),
+        ),
+        _hammer_substep_impulse=SimpleNamespace(
+            _episode_peak_perjoint=torch.tensor(
+                [[0.82, 1.64, 0.41, 0.0, 0.164, 0.328]], dtype=torch.float64
+            ),
+        ),
+    )
+
+
+def test_renderer_adds_terminal_impulse_state_only_to_impulse6_traces():
+    caps = (1.64, 3.28, 1.64, 1.64, 1.64, 1.64)
+    historical = _wave1_trace()
+    historical_keys = tuple(historical)
+
+    returned = render_policy.attach_campaign_terminal_outcomes(
+        historical,
+        campaign="presentation3",
+        base_env=None,
+        impulse_caps=None,
+    )
+    assert returned is historical
+    assert tuple(historical) == historical_keys
+
+    screen = _wave1_trace()
+    render_policy.attach_campaign_terminal_outcomes(
+        screen,
+        campaign="impulse6",
+        base_env=_renderer_terminal_state(),
+        impulse_caps=caps,
+    )
+    assert screen[
+        "impulse6_success_censored_productive_first_event_impulse_n_s"
+    ] == pytest.approx(0.24)
+    assert screen["impulse6_episode_cumulative_impulse_n_s"] == pytest.approx(0.75)
+    assert screen["impulse6_max_lambda_cap_ratio"] == pytest.approx(0.5)
+
+
+def test_renderer_zeros_the_primary_impulse_when_the_first_event_did_not_end_in_success():
+    trace = _wave1_trace()
+    render_policy.attach_campaign_terminal_outcomes(
+        trace,
+        campaign="impulse6",
+        base_env=_renderer_terminal_state(reason=2, productive=True),
+        impulse_caps=(1.64, 3.28, 1.64, 1.64, 1.64, 1.64),
+    )
+
+    assert trace[
+        "impulse6_success_censored_productive_first_event_impulse_n_s"
+    ] == 0.0
+    assert trace["impulse6_episode_cumulative_impulse_n_s"] == pytest.approx(0.75)
+
+
 def test_c0_plot_draws_no_reference_line_gate_disks_or_waypoints(tmp_path):
     from evaluation.analysis.fixed_reset_video_library import (
         treatment_for_task,
@@ -2328,6 +2454,15 @@ def test_impulse6_s8d4_is_the_existing_presentation3_pv_d4_identity():
     assert expected_task("presentation3", "P+V+D4") == _PVD4_TASK
 
 
+def test_impulse6_treatment_selector_rejects_a_crossed_registered_task():
+    from evaluation.analysis.fixed_reset_video_library import (
+        treatment_for_campaign_arm,
+    )
+
+    with pytest.raises(ValueError, match="requires registered task"):
+        treatment_for_campaign_arm("impulse6", "s0d4", _PVD4_TASK)
+
+
 def test_shared_s8d4_task_keeps_presentation3_title_but_gets_the_impulse6_label():
     """Campaign identity changes the screen wording, never the task-derived geometry."""
     presentation = render_policy.substep_plot_kwargs(
@@ -2337,7 +2472,7 @@ def test_shared_s8d4_task_keeps_presentation3_title_but_gets_the_impulse6_label(
     )
     screen = render_policy.substep_plot_kwargs(
         _render_cfg("impulse6", "s8d4"),
-        _wave1_trace(),
+        _impulse6_trace(),
         terminal_reason="terminated",
     )
 
@@ -2353,7 +2488,10 @@ def test_shared_s8d4_task_keeps_presentation3_title_but_gets_the_impulse6_label(
         "impulse6 · s8d4 · seed 4 · impulse screen S=8 D=4 · I-CaT log-only\n"
         "Training: waypoint w=8 (progress weight 8.0) · V-CaT 0.5 @ 500 Hz "
         "(soft velocity-CaT; max_p 0.5) · impulse log-only\n"
-        "Result: gates 6/6 · peak |q̇| 0.0000/3.1415 rad/s · success"
+        "Result: success-censored productive first-event impulse 0.1234 N·s "
+        "· episode-cumulative impulse 0.4567 N·s\n"
+        "Outcome: gates 6/6 · peak |q̇| 0.0000/3.1415 rad/s "
+        "· max Lambda/cap 0.7500 · success"
     )
 
 
@@ -2408,7 +2546,7 @@ def test_impulse6_titles_and_plot_geometry_state_the_actual_screen_treatment(
 
     _, impact_weight, delivered_weight = row
     kwargs = render_policy.substep_plot_kwargs(
-        _render_cfg("impulse6", arm), _wave1_trace(), terminal_reason="terminated"
+        _render_cfg("impulse6", arm), _impulse6_trace(), terminal_reason="terminated"
     )
     title = kwargs["title"]
     assert kwargs["treatment"].geometry == "waypoints"
@@ -2417,6 +2555,9 @@ def test_impulse6_titles_and_plot_geometry_state_the_actual_screen_treatment(
     assert "I-CaT log-only" in title
     assert f"S={impact_weight:g}" in title
     assert f"D={delivered_weight:g}" in title
+    assert "success-censored productive first-event impulse 0.1234 N·s" in title
+    assert "episode-cumulative impulse 0.4567 N·s" in title
+    assert "max Lambda/cap 0.7500" in title
 
     report = write_substep_trajectory_png(
         _wave1_trace(), tmp_path / f"{arm}.png", treatment=kwargs["treatment"]
@@ -2424,10 +2565,13 @@ def test_impulse6_titles_and_plot_geometry_state_the_actual_screen_treatment(
     assert report["reference_source"] == "waypoint_progress_tracker_entry_to_nail"
     assert report["waypoint_marker_count"] == 6
     assert report["gate_disk_count"] == 0
-    assert sum(
+    assert report["control_boundary_marker_count"] == 0
+    assert report["control_boundary_sample_count"] == 4
+    assert len(calls["plot"]) == 2
+    assert all(
         call.get("color") == "black" and call.get("linestyle") == "--"
         for call in calls["plot"]
-    ) == 2
+    )
     assert len(calls["scatter"]) == 12
     assert all(
         call.get("marker") == "D" and call.get("facecolors") == "none"

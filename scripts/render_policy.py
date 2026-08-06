@@ -63,6 +63,11 @@ from src.tasks.hammer.mdp.guideline import (
   GUIDELINE_NUM_GATES,
   project_to_reference,
 )
+from src.tasks.hammer.mdp.first_strike import REASON_SUCCESS, _ENV_FIRST_STRIKE_ATTR
+from src.tasks.hammer.mdp.impulse_bound import (
+  _ENV_SUBSTEP_DELIVERED_ATTR,
+  _ENV_SUBSTEP_IMPULSE_ATTR,
+)
 from src.tasks.hammer.mdp.references import get_strike_reference
 
 
@@ -124,9 +129,88 @@ def substep_plot_kwargs(cfg: "Cfg", trace: dict, *, terminal_reason: str) -> dic
       arm=cfg.arm,
       training_seed=cfg.training_seed,
       treatment=treatment,
-      outcome=trajectory_outcome(trace, success=terminal_reason == "terminated"),
+      outcome=trajectory_outcome(
+        trace,
+        success=terminal_reason == "terminated",
+        campaign=cfg.campaign,
+      ),
     ),
   }
+
+
+def _cpu_numpy(value) -> np.ndarray:
+  if isinstance(value, torch.Tensor):
+    return value.detach().cpu().numpy()
+  return np.asarray(value)
+
+
+def attach_campaign_terminal_outcomes(
+  trace: dict[str, np.ndarray],
+  *,
+  campaign: str,
+  base_env,
+  impulse_caps,
+) -> dict[str, np.ndarray]:
+  """Attach terminal state only for impulse6, after its one fixed-reset rollout ends."""
+  if campaign != "impulse6":
+    return trace
+
+  tracker = getattr(base_env, _ENV_FIRST_STRIKE_ATTR, None)
+  delivered = getattr(base_env, _ENV_SUBSTEP_DELIVERED_ATTR, None)
+  accumulator = getattr(base_env, _ENV_SUBSTEP_IMPULSE_ATTR, None)
+  if tracker is None or delivered is None or accumulator is None:
+    raise RuntimeError(
+      "impulse6 terminal outcomes require FirstStrikeEventTracker, "
+      "SubstepDeliveredImpulse, and SubstepImpulseAccumulator state"
+    )
+
+  productive = _cpu_numpy(tracker.productive)
+  reason = _cpu_numpy(tracker.reason)
+  first_event = _cpu_numpy(tracker.delivered).astype(np.float64)
+  cumulative = _cpu_numpy(delivered.delivered).astype(np.float64)
+  peaks = _cpu_numpy(accumulator._episode_peak_perjoint).astype(np.float64)
+  caps = np.asarray(impulse_caps, dtype=np.float64)
+  for name, values in (
+    ("tracker.productive", productive),
+    ("tracker.reason", reason),
+    ("tracker.delivered", first_event),
+    ("substep_delivered.delivered", cumulative),
+  ):
+    if values.shape != (1,):
+      raise ValueError(f"{name} must have shape (1,) for a fixed-reset render")
+  if peaks.shape != (1, 6):
+    raise ValueError(
+      "SubstepImpulseAccumulator episode peaks must have shape (1, 6) "
+      "for a fixed-reset render"
+    )
+  if caps.shape != (6,) or not np.isfinite(caps).all() or np.any(caps <= 0.0):
+    raise ValueError("impulse6 caps must be six finite positive values")
+  for name, values in (
+    ("tracker.delivered", first_event),
+    ("substep_delivered.delivered", cumulative),
+    ("SubstepImpulseAccumulator episode peaks", peaks),
+  ):
+    if not np.isfinite(values).all():
+      raise ValueError(f"{name} must be finite")
+    if np.any(values < 0.0):
+      raise ValueError(f"{name} must be nonnegative")
+
+  primary = (
+    float(first_event[0])
+    if bool(productive[0]) and int(reason[0]) == REASON_SUCCESS
+    else 0.0
+  )
+  trace.update(
+    {
+      "impulse6_success_censored_productive_first_event_impulse_n_s": np.float64(
+        primary
+      ),
+      "impulse6_episode_cumulative_impulse_n_s": np.float64(cumulative[0]),
+      "impulse6_max_lambda_cap_ratio": np.float64(np.max(peaks[0] / caps)),
+    }
+  )
+  validate_substep_trace(trace)
+  return trace
 
 
 def _sha256(path: Path) -> str:
@@ -302,6 +386,7 @@ def _run_wave1_substep_rollout(
   fixed_reset: dict,
   physics_dt_s: float,
   control_decimation: int,
+  impulse_caps,
 ) -> None:
   """Record 500 Hz evidence by wrapping the production per-substep metrics call.
 
@@ -441,6 +526,12 @@ def _run_wave1_substep_rollout(
     physics_dt_s=physics_dt_s,
     control_decimation=control_decimation,
     executed_control_steps=executed,
+  )
+  attach_campaign_terminal_outcomes(
+    trace,
+    campaign=cfg.campaign,
+    base_env=base_env,
+    impulse_caps=impulse_caps,
   )
   # Wave 1 is frozen with no device block and a documented inferred-CPU bridge;
   # re-rendering it must stay byte-identical, so only later campaigns record one.
@@ -690,6 +781,11 @@ def main(cfg: Cfg) -> None:
       fixed_reset=fixed_reset,
       physics_dt_s=physics_dt_s,
       control_decimation=control_decimation,
+      impulse_caps=(
+        env_cfg.metrics["cat_soft"].params["imp_limit"]
+        if cfg.campaign == "impulse6"
+        else None
+      ),
     )
     return
 

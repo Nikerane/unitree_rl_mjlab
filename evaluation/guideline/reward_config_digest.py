@@ -2,13 +2,15 @@
 
 Usage:  python evaluation/guideline/reward_config_digest.py     # exit 0 = all digests match
 
-Wave-3 launch gate.
+Wave-3 and impulse6 launch gate.
 
-Two jobs:
+Three jobs:
   (a) re-derive the THREE FROZEN Wave-2 per-arm reward-config digests at this revision and
       prove they still match -- this is what shows the src/ change did not perturb the
       controls P/G/C0 that Wave 3 is compared against;
-  (b) derive and print the NEW P+V digest, to be frozen into the preregistration.
+  (b) derive and print the NEW P+V digest, to be frozen into the preregistration;
+  (c) validate all six impulse6 reward cells and bind live S8/D4 to the independently
+      reproduced digest from its historical training revision.
 """
 
 import copy
@@ -86,6 +88,13 @@ SCREEN = {
 }
 PRESENTATION3_PVD4_TASK = (
     "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4"
+)
+# Independently reproduced from the registered P+V+D4 task in a detached export of
+# ``HISTORICAL_S8D4_TRAINING_REVISION``.  This is deliberately a literal rather than a value
+# derived from the live screen config: live S8/D4 drift must make this command fail.
+HISTORICAL_S8D4_TRAINING_REVISION = "ba6119c767fe92a8eb4b6131e0c0b0d3c120f0fe"
+HISTORICAL_S8D4_REWARD_CONFIG_SHA256 = (
+    "cc52cd7319a2845d85da3ea22b685a329c51a927b9edd2ac93d283460323b3d9"
 )
 
 
@@ -177,9 +186,11 @@ for arm, kw in NEW.items():
 
 print()
 print("=== impulse6 registered reward-config digests (six-cell screen) ===")
-screen_baseline = normalized_screen_config(SCREEN["s8d4"][0])
+screen_baseline = normalized_screen_config(SCREEN["s0d0"][0])
+screen_digests = {}
 for short, (task, impact_weight, delivered_weight) in SCREEN.items():
     got, active = registered_digest(task)
+    screen_digests[short] = got
     ok = screen_cell_ok(task, impact_weight, delivered_weight, screen_baseline)
     bad += 0 if ok else 1
     print(
@@ -194,6 +205,18 @@ bad += 0 if centre_ok else 1
 print(
     "  s8d4 existing presentation3 P+V+D4 identity: %s"
     % ("MATCH" if centre_ok else "*** MISMATCH ***")
+)
+historical_centre_ok = (
+    screen_digests["s8d4"] == HISTORICAL_S8D4_REWARD_CONFIG_SHA256
+)
+bad += 0 if historical_centre_ok else 1
+print(
+    "  s8d4 historical %s reward-config digest: %s  %s"
+    % (
+        HISTORICAL_S8D4_TRAINING_REVISION[:7],
+        HISTORICAL_S8D4_REWARD_CONFIG_SHA256,
+        "MATCH" if historical_centre_ok else "*** MISMATCH ***",
+    )
 )
 
 print()
