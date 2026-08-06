@@ -380,7 +380,7 @@ git commit -m "test(hammer): define joint action qualification contract"
 
 Use a fake action term to prove the capture hook records `robot.data.joint_pos_target` immediately after the first `apply_actions()` call in each ten-substep interval. Prove it does not record realized `joint_pos` or the interval-final DiffIK target.
 
-Freeze `POST_REFERENCE_HOLD_CONTROL_STEPS = 10`, matching the established reference feasibility script. The final target is held for ten additional 20 ms control intervals so contact and nail completion are observed without inventing new commands.
+Freeze `POST_REFERENCE_HOLD_CONTROL_STEPS = 10`, matching the established reference feasibility script. The final target is scheduled for up to ten additional 20 ms control intervals so contact and nail completion are observed without inventing new commands. If the existing `nail_driven` termination fires earlier, capture the terminal transition and stop immediately: record the scheduled versus executed hold counts, require ten substeps for every executed target, and never disable termination, step a terminated `auto_reset=False` environment, or fabricate unexecuted targets.
 
 Add an integration test with `cfg.auto_reset=False` proving that the terminal
 `q(t+1)`, nail depth, first-strike state, and applied target are captured before any
