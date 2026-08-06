@@ -38,16 +38,16 @@ compute budgets so implementation sessions do not invent scientific choices.
   restricts this effort to the existing worktree. Research tickets therefore
   write isolated notes under `docs/research/wayfinder/` and do not switch branches
   or commit while unrelated work is dirty.
-- The current Stage-1 plan treats the no-`r_tt` arm as engineering-only. That text
-  must be amended before GPU work because the map now includes a trained matched
-  FIC `r_tt` ablation.
+- The Stage-1 plan now carries a trained matched FIC `r_tt` ablation. This map
+  remains the decision tracker while the implementation plan governs execution.
 
 ## Decisions so far
 
 - [Fix the Z1 simulation experiment ladder](tickets/fix-z1-simulation-experiment-ladder.md) — stage direct-joint FIC, controlled drop, diagnostic active CaT, curriculum/DR, then VIC.
 - [Freeze the direct-joint fixed-gain baseline contract](tickets/freeze-direct-joint-fixed-gain-baseline-contract.md) — preserve the qualified six-joint fixed-gain P+V+D4 treatment and its safety/evidence gates.
 - [Define the causal command-trackability term](tickets/define-causal-command-trackability-term.md) — use the calibrated one-step nonnegative cost with weight `-1.0`, unscaled by CaT, and matched across FIC/VIC.
-- [Establish the paper-aligned FIC RTT ablation](tickets/establish-paper-aligned-fic-rtt-ablation.md) — train fixed-gain joint policies both without and with `r_tt`; the exact campaign depth remains open.
+- [Establish the paper-aligned FIC RTT ablation](tickets/establish-paper-aligned-fic-rtt-ablation.md) — train fixed-gain joint policies both without and with `r_tt`.
+- [Design the matched FIC RTT ablation](tickets/design-the-matched-fic-rtt-ablation.md) — pilot both arms at seed 2, expand both together to seeds 3/4 only if both pass, and report direction-agnostic paired effects.
 - [Freeze the controlled-drop reference setup](tickets/freeze-controlled-drop-reference-setup.md) — use the centered simulation-only 0.200 kg cylindrical primary drop from rest at `h0`.
 - [Use a diagnostic windowed reaction-impulse constraint](tickets/use-diagnostic-windowed-reaction-impulse-constraint.md) — validate CaT with lowered diagnostic per-joint thresholds and defer a rigorous ballistic estimator.
 - [Freeze the high-level VIC architecture](tickets/freeze-high-level-vic-architecture.md) — add bounded per-joint stiffness and coupled damping to the same joint targets, guidance, and `r_tt`, with VIC last.
@@ -68,8 +68,8 @@ compute budgets so implementation sessions do not invent scientific choices.
 ## Out of scope
 
 - Final thesis analysis, writing, presentation, or defense production.
-- Implementing the experiments, GPU training, and result collection; this map
-  ends at the executable specification.
+- Implementation details, GPU job mechanics, and result collection procedures;
+  those live in the executable stage plans while this map records decisions.
 - Hardware drops, physical sim-to-real validation, G1 replication, or
   manufacturer certification.
 - A rigorous ballistic estimator or a split ballistic/press constraint in this

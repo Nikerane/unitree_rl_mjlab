@@ -4,7 +4,7 @@
 
 **Goal:** Replace the learned Cartesian DiffIK action with a qualified six-joint desired-position action while retaining the current task-space P trajectory guidance, fixed actuator gains, velocity CaT, D4 delivered-impulse reward, and log-only impulse CaT. Establish a stable fixed-gain joint-space baseline before the controlled-drop, active impulse-CaT, curriculum/domain-randomization, and VIC stages.
 
-**Architecture:** Preserve every existing Cartesian task. Build the new task from the registered P+V+D4 treatment, then replace only its action term with mjlab 1.4.0 `JointPositionActionCfg`. The policy emits six normalized actions; each maps to an absolute default-offset desired joint position, is clipped to the physical XML limit, and is held for ten 500 Hz physics substeps. Derive per-joint scales from the first causal DiffIK target in each 20 ms reference interval and prove the same scripted strike remains feasible before training. Keep the P tracker entirely in task space. Add the paper-aligned one-step joint-command tracking contribution to the primary fixed-gain task as a nonnegative cost with reward weight `-1.0`, and explicitly keep that penalty outside soft-CaT's scaled positive return. Retain a no-`r_tt` sibling only as an engineering configuration control.
+**Architecture:** Preserve every existing Cartesian task. Build two matched joint-position fixed-gain treatments from the registered P+V+D4 treatment, then replace only their action term with mjlab 1.4.0 `JointPositionActionCfg`. The policy emits six normalized actions; each maps to an absolute default-offset desired joint position, is clipped to the physical XML limit, and is held for ten 500 Hz physics substeps. Derive per-joint scales from the first causal DiffIK target in each 20 ms reference interval and prove the same scripted strike remains feasible before training. Keep the P tracker entirely in task space. FIC-0 omits command tracking; FIC-TT adds the paper-aligned one-step joint-command tracking contribution as a nonnegative cost with reward weight `-1.0`, explicitly outside soft-CaT's scaled positive return. Train and evaluate both arms with matched seeds and budgets.
 
 **Tech Stack:** Python 3.10, PyTorch, mjlab 1.4.0, MuJoCo 3.8.1, RSL-RL/CatPPO, pytest, the existing first-strike/guideline evaluation pipeline, and Slurm on Vega A100 nodes.
 
@@ -41,11 +41,11 @@
 | Item | Frozen value |
 | --- | --- |
 | Matched Cartesian parent | `Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4` |
-| Joint engineering configuration control | `Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4-JointPosition-Fixed` |
-| Joint primary task | `Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4-JointPosition-Fixed-TT` |
+| Joint FIC-0 task | `Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4-JointPosition-Fixed` |
+| Joint FIC-TT task | `Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4-JointPosition-Fixed-TT` |
 | Policy action | six absolute default-offset desired joint positions |
 | Task-space guidance | P waypoint progress, weight `8.0` |
-| Joint command tracking | `r_tt` in the primary task only |
+| Joint command tracking | absent in FIC-0; calibrated `r_tt` in FIC-TT |
 | Delivered-impulse reward | D4, weight `4.0` |
 | Velocity CaT | active, substep peak, limit `3.1415 rad/s` |
 | Impulse CaT | measured but log-only, `imp_max_p=0.0` |
@@ -53,13 +53,13 @@
 | Reset | fixed `(0.0, 0.0)` position and velocity offsets |
 | Action dimensions | Cartesian `3`; joint `6` |
 | Observation dimensions | Cartesian P `44`; joint P `47` |
-| Training | seeds `2`, then `3` and `4`; 200 iterations; 4,096 envs; 24 steps/env/iteration |
+| Training | both arms at seed `2`, then both arms at seeds `3` and `4`; 200 iterations; 4,096 envs; 24 steps/env/iteration |
 | Checkpoint rule | final `model_199.pt`; never select a better intermediate checkpoint |
 | Sampled evaluator RNG | base `2026072900`; reset `2036072919`; observation `2046072933`; action `2056072941` |
 | Sampled policy | stochastic actions; actor corruption on; critic corruption off; two completed episodes/env |
 | Fixed CPU policy | one env, deterministic mean action, fixed reset, observation corruption off |
 
-The no-`r_tt` task proves only configuration isolation and scripted executability. It is not a behavioral control because it is not trained. Do not launch a multi-seed no-`r_tt` campaign now. The primary fixed-gain policy and the later VIC policy both carry the same effective `r_tt` contribution. Consequently, the trained Stage-1 treatment is a joint-action-plus-command-tracking bundle. Comparison to the old Cartesian P+V+D4 policies is descriptive and is not a causal estimate of either the action interface or `r_tt` alone.
+FIC-0 and FIC-TT are both behavioral treatments. Launch their seed-2 pilots as a pair; expand both to seeds 3 and 4 only if both independently pass the same absolute task/safety gates. No directional improvement from `r_tt` is required for promotion: report its effect on task success, productive impact, nail impulse, per-joint reaction impulse, command-tracking error, action saturation, joint-limit proximity, and velocity legality. Metrics that require an active reward term—positive raw `r_tt` cost and negative weighted return—apply only to FIC-TT; the corresponding expected value for FIC-0 is absence of the term. The later impedance-isolation comparison is FIC-TT versus VIC-TT with the same effective `r_tt`. Comparison to old Cartesian P+V+D4 policies remains descriptive.
 
 ## Physical and Controller Contract
 
@@ -119,7 +119,7 @@ Delta R_tt(t) = -k_tt * ||q_des(t) - q(t+1)||^2
 - Implement `joint_trackability_cost = k_tt * ||q_des-q_next||^2` as a nonnegative function and configure reward term `r_tt` with weight `-1.0`.
 - Add `r_tt` to `CatSoftHook._NEG_TERMS`, so velocity violations never multiply this penalty by `(1-delta)`. A unit test must prove `reward_buf = r_pos + r_neg` and that `r_tt` rides through unscaled for nonzero delta.
 
-This joint command-tracking term is distinct from the P task-space trajectory guidance. Both are active in the primary task.
+This joint command-tracking term is distinct from the P task-space trajectory guidance. Both are active in FIC-TT; P guidance remains active in FIC-0 as well.
 
 ## Stop/Go Gates
 
@@ -129,8 +129,8 @@ This joint command-tracking term is distinct from the P task-space trajectory gu
 | G1 — causal replay | 16/16 fixed-reset seeded replays succeed with exact ordering, finite state, zero clipping/saturation, legal qvel, six waypoints, and accepted strike | Stop; do not train or tune gains |
 | G2 — production integration | Joint task is 6-action/47-observation; old Cartesian tasks unchanged; full CPU tests pass | Fix through TDD before any GPU work |
 | G3 — live backend | CPU and CUDA smokes prove affine mapping, ten-substep hold, fixed gains, P+V+D4 identity, active velocity CaT, and log-only impulse CaT | Stop before pilot training |
-| G4 — one-seed learnability | Seed 2 final checkpoint passes the preregistered 64-episode pilot criteria | Diagnose one cause at a time; do not expand |
-| G5 — three-seed stability | Seeds 2, 3, and 4 pass the final 512-episode-per-checkpoint criteria | Report instability; do not enter the drop/VIC stages |
+| G4 — paired one-seed learnability | The seed-2 final checkpoint for both FIC-0 and FIC-TT independently passes the preregistered 64-episode pilot criteria | Diagnose one arm/cause at a time; expand neither arm |
+| G5 — paired three-seed stability | Seeds 2, 3, and 4 for both arms pass the final 512-episode-per-checkpoint criteria | Report instability; do not enter the drop/VIC stages |
 
 Seeds `1000` through `1015` in G1 are deterministic repeatability runs under the same fixed reset, not 16 different reset poses and not statistical replicates. They are retained to detect hidden RNG, ordering, and backend drift. Their causal target-tape hashes must be identical; otherwise the fixed-play contract is not deterministic and qualification fails.
 
@@ -163,7 +163,7 @@ Seeds `1000` through `1015` in G1 are deterministic repeatability runs under the
 ### Existing files to modify
 
 - `src/tasks/hammer/config/z1/env_cfgs.py` — additive helper that replaces DiffIK with the qualified joint action.
-- `src/tasks/hammer/config/z1/__init__.py` — register the no-`r_tt` engineering task and primary `-TT` task from the exact P+V+D4 parent.
+- `src/tasks/hammer/config/z1/__init__.py` — register the matched FIC-0 and FIC-TT tasks from the exact P+V+D4 parent.
 - `src/tasks/hammer/mdp/__init__.py` — export trackability readers.
 - `src/tasks/hammer/cat/hook.py` — classify `r_tt` as an unscaled negative term in the soft-CaT return split.
 - `src/tasks/hammer/rl/runner.py` — typed Cartesian/joint metadata dispatch.
@@ -522,7 +522,7 @@ If G1 fails, stop the entire plan. Do not change gains, thresholds, reset select
 
 - [ ] **Step 1: Write failing additive config tests**
 
-Require the engineering task to:
+Require the FIC-0 task to:
 
 - be registered in train and play form;
 - build from the exact P+V+D4 parent;
@@ -537,7 +537,7 @@ Require the engineering task to:
 - have action dimension 6 and actor/critic observation dimensions 47;
 - leave the Cartesian P+V+D4 task at action dimension 3 and observations 44.
 
-Canonicalize the parent and engineering configs and prove the only dataclass difference is `actions`. The runtime observation-width change follows from the unchanged `last_action` observation term and must not be implemented as a second config change.
+Canonicalize the parent and FIC-0 configs and prove the only dataclass difference is `actions`. The runtime observation-width change follows from the unchanged `last_action` observation term and must not be implemented as a second config change.
 
 - [ ] **Step 2: Verify RED**
 
@@ -550,7 +550,7 @@ PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -m pytest 
 
 Keep `z1_hammer_env_cfg()` and its DiffIK wiring unchanged. Add a helper in `env_cfgs.py` that accepts an already-built config, loads the qualified artifact, and replaces only `cfg.actions`.
 
-In `__init__.py`, construct the engineering sibling by calling the existing `_presentation_i_off_env_cfg(velocity_cat=True, delivered_weight=4.0)`, then call the installer. This avoids changing the large factory signature and prevents any legacy registration from taking a new construction path.
+In `__init__.py`, construct FIC-0 by calling the existing `_presentation_i_off_env_cfg(velocity_cat=True, delivered_weight=4.0)`, then call the installer. This avoids changing the large factory signature and prevents any legacy registration from taking a new construction path.
 
 - [ ] **Step 4: Add live runtime tests**
 
@@ -722,7 +722,7 @@ k_tt: exact value loaded from z1_joint_trackability_stage1.json
 robot joints: joint1 ... joint6
 ```
 
-An exact-diff test must prove engineering configuration control versus primary
+An exact-diff test must prove FIC-0 versus FIC-TT
 differs only by `rewards.r_tt`. Assert that all four train/play config and reward
 objects are independent and do not alias. Both retain P guidance.
 
@@ -769,9 +769,9 @@ qualification_payload_sha256
 trackability_payload_sha256
 ```
 
-For the engineering no-`r_tt` task, `trackability_payload_sha256` is the explicit
+For FIC-0, `trackability_payload_sha256` is the explicit
 string sentinel `not_applicable_no_r_tt`; ONNX metadata does not preserve Python
-`None` as JSON null. For the primary task it is the exact frozen calibration digest. Unknown
+`None` as JSON null. For FIC-TT it is the exact frozen calibration digest. Unknown
 action classes, multiple action terms, mismatched target order, or a missing
 required artifact digest must raise. Do not report `cfg.offset` as the effective
 default offset because mjlab replaces it at runtime.
@@ -791,14 +791,14 @@ ONNX export failures may retain the existing warning behavior.
 
 - [ ] **Step 3: Write the dedicated smoke with an importable `run_checks()`**
 
-For both joint task IDs on CPU and for the primary task on CUDA, check:
+For both joint task IDs on CPU and CUDA, check:
 
 - registration, CatPPO, 6 actions, and 47 observations;
 - exact target order, affine map, physical clip, reset semantics, and ten-substep hold;
 - fixed gains/efforts and no gain-setting action;
 - exact base reward weights, P reward `8.0`, D4 `4.0`, and `action_rate=-0.01`;
-- finite nonzero raw cost and negative weighted `r_tt` contribution only in the
-  primary task, with that penalty excluded from soft-CaT `r_pos`;
+- finite nonzero raw cost and negative weighted `r_tt` contribution only in
+  FIC-TT, with that penalty excluded from soft-CaT `r_pos`;
 - active substep velocity tracker and a synthetic over-limit peak producing positive CaT delta;
 - `imp_max_p=0.0` while impulse measurement remains enabled;
 - unchanged caps and first-strike-before-waypoint tracker registration order;
@@ -846,7 +846,11 @@ Add dedicated constants and dispatch before the generic Cartesian validator:
 ```python
 JOINT_POSITION_STAGE1_CAMPAIGN = "joint-position-fixed-stage1"
 JOINT_POSITION_STAGE1_TASKS = {
-    "TT": (
+    "FIC-0": (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
+        "CProgress-Vel-Delivered4-JointPosition-Fixed"
+    ),
+    "FIC-TT": (
         "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
         "CProgress-Vel-Delivered4-JointPosition-Fixed-TT"
     )
@@ -873,13 +877,14 @@ the row's task, seed, `model_199.pt` basename, checkpoint SHA-256, training
 code/asset revisions, and both generated-artifact hashes. A digest string without
 manifest contents is insufficient.
 
-Reject before rollout:
+Reject before rollout, with arm-specific identity checks that require `r_tt` only
+for FIC-TT and require it to be absent for FIC-0:
 
 - wrong task ID or checkpoint task;
 - action class/term/width/order drift;
 - default-offset, scale, physical clip, or artifact-digest drift;
 - fixed gain, effort, timing, reset, P reward, D4 dose, velocity-CaT, cap, or `imp_max_p` drift;
-- missing/altered `r_tt` or `k_tt`;
+- missing/altered `r_tt` or `k_tt` in FIC-TT, or any `r_tt` in FIC-0;
 - any unapproved reward override;
 - dirty/unknown code or asset provenance;
 - a declared trace width that differs from the actual arrays.
@@ -980,14 +985,15 @@ git commit -m "feat(eval): add strict joint-position stage1 contract"
 
 - [ ] **Step 1: Write launcher tests before the launcher**
 
-The launcher accepts exactly two modes:
+The launcher accepts exactly two modes and expands the Cartesian product of arms
+and seeds:
 
 ```text
-pilot:  array index 0; seed 2
-expand: array indices 0-1; seeds 3 and 4
+pilot:  array indices 0-1; (FIC-0, seed 2), (FIC-TT, seed 2)
+expand: array indices 0-3; both arms at seeds 3 and 4
 ```
 
-Both training modes freeze the primary task, 200 iterations, 4,096 envs, 24 rollout
+Both training modes freeze the selected task identity, 200 iterations, 4,096 envs, 24 rollout
 steps, save interval 50, final `model_199.pt`, A100, clean exact code/asset
 revisions, `substep_impulse_rows.enabled=False`, and no reward/gain/reset/threshold
 overrides. Reject `IMPACT_W`, `DELIVERED_W`, `NAIL_DRIVEN_W`, `IMP_MAX_P`, or any
@@ -1016,9 +1022,9 @@ to the job log.
 exact accepted-manifest path, a new external attempt directory, and the frozen
 code/asset revisions. It validates and snapshots the manifest before rollout.
 
-- `pilot` selects only seed 2 and runs the joint evaluator with 32 CUDA envs,
-  `--stage1-phase pilot`, and the four RNG seeds frozen above.
-- `final` selects seeds 2, 3, and 4 and runs each with 256 CUDA envs,
+- `pilot` selects both seed-2 arm rows and runs each joint evaluator with 32 CUDA
+  envs, `--stage1-phase pilot`, and the four RNG seeds frozen above.
+- `final` selects both arms at seeds 2, 3, and 4 and runs each with 256 CUDA envs,
   `--stage1-phase final`, and the same RNG contract.
 - After each sampled run, it invokes the separate one-env fixed CPU companion.
 - Sampled and fixed outputs use separate directories and payload hashes.
@@ -1031,7 +1037,7 @@ manifest content, output reuse, RNG override, or dirty/unequal revision.
 
 Record:
 
-- both task IDs and why only `-TT` is trained;
+- both task IDs and the paper-aligned causal reason both are trained;
 - exact config/action/gain/cap/artifact signatures;
 - seed order `2 -> {3,4}`;
 - iteration/env/minibatch/PPO settings from the handoff;
@@ -1111,20 +1117,31 @@ Only the clean pushed revision may train. The local untracked presentation evide
 
 ---
 
-### Task 8: Run the bounded CPU/CUDA smoke and one-seed pilot
+### Task 8: Run the bounded CPU/CUDA smoke and paired one-seed pilot
 
 **Files:**
 - Evidence only under `evaluation/results/2026-08-06_joint_position_fixed_stage1/` after returning hash-checked outputs.
-- Record job IDs and immutable attempt identities in the external attempt output. Do not edit or commit tracked files between the seed-2 pilot and the seeds-3/4 expansion; all three policies must train from the same frozen revision.
+- Record job IDs and immutable attempt identities in the external attempt output. Do not edit or commit tracked files between the paired seed-2 pilots and the paired seeds-3/4 expansion; all six policies must train from the same frozen revision.
 
-- [ ] **Step 1: Run a one-iteration CPU training smoke**
+- [ ] **Step 1: Run one-iteration CPU training smokes for both arms**
 
 ```bash
+PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python scripts/train.py \
+  Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4-JointPosition-Fixed \
+  --gpu-ids '[]' \
+  --agent.logger tensorboard \
+  --agent.run-name stage1_jointpos_fic0_cpu_smoke \
+  --agent.seed 2 \
+  --agent.max-iterations 1 \
+  --agent.save-interval 1 \
+  --env.scene.num-envs 8 \
+  --env.metrics.substep-impulse-rows.params.enabled False
+
 PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python scripts/train.py \
   Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4-JointPosition-Fixed-TT \
   --gpu-ids '[]' \
   --agent.logger tensorboard \
-  --agent.run-name stage1_jointpos_fixed_tt_cpu_smoke \
+  --agent.run-name stage1_jointpos_fictt_cpu_smoke \
   --agent.seed 2 \
   --agent.max-iterations 1 \
   --agent.save-interval 1 \
@@ -1132,19 +1149,17 @@ PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python scripts/tr
   --env.metrics.substep-impulse-rows.params.enabled False
 ```
 
-Require finite loss, reward, observation normalization, six-action policy output,
-positive finite raw tracking cost, and a negative finite weighted `r_tt`
-contribution. Do not add CLI reward, threshold, reset, or gain overrides.
+Require finite loss, reward, observation normalization, and six-action policy output
+for both arms. Additionally require positive finite raw tracking cost and a negative
+finite weighted `r_tt` contribution for FIC-TT, while proving the term is absent in
+FIC-0. Do not add CLI reward, threshold, reset, or gain overrides.
 
 - [ ] **Step 2: Run the live CUDA smoke on the deployed clean revision**
 
-```bash
-PYTHONPATH=. .venv/bin/python scripts/smoke_joint_position_fixed.py \
-  --task Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4-JointPosition-Fixed-TT \
-  --device cuda --num-envs 64 --steps 3
-```
+Run the command once for each frozen task ID. FIC-0 must prove `r_tt` absent and
+FIC-TT must prove the calibrated term active.
 
-- [ ] **Step 3: Launch only seed 2**
+- [ ] **Step 3: Launch both seed-2 arms and nothing else**
 
 From the clean deployed checkout:
 
@@ -1153,18 +1168,20 @@ STAGE1_CODE_REV=$(git rev-parse HEAD)
 STAGE1_ASSET_REV=$(git -C ../safe_impact_manipulation rev-parse HEAD)
 MODE=pilot EXPECTED_CODE_REVISION="$STAGE1_CODE_REV" \
   EXPECTED_ASSET_REVISION="$STAGE1_ASSET_REV" \
-  sbatch --array=0 \
+  sbatch --array=0-1 \
   --export=ALL,MODE,EXPECTED_CODE_REVISION,EXPECTED_ASSET_REVISION \
   scripts/slurm/vega_joint_position_stage1.sbatch
 ```
 
-- [ ] **Step 4: Admit only the final checkpoint by exact path and SHA-256**
+- [ ] **Step 4: Admit only both final checkpoints by exact path and SHA-256**
 
-Require successful process exit, clean revision match, clean asset match, exact task, seed 2, and `model_199.pt`. Create a one-row accepted-checkpoint manifest; never glob `latest` and never substitute an intermediate checkpoint.
+Require successful process exit, clean revision match, clean asset match, exact task,
+seed 2, and `model_199.pt` for both arms. Create a two-row accepted-checkpoint
+manifest; never glob `latest` and never substitute an intermediate checkpoint.
 
-- [ ] **Step 5: Evaluate 64 sampled episodes plus one fixed CPU rollout**
+- [ ] **Step 5: Evaluate 64 sampled episodes plus one fixed CPU rollout per arm**
 
-Write the admitted seed-2 row to
+Write the two admitted seed-2 rows to
 `$HOME/unitree_rl_mjlab_eval/joint-position-fixed-stage1/accepted_training_checkpoints_pilot.tsv`,
 then run the dedicated launcher:
 
@@ -1179,12 +1196,13 @@ MODE=pilot EVAL_ATTEMPT=pilot_seed2_attempt1 \
   scripts/slurm/vega_joint_position_stage1_eval.sbatch
 ```
 
-This yields exactly 32 CUDA environments x two completions = 64 stochastic sampled
-episodes plus a separately executed one-env deterministic fixed CPU rollout.
+This yields, separately for each arm, exactly 32 CUDA environments x two
+completions = 64 stochastic sampled episodes plus a one-env deterministic fixed
+CPU rollout. Never pool the arms.
 
 - [ ] **Step 6: Apply the G4 promotion gate**
 
-Seed 2 must meet every item:
+Each seed-2 arm must independently meet every item:
 
 - task success at least `58/64` sampled episodes;
 - productive first-event count at least `58/64`;
@@ -1200,11 +1218,16 @@ Seed 2 must meet every item:
   joint-element saturation `< 5%`;
 - actual-position joint-limit proximity `< 1%` by the one-percent-of-range
   joint-element definition above;
-- finite joint-target RMSE, finite positive raw tracking cost, and finite negative
-  weighted `r_tt` return;
+- finite joint-target RMSE in both arms; in FIC-TT, finite positive raw tracking
+  cost and finite negative weighted `r_tt` return; in FIC-0, verified absence of
+  `r_tt`;
 - fixed CPU rollout shows an accepted hammer-face impact and successful nail drive.
 
-These are promotion criteria, not claims of hardware certification. If any item fails, do not submit seeds 3/4. First classify the failure as action range, trackability dose, exploration/learning, trajectory guidance, velocity legality, or evaluator/provenance. Do not simultaneously tune scales, rewards, gains, and resets.
+These are promotion criteria, not claims of hardware certification. No directional
+FIC-TT advantage is required. If either arm fails, do not submit seeds 3/4 for
+either arm. First classify the failure as action range, trackability dose,
+exploration/learning, trajectory guidance, velocity legality, or evaluator/provenance.
+Do not simultaneously tune scales, rewards, gains, and resets.
 
 ---
 
@@ -1215,23 +1238,23 @@ These are promotion criteria, not claims of hardware certification. If any item 
 - Add accepted evidence under `evaluation/results/2026-08-06_joint_position_fixed_stage1/` only after hash validation.
 - Modify: `docs/results/2026-08-06_PRESENTATION_HANDOFF.md` with the completed Stage-1 outcome and next gate.
 
-- [ ] **Step 1: Launch seeds 3 and 4 only after G4 passes**
+- [ ] **Step 1: Launch both arms at seeds 3 and 4 only after both pass G4**
 
 ```bash
 STAGE1_CODE_REV=$(git rev-parse HEAD)
 STAGE1_ASSET_REV=$(git -C ../safe_impact_manipulation rev-parse HEAD)
 MODE=expand EXPECTED_CODE_REVISION="$STAGE1_CODE_REV" \
   EXPECTED_ASSET_REVISION="$STAGE1_ASSET_REV" \
-  sbatch --array=0-1 \
+  sbatch --array=0-3 \
   --export=ALL,MODE,EXPECTED_CODE_REVISION,EXPECTED_ASSET_REVISION \
   scripts/slurm/vega_joint_position_stage1.sbatch
 ```
 
 - [ ] **Step 2: Admit exact `model_199.pt` checkpoints and evaluate**
 
-Build the three-row manifest
+Build the six-row manifest
 `$HOME/unitree_rl_mjlab_eval/joint-position-fixed-stage1/accepted_training_checkpoints_final.tsv`
-for seeds 2, 3, and 4, then launch:
+for both arms at seeds 2, 3, and 4, then launch:
 
 ```bash
 STAGE1_CODE_REV=$(git rev-parse HEAD)
@@ -1250,7 +1273,7 @@ preclip/wrapper/nominal/applied/actual traces and their digests.
 
 - [ ] **Step 3: Apply the G5 stability gate per checkpoint**
 
-Each of the three checkpoints must meet:
+Each of the six checkpoints must meet:
 
 - sampled task success at least `461/512`;
 - productive first-event count at least `461/512`;
@@ -1262,12 +1285,17 @@ Each of the three checkpoints must meet:
 - zero physical target clipping, raw-action joint-element saturation `<5%`, and
   actual-position joint-limit joint-element proximity `<1%`;
 - genuine impact on the fixed rollout rather than a slow press;
-- finite joint-target RMSE, positive finite raw tracking cost, and negative finite
-  weighted `r_tt` return.
+- finite joint-target RMSE; additionally, positive finite raw tracking cost and
+  negative finite weighted `r_tt` return for FIC-TT, and verified absence of the
+  term for FIC-0.
 
-Report per-joint reaction impulse and nail impulse, but do not require a reaction-impulse reduction at this fixed-gain integration stage. Do not claim the joint interface is superior to Cartesian from three seeds.
-The scientific replicate is the independently trained checkpoint (`n=3`), not the
-1,536 within-checkpoint episodes.
+Report the paired FIC-TT minus FIC-0 effect for command tracking, success,
+productive impact, nail impulse, per-joint reaction impulse, action saturation,
+joint-limit proximity, and velocity legality, without imposing an unregistered
+directional margin. Do not require reaction-impulse reduction at this integration
+stage and do not claim the joint interface is superior to Cartesian. The scientific
+replicate is the independently trained seed (`n=3` paired seeds per arm), not the
+within-checkpoint episodes.
 
 - [ ] **Step 4: Write the dated result note before changing any later-stage parameter**
 
