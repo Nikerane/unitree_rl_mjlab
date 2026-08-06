@@ -129,6 +129,26 @@ PRESENTATION3_EVALUATION_RNG = {
   "observation": 2046072933,
   "action": 2056072941,
 }
+_PRESENTATION3_OBSERVATION_TERM_NAMES = (
+  "joint_pos",
+  "joint_vel",
+  "ee_pos",
+  "ee_vel",
+  "head_pos",
+  "head_vel",
+  "nail_top_pos",
+  "nail_depth",
+  "strike_phase",
+  "strike_ref_error",
+  "actions",
+  "next_gate_vector",
+  "completed_gate_fraction",
+  "guideline_perpendicular_error",
+  "waypoint_progress_state",
+)
+EXPECTED_PRESENTATION3_OBSERVATION_GROUPS_SHA256 = (
+  "a15801c4c46aa66a3532201d8823ad513a6ba5dda12cff6e67c8413c5d84e76c"
+)
 QUALITY_EVALUATION_REFERENCE_TASK = QUALITY_ARM_TASKS["FQ"]
 FQ3X8_TASKS = frozenset(
   QUALITY_ARM_TASKS[arm] for arm in ("F8", "B8", "FQ")
@@ -888,6 +908,14 @@ def _policy_observation_signature(env_cfg) -> dict:
   return _freeze_config_value(env_cfg.observations["actor"])
 
 
+def _presentation3_observation_groups_signature(env_cfg) -> dict:
+  """Freeze every actor/critic group field and term configuration."""
+  return {
+    group_name: _freeze_config_value(env_cfg.observations[group_name])
+    for group_name in ("actor", "critic")
+  }
+
+
 def _treatment_reward_signature(env_cfg) -> dict:
   return {
     name: _freeze_config_value(cfg)
@@ -1307,6 +1335,19 @@ def _validate_presentation3_env_contract(env_cfg, task: str, treatment: str) -> 
         "width": width,
       }:
         raise ValueError(f"{task}: {group_name} guideline observation drift")
+    # The canonical digest sorts mapping keys, so bind execution order
+    # explicitly before hashing every group and term field below.
+    if tuple(terms) != _PRESENTATION3_OBSERVATION_TERM_NAMES:
+      raise ValueError(f"{task}: {group_name} observation group identity drift")
+
+  observation_groups_sha256 = _canonical_digest(
+    _presentation3_observation_groups_signature(env_cfg)
+  )
+  if (
+    observation_groups_sha256
+    != EXPECTED_PRESENTATION3_OBSERVATION_GROUPS_SHA256
+  ):
+    raise ValueError(f"{task}: observation group identity drift")
 
   cat_soft = env_cfg.metrics["cat_soft"]
   params = cat_soft.params
@@ -1370,6 +1411,7 @@ def _validate_presentation3_env_contract(env_cfg, task: str, treatment: str) -> 
     "reset_velocity_noise_min_rad_s": reset_velocity_range[0],
     "reset_velocity_noise_max_rad_s": reset_velocity_range[1],
     "scale_rewards_by_dt": True,
+    "observation_groups_sha256": observation_groups_sha256,
   }
 
 

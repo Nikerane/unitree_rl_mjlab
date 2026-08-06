@@ -500,6 +500,26 @@ def test_sampled_contract_binds_each_presentation3_task_identity(
   assert contract["reset_position_noise_min_rad"] == 0.0
   assert contract["reset_position_noise_max_rad"] == 0.0
   assert contract["guideline_observation_width"] == 7
+  assert contract["observation_groups_sha256"] == (
+    "a15801c4c46aa66a3532201d8823ad513a6ba5dda12cff6e67c8413c5d84e76c"
+  )
+
+
+@pytest.mark.parametrize("group_name", ("actor", "critic"))
+def test_presentation3_contract_rejects_same_width_base_observation_swap(
+  group_name,
+):
+  """A same-width base-term swap must not preserve the policy contract."""
+  task = (
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
+    "CProgress-Vel-Delivered4"
+  )
+  cfg = eval_impulse.load_env_cfg(task, play=False)
+  terms = cfg.observations[group_name].terms
+  terms["joint_pos"], terms["joint_vel"] = terms["joint_vel"], terms["joint_pos"]
+
+  with pytest.raises(ValueError, match="observation group identity"):
+    eval_impulse._validate_sampled_env_contract(cfg, task)
 
 
 @pytest.mark.parametrize(
