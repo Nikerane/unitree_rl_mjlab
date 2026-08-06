@@ -2328,6 +2328,35 @@ def test_impulse6_s8d4_is_the_existing_presentation3_pv_d4_identity():
     assert expected_task("presentation3", "P+V+D4") == _PVD4_TASK
 
 
+def test_shared_s8d4_task_keeps_presentation3_title_but_gets_the_impulse6_label():
+    """Campaign identity changes the screen wording, never the task-derived geometry."""
+    presentation = render_policy.substep_plot_kwargs(
+        _render_cfg("presentation3", "P+V+D4"),
+        _wave1_trace(),
+        terminal_reason="terminated",
+    )
+    screen = render_policy.substep_plot_kwargs(
+        _render_cfg("impulse6", "s8d4"),
+        _wave1_trace(),
+        terminal_reason="terminated",
+    )
+
+    assert presentation["treatment"].geometry == screen["treatment"].geometry == "waypoints"
+    assert presentation["title"] == (
+        "presentation3 · P+V+D4 · seed 4 · progress-guided strike with soft velocity-CaT "
+        "and delivered weight 4.0\n"
+        "Training: progress weight 8.0 · velocity max_p 0.5 (500 Hz substep peak) "
+        "· impulse log-only\n"
+        "Result: gates 6/6 · peak |q̇| 0.0000/3.1415 rad/s · success"
+    )
+    assert screen["title"] == (
+        "impulse6 · s8d4 · seed 4 · impulse screen S=8 D=4 · I-CaT log-only\n"
+        "Training: waypoint w=8 (progress weight 8.0) · V-CaT 0.5 @ 500 Hz "
+        "(soft velocity-CaT; max_p 0.5) · impulse log-only\n"
+        "Result: gates 6/6 · peak |q̇| 0.0000/3.1415 rad/s · success"
+    )
+
+
 @pytest.mark.parametrize("arm,row", _IMPULSE6.items())
 def test_impulse6_titles_and_plot_geometry_state_the_actual_screen_treatment(
     arm, row, tmp_path, monkeypatch
@@ -2337,11 +2366,13 @@ def test_impulse6_titles_and_plot_geometry_state_the_actual_screen_treatment(
 
     from evaluation.analysis.fixed_reset_video_library import write_substep_trajectory_png
 
-    calls = {"plot": [], "scatter": [], "annotate": [], "patch": []}
+    from matplotlib.collections import LineCollection, PathCollection
+
+    calls = {"plot": [], "scatter": [], "annotate": [], "collection": []}
     original_plot = Axes.plot
     original_scatter = Axes.scatter
     original_annotate = Axes.annotate
-    original_add_patch = Axes.add_patch
+    original_add_collection = Axes.add_collection
 
     def capture_plot(axis, *args, **kwargs):
         calls["plot"].append(kwargs)
@@ -2355,14 +2386,25 @@ def test_impulse6_titles_and_plot_geometry_state_the_actual_screen_treatment(
         calls["annotate"].append(str(text))
         return original_annotate(axis, text, *args, **kwargs)
 
-    def capture_add_patch(axis, patch):
-        calls["patch"].append(patch)
-        return original_add_patch(axis, patch)
+    def reject_patch(*_args, **_kwargs):
+        raise AssertionError("screen plot must not add a disk, tube, or corridor patch")
+
+    def reject_fill(*_args, **_kwargs):
+        raise AssertionError("screen plot must not add a filled tube or corridor")
+
+    def capture_line_collection(axis, collection, *args, **kwargs):
+        if not isinstance(collection, (LineCollection, PathCollection)):
+            raise AssertionError("screen plot must not add a non-trajectory collection")
+        calls["collection"].append(collection)
+        return original_add_collection(axis, collection, *args, **kwargs)
 
     monkeypatch.setattr(Axes, "plot", capture_plot)
     monkeypatch.setattr(Axes, "scatter", capture_scatter)
     monkeypatch.setattr(Axes, "annotate", capture_annotate)
-    monkeypatch.setattr(Axes, "add_patch", capture_add_patch)
+    monkeypatch.setattr(Axes, "add_patch", reject_patch)
+    monkeypatch.setattr(Axes, "fill_between", reject_fill)
+    monkeypatch.setattr(Axes, "fill_betweenx", reject_fill)
+    monkeypatch.setattr(Axes, "add_collection", capture_line_collection)
 
     _, impact_weight, delivered_weight = row
     kwargs = render_policy.substep_plot_kwargs(
@@ -2386,10 +2428,14 @@ def test_impulse6_titles_and_plot_geometry_state_the_actual_screen_treatment(
         call.get("color") == "black" and call.get("linestyle") == "--"
         for call in calls["plot"]
     ) == 2
-    diamonds = [call for call in calls["scatter"] if call.get("marker") == "D"]
-    assert len(diamonds) == 12 and all(call.get("facecolors") == "none" for call in diamonds)
+    assert len(calls["scatter"]) == 12
+    assert all(
+        call.get("marker") == "D" and call.get("facecolors") == "none"
+        for call in calls["scatter"]
+    )
     assert calls["annotate"] == [str(order) for _ in range(2) for order in range(1, 7)]
-    assert calls["patch"] == []
+    assert sum(isinstance(collection, LineCollection) for collection in calls["collection"]) == 2
+    assert sum(isinstance(collection, PathCollection) for collection in calls["collection"]) == 12
 
 
 def test_treatment_table_matches_the_registered_environment_configuration():

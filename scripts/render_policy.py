@@ -47,7 +47,7 @@ from evaluation.analysis.fixed_reset_video_library import (
   expected_task,
   load_fixed_reset,
   trajectory_outcome,
-  treatment_for_task,
+  treatment_for_campaign_arm,
   validate_substep_trace,
   write_metadata,
   write_substep_trajectory_png,
@@ -115,7 +115,8 @@ def substep_plot_kwargs(cfg: "Cfg", trace: dict, *, terminal_reason: str) -> dic
   """
   if cfg.campaign in FROZEN_RENDER_CAMPAIGNS:
     return {"title": f"wave1 / {cfg.arm} / seed {cfg.training_seed}"}
-  treatment = treatment_for_task(expected_task(cfg.campaign, cfg.arm))
+  task = expected_task(cfg.campaign, cfg.arm)
+  treatment = treatment_for_campaign_arm(cfg.campaign, cfg.arm, task)
   return {
     "treatment": treatment,
     "title": compose_trajectory_title(

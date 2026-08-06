@@ -195,6 +195,7 @@ class Treatment:
     velocity: str
     impulse: str
     geometry: str
+    screen_target_markers_only: bool = False
 
 
 _VELOCITY_MEASURED_ONLY = "velocity measured, not enforced"
@@ -247,12 +248,9 @@ TREATMENT_BY_TASK: dict[str, Treatment] = {
         "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
         "CProgress-Vel-Delivered4"
     ): Treatment(
-        headline=(
-            "impulse screen S=8 D=4 · I-CaT log-only: progress-guided strike with soft velocity-CaT "
-            "and delivered weight 4.0"
-        ),
-        guidance="waypoint w=8 (progress weight 8.0)",
-        velocity="V-CaT 0.5 @ 500 Hz (soft velocity-CaT; max_p 0.5)",
+        headline="progress-guided strike with soft velocity-CaT and delivered weight 4.0",
+        guidance="progress weight 8.0",
+        velocity=_VELOCITY_SOFT_CAT,
         impulse=_IMPULSE_LOG_ONLY,
         geometry=GEOMETRY_WAYPOINTS,
     ),
@@ -262,6 +260,7 @@ TREATMENT_BY_TASK: dict[str, Treatment] = {
         velocity="V-CaT 0.5 @ 500 Hz (soft velocity-CaT; max_p 0.5)",
         impulse=_IMPULSE_LOG_ONLY,
         geometry=GEOMETRY_WAYPOINTS,
+        screen_target_markers_only=True,
     ),
     "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D4": Treatment(
         headline="impulse screen S=0 D=4 · I-CaT log-only",
@@ -269,6 +268,7 @@ TREATMENT_BY_TASK: dict[str, Treatment] = {
         velocity="V-CaT 0.5 @ 500 Hz (soft velocity-CaT; max_p 0.5)",
         impulse=_IMPULSE_LOG_ONLY,
         geometry=GEOMETRY_WAYPOINTS,
+        screen_target_markers_only=True,
     ),
     "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D16": Treatment(
         headline="impulse screen S=0 D=16 · I-CaT log-only",
@@ -276,6 +276,7 @@ TREATMENT_BY_TASK: dict[str, Treatment] = {
         velocity="V-CaT 0.5 @ 500 Hz (soft velocity-CaT; max_p 0.5)",
         impulse=_IMPULSE_LOG_ONLY,
         geometry=GEOMETRY_WAYPOINTS,
+        screen_target_markers_only=True,
     ),
     "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S8-D0": Treatment(
         headline="impulse screen S=8 D=0 · I-CaT log-only",
@@ -283,6 +284,7 @@ TREATMENT_BY_TASK: dict[str, Treatment] = {
         velocity="V-CaT 0.5 @ 500 Hz (soft velocity-CaT; max_p 0.5)",
         impulse=_IMPULSE_LOG_ONLY,
         geometry=GEOMETRY_WAYPOINTS,
+        screen_target_markers_only=True,
     ),
     "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S8-D16": Treatment(
         headline="impulse screen S=8 D=16 · I-CaT log-only",
@@ -290,12 +292,27 @@ TREATMENT_BY_TASK: dict[str, Treatment] = {
         velocity="V-CaT 0.5 @ 500 Hz (soft velocity-CaT; max_p 0.5)",
         impulse=_IMPULSE_LOG_ONLY,
         geometry=GEOMETRY_WAYPOINTS,
+        screen_target_markers_only=True,
     ),
     "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear": _NO_GUIDELINE,
     "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0": _NO_GUIDELINE,
     "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-D0": _NO_GUIDELINE,
     "Unitree-Z1-Hammer-CaT-Impulse-Event-Quality": _NO_GUIDELINE,
     "Unitree-Z1-Hammer-CaT-Impulse-Event-Bounded": _NO_GUIDELINE,
+}
+
+# The screen's shared S8/D4 task remains presentation3's historical task identity.  Only the
+# impulse6 campaign renders that task with its screen label; geometry is always validated from
+# the task treatment below.
+TREATMENT_BY_CAMPAIGN_ARM: dict[tuple[str, str], Treatment] = {
+    ("impulse6", "s8d4"): Treatment(
+        headline="impulse screen S=8 D=4 · I-CaT log-only",
+        guidance="waypoint w=8 (progress weight 8.0)",
+        velocity="V-CaT 0.5 @ 500 Hz (soft velocity-CaT; max_p 0.5)",
+        impulse=_IMPULSE_LOG_ONLY,
+        geometry=GEOMETRY_WAYPOINTS,
+        screen_target_markers_only=True,
+    ),
 }
 
 
@@ -305,6 +322,18 @@ def treatment_for_task(task: str) -> Treatment:
         return TREATMENT_BY_TASK[task]
     except KeyError as error:
         raise ValueError(f"unregistered task treatment identity: {task}") from error
+
+
+def treatment_for_campaign_arm(campaign: str, arm: str, task: str) -> Treatment:
+    """Select a campaign label while deriving the plot geometry from the registered task."""
+    task_treatment = treatment_for_task(task)
+    treatment = TREATMENT_BY_CAMPAIGN_ARM.get((campaign, arm), task_treatment)
+    if treatment.geometry != task_treatment.geometry:
+        raise ValueError(
+            "campaign treatment geometry disagrees with registered task treatment: "
+            f"{campaign}/{arm}"
+        )
+    return treatment
 
 
 def trajectory_outcome(trace: Mapping[str, Any], *, success: bool) -> dict:
@@ -1246,21 +1275,24 @@ def write_substep_trajectory_png(
                     zorder=3,
                 )
             )
-        axis.scatter(
-            positions[boundary, 0],
-            positions[boundary, ordinate],
-            facecolors="none",
-            edgecolors="#444444",
-            s=26,
-            linewidths=0.7,
-            label="control-step boundary",
-            zorder=4,
-        )
-        axis.scatter(positions[0, 0], positions[0, ordinate], c="#2ca02c", s=42, zorder=6,
-                     label="start")
-        if contact.any():
-            axis.scatter(positions[contact, 0], positions[contact, ordinate], c="#d62728",
-                         s=14, zorder=7, label="contact")
+        # The impulse-screen treatment shows only its rewarded waypoint markers.  Historical
+        # campaigns retain their boundary/start/contact artists, including the frozen path.
+        if treatment is None or not treatment.screen_target_markers_only:
+            axis.scatter(
+                positions[boundary, 0],
+                positions[boundary, ordinate],
+                facecolors="none",
+                edgecolors="#444444",
+                s=26,
+                linewidths=0.7,
+                label="control-step boundary",
+                zorder=4,
+            )
+            axis.scatter(positions[0, 0], positions[0, ordinate], c="#2ca02c", s=42, zorder=6,
+                         label="start")
+            if contact.any():
+                axis.scatter(positions[contact, 0], positions[contact, ordinate], c="#d62728",
+                             s=14, zorder=7, label="contact")
         axis.set_xlim(centers[0] - half, centers[0] + half)
         axis.set_ylim(centers[ordinate] - half, centers[ordinate] + half)
         axis.set_aspect("equal", adjustable="box")
