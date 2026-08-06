@@ -221,6 +221,9 @@ def assemble_result_row(
         "tail_fraction_mean_sampled": raw_aggregate[
             "tail_fraction_mean_sampled"
         ],
+        "first_strike_v_precontact_mean_sampled": raw_aggregate[
+            "first_strike_v_precontact_mean_sampled"
+        ],
     }
     for field, recomputed in recomputed_summary.items():
         try:
@@ -317,6 +320,9 @@ def assemble_result_row(
         "sampled_tail_fraction_mean": float(
             raw_aggregate["tail_fraction_mean_sampled"]
         ),
+        "sampled_precontact_axial_speed_mean_m_s": float(
+            raw_aggregate["first_strike_v_precontact_mean_sampled"]
+        ),
         "sampled_all_six_by_contact_n": sampled_waypoints[
             "all_six_by_contact_n"
         ],
@@ -335,6 +341,9 @@ def assemble_result_row(
             "cumulative_impulse_n_s"
         ],
         "fixed_post_event_tail_n_s": fixed_impulse["post_event_tail_n_s"],
+        "fixed_precontact_axial_speed_m_s": fixed_impulse[
+            "precontact_axial_speed_m_s"
+        ],
         "fixed_max_lambda_cap_ratio": fixed_impulse["max_lambda_cap_ratio"],
         "fixed_qvel_max_rad_s": fixed_peak,
         "fixed_qvel_legal": fixed_legal,
@@ -694,6 +703,18 @@ def fixed_impulse_metrics(diagnostic, *, caps):
         diagnostic["lambda_windowed_constraint_read_n_m_s"], dtype=float
     )
     limits = np.asarray(caps, dtype=float)
+    try:
+        precontact_speed = np.asarray(
+            diagnostic["tracker_v_precontact_m_s"], dtype=float
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("malformed fixed-reset tracker speed") from error
+    if (
+        precontact_speed.shape != finalized.shape
+        or not np.all(np.isfinite(precontact_speed))
+        or np.any(precontact_speed < 0.0)
+    ):
+        raise ValueError("malformed fixed-reset tracker speed")
     if not (
         finalized.ndim == productive.ndim == first_event.ndim == cumulative.ndim == 1
         and len(finalized) == len(productive) == len(first_event) == len(cumulative)
@@ -710,6 +731,18 @@ def fixed_impulse_metrics(diagnostic, *, caps):
         raise ValueError("malformed fixed-reset impulse trace")
     if not finalized[-1] or not productive[-1]:
         raise ValueError("first strike did not finalize as productive")
+    first_finalization = int(np.flatnonzero(finalized)[0])
+    if (
+        not productive[first_finalization]
+        or not np.all(finalized[first_finalization:])
+        or not np.all(
+            precontact_speed[first_finalization:]
+            == precontact_speed[first_finalization]
+        )
+    ):
+        raise ValueError(
+            "fixed-reset tracker speed is not latched at first finalization"
+        )
     first_value = float(first_event[-1])
     cumulative_value = float(cumulative[-1])
     if first_value < 0.0 or cumulative_value + 1e-9 < first_value:
@@ -718,6 +751,9 @@ def fixed_impulse_metrics(diagnostic, *, caps):
         "first_event_impulse_n_s": first_value,
         "cumulative_impulse_n_s": cumulative_value,
         "post_event_tail_n_s": cumulative_value - first_value,
+        "precontact_axial_speed_m_s": float(
+            precontact_speed[first_finalization]
+        ),
         "max_lambda_cap_ratio": float(np.max(np.abs(impulse) / limits)),
     }
 

@@ -139,6 +139,7 @@ def result_inputs():
         "worst_ratio_max_sampled": "0.50",
         "recontact_rate_sampled": "0.50",
         "tail_fraction_mean_sampled": "0.10",
+        "first_strike_v_precontact_mean_sampled": "1.0",
     }
     sampled_payload = {
         "task": task,
@@ -232,6 +233,7 @@ def result_inputs():
         "tracker_finalized": np.array([False, True, True]),
         "tracker_productive": np.array([False, True, True]),
         "tracker_delivered_n_s": np.array([0.0, 0.31, 0.31]),
+        "tracker_v_precontact_m_s": np.array([0.0, 1.25, 1.25]),
         "delivered_impulse_n_s": np.array([0.0, 0.40, 0.45]),
         "lambda_windowed_constraint_read_n_m_s": np.array(
             [[0.0, 0.0], [0.82, 0.82], [0.82, 0.82]]
@@ -268,6 +270,42 @@ def test_assemble_result_row_keeps_sampled_and_fixed_protocols_separate(result_i
     assert trajectory["waypoints_m"].shape == (6, 3)
 
 
+def test_assemble_result_row_emits_sampled_and_fixed_precontact_speeds(result_inputs):
+    row, _ = assemble_result_row(*result_inputs)
+
+    assert row["sampled_precontact_axial_speed_mean_m_s"] == pytest.approx(1.0)
+    assert row["fixed_precontact_axial_speed_m_s"] == pytest.approx(1.25)
+
+
+def test_assemble_result_row_rejects_sampled_precontact_speed_summary_mismatch(
+    result_inputs,
+):
+    mutated = copy.deepcopy(result_inputs)
+    mutated[0]["first_strike_v_precontact_mean_sampled"] = "0.99"
+
+    with pytest.raises(
+        ValueError, match="first_strike_v_precontact_mean_sampled"
+    ):
+        assemble_result_row(*mutated)
+
+
+@pytest.mark.parametrize(
+    "malformed_speed",
+    (
+        np.array([[0.0, 1.25, 1.25]]),
+        np.array([0.0, np.nan, 1.25]),
+    ),
+)
+def test_assemble_result_row_rejects_malformed_fixed_precontact_speed(
+    result_inputs, malformed_speed
+):
+    mutated = copy.deepcopy(result_inputs)
+    mutated[5]["tracker_v_precontact_m_s"] = malformed_speed
+
+    with pytest.raises(ValueError, match="fixed-reset tracker speed"):
+        assemble_result_row(*mutated)
+
+
 @pytest.mark.parametrize(
     "field,mutated_value",
     (
@@ -293,6 +331,7 @@ def test_fixed_impulse_keeps_productive_first_event_separate_from_larger_cumulat
         "tracker_finalized": np.array([False, True]),
         "tracker_productive": np.array([False, True]),
         "tracker_delivered_n_s": np.array([0.0, 0.30]),
+        "tracker_v_precontact_m_s": np.array([0.0, 1.10]),
         "delivered_impulse_n_s": np.array([0.0, 0.52]),
         "lambda_windowed_constraint_read_n_m_s": np.array(
             [[0.0, 0.0], [0.82, 0.82]]
