@@ -1,10 +1,14 @@
 import copy
 import csv
+import hashlib
+import json
+import sys
 
 import numpy as np
 import pytest
 from matplotlib.patches import Circle
 
+from evaluation.analysis import presentation3_results as p3
 from evaluation.analysis.presentation3_results import (
     assemble_result_row,
     canonical_policy_rows,
@@ -29,6 +33,165 @@ NAIL_GEOMETRY = {
     "nail_radius_m": 0.012,
     "source_sha256": "9" * 64,
 }
+
+
+def _valid_sampled_contract_inputs():
+    task = (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
+        "CProgress-Vel-Delivered0"
+    )
+    checkpoint = "a" * 64
+    manifest = "b" * 64
+    training_revision = "c" * 40
+    evaluation_revision = "d" * 40
+    asset_revision = "e" * 40
+    campaign_config = "1" * 64
+    treatment_config = "2" * 64
+    nail_asset = "3" * 64
+    caps = [1.64, 3.28, 1.64, 1.64, 1.64, 1.64]
+    summary = {
+        "name": "presentation3_pvd0_seed2",
+        "task": task,
+        "treatment": "V+D0",
+        "training_seed": "2",
+        "checkpoint_sha256": checkpoint,
+        "accepted_checkpoint_sha256": checkpoint,
+        "accepted_manifest_sha256": manifest,
+        "training_code_revision": training_revision,
+        "training_asset_revision": asset_revision,
+        "git_revision": evaluation_revision,
+        "git_dirty": "False",
+        "asset_git_revision": asset_revision,
+        "asset_git_dirty": "False",
+        "campaign_config_sha256": campaign_config,
+        "treatment_config_sha256": treatment_config,
+        "nail_asset_sha256": nail_asset,
+        "seed": "2026072900",
+        "num_envs": "256",
+        "episodes_per_env_sampled": "2",
+        "episode_len_s": "4.0",
+        "nsteps": "400",
+        "sampled_completion_rule": "first_two_completions_per_environment",
+        "sampled_actions_stochastic": "True",
+        "reset_position_noise_min_rad": "0.0",
+        "reset_position_noise_max_rad": "0.0",
+        "actor_observation_corruption": "True",
+        "critic_observation_corruption": "False",
+        "physics_dt_s": "0.002",
+        "control_decimation": "10",
+        "fixed_impedance_signature_sha256": (
+            "a8252c853dd0059c89cff357e8e542fc6d097ecc9ef2652768ca0ef83d8aa269"
+        ),
+        "fixed_action_signature_sha256": (
+            "56e59da46050a16c2005cb1872632ed81d41f82b48ae5c94beaca8fea44790ec"
+        ),
+        "reset_rng_seed": "2036072919",
+        "observation_rng_seed": "2046072933",
+        "action_rng_seed": "2056072941",
+        "impact_weight": "8.0",
+        "delivered_weight": "0.0",
+        "r_waypoint_progress_weight": "8.0",
+        "event_i_ref_n_s": "0.3088",
+        "imp_max_p": "0.0",
+        "n_episodes_sampled": "512",
+    }
+    payload = {
+        "schema_version": 3,
+        "selection": "first two completed episodes from each of 256 environments",
+        "expected_episode_count": 512,
+        "task": task,
+        "treatment": "V+D0",
+        "training_seed": 2,
+        "event_i_ref_n_s": 0.3088,
+        "imp_max_p": 0.0,
+        "weights": {
+            "impact_progress": 8.0,
+            "delivered_impulse": 0.0,
+            "r_waypoint_progress": 8.0,
+        },
+        "impulse_limits_n_m_s": caps,
+        "rng_streams": {
+            "reset": 2036072919,
+            "observation": 2046072933,
+            "action": 2056072941,
+        },
+        "evaluation_contract": {
+            "base_rng_seed": 2026072900,
+            "num_envs": 256,
+            "episodes_per_env": 2,
+            "episode_len_s": 4.0,
+            "mean_nsteps": 400,
+            "completion_rule": "first_two_completions_per_environment",
+            "stochastic_actions": True,
+            "reset_position_noise_rad": [0.0, 0.0],
+            "actor_observation_corruption": True,
+            "critic_observation_corruption": False,
+            "physics_dt_s": 0.002,
+            "control_decimation": 10,
+            "fixed_impedance_signature_sha256": summary[
+                "fixed_impedance_signature_sha256"
+            ],
+            "fixed_action_signature_sha256": summary[
+                "fixed_action_signature_sha256"
+            ],
+            "strict_config_identities": {},
+        },
+        "provenance": {
+            "checkpoint_sha256": checkpoint,
+            "accepted_checkpoint_sha256": checkpoint,
+            "accepted_manifest_sha256": manifest,
+            "campaign_config_sha256": campaign_config,
+            "treatment_config_sha256": treatment_config,
+            "nail_asset_sha256": nail_asset,
+            "training_code_revision": training_revision,
+            "training_asset_revision": asset_revision,
+            "code_git": {
+                "revision": evaluation_revision,
+                "dirty": False,
+                "status": "",
+            },
+            "asset_git": {
+                "revision": asset_revision,
+                "dirty": False,
+                "status": "",
+            },
+        },
+        "episodes": [
+            {
+                "episode_id": f"V+D0-env{env_id}-episode{ordinal}",
+                "env_id": env_id,
+                "episode_ordinal": ordinal,
+                "arm": "V+D0",
+                "task": task,
+                "impulse_limits_n_m_s": caps,
+            }
+            for env_id in range(256)
+            for ordinal in (0, 1)
+        ],
+    }
+    expected = {
+        "manifest": manifest,
+        "training_revision": training_revision,
+        "evaluation_revision": evaluation_revision,
+        "asset_revision": asset_revision,
+        "manifest_row": {
+            "array_index": "0",
+            "arm": "V+D0",
+            "name": summary["name"],
+            "task": task,
+            "training_seed": "2",
+            "training_code_revision": training_revision,
+            "training_asset_revision": asset_revision,
+            "checkpoint_path": "/frozen/model_199.pt",
+            "checkpoint_sha256": checkpoint,
+        },
+        "config_identity": {
+            "campaign_config_sha256": campaign_config,
+            "treatment_config_sha256": treatment_config,
+            "nail_asset_sha256": nail_asset,
+        },
+    }
+    return summary, payload, expected
 
 
 def _raw_sampled_episode(
@@ -198,7 +361,13 @@ def result_inputs():
         ),
         "substep_contact": np.array([False, True, True]),
         "substep_nail_depth_m": np.array([0.0, 0.01, 0.04]),
-        "substep_arm_qvel_rad_s": np.array([[1.0, 2.0], [2.0, 3.0], [2.0, 3.1]]),
+        "substep_arm_qvel_rad_s": np.array(
+            [
+                [1.0, 2.0, 0.0, 0.0, 0.0, 0.0],
+                [2.0, 3.0, 0.0, 0.0, 0.0, 0.0],
+                [2.0, 3.1, 0.0, 0.0, 0.0, 0.0],
+            ]
+        ),
         "substep_gate_index": np.array([2, 6, 6]),
         "substep_perpendicular_error_m": np.array([0.0, 0.001, 0.010]),
         "guideline_entry_m": np.array([0.0, 0.0, 0.10]),
@@ -214,9 +383,9 @@ def result_inputs():
         "task": task,
         "checkpoint_sha256": checkpoint,
         "asset_revision": asset_revision,
-        "code_revision": "4" * 40,
+        "code_revision": p3.EXPECTED_D0_RENDERER,
         "reset_state_digest": reset_digest,
-        "j_limit_n_m_s": [1.64, 3.28],
+        "j_limit_n_m_s": [1.64, 3.28, 1.64, 1.64, 1.64, 1.64],
     }
     impulse_trace = {
         "head_position_m": video_trace["substep_head_position_m"].astype(np.float32),
@@ -236,7 +405,11 @@ def result_inputs():
         "tracker_v_precontact_m_s": np.array([0.0, 1.25, 1.25]),
         "delivered_impulse_n_s": np.array([0.0, 0.40, 0.45]),
         "lambda_windowed_constraint_read_n_m_s": np.array(
-            [[0.0, 0.0], [0.82, 0.82], [0.82, 0.82]]
+            [
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [0.82, 0.82, 0.0, 0.0, 0.0, 0.0],
+                [0.82, 0.82, 0.0, 0.0, 0.0, 0.0],
+            ]
         ),
     }
 
@@ -250,6 +423,409 @@ def result_inputs():
     )
 
 
+def test_sampled_contract_accepts_only_the_frozen_complete_population():
+    summary, payload, expected = _valid_sampled_contract_inputs()
+
+    p3.validate_sampled_population_contract(summary, payload, **expected)
+
+
+def test_frozen_manifest_loader_hash_binds_the_exact_policy_matrix(tmp_path):
+    manifest = tmp_path / "accepted.tsv"
+    manifest.write_text(
+        "\t".join(
+            (
+                "array_index",
+                "arm",
+                "name",
+                "task",
+                "training_seed",
+                "training_code_revision",
+                "training_asset_revision",
+                "checkpoint_path",
+                "checkpoint_sha256",
+            )
+        )
+        + "\n"
+        + "\t".join(
+            (
+                "0",
+                "V+D0",
+                "presentation3_pvd0_seed2",
+                "task",
+                "2",
+                "c" * 40,
+                "e" * 40,
+                "/frozen/model_199.pt",
+                "a" * 64,
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+
+    rows = p3.load_frozen_training_manifest(
+        manifest,
+        expected_sha256=digest,
+        expected_keys={("V+D0", 2)},
+    )
+
+    assert rows[("V+D0", 2)]["checkpoint_sha256"] == "a" * 64
+    with pytest.raises(ValueError, match="SHA-256"):
+        p3.load_frozen_training_manifest(
+            manifest,
+            expected_sha256="f" * 64,
+            expected_keys={("V+D0", 2)},
+        )
+
+
+def test_sampled_input_inventory_binds_the_exact_24_file_pairs():
+    records = []
+    for arm_index, arm in enumerate(("M", "V+D0", "V", "V+M")):
+        for seed in range(2, 8):
+            index = arm_index * 6 + seed
+            records.append(
+                {
+                    "arm": arm,
+                    "training_seed": seed,
+                    "summary_sha256": f"{index:064x}",
+                    "artifact_sha256": f"{index + 100:064x}",
+                }
+            )
+    canonical = "".join(
+        f"{row['arm']}\t{row['training_seed']}\t{row['summary_sha256']}\t"
+        f"{row['artifact_sha256']}\n"
+        for row in records
+    ).encode()
+    expected = hashlib.sha256(canonical).hexdigest()
+
+    assert p3.validate_sampled_input_inventory(
+        records, expected_sha256=expected
+    ) == expected
+
+    records[0]["artifact_sha256"] = "f" * 64
+    with pytest.raises(ValueError, match="inventory SHA-256"):
+        p3.validate_sampled_input_inventory(records, expected_sha256=expected)
+
+
+def test_sampled_contract_rejects_jointly_mutated_config_and_asset_identity():
+    summary, payload, expected = _valid_sampled_contract_inputs()
+    for field, value in (
+        ("campaign_config_sha256", "a" * 64),
+        ("treatment_config_sha256", "b" * 64),
+        ("nail_asset_sha256", "c" * 64),
+    ):
+        summary[field] = value
+        payload["provenance"][field] = value
+
+    with pytest.raises(ValueError, match="config identity"):
+        p3.validate_sampled_population_contract(summary, payload, **expected)
+
+
+@pytest.mark.parametrize(
+    "mutation,match",
+    (
+        (
+            lambda payload: payload["provenance"].__setitem__(
+                "accepted_manifest_sha256", "f" * 64
+            ),
+            "accepted_manifest_sha256",
+        ),
+        (
+            lambda payload: payload["provenance"].__setitem__(
+                "training_code_revision", "f" * 40
+            ),
+            "training_code_revision",
+        ),
+        (
+            lambda payload: payload["rng_streams"].__setitem__("action", 7),
+            "RNG",
+        ),
+        (
+            lambda payload: payload["evaluation_contract"].__setitem__(
+                "episodes_per_env", 1
+            ),
+            "evaluation contract",
+        ),
+        (
+            lambda payload: payload.__setitem__("selection", "best 512 episodes"),
+            "selection",
+        ),
+        (
+            lambda payload: payload.__setitem__(
+                "impulse_limits_n_m_s", [9.0, 9.0, 9.0, 9.0, 9.0, 9.0]
+            ),
+            "impulse caps",
+        ),
+    ),
+)
+def test_sampled_contract_rejects_stale_or_mutated_bindings(mutation, match):
+    summary, payload, expected = _valid_sampled_contract_inputs()
+    mutation(payload)
+
+    with pytest.raises(ValueError, match=match):
+        p3.validate_sampled_population_contract(summary, payload, **expected)
+
+
+@pytest.mark.parametrize(
+    "mutation,match",
+    (
+        (lambda payload: payload.__setitem__("schema_version", 3.0), "schema_version"),
+        (lambda payload: payload.__setitem__("imp_max_p", False), "imp_max_p"),
+        (
+            lambda payload: payload["evaluation_contract"].__setitem__(
+                "stochastic_actions", 1
+            ),
+            "evaluation contract",
+        ),
+        (
+            lambda payload: payload["episodes"][34].__setitem__("env_id", 17.9),
+            "environment/ordinal",
+        ),
+        (
+            lambda payload: payload.__setitem__(
+                "impulse_limits_n_m_s", {"not": "a vector"}
+            ),
+            "impulse caps",
+        ),
+    ),
+)
+def test_sampled_contract_rejects_permissive_json_types(mutation, match):
+    summary, payload, expected = _valid_sampled_contract_inputs()
+    mutation(payload)
+
+    with pytest.raises(ValueError, match=match):
+        p3.validate_sampled_population_contract(summary, payload, **expected)
+
+
+@pytest.mark.parametrize(
+    "field,bad_value",
+    (
+        ("action_rng_seed", "7"),
+        ("episodes_per_env_sampled", "1"),
+        ("sampled_completion_rule", "best_two"),
+        ("delivered_weight", "9.0"),
+        ("imp_max_p", "0.5"),
+    ),
+)
+def test_sampled_contract_rejects_summary_contract_drift(field, bad_value):
+    summary, payload, expected = _valid_sampled_contract_inputs()
+    summary[field] = bad_value
+
+    with pytest.raises(ValueError, match=field):
+        p3.validate_sampled_population_contract(summary, payload, **expected)
+
+
+def test_sampled_contract_rejects_a_duplicated_stream_coordinate():
+    summary, payload, expected = _valid_sampled_contract_inputs()
+    payload["episodes"][-1] = copy.deepcopy(payload["episodes"][0])
+
+    with pytest.raises(ValueError, match="environment/ordinal"):
+        p3.validate_sampled_population_contract(summary, payload, **expected)
+
+
+def test_sampled_contract_rejects_episode_task_arm_and_cap_drift():
+    summary, payload, expected = _valid_sampled_contract_inputs()
+    payload["episodes"][10]["task"] = "wrong-task"
+
+    with pytest.raises(ValueError, match="episode identity"):
+        p3.validate_sampled_population_contract(summary, payload, **expected)
+
+    summary, payload, expected = _valid_sampled_contract_inputs()
+    payload["episodes"][10]["impulse_limits_n_m_s"] = [1.0] * 6
+
+    with pytest.raises(ValueError, match="episode impulse caps"):
+        p3.validate_sampled_population_contract(summary, payload, **expected)
+
+
+@pytest.mark.parametrize(
+    "drift,match",
+    (
+        ("duplicate_coordinate", "environment/ordinal"),
+        ("joint_config_identity", "config identity"),
+    ),
+)
+def test_main_applies_population_contract_before_reducing_raw_episodes(
+    tmp_path, monkeypatch, drift, match
+):
+    summary, payload, _ = _valid_sampled_contract_inputs()
+    manifest_fields = list(p3.FROZEN_MANIFEST_FIELDS)
+
+    def write_manifest(path, arms, training_revision, sampled_row=None):
+        rows = []
+        for arm in arms:
+            for seed in range(2, 8):
+                row = {
+                    "array_index": str(len(rows)),
+                    "arm": arm,
+                    "name": f"unused_{arm}_{seed}",
+                    "task": "unused-task",
+                    "training_seed": str(seed),
+                    "training_code_revision": training_revision,
+                    "training_asset_revision": p3.EXPECTED_ASSET_REVISION,
+                    "checkpoint_path": f"/frozen/{arm}_{seed}/model_199.pt",
+                    "checkpoint_sha256": f"{len(rows) + 1:064x}",
+                }
+                if sampled_row is not None and (arm, seed) == (
+                    sampled_row["treatment"],
+                    int(sampled_row["training_seed"]),
+                ):
+                    row.update(
+                        {
+                            "name": sampled_row["name"],
+                            "task": sampled_row["task"],
+                            "checkpoint_sha256": sampled_row["checkpoint_sha256"],
+                        }
+                    )
+                rows.append(row)
+        with path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(
+                handle, fieldnames=manifest_fields, delimiter="\t", lineterminator="\n"
+            )
+            writer.writeheader()
+            writer.writerows(rows)
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    existing_manifest_path = tmp_path / "existing.tsv"
+    d0_manifest_path = tmp_path / "d0.tsv"
+    existing_manifest_sha = write_manifest(
+        existing_manifest_path,
+        ("M", "V", "V+M"),
+        p3.EXPECTED_EXISTING_TRAINING,
+    )
+    d0_manifest_sha = write_manifest(
+        d0_manifest_path,
+        ("V+D0",),
+        p3.EXPECTED_D0_TRAINING,
+        sampled_row=summary,
+    )
+    monkeypatch.setattr(p3, "EXPECTED_EXISTING_MANIFEST", existing_manifest_sha)
+    monkeypatch.setattr(p3, "EXPECTED_D0_MANIFEST", d0_manifest_sha)
+    config_identity = p3.EXPECTED_CONFIG_IDENTITY_BY_TREATMENT["V+D0"]
+    summary.update(config_identity)
+    payload["provenance"].update(config_identity)
+    summary.update(
+        {
+            "accepted_manifest_sha256": d0_manifest_sha,
+            "training_code_revision": p3.EXPECTED_D0_TRAINING,
+            "training_asset_revision": p3.EXPECTED_ASSET_REVISION,
+            "git_revision": p3.EXPECTED_D0_EVALUATION,
+            "asset_git_revision": p3.EXPECTED_ASSET_REVISION,
+            "reset_digest": p3.EXPECTED_RESET_DIGEST,
+        }
+    )
+    payload["provenance"].update(
+        {
+            "accepted_manifest_sha256": d0_manifest_sha,
+            "training_code_revision": p3.EXPECTED_D0_TRAINING,
+            "training_asset_revision": p3.EXPECTED_ASSET_REVISION,
+        }
+    )
+    payload["provenance"]["code_git"]["revision"] = p3.EXPECTED_D0_EVALUATION
+    payload["provenance"]["asset_git"]["revision"] = p3.EXPECTED_ASSET_REVISION
+    if drift == "duplicate_coordinate":
+        payload["episodes"][-1] = copy.deepcopy(payload["episodes"][0])
+    else:
+        for field, value in (
+            ("campaign_config_sha256", "a" * 64),
+            ("treatment_config_sha256", "b" * 64),
+            ("nail_asset_sha256", "c" * 64),
+        ):
+            summary[field] = value
+            payload["provenance"][field] = value
+    digest = hashlib.sha256(
+        json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
+    ).hexdigest()
+    payload["payload_digest"] = digest
+
+    existing_root = tmp_path / "existing"
+    d0_root = tmp_path / "d0"
+    row_root = d0_root / summary["name"]
+    existing_root.mkdir()
+    row_root.mkdir(parents=True)
+    trace_path = row_root / "fixture_sampled_traces.npz"
+    encoded = np.frombuffer(json.dumps(payload).encode(), dtype=np.uint8)
+    np.savez_compressed(trace_path, payload_json=encoded)
+    summary["sampled_trace_digest"] = digest
+    summary["sampled_trace_artifact_sha256"] = hashlib.sha256(
+        trace_path.read_bytes()
+    ).hexdigest()
+    with (row_root / "summary.csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(summary))
+        writer.writeheader()
+        writer.writerow(summary)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "presentation3_results.py",
+            "--existing-fixed-root",
+            str(tmp_path / "unused-existing-fixed"),
+            "--d0-fixed-root",
+            str(tmp_path / "unused-d0-fixed"),
+            "--existing-sampled-root",
+            str(existing_root),
+            "--d0-sampled-root",
+            str(d0_root),
+            "--existing-manifest",
+            str(existing_manifest_path),
+            "--d0-manifest",
+            str(d0_manifest_path),
+            "--output-dir",
+            str(tmp_path / "output"),
+        ],
+    )
+
+    with pytest.raises(ValueError, match=match):
+        p3.main()
+
+
+def test_main_requires_the_exact_sampled_input_inventory_before_writing(
+    tmp_path, monkeypatch
+):
+    existing_root = tmp_path / "existing"
+    d0_root = tmp_path / "d0"
+    existing_root.mkdir()
+    d0_root.mkdir()
+    monkeypatch.setattr(p3, "load_frozen_training_manifest", lambda *args, **kwargs: {})
+
+    def reject_unpinned_inventory(records, *, expected_sha256):
+        assert records == []
+        assert expected_sha256 == p3.EXPECTED_SAMPLED_INPUT_INVENTORY_SHA256
+        raise ValueError("sampled inventory sentinel")
+
+    monkeypatch.setattr(
+        p3, "validate_sampled_input_inventory", reject_unpinned_inventory
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "presentation3_results.py",
+            "--existing-fixed-root",
+            str(tmp_path / "unused-existing-fixed"),
+            "--d0-fixed-root",
+            str(tmp_path / "unused-d0-fixed"),
+            "--existing-sampled-root",
+            str(existing_root),
+            "--d0-sampled-root",
+            str(d0_root),
+            "--existing-manifest",
+            str(tmp_path / "unused-existing.tsv"),
+            "--d0-manifest",
+            str(tmp_path / "unused-d0.tsv"),
+            "--output-dir",
+            str(tmp_path / "output"),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="sampled inventory sentinel"):
+        p3.main()
+
+
 def test_assemble_result_row_keeps_sampled_and_fixed_protocols_separate(result_inputs):
     row, trajectory = assemble_result_row(*result_inputs)
 
@@ -260,7 +836,8 @@ def test_assemble_result_row_keeps_sampled_and_fixed_protocols_separate(result_i
     assert row["sampled_qvel_legal_n"] == 1
     assert row["sampled_qvel_max_rad_s"] == pytest.approx(3.20)
     assert row["sampled_max_lambda_cap_ratio"] == pytest.approx(0.50)
-    assert row["sampled_recontact_rate"] == pytest.approx(0.50)
+    assert row["sampled_post_finalization_contact_rate"] == pytest.approx(0.50)
+    assert "sampled_recontact_rate" not in row
     assert row["sampled_tail_fraction_mean"] == pytest.approx(0.10)
     assert row["fixed_first_event_impulse_n_s"] == pytest.approx(0.31)
     assert row["fixed_cumulative_impulse_n_s"] == pytest.approx(0.45)
@@ -306,6 +883,24 @@ def test_assemble_result_row_rejects_malformed_fixed_precontact_speed(
         assemble_result_row(*mutated)
 
 
+def test_assemble_result_row_rejects_fixed_cap_drift(result_inputs):
+    mutated = copy.deepcopy(result_inputs)
+    mutated[4]["j_limit_n_m_s"][0] = 9.0
+
+    with pytest.raises(ValueError, match="fixed-reset impulse caps"):
+        assemble_result_row(*mutated)
+
+
+def test_assemble_result_row_rejects_unapproved_impulse_analysis_revision(
+    result_inputs,
+):
+    mutated = copy.deepcopy(result_inputs)
+    mutated[4]["code_revision"] = "4" * 40
+
+    with pytest.raises(ValueError, match="impulse analysis revision"):
+        assemble_result_row(*mutated)
+
+
 @pytest.mark.parametrize(
     "field,mutated_value",
     (
@@ -346,11 +941,34 @@ def test_fixed_impulse_keeps_productive_first_event_separate_from_larger_cumulat
     assert actual["max_lambda_cap_ratio"] == pytest.approx(0.5)
 
 
+def test_fixed_impulse_rejects_a_first_event_value_that_drifted_after_finalization():
+    diagnostic = {
+        "tracker_finalized": np.array([False, True, True]),
+        "tracker_productive": np.array([False, True, True]),
+        "tracker_delivered_n_s": np.array([0.0, 0.30, 0.45]),
+        "tracker_v_precontact_m_s": np.array([0.0, 1.10, 1.10]),
+        "delivered_impulse_n_s": np.array([0.0, 0.30, 0.52]),
+        "lambda_windowed_constraint_read_n_m_s": np.array(
+            [[0.0, 0.0], [0.82, 0.82], [0.82, 0.82]]
+        ),
+    }
+
+    with pytest.raises(ValueError, match="first-event latch"):
+        fixed_impulse_metrics(diagnostic, caps=np.array([1.64, 3.28]))
+
+
 def test_waypoint_count_stops_at_contact_onset_instead_of_using_follow_through():
     next_waypoint = np.array([0, 1, 2, 6])
     contact = np.array([False, False, True, True])
 
     assert waypoints_reached_by_contact(next_waypoint, contact) == 2
+
+
+def test_waypoints_by_contact_is_zero_when_contact_never_occurs():
+    next_waypoint = np.array([0, 1, 2, 6])
+    contact = np.array([False, False, False, False])
+
+    assert waypoints_reached_by_contact(next_waypoint, contact) == 0
 
 
 def test_precontact_geometry_uses_recorded_finite_segment_error_and_contact_window():

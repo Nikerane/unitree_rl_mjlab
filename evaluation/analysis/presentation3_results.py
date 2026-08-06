@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import io
 import json
 from collections.abc import Mapping
 from pathlib import Path
@@ -13,6 +14,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from evaluation.analysis.first_strike_campaign import (
+    EXPECTED_EPISODES_PER_ENV,
+    EXPECTED_EPISODES_PER_SEED,
+    EXPECTED_IMPULSE_LIMITS_N_M_S,
+    EXPECTED_NUM_ENVS,
     aggregate_episode_metrics,
     summarize_episode,
 )
@@ -29,12 +34,404 @@ EXPECTED_ASSET_REVISION = "b58ccd2f81fd246f27c1e8d88cf86484cd888703"
 EXPECTED_RESET_DIGEST = "bde511ec2adc42e5365e1e46f45ff1fb43223a93c31c6fbfb4580352e445e319"
 EXPECTED_EXISTING_MANIFEST = "dab2f08e66dae9390e59764189a08f356fbe4718e36927644a29ee897a223c89"
 EXPECTED_D0_MANIFEST = "f55f20c80774916950f56252efa5fddebecf475de2408b221eb44273a5b7efd7"
+EXPECTED_SAMPLED_INPUT_INVENTORY_SHA256 = (
+    "2c1e1cf3711ffc8ef57c8aa078688b712f5719994b5ac5fb5549e4a369ca9ec2"
+)
 EXPECTED_EXISTING_TRAINING = "ba6119c767fe92a8eb4b6131e0c0b0d3c120f0fe"
 EXPECTED_D0_TRAINING = "db48032449cb77184579f8cf62b9a5a228cfa77f"
 EXPECTED_EXISTING_EVALUATION = "2b045371704604367b7c16b87e90457d20db30f7"
 EXPECTED_D0_EVALUATION = EXPECTED_D0_TRAINING
 EXPECTED_EXISTING_RENDERER = "268502be41ae2caf20d5a147edfa90a0f1cda766"
 EXPECTED_D0_RENDERER = "3435dc8357ff63b6dc24f8dee153b9b950c5b71e"
+EXPECTED_IMPULSE_ANALYSIS_BY_POLICY = {
+    **{("M", seed): EXPECTED_EXISTING_RENDERER for seed in (2, 3, 4)},
+    **{("M", seed): EXPECTED_EXISTING_TRAINING for seed in (5, 6, 7)},
+    **{("V+D0", seed): EXPECTED_D0_RENDERER for seed in range(2, 8)},
+    **{("V", seed): EXPECTED_EXISTING_RENDERER for seed in range(2, 8)},
+    **{("V+M", seed): EXPECTED_EXISTING_TRAINING for seed in range(2, 8)},
+}
+EXPECTED_CONFIG_IDENTITY_BY_TREATMENT = {
+    "M": {
+        "campaign_config_sha256": (
+            "1b100978f6658ea45b5c06a56a1a50a1efd39691b038bafcc2980764d57379a3"
+        ),
+        "treatment_config_sha256": (
+            "5d78b234089983296f79e444f48182f8bc89cb253c53cc61087e1f421d00c1ac"
+        ),
+        "nail_asset_sha256": (
+            "47b0986d74675673a8c7e03a7b6d7012790d7cb10c1622bf699179f0046c3e00"
+        ),
+    },
+    "V+D0": {
+        "campaign_config_sha256": (
+            "370ef93158ce3f77fc27a6b796a49453ef2eee2779b11791b06f654ecd252a6d"
+        ),
+        "treatment_config_sha256": (
+            "a7bcaac571ad6bb11239a0be30a6e3d374457c35b2e7dc1d36d095cbc59379e3"
+        ),
+        "nail_asset_sha256": (
+            "47b0986d74675673a8c7e03a7b6d7012790d7cb10c1622bf699179f0046c3e00"
+        ),
+    },
+    "V": {
+        "campaign_config_sha256": (
+            "5cb484bb432f84d767bb41737b094f8eccd65a9ee133d5d43a4c32bd8975f31f"
+        ),
+        "treatment_config_sha256": (
+            "14876e175f6ea4cca5ee65fc1bcb5acf9822a99767b12290f3c58a0d928b8ad5"
+        ),
+        "nail_asset_sha256": (
+            "47b0986d74675673a8c7e03a7b6d7012790d7cb10c1622bf699179f0046c3e00"
+        ),
+    },
+    "V+M": {
+        "campaign_config_sha256": (
+            "1b100978f6658ea45b5c06a56a1a50a1efd39691b038bafcc2980764d57379a3"
+        ),
+        "treatment_config_sha256": (
+            "c59ffdb85516909f05aa37a20742e00917b46f2fffa6273fd1108815ebffee62"
+        ),
+        "nail_asset_sha256": (
+            "47b0986d74675673a8c7e03a7b6d7012790d7cb10c1622bf699179f0046c3e00"
+        ),
+    },
+}
+FROZEN_MANIFEST_FIELDS = (
+    "array_index",
+    "arm",
+    "name",
+    "task",
+    "training_seed",
+    "training_code_revision",
+    "training_asset_revision",
+    "checkpoint_path",
+    "checkpoint_sha256",
+)
+EXPECTED_SELECTION = "first two completed episodes from each of 256 environments"
+EXPECTED_RNG_STREAMS = {
+    "reset": 2036072919,
+    "observation": 2046072933,
+    "action": 2056072941,
+}
+EXPECTED_EVALUATION_CONTRACT = {
+    "base_rng_seed": 2026072900,
+    "num_envs": EXPECTED_NUM_ENVS,
+    "episodes_per_env": EXPECTED_EPISODES_PER_ENV,
+    "episode_len_s": 4.0,
+    "mean_nsteps": 400,
+    "completion_rule": "first_two_completions_per_environment",
+    "stochastic_actions": True,
+    "reset_position_noise_rad": [0.0, 0.0],
+    "actor_observation_corruption": True,
+    "critic_observation_corruption": False,
+    "physics_dt_s": 0.002,
+    "control_decimation": 10,
+    "fixed_impedance_signature_sha256": (
+        "a8252c853dd0059c89cff357e8e542fc6d097ecc9ef2652768ca0ef83d8aa269"
+    ),
+    "fixed_action_signature_sha256": (
+        "56e59da46050a16c2005cb1872632ed81d41f82b48ae5c94beaca8fea44790ec"
+    ),
+    "strict_config_identities": {},
+}
+
+
+def load_frozen_training_manifest(path, *, expected_sha256, expected_keys):
+    """Read one hash-pinned training manifest and require its exact arm/seed matrix."""
+    manifest_path = Path(path)
+    raw = manifest_path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != expected_sha256:
+        raise ValueError(f"frozen manifest SHA-256 mismatch: {manifest_path}")
+    try:
+        reader = csv.DictReader(io.StringIO(raw.decode("utf-8")), delimiter="\t")
+        if tuple(reader.fieldnames or ()) != FROZEN_MANIFEST_FIELDS:
+            raise ValueError("frozen manifest header drift")
+        rows = list(reader)
+    except UnicodeDecodeError as error:
+        raise ValueError("frozen manifest is not UTF-8") from error
+
+    expected = set(expected_keys)
+    if len(rows) != len(expected):
+        raise ValueError("frozen manifest row-count drift")
+    keyed = {}
+    array_indices = set()
+    for index, row in enumerate(rows):
+        if None in row or any(row.get(field, "") == "" for field in FROZEN_MANIFEST_FIELDS):
+            raise ValueError(f"frozen manifest row {index} is malformed")
+        try:
+            key = (str(row["arm"]), int(row["training_seed"]))
+            array_index = int(row["array_index"])
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"frozen manifest row {index} identity is malformed") from error
+        if key in keyed:
+            raise ValueError(f"frozen manifest duplicate policy identity: {key}")
+        if len(row["training_code_revision"]) != 40 or len(
+            row["training_asset_revision"]
+        ) != 40:
+            raise ValueError(f"frozen manifest row {index} revision is malformed")
+        if len(row["checkpoint_sha256"]) != 64:
+            raise ValueError(f"frozen manifest row {index} checkpoint is malformed")
+        keyed[key] = row
+        array_indices.add(array_index)
+    if set(keyed) != expected:
+        raise ValueError("frozen manifest policy matrix drift")
+    if array_indices != set(range(len(rows))):
+        raise ValueError("frozen manifest array-index drift")
+    return keyed
+
+
+def validate_sampled_input_inventory(records, *, expected_sha256):
+    """Bind the exact accepted summary/trace bytes, including the r4 evaluation."""
+    arm_order = {arm: index for index, arm in enumerate(VIDEO_ARM_BY_TREATMENT)}
+    expected_keys = {
+        (arm, seed) for arm in VIDEO_ARM_BY_TREATMENT for seed in range(2, 8)
+    }
+    keyed = {}
+    for index, record in enumerate(records):
+        if not isinstance(record, Mapping):
+            raise ValueError(f"sampled input inventory row {index} is malformed")
+        try:
+            key = (str(record["arm"]), int(record["training_seed"]))
+            summary_sha = str(record["summary_sha256"])
+            artifact_sha = str(record["artifact_sha256"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(
+                f"sampled input inventory row {index} is malformed"
+            ) from error
+        if key in keyed:
+            raise ValueError(f"sampled input inventory duplicate policy: {key}")
+        try:
+            valid_hashes = (
+                len(summary_sha) == 64
+                and len(artifact_sha) == 64
+                and int(summary_sha, 16) >= 0
+                and int(artifact_sha, 16) >= 0
+            )
+        except ValueError:
+            valid_hashes = False
+        if not valid_hashes:
+            raise ValueError(f"sampled input inventory row {index} hash is malformed")
+        keyed[key] = (summary_sha, artifact_sha)
+    if set(keyed) != expected_keys:
+        raise ValueError("sampled input inventory policy matrix drift")
+    canonical = "".join(
+        f"{arm}\t{seed}\t{keyed[(arm, seed)][0]}\t{keyed[(arm, seed)][1]}\n"
+        for arm, seed in sorted(
+            keyed, key=lambda key: (arm_order[key[0]], key[1])
+        )
+    ).encode("utf-8")
+    actual_sha256 = hashlib.sha256(canonical).hexdigest()
+    if actual_sha256 != expected_sha256:
+        raise ValueError("sampled input inventory SHA-256 mismatch")
+    return actual_sha256
+
+
+def _strict_json_equal(actual, expected):
+    """Compare decoded JSON without Python's bool/int or int/float coercions."""
+    if type(actual) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        return actual.keys() == expected.keys() and all(
+            _strict_json_equal(actual[key], value) for key, value in expected.items()
+        )
+    if isinstance(expected, list):
+        return len(actual) == len(expected) and all(
+            _strict_json_equal(left, right)
+            for left, right in zip(actual, expected, strict=True)
+        )
+    return actual == expected
+
+
+def validate_sampled_population_contract(
+    summary,
+    payload,
+    *,
+    manifest,
+    training_revision,
+    evaluation_revision,
+    asset_revision,
+    manifest_row,
+    config_identity,
+):
+    """Bind one raw population to the frozen Presentation3 sampling contract."""
+    if not isinstance(summary, Mapping) or not isinstance(payload, Mapping):
+        raise ValueError("sampled contract inputs must be mappings")
+    treatment = str(summary.get("treatment", ""))
+    if treatment not in VIDEO_ARM_BY_TREATMENT:
+        raise ValueError("unknown Presentation3 treatment")
+    try:
+        seed = int(summary["training_seed"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("sampled training seed is malformed") from error
+    task = str(summary.get("task", ""))
+    checkpoint = str(summary.get("checkpoint_sha256", ""))
+    if not isinstance(manifest_row, Mapping):
+        raise ValueError("frozen manifest row is missing")
+    expected_manifest_identity = {
+        "arm": treatment,
+        "name": summary.get("name"),
+        "task": task,
+        "training_seed": str(seed),
+        "training_code_revision": training_revision,
+        "training_asset_revision": asset_revision,
+        "checkpoint_sha256": checkpoint,
+    }
+    for field, expected in expected_manifest_identity.items():
+        if manifest_row.get(field) != expected:
+            raise ValueError(f"frozen manifest {field} drift")
+    if not isinstance(config_identity, Mapping):
+        raise ValueError("frozen config identity is missing")
+    for field in (
+        "campaign_config_sha256",
+        "treatment_config_sha256",
+        "nail_asset_sha256",
+    ):
+        if summary.get(field) != config_identity.get(field):
+            raise ValueError(f"sampled config identity {field} drift")
+    expected_dose = DELIVERED_DOSE_BY_TREATMENT[treatment]
+    expected_summary = {
+        "accepted_checkpoint_sha256": checkpoint,
+        "accepted_manifest_sha256": manifest,
+        "training_code_revision": training_revision,
+        "training_asset_revision": asset_revision,
+        "git_revision": evaluation_revision,
+        "asset_git_revision": asset_revision,
+        "n_episodes_sampled": str(EXPECTED_EPISODES_PER_SEED),
+        "seed": "2026072900",
+        "num_envs": str(EXPECTED_NUM_ENVS),
+        "episodes_per_env_sampled": str(EXPECTED_EPISODES_PER_ENV),
+        "episode_len_s": "4.0",
+        "nsteps": "400",
+        "sampled_completion_rule": "first_two_completions_per_environment",
+        "sampled_actions_stochastic": "True",
+        "reset_position_noise_min_rad": "0.0",
+        "reset_position_noise_max_rad": "0.0",
+        "actor_observation_corruption": "True",
+        "critic_observation_corruption": "False",
+        "physics_dt_s": "0.002",
+        "control_decimation": "10",
+        "fixed_impedance_signature_sha256": EXPECTED_EVALUATION_CONTRACT[
+            "fixed_impedance_signature_sha256"
+        ],
+        "fixed_action_signature_sha256": EXPECTED_EVALUATION_CONTRACT[
+            "fixed_action_signature_sha256"
+        ],
+        "reset_rng_seed": str(EXPECTED_RNG_STREAMS["reset"]),
+        "observation_rng_seed": str(EXPECTED_RNG_STREAMS["observation"]),
+        "action_rng_seed": str(EXPECTED_RNG_STREAMS["action"]),
+        "impact_weight": "8.0",
+        "delivered_weight": str(float(expected_dose)),
+        "r_waypoint_progress_weight": "8.0",
+        "event_i_ref_n_s": "0.3088",
+        "imp_max_p": "0.0",
+    }
+    for field, expected in expected_summary.items():
+        if summary.get(field) != expected:
+            raise ValueError(f"sampled summary {field} drift")
+    if str(summary.get("git_dirty", "")).lower() != "false" or str(
+        summary.get("asset_git_dirty", "")
+    ).lower() != "false":
+        raise ValueError("sampled summary dirty provenance")
+
+    scalar_bindings = {
+        "schema_version": 3,
+        "selection": EXPECTED_SELECTION,
+        "expected_episode_count": EXPECTED_EPISODES_PER_SEED,
+        "task": task,
+        "treatment": treatment,
+        "training_seed": seed,
+        "event_i_ref_n_s": float(summary["event_i_ref_n_s"]),
+        "imp_max_p": 0.0,
+    }
+    for field, expected in scalar_bindings.items():
+        if not _strict_json_equal(payload.get(field), expected):
+            label = "selection" if field == "selection" else field
+            raise ValueError(f"sampled payload {label} drift")
+    if not _strict_json_equal(payload.get("rng_streams"), EXPECTED_RNG_STREAMS):
+        raise ValueError("sampled payload RNG streams drift")
+    if not _strict_json_equal(
+        payload.get("evaluation_contract"), EXPECTED_EVALUATION_CONTRACT
+    ):
+        raise ValueError("sampled payload evaluation contract drift")
+
+    if not _strict_json_equal(payload.get("weights"), {
+        "impact_progress": 8.0,
+        "delivered_impulse": expected_dose,
+        "r_waypoint_progress": 8.0,
+    }):
+        raise ValueError("sampled payload treatment weights drift")
+    try:
+        caps = np.asarray(payload.get("impulse_limits_n_m_s"), dtype=float)
+    except (TypeError, ValueError) as error:
+        raise ValueError("sampled payload impulse caps drift") from error
+    expected_caps = np.asarray(EXPECTED_IMPULSE_LIMITS_N_M_S, dtype=float)
+    if caps.shape != expected_caps.shape or not np.array_equal(caps, expected_caps):
+        raise ValueError("sampled payload impulse caps drift")
+
+    provenance = payload.get("provenance")
+    if not isinstance(provenance, Mapping):
+        raise ValueError("sampled payload provenance is missing")
+    expected_provenance = {
+        "checkpoint_sha256": checkpoint,
+        "accepted_checkpoint_sha256": checkpoint,
+        "accepted_manifest_sha256": manifest,
+        "campaign_config_sha256": config_identity.get("campaign_config_sha256"),
+        "treatment_config_sha256": config_identity.get("treatment_config_sha256"),
+        "nail_asset_sha256": config_identity.get("nail_asset_sha256"),
+        "training_code_revision": training_revision,
+        "training_asset_revision": asset_revision,
+    }
+    for field, expected in expected_provenance.items():
+        if provenance.get(field) != expected:
+            raise ValueError(f"sampled payload provenance {field} drift")
+    for field, expected_revision in (
+        ("code_git", evaluation_revision),
+        ("asset_git", asset_revision),
+    ):
+        binding = provenance.get(field)
+        if (
+            not isinstance(binding, Mapping)
+            or binding.get("revision") != expected_revision
+            or binding.get("dirty") is not False
+        ):
+            raise ValueError(f"sampled payload provenance {field} drift")
+
+    episodes = payload.get("episodes")
+    if not isinstance(episodes, list) or len(episodes) != EXPECTED_EPISODES_PER_SEED:
+        raise ValueError("sampled payload episode count drift")
+    coordinates = set()
+    for index, episode in enumerate(episodes):
+        if not isinstance(episode, Mapping):
+            raise ValueError(f"sampled episode {index} is malformed")
+        try:
+            env_id = episode["env_id"]
+            ordinal = episode["episode_ordinal"]
+            if type(env_id) is not int or type(ordinal) is not int:
+                raise TypeError
+            coordinate = (env_id, ordinal)
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(f"sampled episode {index} environment/ordinal drift") from error
+        if (
+            episode.get("arm") != treatment
+            or episode.get("task") != task
+            or episode.get("episode_id")
+            != f"{treatment}-env{coordinate[0]}-episode{coordinate[1]}"
+        ):
+            raise ValueError(f"sampled episode {index} episode identity drift")
+        episode_caps = np.asarray(episode.get("impulse_limits_n_m_s"), dtype=float)
+        if (
+            episode_caps.shape != expected_caps.shape
+            or not np.array_equal(episode_caps, expected_caps)
+        ):
+            raise ValueError(f"sampled episode {index} episode impulse caps drift")
+        coordinates.add(coordinate)
+    expected_coordinates = {
+        (env_id, ordinal)
+        for env_id in range(EXPECTED_NUM_ENVS)
+        for ordinal in range(EXPECTED_EPISODES_PER_ENV)
+    }
+    if coordinates != expected_coordinates or len(coordinates) != len(episodes):
+        raise ValueError("sampled environment/ordinal population drift")
 
 
 def write_result_package(rows, traces, output_dir):
@@ -147,6 +544,20 @@ def assemble_result_row(
     failed = [name for name, passed in identity_checks.items() if not passed]
     if failed:
         raise ValueError(f"artifact identity mismatch: {', '.join(failed)}")
+    expected_impulse_revision = EXPECTED_IMPULSE_ANALYSIS_BY_POLICY.get(
+        (treatment, seed)
+    )
+    if impulse_metadata.get("code_revision") != expected_impulse_revision:
+        raise ValueError("impulse analysis revision drift")
+    try:
+        fixed_caps = np.asarray(impulse_metadata["j_limit_n_m_s"], dtype=float)
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("fixed-reset impulse caps are malformed") from error
+    expected_caps = np.asarray(EXPECTED_IMPULSE_LIMITS_N_M_S, dtype=float)
+    if fixed_caps.shape != expected_caps.shape or not np.array_equal(
+        fixed_caps, expected_caps
+    ):
+        raise ValueError("fixed-reset impulse caps drift")
     if sampled_summary.get("accepted_checkpoint_sha256") != checkpoint:
         raise ValueError("accepted checkpoint mismatch")
     if str(sampled_summary.get("git_dirty")).lower() != "false" or str(
@@ -262,7 +673,7 @@ def assemble_result_row(
     sampled_event = sampled_first_event_metrics(sampled_payload)
     sampled_waypoints = sampled_waypoints_by_contact(sampled_payload)
     fixed_impulse = fixed_impulse_metrics(
-        impulse_trace, caps=np.asarray(impulse_metadata["j_limit_n_m_s"], dtype=float)
+        impulse_trace, caps=fixed_caps
     )
     fixed_peak, fixed_legal = peak_post_integration_qvel(
         diagnostic_qvel, limit=3.1415
@@ -316,7 +727,9 @@ def assemble_result_row(
         "sampled_post_event_tail_mean_n_s": sampled_event[
             "post_event_tail_mean_n_s"
         ],
-        "sampled_recontact_rate": float(raw_aggregate["recontact_rate_sampled"]),
+        "sampled_post_finalization_contact_rate": float(
+            raw_aggregate["recontact_rate_sampled"]
+        ),
         "sampled_tail_fraction_mean": float(
             raw_aggregate["tail_fraction_mean_sampled"]
         ),
@@ -735,15 +1148,18 @@ def fixed_impulse_metrics(diagnostic, *, caps):
     if (
         not productive[first_finalization]
         or not np.all(finalized[first_finalization:])
+        or not np.all(first_event[first_finalization:] == first_event[first_finalization])
         or not np.all(
             precontact_speed[first_finalization:]
             == precontact_speed[first_finalization]
         )
     ):
-        raise ValueError(
-            "fixed-reset tracker speed is not latched at first finalization"
-        )
-    first_value = float(first_event[-1])
+        if not np.all(
+            first_event[first_finalization:] == first_event[first_finalization]
+        ):
+            raise ValueError("fixed-reset first-event latch drift")
+        raise ValueError("fixed-reset tracker state is not latched at first finalization")
+    first_value = float(first_event[first_finalization])
     cumulative_value = float(cumulative[-1])
     if first_value < 0.0 or cumulative_value + 1e-9 < first_value:
         raise ValueError("inconsistent delivered-impulse accumulators")
@@ -770,7 +1186,9 @@ def waypoints_reached_by_contact(next_waypoint, contact):
         or not np.all(np.isfinite(progress))
     ):
         raise ValueError("malformed waypoint/contact trace")
-    onset = int(np.flatnonzero(contact_mask)[0]) if np.any(contact_mask) else len(progress) - 1
+    if not np.any(contact_mask):
+        return 0
+    onset = int(np.flatnonzero(contact_mask)[0])
     return int(np.max(progress[: onset + 1]))
 
 
@@ -840,6 +1258,8 @@ def main() -> None:
     parser.add_argument("--d0-fixed-root", type=Path, required=True)
     parser.add_argument("--existing-sampled-root", type=Path, required=True)
     parser.add_argument("--d0-sampled-root", type=Path, required=True)
+    parser.add_argument("--existing-manifest", type=Path, required=True)
+    parser.add_argument("--d0-manifest", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
 
@@ -853,12 +1273,33 @@ def main() -> None:
         _validated_reset_state_digest,
     )
 
+    existing_manifest_rows = load_frozen_training_manifest(
+        args.existing_manifest,
+        expected_sha256=EXPECTED_EXISTING_MANIFEST,
+        expected_keys={
+            (arm, seed)
+            for arm in ("M", "V", "V+M")
+            for seed in range(2, 8)
+        },
+    )
+    d0_manifest_rows = load_frozen_training_manifest(
+        args.d0_manifest,
+        expected_sha256=EXPECTED_D0_MANIFEST,
+        expected_keys={("V+D0", seed) for seed in range(2, 8)},
+    )
+
     rows = []
     trajectories = {}
+    sampled_input_records = []
     for sampled_root in (args.existing_sampled_root, args.d0_sampled_root):
         for summary_path in sorted(sampled_root.glob("*/summary.csv")):
-            with summary_path.open(encoding="utf-8", newline="") as handle:
-                summary_rows = list(csv.DictReader(handle))
+            summary_bytes = summary_path.read_bytes()
+            try:
+                summary_rows = list(
+                    csv.DictReader(io.StringIO(summary_bytes.decode("utf-8")))
+                )
+            except UnicodeDecodeError as error:
+                raise ValueError(f"summary is not UTF-8: {summary_path}") from error
             if len(summary_rows) != 1:
                 raise ValueError(f"expected one summary row: {summary_path}")
             summary = summary_rows[0]
@@ -887,12 +1328,6 @@ def main() -> None:
                 or recorded_payload_digest != summary.get("sampled_trace_digest")
             ):
                 raise ValueError(f"sampled payload digest mismatch: {sampled_trace_path}")
-            for episode in payload["episodes"]:
-                _validated_physical_trace_digest(
-                    episode, require_recorded_digest=True
-                )
-                _validated_reset_state_digest(episode, require_recorded_digest=True)
-
             is_d0 = treatment == "V+D0"
             expected_manifest = EXPECTED_D0_MANIFEST if is_d0 else EXPECTED_EXISTING_MANIFEST
             expected_training = EXPECTED_D0_TRAINING if is_d0 else EXPECTED_EXISTING_TRAINING
@@ -900,6 +1335,13 @@ def main() -> None:
                 EXPECTED_D0_EVALUATION if is_d0 else EXPECTED_EXISTING_EVALUATION
             )
             expected_renderer = EXPECTED_D0_RENDERER if is_d0 else EXPECTED_EXISTING_RENDERER
+            manifest_rows = d0_manifest_rows if is_d0 else existing_manifest_rows
+            try:
+                manifest_row = manifest_rows[
+                    (treatment, int(summary["training_seed"]))
+                ]
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError(f"{summary.get('name')}: not in frozen manifest") from error
             exact_summary = {
                 "accepted_manifest_sha256": expected_manifest,
                 "training_code_revision": expected_training,
@@ -911,6 +1353,29 @@ def main() -> None:
             for field, expected in exact_summary.items():
                 if summary.get(field) != expected:
                     raise ValueError(f"{summary['name']}: {field} drift")
+            validate_sampled_population_contract(
+                summary,
+                payload,
+                manifest=expected_manifest,
+                training_revision=expected_training,
+                evaluation_revision=expected_evaluation,
+                asset_revision=EXPECTED_ASSET_REVISION,
+                manifest_row=manifest_row,
+                config_identity=EXPECTED_CONFIG_IDENTITY_BY_TREATMENT[treatment],
+            )
+            sampled_input_records.append(
+                {
+                    "arm": treatment,
+                    "training_seed": int(summary["training_seed"]),
+                    "summary_sha256": hashlib.sha256(summary_bytes).hexdigest(),
+                    "artifact_sha256": artifact_sha,
+                }
+            )
+            for episode in payload["episodes"]:
+                _validated_physical_trace_digest(
+                    episode, require_recorded_digest=True
+                )
+                _validated_reset_state_digest(episode, require_recorded_digest=True)
 
             fixed_root = args.d0_fixed_root if is_d0 else args.existing_fixed_root
             video_leaf = fixed_root / "videos" / summary["name"]
@@ -956,6 +1421,10 @@ def main() -> None:
             rows.append(row)
             trajectories[(treatment, int(summary["training_seed"]))] = trajectory
 
+    validate_sampled_input_inventory(
+        sampled_input_records,
+        expected_sha256=EXPECTED_SAMPLED_INPUT_INVENTORY_SHA256,
+    )
     outputs = write_result_package(rows, trajectories, args.output_dir)
     for label, path in outputs.items():
         print(f"{label}: {path} sha256={hashlib.sha256(path.read_bytes()).hexdigest()}")
