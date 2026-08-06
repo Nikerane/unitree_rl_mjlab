@@ -118,6 +118,7 @@ GUIDELINE_TASK_TO_ARM = {
 PRESENTATION3_ARM_TASKS = {
   "M": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Delivered4",
   "V": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel",
+  "V+D0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered0",
   "V+M": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4",
 }
 PRESENTATION3_TASK_TO_ARM = {
@@ -191,6 +192,7 @@ PAYOUT_SEMANTICS = {
   "C-Gate": "actual_event_linear_plus_actual_ordered_gate",
   "M": "actual_event_linear_waypoint_progress_delivered4",
   "V": "actual_event_linear_waypoint_progress_velocity_cat",
+  "V+D0": "actual_event_linear_waypoint_progress_velocity_cat_delivered_disabled",
   "V+M": "actual_event_linear_waypoint_progress_velocity_cat_delivered4",
 }
 
@@ -1242,8 +1244,8 @@ def _validate_native_guideline_env_contract(env_cfg, task: str) -> dict:
 
 
 def _validate_presentation3_env_contract(env_cfg, task: str, treatment: str) -> dict:
-  """Bind the sampled Presentation3 arms to their preregistered 2x2 cells."""
-  expected_velocity_cat = treatment in ("V", "V+M")
+  """Bind the sampled Presentation3 arms to their registered treatment cells."""
+  expected_velocity_cat = treatment in ("V", "V+D0", "V+M")
   guidance = env_cfg.rewards.get("r_waypoint_progress")
   if (
     guidance is None
@@ -1445,6 +1447,7 @@ def _validate_sampled_env_contract(env_cfg, task: str) -> dict:
     "B8": (8.0, 0.0),
     "M": (8.0, 4.0),
     "V": (8.0, 2.0),
+    "V+D0": (8.0, 0.0),
     "V+M": (8.0, 4.0),
   }
   if treatment not in expected_weights_by_treatment:
@@ -2954,7 +2957,7 @@ def main() -> None:
     help=(
       "optional frozen evaluation contract; fq3x8 binds its three arms and RNG "
       "streams, cartesian-guideline-pilot exclusively admits C0/C-Gate, and "
-      "presentation3 binds M/V/V+M to its frozen RNG population"
+      "presentation3 binds M/V/V+D0/V+M to its frozen RNG population"
     ),
   )
   ap.add_argument("--ckpt", required=True, help="checkpoint .pt path")

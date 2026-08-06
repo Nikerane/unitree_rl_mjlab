@@ -135,6 +135,10 @@ TASK_BY_CAMPAIGN_ARM = {
     ("presentation3", "P+D4"): (
         "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Delivered4"
     ),
+    ("presentation3", "P+V+D0"): (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
+        "CProgress-Vel-Delivered0"
+    ),
     ("presentation3", "P+V+D4"): (
         "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
         "CProgress-Vel-Delivered4"
@@ -211,6 +215,16 @@ TREATMENT_BY_TASK: dict[str, Treatment] = {
     ),
     "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel": Treatment(
         headline="progress-guided strike with soft velocity-CaT",
+        guidance="progress weight 8.0",
+        velocity=_VELOCITY_SOFT_CAT,
+        impulse=_IMPULSE_LOG_ONLY,
+        geometry=GEOMETRY_WAYPOINTS,
+    ),
+    (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
+        "CProgress-Vel-Delivered0"
+    ): Treatment(
+        headline="progress-guided strike with soft velocity-CaT; delivered reward off",
         guidance="progress weight 8.0",
         velocity=_VELOCITY_SOFT_CAT,
         impulse=_IMPULSE_LOG_ONLY,

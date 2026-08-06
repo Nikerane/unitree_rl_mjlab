@@ -3996,6 +3996,7 @@ def test_training_launcher_executes_one_exact_frozen_matrix_row(tmp_path):
     (
         ("Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel", "pv"),
         ("Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Delivered4", "pd4"),
+        ("Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered0", "pvd0"),
         ("Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4", "pvd4"),
     ),
 )
@@ -4049,6 +4050,16 @@ def test_presentation3_launcher_executes_each_exact_i_off_row(tmp_path, task, sh
                     "CProgress-Vel-ImpEnforced"
                 ),
                 "SINGLE_SHORT": "pvi",
+            },
+            "task/short",
+        ),
+        (
+            {
+                "SINGLE_TASK": (
+                    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
+                    "CProgress-Vel-Delivered0"
+                ),
+                "SINGLE_SHORT": "pv",
             },
             "task/short",
         ),

@@ -1,4 +1,4 @@
-"""Wave-3 P+V launch gate: prove velocity-CaT is REALLY on, on the device that will train.
+"""P+V launch gate: prove velocity-CaT is REALLY on, on the device that will train.
 
 Run on Vega (CUDA) before submitting the six seeds, and on CPU as a pre-deploy rehearsal:
 
@@ -30,12 +30,17 @@ from src.tasks.hammer.config.z1.env_cfgs import IMP_J_LIMIT
 from src.tasks.hammer.mdp.velocity_bound import _ENV_SUBSTEP_ATTR, Z1_JOINT_VEL_LIMIT
 
 PV_TASK = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel"
+PVD0_TASK = (
+  "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
+  "CProgress-Vel-Delivered0"
+)
 P_TASK = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress"
 BASE_REWARDS = {
   "approach": 0.1, "nail_driven": 0.5, "nail_depth_delta": 600.0,
   "impact_progress": 8.0, "completion": 100.0, "action_rate": -0.01,
-  "joint_pos_limits": -10.0, "delivered_impulse": 2.0,
+  "joint_pos_limits": -10.0,
 }
+TASK_DELIVERED_WEIGHT = {PV_TASK: 2.0, PVD0_TASK: 0.0}
 FROZEN_CAPS = [1.640, 3.280, 1.640, 1.640, 1.640, 1.640]
 
 
@@ -48,14 +53,21 @@ def _hook_of(env: ManagerBasedRlEnv) -> CatSoftHook:
   return instance
 
 
-def run_checks(device: str = "cpu", num_envs: int = 8, steps: int = 3) -> list[tuple[str, bool, str]]:
+def run_checks(
+  task: str = PV_TASK,
+  device: str = "cpu",
+  num_envs: int = 8,
+  steps: int = 3,
+) -> list[tuple[str, bool, str]]:
   """Return [(name, passed, detail)]. Importable so a CPU test can rehearse the GPU gate."""
+  if task not in TASK_DELIVERED_WEIGHT:
+    raise ValueError(f"unsupported P+V smoke task: {task}")
   results: list[tuple[str, bool, str]] = []
 
   def check(name: str, ok: bool, detail: str = "") -> None:
     results.append((name, bool(ok), detail))
 
-  cfg = load_env_cfg(PV_TASK, play=True)
+  cfg = load_env_cfg(task, play=True)
   cfg.scene.num_envs = num_envs
   env = ManagerBasedRlEnv(cfg, device=device)
   hook = _hook_of(env)
@@ -112,22 +124,31 @@ def run_checks(device: str = "cpu", num_envs: int = 8, steps: int = 3) -> list[t
         f"peak now {float(tracker.peak_qv_joint.max()):.6e}")
 
   # (d) the progress treatment stays isolated.
-  live = {n: env.reward_manager.get_term_cfg(n).weight
-          for n in env.reward_manager.active_terms}
-  check("eight base reward terms and weights unchanged",
-        {k: v for k, v in live.items() if k in BASE_REWARDS} == BASE_REWARDS)
+  expected_delivered = TASK_DELIVERED_WEIGHT[task]
+  configured = {name: term.weight for name, term in cfg.rewards.items()}
+  expected_configured = {
+    **BASE_REWARDS,
+    "delivered_impulse": expected_delivered,
+    "r_waypoint_progress": 8.0,
+  }
+  live = {
+    name: env.reward_manager.get_term_cfg(name).weight
+    for name in env.reward_manager.active_terms
+  }
+  check("configured reward terms and weights match the selected P+V dose",
+        configured == expected_configured, str(configured))
+  check("runtime reward set retains the configured zero-weight reader",
+        live == expected_configured, str(live))
   check("r_waypoint_progress present at exactly 8.0",
         live.get("r_waypoint_progress") == 8.0, str(live.get("r_waypoint_progress")))
   check("r_gate absent", "r_gate" not in live, str(sorted(live)))
-  check("reward set is exactly the base eight plus r_waypoint_progress",
-        set(live) == set(BASE_REWARDS) | {"r_waypoint_progress"})
   check("no deterministic velocity termination",
         not ({"vel_hard", "cat_vel"} & set(env.termination_manager.active_terms)),
         str(sorted(env.termination_manager.active_terms)))
   check("no action clipping / velocity brake term",
         set(env.action_manager.active_terms) == {"ik_hammer_head"},
         str(env.action_manager.active_terms))
-  check("CatPPO is selected", load_rl_cfg(PV_TASK).algorithm.class_name
+  check("CatPPO is selected", load_rl_cfg(task).algorithm.class_name
         == "src.tasks.hammer.rl.cat_ppo:CatPPO")
   check("observation contract matches the frozen P control",
         env.observation_manager.group_obs_dim
@@ -150,15 +171,18 @@ def run_checks(device: str = "cpu", num_envs: int = 8, steps: int = 3) -> list[t
 
 def main() -> int:
   ap = argparse.ArgumentParser(description=__doc__)
+  ap.add_argument("--task", choices=tuple(TASK_DELIVERED_WEIGHT), default=PV_TASK)
   ap.add_argument("--device", default="cpu")
   ap.add_argument("--num-envs", type=int, default=8)
   ap.add_argument("--steps", type=int, default=3)
   args = ap.parse_args()
 
-  print(f"[smoke] task   : {PV_TASK}")
+  print(f"[smoke] task   : {args.task}")
   print(f"[smoke] control: {P_TASK}")
   print(f"[smoke] device : {args.device}  envs={args.num_envs}\n")
-  results = run_checks(device=args.device, num_envs=args.num_envs, steps=args.steps)
+  results = run_checks(
+    task=args.task, device=args.device, num_envs=args.num_envs, steps=args.steps
+  )
   for name, ok, detail in results:
     print(f"[{'PASS' if ok else 'FAIL'}] {name}" + (f"  {detail}" if detail else ""))
   failed = [n for n, ok, _ in results if not ok]
@@ -167,7 +191,7 @@ def main() -> int:
     print("FAILED:", *failed, sep="\n  ")
     print("\nDO NOT SUBMIT.")
     return 1
-  print("P+V velocity-CaT verified active on this device.")
+  print("P+V velocity-CaT treatment verified active on this device.")
   return 0
 
 

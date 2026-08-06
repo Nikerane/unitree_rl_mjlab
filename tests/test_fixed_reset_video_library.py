@@ -2100,6 +2100,7 @@ _G_TASK = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate"
 _P_TASK = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress"
 _PV_TASK = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel"
 _PD4_TASK = f"{_P_TASK}-Delivered4"
+_PVD0_TASK = f"{_PV_TASK}-Delivered0"
 _PVD4_TASK = f"{_PV_TASK}-Delivered4"
 
 
@@ -2275,11 +2276,12 @@ def test_the_velocity_arm_has_a_registered_campaign_task_identity():
     assert expected_task("wave3", "P+V") == _PV_TASK
 
 
-def test_presentation3_resolves_all_three_registered_task_identities():
+def test_presentation3_resolves_all_registered_task_identities():
     from evaluation.analysis.fixed_reset_video_library import expected_task
 
     assert expected_task("presentation3", "P+V") == _PV_TASK
     assert expected_task("presentation3", "P+D4") == _PD4_TASK
+    assert expected_task("presentation3", "P+V+D0") == _PVD0_TASK
     assert expected_task("presentation3", "P+V+D4") == _PVD4_TASK
 
 
@@ -2296,6 +2298,7 @@ def test_treatment_table_matches_the_registered_environment_configuration():
         (_P_TASK, "r_waypoint_progress", "waypoints"),
         (_PV_TASK, "r_waypoint_progress", "waypoints"),
         (_PD4_TASK, "r_waypoint_progress", "waypoints"),
+        (_PVD0_TASK, "r_waypoint_progress", "waypoints"),
         (_PVD4_TASK, "r_waypoint_progress", "waypoints"),
     ):
         cfg = load_env_cfg(task)
@@ -2318,6 +2321,9 @@ def test_treatment_table_matches_the_registered_environment_configuration():
         if task.endswith("Delivered4"):
             assert cfg.rewards["delivered_impulse"].weight == 4.0
             assert "delivered weight 4.0" in treatment.headline
+        if task.endswith("Delivered0"):
+            assert cfg.rewards["delivered_impulse"].weight == 0.0
+            assert "delivered reward off" in treatment.headline
 
 
 # --- render_policy plot wiring -------------------------------------------------------------------
@@ -2363,6 +2369,7 @@ def test_new_campaigns_get_treatment_faithful_geometry_and_a_full_title():
     (
         ("P+V", "soft velocity-CaT"),
         ("P+D4", "delivered weight 4.0"),
+        ("P+V+D0", "delivered reward off"),
         ("P+V+D4", "delivered weight 4.0"),
     ),
 )

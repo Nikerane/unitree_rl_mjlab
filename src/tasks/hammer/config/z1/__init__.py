@@ -237,12 +237,11 @@ def _presentation_i_off_env_cfg(
     velocity_cat: bool = False,
     delivered_weight: float,
 ):
-    """Build an impulse-log-only arm of the matched presentation 2x2.
+    """Build one fixed-plant, impulse-log-only presentation arm.
 
-    The frozen P controls supply V-off/D2.  This helper adds only the two missing
-    treatment cells: D4 without velocity CaT and D4 with velocity CaT.  Active impulse
-    CaT is deliberately excluded until the current sliding-window semantics receive a
-    new C2 dose calibration.
+    The helper isolates only the delivered-reward dose and optional velocity CaT.
+    Active impulse CaT is excluded until the current sliding-window semantics receive
+    a new C2 dose calibration.
     """
     cfg = z1_hammer_env_cfg(
         play=play,
@@ -260,13 +259,28 @@ def _presentation_i_off_env_cfg(
     return cfg
 
 
-# Presentation Phase 1 is a matched 2x2: velocity CaT off/on x delivered-impulse
-# weight 2/4. Frozen P controls supply the off/D2 cell and the existing P+V task
-# supplies on/D2; only the two D4 cells need new registrations.
+# Presentation Phase 1 contains the matched velocity-on/off D2/D4 cells. The
+# velocity-on D0 contingency below adds the missing zero-dose comparison without
+# activating or retuning impulse CaT.
 register_mjlab_task(
     task_id="Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Delivered4",
     env_cfg=_presentation_i_off_env_cfg(delivered_weight=4.0),
     play_env_cfg=_presentation_i_off_env_cfg(play=True, delivered_weight=4.0),
+    rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+    runner_cls=HammerOnPolicyRunner,
+)
+
+register_mjlab_task(
+    task_id=(
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
+        "CProgress-Vel-Delivered0"
+    ),
+    env_cfg=_presentation_i_off_env_cfg(
+        velocity_cat=True, delivered_weight=0.0
+    ),
+    play_env_cfg=_presentation_i_off_env_cfg(
+        play=True, velocity_cat=True, delivered_weight=0.0
+    ),
     rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
     runner_cls=HammerOnPolicyRunner,
 )

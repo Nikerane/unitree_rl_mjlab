@@ -31,7 +31,8 @@
 #     EXPECTED_CODE_REVISION=<40hex> EXPECTED_ASSET_REVISION=<40hex> \
 #     sbatch --array=0-5 --export=ALL,CAMPAIGN,SEEDS,ITERS,SINGLE_TASK,SINGLE_SHORT,EXPECTED_CODE_REVISION,EXPECTED_ASSET_REVISION scripts/slurm/vega_train.sbatch
 # Task/short pairs: CProgress-Vel / pv; CProgress-Delivered4 / pd4;
-# CProgress-Vel-Delivered4 / pvd4 (all with the full task prefix used below).
+# CProgress-Vel-Delivered0 / pvd0; CProgress-Vel-Delivered4 / pvd4
+# (all with the full task prefix used below).
 #SBATCH --job-name=z1-train
 #SBATCH --account=d2026d06-166-users
 #SBATCH --partition=gpu
@@ -210,6 +211,7 @@ if [ "$CAMPAIGN" = "presentation3" ]; then
   case "$task:$short" in
     Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel:pv|\
     Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Delivered4:pd4|\
+    Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered0:pvd0|\
     Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4:pvd4) ;;
     *) echo "PRESENTATION3_FAIL: task/short is not a frozen presentation3 arm"; exit 2 ;;
   esac

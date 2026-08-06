@@ -575,6 +575,16 @@ def test_wave3_pv_smoke_gate_passes_on_cpu():
     assert len(results) >= 20  # the gate must not silently shrink to a trivial pass
 
 
+def test_presentation3_pvd0_smoke_gate_passes_on_cpu():
+    """The zero reward dose keeps physical instrumentation but has no manager payout."""
+    from scripts.smoke_wave3_pv import PVD0_TASK, run_checks
+
+    results = run_checks(task=PVD0_TASK, device="cpu", num_envs=4, steps=2)
+    failed = [name for name, ok, _ in results if not ok]
+    assert not failed, failed
+    assert len(results) >= 20
+
+
 @pytest.mark.parametrize(
     "task, expected_use_vel",
     (
@@ -586,6 +596,11 @@ def test_wave3_pv_smoke_gate_passes_on_cpu():
         (
             "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
             "CProgress-Vel-Delivered4",
+            True,
+        ),
+        (
+            "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
+            "CProgress-Vel-Delivered0",
             True,
         ),
     ),
@@ -606,7 +621,15 @@ def test_presentation_phase_one_new_tasks_build_live_and_stay_impulse_log_only(
         hook = env.metrics_manager._term_cfgs[hook_index].func
         assert hook._use_vel is expected_use_vel
         assert hook._imp_max_p == 0.0
-        assert env.reward_manager.get_term_cfg("delivered_impulse").weight == 4.0
+        expected_delivered = 0.0 if task.endswith("Delivered0") else 4.0
+        assert cfg.rewards["delivered_impulse"].weight == expected_delivered
+        if expected_delivered:
+            assert env.reward_manager.get_term_cfg("delivered_impulse").weight == 4.0
+        else:
+            # mjlab intentionally skips zero-weight readers at runtime. The configured
+            # FirstStrikeDeliveredRewardTerm stays present and physical impulse is measured
+            # by first-strike instrumentation, not by a reward-manager payout.
+            assert env.reward_manager.get_term_cfg("delivered_impulse").weight == 0.0
         assert set(env.action_manager.active_terms) == {"ik_hammer_head"}
     finally:
         env.close()

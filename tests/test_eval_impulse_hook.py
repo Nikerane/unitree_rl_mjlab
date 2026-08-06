@@ -128,10 +128,11 @@ PRESENTATION3_RNG = {
   (
     "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Delivered4",
     "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel",
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered0",
     "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4",
   ),
 )
-def test_presentation3_campaign_accepts_only_its_three_tasks_with_frozen_rng(task):
+def test_presentation3_campaign_accepts_only_its_registered_tasks_with_frozen_rng(task):
   """Removing the campaign arm allowlist or frozen tuple must fail this call."""
   eval_impulse._validate_evaluation_campaign(
     PRESENTATION3_CAMPAIGN,
@@ -373,9 +374,9 @@ _QUALITY_CONTRACT_WEIGHTS = (
 )
 
 
-# These are the three already-trained Presentation3 identities.  The evaluator
-# must bind their task semantics before a stochastic sampled rollout, rather
-# than treating the task ID as an interchangeable label.
+# These are the registered Presentation3 identities. The evaluator must bind
+# their task semantics before a stochastic sampled rollout rather than treating
+# the task ID as an interchangeable label.
 _PRESENTATION3_CONTRACTS = (
   (
     "M",
@@ -387,6 +388,12 @@ _PRESENTATION3_CONTRACTS = (
     "V",
     "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel",
     2.0,
+    True,
+  ),
+  (
+    "V+D0",
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered0",
+    0.0,
     True,
   ),
   (
@@ -422,7 +429,7 @@ def _presentation3_identity_kwargs(arm="V", **overrides):
   return values
 
 
-@pytest.mark.parametrize("arm", ("M", "V", "V+M"))
+@pytest.mark.parametrize("arm", ("M", "V", "V+D0", "V+M"))
 def test_presentation3_row_identity_accepts_each_arm_and_distinct_evaluation_revision(arm):
   """Requiring eval/training code equality would wrongly reject reviewed evaluators."""
   validator = getattr(eval_impulse, "_validate_presentation3_identity", None)
@@ -536,6 +543,35 @@ def test_presentation3_contract_rejects_same_width_base_observation_swap(
         "vel_detection", "control_rate"
       ),
       "velocity-CaT",
+    ),
+    (
+      "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered0",
+      lambda cfg: cfg.rewards["delivered_impulse"].__setattr__("weight", 2.0),
+      "configured maximize weights",
+    ),
+    (
+      "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered0",
+      lambda cfg: cfg.metrics["cat_soft"].params.__setitem__("use_vel", False),
+      "velocity-CaT",
+    ),
+    (
+      "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered0",
+      lambda cfg: cfg.metrics["cat_soft"].params.__setitem__(
+        "vel_detection", "control_rate"
+      ),
+      "velocity-CaT",
+    ),
+    (
+      "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered0",
+      lambda cfg: cfg.metrics["cat_soft"].params.__setitem__(
+        "imp_limit", [1.0] * 6
+      ),
+      "impulse limits",
+    ),
+    (
+      "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered0",
+      lambda cfg: cfg.metrics["cat_soft"].params.__setitem__("imp_max_p", 0.1),
+      "imp_max_p",
     ),
     (
       "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4",
@@ -1499,7 +1535,7 @@ def presentation3_autoreset_records():
   return records
 
 
-@pytest.mark.parametrize("arm", ("M", "V", "V+M"))
+@pytest.mark.parametrize("arm", ("M", "V", "V+D0", "V+M"))
 def test_presentation3_real_completion_validates_and_persists_progress_schema(
   tmp_path, presentation3_autoreset_records, arm
 ):
@@ -1584,6 +1620,17 @@ def test_presentation3_collector_records_actual_waypoint_progress_payout():
     )
   finally:
     env.close()
+
+
+def test_pvd0_records_zero_manager_payout_without_erasing_physical_impulse_channels(
+  presentation3_autoreset_records,
+):
+  record = presentation3_autoreset_records["V+D0"]
+  trace = record["trace"]
+  assert record["contract"]["delivered_weight"] == 0.0
+  assert trace["reward"]["delivered_payout"] == [0.0]
+  assert "delivered_n_s" in trace["first_strike"]
+  assert "episode_delivered_accumulator_n_s" in trace
 
 
 def test_presentation3_progress_identity_and_payout_are_digest_bound(

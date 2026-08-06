@@ -638,6 +638,7 @@ class TestCartesianGuidelineStudy:
             self._C_PROGRESS,
             self._C_PROGRESS + "-Vel",  # P+V (velocity-CaT wave); see TestProgressPlusVelocityArm
             self._C_PROGRESS + "-Delivered4",
+            self._C_PROGRESS + "-Vel-Delivered0",
             self._C_PROGRESS + "-Vel-Delivered4",
         }
 
@@ -1388,14 +1389,15 @@ class TestProgressPlusVelocityArm:
 
 
 class TestPresentationPhaseOne:
-    """Matched I-off 2x2: velocity CaT off/on x delivered weight 2/4."""
+    """Matched I-off cells plus the velocity-on delivered-dose-zero contingency."""
 
     _P = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress"
     _PV = f"{_P}-Vel"
     _PD4 = f"{_P}-Delivered4"
+    _PVD0 = f"{_PV}-Delivered0"
     _PVD4 = f"{_PV}-Delivered4"
 
-    @pytest.mark.parametrize("task", (_PV, _PD4, _PVD4))
+    @pytest.mark.parametrize("task", (_PV, _PD4, _PVD0, _PVD4))
     def test_every_phase_one_arm_is_registered_and_uses_catppo(self, task):
         from mjlab.tasks.registry import load_rl_cfg
 
@@ -1428,7 +1430,20 @@ class TestPresentationPhaseOne:
             TestCartesianGuidelineStudy._normalize(pv)
         )
 
-    @pytest.mark.parametrize("task", (_PV, _PD4, _PVD4))
+    @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
+    def test_delivered0_is_the_only_pv_to_pvd0_change(self, play):
+        pv = load_env_cfg(self._PV, play=play)
+        pvd0 = load_env_cfg(self._PVD0, play=play)
+        assert pv.rewards["delivered_impulse"].weight == pytest.approx(2.0)
+        assert pvd0.rewards["delivered_impulse"].weight == pytest.approx(0.0)
+        assert pvd0.metrics["cat_soft"].params["imp_max_p"] == 0.0
+
+        pv.rewards["delivered_impulse"].weight = 0.0
+        assert TestCartesianGuidelineStudy._normalize(pvd0) == (
+            TestCartesianGuidelineStudy._normalize(pv)
+        )
+
+    @pytest.mark.parametrize("task", (_PV, _PD4, _PVD0, _PVD4))
     def test_phase_one_keeps_fixed_impedance_nominal_reset_and_impulse_log_only(self, task):
         cfg = load_env_cfg(task)
         assert set(cfg.actions) == {"ik_hammer_head"}
