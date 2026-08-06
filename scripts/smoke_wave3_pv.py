@@ -22,8 +22,9 @@ import sys
 # Running ``python scripts/smoke_wave3_pv.py`` otherwise places only ``scripts/``
 # ahead of editable installs. Anchor imports to the checkout being qualified.
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(_REPO_ROOT) not in sys.path:
-  sys.path.insert(0, str(_REPO_ROOT))
+_REPO_ROOT_STR = str(_REPO_ROOT)
+sys.path[:] = [entry for entry in sys.path if entry != _REPO_ROOT_STR]
+sys.path.insert(0, _REPO_ROOT_STR)
 
 import torch
 

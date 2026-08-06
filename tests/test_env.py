@@ -624,6 +624,45 @@ def test_pvd0_standalone_smoke_anchors_this_checkout_without_pythonpath():
     assert "23/23 checks passed" in result.stdout
 
 
+def test_pvd0_standalone_smoke_puts_this_checkout_ahead_of_a_decoy(tmp_path):
+    """A later worktree entry must be promoted ahead of another checkout."""
+    root = Path(__file__).resolve().parents[1]
+    decoy_src = tmp_path / "src"
+    decoy_src.mkdir()
+    (decoy_src / "__init__.py").write_text(
+        'raise RuntimeError("decoy src imported")\n', encoding="utf-8"
+    )
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join((str(tmp_path), str(root)))
+    task = (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
+        "CProgress-Vel-Delivered0"
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/smoke_wave3_pv.py",
+            "--task",
+            task,
+            "--device",
+            "cpu",
+            "--num-envs",
+            "1",
+            "--steps",
+            "1",
+        ],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"[smoke] task   : {task}" in result.stdout
+    assert "23/23 checks passed" in result.stdout
+
+
 @pytest.mark.parametrize(
     "task, expected_use_vel",
     (
