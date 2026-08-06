@@ -32,6 +32,11 @@
 #     sbatch --array=0-5 --export=ALL,CAMPAIGN,SEEDS,ITERS,SINGLE_TASK,SINGLE_SHORT,EXPECTED_CODE_REVISION,EXPECTED_ASSET_REVISION scripts/slurm/vega_train.sbatch
 # Task/short pairs: CProgress-Vel / pv; CProgress-Delivered4 / pd4;
 # CProgress-Vel-Delivered4 / pvd4 (all with the full task prefix used below).
+#
+# impulse6: the reference-guided delivered-impulse screen. Every reward weight
+# is baked into the registered task; all override hooks must be truly unset.
+# Submit one six-seed array for each exact task/short pair in
+# docs/results/2026-08-06_impulse6_prereg.md.
 #SBATCH --job-name=z1-train
 #SBATCH --account=d2026d06-166-users
 #SBATCH --partition=gpu
@@ -88,6 +93,10 @@ if [ "$CAMPAIGN_LC" = "presentation3" ] && [ "$CAMPAIGN" != "presentation3" ]; t
   echo "PRESENTATION3_FAIL: CAMPAIGN '$CAMPAIGN' looks like presentation3 but is not an exact match"
   exit 2
 fi
+if [ "$CAMPAIGN_LC" = "impulse6" ] && [ "$CAMPAIGN" != "impulse6" ]; then
+  echo "IMPULSE6_FAIL: CAMPAIGN '$CAMPAIGN' looks like impulse6 but is not an exact match"
+  exit 2
+fi
 read -ra SEEDARR <<< "${SEEDS:-0 1 2}"
 # nail_driven=0.5 is now the BAKED default (farm-cut). Optional per-run reward-weight overrides:
 #   DELIVERED_W=0  -> F2 arm (delivered-impulse reward off, tests its contribution to the strike).
@@ -103,6 +112,10 @@ ARM_SHORT=(track none)
 t=${SLURM_ARRAY_TASK_ID:?must run as an array}
 if [ "$CAMPAIGN" = "presentation3" ] && ! [[ "$t" =~ ^[0-5]$ ]]; then
   echo "PRESENTATION3_FAIL: array index must be exactly 0..5"
+  exit 2
+fi
+if [ "$CAMPAIGN" = "impulse6" ] && ! [[ "$t" =~ ^[0-5]$ ]]; then
+  echo "IMPULSE6_FAIL: array index must be exactly 0..5"
   exit 2
 fi
 # SINGLE_TASK mode (Option B / any one-arm campaign): array index == seed index, one fixed task.
@@ -214,13 +227,40 @@ if [ "$CAMPAIGN" = "presentation3" ]; then
     *) echo "PRESENTATION3_FAIL: task/short is not a frozen presentation3 arm"; exit 2 ;;
   esac
 fi
+
+# Reference-guided impulse-maximization screen: task registrations, rather than
+# CLI reward switches, encode the S/D treatment. Reject every inherited override
+# (including an exported empty value) before any provenance or GPU work.
+if [ "$CAMPAIGN" = "impulse6" ]; then
+  [ "${SEEDS:-}" = "2 3 4 5 6 7" ] \
+    || { echo "IMPULSE6_FAIL: seeds must be exactly 2..7"; exit 2; }
+  [ "${ITERS+x}" = x ] && [ "$ITERS" = 200 ] \
+    || { echo "IMPULSE6_FAIL: ITERS must be exactly 200 (set, not omitted or empty)"; exit 2; }
+  for override in IMPACT_W DELIVERED_W NAIL_DRIVEN_W; do
+    [ -z "${!override+x}" ] \
+      || { echo "IMPULSE6_FAIL: $override must be unset (weights come from the registered task)"; exit 2; }
+  done
+  [[ "${EXPECTED_CODE_REVISION:-}" =~ ^[0-9a-f]{40}$ ]] \
+    || { echo "IMPULSE6_FAIL: EXPECTED_CODE_REVISION must be a clean 40-hex revision"; exit 2; }
+  [[ "${EXPECTED_ASSET_REVISION:-}" =~ ^[0-9a-f]{40}$ ]] \
+    || { echo "IMPULSE6_FAIL: EXPECTED_ASSET_REVISION must be a clean 40-hex revision"; exit 2; }
+  case "$task:$short" in
+    Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D0:s0d0|\
+    Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D4:s0d4|\
+    Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D16:s0d16|\
+    Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S8-D0:s8d0|\
+    Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4:s8d4|\
+    Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S8-D16:s8d16) ;;
+    *) echo "IMPULSE6_FAIL: task/short is not a frozen impulse6 arm"; exit 2 ;;
+  esac
+fi
 RUN="${CAMPAIGN}_${short}_seed${seed}"
 # Provenance: record the exact code state that trains (git hash + '-dirty' if the tree has uncommitted
 # tracked edits). Deploy via git pull, NOT scp, so this hash is trustworthy (2026-07-19 provenance fix).
 GITHASH=$(git rev-parse HEAD 2>/dev/null || echo unknown)
 GITSTATUS=$(git status --porcelain=v1 --untracked-files=all 2>/dev/null || echo provenance-unavailable)
 [ -n "$GITSTATUS" ] && GITHASH="${GITHASH}-dirty"
-echo "### TRAIN task=$t arm=$short seed=$seed run=$RUN git=$GITHASH host=$(hostname) $(date '+%F %T')"
+echo "### TRAIN task=$task arm=$short seed=$seed run=$RUN git=$GITHASH host=$(hostname) $(date '+%F %T')"
 [ "$GITHASH" != "unknown" ] && [ "${GITHASH%-dirty}" = "$GITHASH" ] \
   || { echo "### TRAIN_FAIL: code provenance is unknown or dirty"; exit 2; }
 ASSET_HASH=$(git -C "$ASSET_REPO" rev-parse HEAD 2>/dev/null || echo unknown)
@@ -251,6 +291,12 @@ if [ "$CAMPAIGN" = "presentation3" ]; then
     || { echo "PRESENTATION3_FAIL: code revision does not equal expected code revision"; exit 2; }
   [ "$ASSET_HASH" = "$EXPECTED_ASSET_REVISION" ] \
     || { echo "PRESENTATION3_FAIL: asset revision does not equal expected asset revision"; exit 2; }
+fi
+if [ "$CAMPAIGN" = "impulse6" ]; then
+  [ "$GITHASH" = "$EXPECTED_CODE_REVISION" ] \
+    || { echo "IMPULSE6_FAIL: code revision does not equal expected code revision"; exit 2; }
+  [ "$ASSET_HASH" = "$EXPECTED_ASSET_REVISION" ] \
+    || { echo "IMPULSE6_FAIL: asset revision does not equal expected asset revision"; exit 2; }
 fi
 $PY -c "import torch; assert torch.cuda.is_available() and 'A100' in torch.cuda.get_device_name(0), 'no A100'; print('A100 ok:', torch.cuda.get_device_name(0))" || { echo "### NO GPU/A100 on $(hostname) — requeue+exit"; scontrol requeue "${SLURM_JOB_ID}" 2>/dev/null; exit 1; }
 $PY scripts/train.py "$task" --gpu-ids [0] --agent.logger tensorboard \

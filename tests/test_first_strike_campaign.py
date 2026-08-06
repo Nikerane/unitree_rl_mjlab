@@ -3912,7 +3912,8 @@ def _fake_git(path: Path) -> None:
 case "$*" in
   *"safe_impact_manipulation"*"rev-parse"*) printf '%s\\n' bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb ;;
   *"rev-parse"*) printf '%s\\n' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
-  *"status"*) exit 0 ;;
+  *"safe_impact_manipulation"*"status"*) [ -z "${FAKE_ASSET_GIT_DIRTY:-}" ] || printf '%s\\n' dirty ;;
+  *"status"*) [ -z "${FAKE_CODE_GIT_DIRTY:-}" ] || printf '%s\\n' dirty ;;
 esac
 """,
     )
@@ -4071,6 +4072,108 @@ def test_presentation3_launcher_rejects_matrix_drift(tmp_path, overrides, messag
     assert result.returncode == 2
     assert f"PRESENTATION3_FAIL: {message}" in result.stdout
     assert "scripts/train.py" not in calls
+
+
+_IMPULSE6 = {
+    "s0d0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D0",
+    "s0d4": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D4",
+    "s0d16": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D16",
+    "s8d0": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S8-D0",
+    "s8d4": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4",
+    "s8d16": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S8-D16",
+}
+
+
+def _run_impulse6_launcher(root: Path, *, task: str, short: str, **overrides):
+    values = {
+        "CAMPAIGN": "impulse6",
+        "SEEDS": "2 3 4 5 6 7",
+        "SLURM_ARRAY_TASK_ID": "0",
+        "SINGLE_TASK": task,
+        "SINGLE_SHORT": short,
+        "IMPACT_W": None,
+        "DELIVERED_W": None,
+        "NAIL_DRIVEN_W": None,
+        "ITERS": "200",
+        "EXPECTED_CODE_REVISION": "a" * 40,
+        "EXPECTED_ASSET_REVISION": "b" * 40,
+    }
+    values.update(overrides)
+    return _run_training_launcher(root, **values)
+
+
+@pytest.mark.parametrize("short, task", tuple(_IMPULSE6.items()))
+@pytest.mark.parametrize("array_index, seed", ((0, 2), (1, 3), (2, 4), (3, 5), (4, 6), (5, 7)))
+def test_impulse6_launcher_executes_each_frozen_identity_row(
+    tmp_path, short, task, array_index, seed
+):
+    result, calls = _run_impulse6_launcher(
+        tmp_path / f"{short}-{array_index}",
+        task=task,
+        short=short,
+        SLURM_ARRAY_TASK_ID=str(array_index),
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    train_calls = [line for line in calls.splitlines() if "scripts/train.py" in line]
+    assert len(train_calls) == 1
+    call = train_calls[0]
+    assert f"scripts/train.py {task}" in call
+    assert f"--agent.run-name impulse6_{short}_seed{seed}" in call
+    assert f"--agent.seed {seed}" in call
+    assert "--agent.max-iterations 200" in call
+    assert "--env.metrics.cat-soft.params.imp-max-p 0" in call
+    assert "--env.rewards.impact-progress.weight" not in call
+    assert "--env.rewards.delivered-impulse.weight" not in call
+    assert "--env.rewards.nail-driven.weight" not in call
+
+
+@pytest.mark.parametrize(
+    "overrides, message",
+    (
+        ({"CAMPAIGN": "Impulse6"}, "IMPULSE6_FAIL: CAMPAIGN"),
+        ({"SEEDS": "2 3 4 5 6"}, "IMPULSE6_FAIL: seeds"),
+        ({"ITERS": "201"}, "IMPULSE6_FAIL: ITERS"),
+        ({"SLURM_ARRAY_TASK_ID": "6"}, "IMPULSE6_FAIL: array index"),
+        ({"SINGLE_SHORT": "wrong"}, "IMPULSE6_FAIL: task/short"),
+        ({"IMPACT_W": "8"}, "IMPULSE6_FAIL: IMPACT_W"),
+        ({"IMPACT_W": ""}, "IMPULSE6_FAIL: IMPACT_W"),
+        ({"DELIVERED_W": "4"}, "IMPULSE6_FAIL: DELIVERED_W"),
+        ({"DELIVERED_W": ""}, "IMPULSE6_FAIL: DELIVERED_W"),
+        ({"NAIL_DRIVEN_W": "0.5"}, "IMPULSE6_FAIL: NAIL_DRIVEN_W"),
+        ({"NAIL_DRIVEN_W": ""}, "IMPULSE6_FAIL: NAIL_DRIVEN_W"),
+        ({"EXPECTED_CODE_REVISION": None}, "IMPULSE6_FAIL: EXPECTED_CODE_REVISION"),
+        ({"EXPECTED_ASSET_REVISION": None}, "IMPULSE6_FAIL: EXPECTED_ASSET_REVISION"),
+        ({"EXPECTED_CODE_REVISION": "a" * 39}, "IMPULSE6_FAIL: EXPECTED_CODE_REVISION"),
+        ({"EXPECTED_ASSET_REVISION": "b" * 39}, "IMPULSE6_FAIL: EXPECTED_ASSET_REVISION"),
+        ({"EXPECTED_CODE_REVISION": "c" * 40}, "IMPULSE6_FAIL: code revision"),
+        ({"EXPECTED_ASSET_REVISION": "c" * 40}, "IMPULSE6_FAIL: asset revision"),
+        ({"FAKE_CODE_GIT_DIRTY": "1"}, "code provenance is unknown or dirty"),
+        ({"FAKE_ASSET_GIT_DIRTY": "1"}, "asset provenance is unknown or dirty"),
+    ),
+)
+def test_impulse6_launcher_rejects_contract_drift(tmp_path, overrides, message):
+    result, calls = _run_impulse6_launcher(
+        tmp_path / message.split(":")[-1].strip().replace(" ", "-"),
+        task=_IMPULSE6["s0d0"],
+        short="s0d0",
+        **overrides,
+    )
+
+    assert result.returncode == 2
+    assert message in result.stdout
+    assert "scripts/train.py" not in calls
+
+
+def test_impulse6_launcher_logs_the_registered_task_not_array_index(tmp_path):
+    result, _ = _run_impulse6_launcher(
+        tmp_path,
+        task=_IMPULSE6["s0d0"],
+        short="s0d0",
+    )
+
+    assert f"### TRAIN task={_IMPULSE6['s0d0']} arm=s0d0 seed=2" in result.stdout
+    assert "### TRAIN task=0 " not in result.stdout
 
 
 def test_training_launcher_rejects_legacy_reward_override(tmp_path):
