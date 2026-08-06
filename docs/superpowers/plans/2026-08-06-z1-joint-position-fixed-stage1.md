@@ -320,6 +320,7 @@ action_semantics
 source_task_id
 source_code_revision
 source_asset_revision
+source_task_config_projection
 source_task_config_sha256
 joint_names
 actuator_names
@@ -337,6 +338,11 @@ decision
 payload_sha256
 ```
 
+`source_task_config_projection` is the explicit JSON-compatible projection of the
+source task's action, observations, rewards, metrics, events, actuators, timing,
+and reset fields. The loader must recompute `source_task_config_sha256` from that
+projection; accepting an arbitrary well-formed digest is not sufficient.
+
 Serialize with sorted keys and `allow_nan=False`. Define `payload_sha256` as the
 SHA-256 of canonical JSON after removing the `payload_sha256` field itself; use the
 same non-self-referential rule for the trackability artifact. Compute
@@ -344,7 +350,8 @@ same non-self-referential rule for the trackability artifact. Compute
 action, observations, rewards, metrics, events, actuators, timing, and reset fields,
 reusing the repository's reward/config digest conventions. Never serialize the full
 dataclass with callables or manager objects. The loader checks structure and
-scientific identity, but it must not require the artifact-builder revision to equal
+scientific identity, reject JSON booleans in numeric fields, and return deeply
+immutable validated evidence (including replay rows), but it must not require the artifact-builder revision to equal
 a later training revision; those revisions remain separately recorded in
 provenance.
 
