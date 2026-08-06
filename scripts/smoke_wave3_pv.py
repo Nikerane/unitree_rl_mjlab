@@ -16,7 +16,14 @@ Exit code 0 = every check passed. Non-zero = do not submit.
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import sys
+
+# Running ``python scripts/smoke_wave3_pv.py`` otherwise places only ``scripts/``
+# ahead of editable installs. Anchor imports to the checkout being qualified.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+  sys.path.insert(0, str(_REPO_ROOT))
 
 import torch
 

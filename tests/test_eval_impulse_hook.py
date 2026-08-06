@@ -1623,14 +1623,82 @@ def test_presentation3_collector_records_actual_waypoint_progress_payout():
 
 
 def test_pvd0_records_zero_manager_payout_without_erasing_physical_impulse_channels(
-  presentation3_autoreset_records,
+  tmp_path,
 ):
-  record = presentation3_autoreset_records["V+D0"]
-  trace = record["trace"]
-  assert record["contract"]["delivered_weight"] == 0.0
-  assert trace["reward"]["delivered_payout"] == [0.0]
-  assert "delivered_n_s" in trace["first_strike"]
-  assert "episode_delivered_accumulator_n_s" in trace
+  task = (
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
+    "CProgress-Vel-Delivered0"
+  )
+  cfg = eval_impulse.load_env_cfg(task, play=False)
+  contract = eval_impulse._validate_sampled_env_contract(cfg, task)
+  cfg.scene.num_envs = 1
+  env = ManagerBasedRlEnv(cfg=cfg, device="cpu", render_mode=None)
+  snapshot = eval_impulse._install_episode_hook(env)
+  collector = eval_impulse._SampledTraceCollector(
+    env,
+    snapshot=snapshot,
+    treatment="V+D0",
+    task=task,
+    gamma=0.99,
+    event_i_ref_n_s=0.3088,
+    nail_geometry={
+      "nail_axis": [0.0, 0.0, -1.0],
+      "nail_xy_m": [0.5, 0.0],
+      "nail_radius_m": 0.012,
+      "source_sha256": "0" * 64,
+    },
+  )
+  try:
+    env.reset()
+    delivered_cfg = env.reward_manager.get_term_cfg("delivered_impulse")
+    assert delivered_cfg.weight == 0.0
+
+    def reader_must_not_run(*_args, **_kwargs):
+      raise AssertionError("zero-weight delivered reader was invoked")
+
+    delivered_cfg.func = reader_must_not_run
+    env.sim.step()
+    env.metrics_manager.compute_substep()
+    first_strike = getattr(env, eval_impulse._ENV_FIRST_STRIKE_ATTR)
+    delivered_accumulator = getattr(
+      env, eval_impulse._ENV_SUBSTEP_DELIVERED_ATTR
+    )
+    first_strike.delivered.fill_(0.123)
+    delivered_accumulator.delivered.fill_(0.456)
+    env.reward_manager.compute(env.step_dt)
+    delivered_idx = env.reward_manager.active_terms.index("delivered_impulse")
+    assert float(env.reward_manager._step_reward[0, delivered_idx]) == 0.0
+
+    env.reset_buf = torch.ones(1, dtype=torch.bool, device=env.device)
+    env.reset_terminated = torch.zeros(1, dtype=torch.bool, device=env.device)
+    env.metrics_manager.compute()
+    trace = collector.completed[0]
+    assert trace["reward"]["delivered_payout"] == [0.0]
+    assert trace["first_strike"]["delivered_n_s"] == pytest.approx(0.123)
+    assert trace["episode_delivered_accumulator_n_s"] == pytest.approx(0.456)
+
+    artifact = eval_impulse._persist_sampled_traces(
+      out_dir=tmp_path,
+      name="presentation3-V+D0-seed2",
+      sampled_rec={"control_steps": 1, "episodes": [trace]},
+      task=task,
+      contract=contract,
+      training_seed=2,
+      reset_seed=PRESENTATION3_RNG["reset_seed"],
+      observation_seed=PRESENTATION3_RNG["observation_seed"],
+      action_seed=PRESENTATION3_RNG["action_seed"],
+      nail_geometry=trace["nail_geometry"],
+      provenance={"checkpoint_sha256": "c" * 64},
+      mean_rollout_invariants={},
+    )
+    with eval_impulse.np.load(artifact["path"], allow_pickle=False) as saved:
+      payload = json.loads(eval_impulse.decode_payload_json(saved))
+    persisted = payload["episodes"][0]
+    assert persisted["reward"]["delivered_payout"] == [0.0]
+    assert persisted["first_strike"]["delivered_n_s"] == pytest.approx(0.123)
+    assert persisted["episode_delivered_accumulator_n_s"] == pytest.approx(0.456)
+  finally:
+    env.close()
 
 
 def test_presentation3_progress_identity_and_payout_are_digest_bound(

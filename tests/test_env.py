@@ -10,6 +10,11 @@ All tests share a single env instance (module scope) to avoid recompiling
 Warp kernels between tests.
 """
 
+import os
+from pathlib import Path
+import subprocess
+import sys
+
 import pytest
 import torch
 
@@ -583,6 +588,40 @@ def test_presentation3_pvd0_smoke_gate_passes_on_cpu():
     failed = [name for name, ok, _ in results if not ok]
     assert not failed, failed
     assert len(results) >= 20
+
+
+def test_pvd0_standalone_smoke_anchors_this_checkout_without_pythonpath():
+    """The deployment command must not import src from another editable checkout."""
+    root = Path(__file__).resolve().parents[1]
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+    task = (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
+        "CProgress-Vel-Delivered0"
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/smoke_wave3_pv.py",
+            "--task",
+            task,
+            "--device",
+            "cpu",
+            "--num-envs",
+            "1",
+            "--steps",
+            "1",
+        ],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"[smoke] task   : {task}" in result.stdout
+    assert "23/23 checks passed" in result.stdout
 
 
 @pytest.mark.parametrize(
