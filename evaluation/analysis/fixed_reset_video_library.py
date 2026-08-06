@@ -139,6 +139,26 @@ TASK_BY_CAMPAIGN_ARM = {
         "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
         "CProgress-Vel-Delivered4"
     ),
+    ("impulse6", "s0d0"): (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D0"
+    ),
+    ("impulse6", "s0d4"): (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D4"
+    ),
+    ("impulse6", "s0d16"): (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D16"
+    ),
+    ("impulse6", "s8d0"): (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S8-D0"
+    ),
+    # This centre cell is intentionally the existing presentation3 P+V+D4 task.
+    ("impulse6", "s8d4"): (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
+        "CProgress-Vel-Delivered4"
+    ),
+    ("impulse6", "s8d16"): (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S8-D16"
+    ),
 }
 
 # --- Treatment-faithful plot semantics ----------------------------------------------------------
@@ -227,9 +247,47 @@ TREATMENT_BY_TASK: dict[str, Treatment] = {
         "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
         "CProgress-Vel-Delivered4"
     ): Treatment(
-        headline="progress-guided strike with soft velocity-CaT and delivered weight 4.0",
-        guidance="progress weight 8.0",
-        velocity=_VELOCITY_SOFT_CAT,
+        headline=(
+            "impulse screen S=8 D=4 · I-CaT log-only: progress-guided strike with soft velocity-CaT "
+            "and delivered weight 4.0"
+        ),
+        guidance="waypoint w=8 (progress weight 8.0)",
+        velocity="V-CaT 0.5 @ 500 Hz (soft velocity-CaT; max_p 0.5)",
+        impulse=_IMPULSE_LOG_ONLY,
+        geometry=GEOMETRY_WAYPOINTS,
+    ),
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D0": Treatment(
+        headline="impulse screen S=0 D=0 · I-CaT log-only",
+        guidance="waypoint w=8 (progress weight 8.0)",
+        velocity="V-CaT 0.5 @ 500 Hz (soft velocity-CaT; max_p 0.5)",
+        impulse=_IMPULSE_LOG_ONLY,
+        geometry=GEOMETRY_WAYPOINTS,
+    ),
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D4": Treatment(
+        headline="impulse screen S=0 D=4 · I-CaT log-only",
+        guidance="waypoint w=8 (progress weight 8.0)",
+        velocity="V-CaT 0.5 @ 500 Hz (soft velocity-CaT; max_p 0.5)",
+        impulse=_IMPULSE_LOG_ONLY,
+        geometry=GEOMETRY_WAYPOINTS,
+    ),
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D16": Treatment(
+        headline="impulse screen S=0 D=16 · I-CaT log-only",
+        guidance="waypoint w=8 (progress weight 8.0)",
+        velocity="V-CaT 0.5 @ 500 Hz (soft velocity-CaT; max_p 0.5)",
+        impulse=_IMPULSE_LOG_ONLY,
+        geometry=GEOMETRY_WAYPOINTS,
+    ),
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S8-D0": Treatment(
+        headline="impulse screen S=8 D=0 · I-CaT log-only",
+        guidance="waypoint w=8 (progress weight 8.0)",
+        velocity="V-CaT 0.5 @ 500 Hz (soft velocity-CaT; max_p 0.5)",
+        impulse=_IMPULSE_LOG_ONLY,
+        geometry=GEOMETRY_WAYPOINTS,
+    ),
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S8-D16": Treatment(
+        headline="impulse screen S=8 D=16 · I-CaT log-only",
+        guidance="waypoint w=8 (progress weight 8.0)",
+        velocity="V-CaT 0.5 @ 500 Hz (soft velocity-CaT; max_p 0.5)",
         impulse=_IMPULSE_LOG_ONLY,
         geometry=GEOMETRY_WAYPOINTS,
     ),

@@ -11,10 +11,18 @@ Two jobs:
   (b) derive and print the NEW P+V digest, to be frozen into the preregistration.
 """
 
+import copy
 import dataclasses
 import hashlib
 import json
 import sys
+from pathlib import Path
+
+# Running this file by path otherwise resolves an older editable checkout before this one.
+SOURCE_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(SOURCE_ROOT))
+
+from mjlab.tasks.registry import load_env_cfg
 
 from src.tasks.hammer.config.z1 import z1_hammer_env_cfg
 from src.tasks.hammer.config.z1.env_cfgs import IMP_J_LIMIT
@@ -42,6 +50,44 @@ NEW = {
 }
 CAPS = [1.640, 3.280, 1.640, 1.640, 1.640, 1.640]
 
+# Exact published screen identities.  The S8/D4 centre deliberately reuses the existing
+# presentation3 P+V+D4 registration: it is not an alias and must stay task-identical.
+SCREEN = {
+    "s0d0": (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D0",
+        0.0,
+        0.0,
+    ),
+    "s0d4": (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D4",
+        0.0,
+        4.0,
+    ),
+    "s0d16": (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D16",
+        0.0,
+        16.0,
+    ),
+    "s8d0": (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S8-D0",
+        8.0,
+        0.0,
+    ),
+    "s8d4": (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4",
+        8.0,
+        4.0,
+    ),
+    "s8d16": (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S8-D16",
+        8.0,
+        16.0,
+    ),
+}
+PRESENTATION3_PVD4_TASK = (
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-Delivered4"
+)
+
 
 def canon(o):
     if dataclasses.is_dataclass(o) and not isinstance(o, type):
@@ -62,10 +108,44 @@ def canon(o):
 
 def digest(kw):
     rewards = canon(z1_hammer_env_cfg(**kw).rewards)
+    return digest_rewards(rewards)
+
+
+def digest_rewards(rewards):
     blob = json.dumps(rewards, sort_keys=True, separators=(",", ":"))
     active = {k: v["weight"] for k, v in rewards.items()
               if isinstance(v, dict) and v.get("weight") is not None}
     return hashlib.sha256(blob.encode()).hexdigest(), active
+
+
+def registered_digest(task):
+    """Digest exactly the registered config rendered and trained by a screen arm."""
+    return digest_rewards(canon(load_env_cfg(task).rewards))
+
+
+def normalized_screen_config(task):
+    """Erase only the declared S/D treatment so all six cells must otherwise coincide."""
+    cfg = copy.deepcopy(load_env_cfg(task))
+    cfg.rewards["impact_progress"].weight = 8.0
+    cfg.rewards["delivered_impulse"].weight = 4.0
+    return canon(cfg)
+
+
+def screen_cell_ok(task, impact_weight, delivered_weight, baseline):
+    """Verify the six cells differ solely by their matrix-declared reward weights."""
+    cfg = load_env_cfg(task)
+    params = cfg.metrics["cat_soft"].params
+    return (
+        cfg.rewards["impact_progress"].weight == impact_weight
+        and cfg.rewards["delivered_impulse"].weight == delivered_weight
+        and cfg.rewards["r_waypoint_progress"].weight == 8.0
+        and "r_gate" not in cfg.rewards
+        and params["use_vel"] is True
+        and params["max_p"] == 0.5
+        and params["vel_detection"] == "substep"
+        and params["imp_max_p"] == 0.0
+        and normalized_screen_config(task) == baseline
+    )
 
 
 bad = 0
@@ -94,6 +174,27 @@ for arm, kw in NEW.items():
     print("                 reward-config digest identical to frozen P: %s" % (got == p_digest))
     if got != p_digest:
         bad += 1
+
+print()
+print("=== impulse6 registered reward-config digests (six-cell screen) ===")
+screen_baseline = normalized_screen_config(SCREEN["s8d4"][0])
+for short, (task, impact_weight, delivered_weight) in SCREEN.items():
+    got, active = registered_digest(task)
+    ok = screen_cell_ok(task, impact_weight, delivered_weight, screen_baseline)
+    bad += 0 if ok else 1
+    print(
+        "  %-6s %s  task=%s  S=%g D=%g  %s"
+        % (short, got, task, impact_weight, delivered_weight, "MATCH" if ok else "*** MISMATCH ***")
+    )
+    print("                 terms=%d %s" % (len(active), json.dumps(active, sort_keys=True)))
+
+centre_task = SCREEN["s8d4"][0]
+centre_ok = centre_task == PRESENTATION3_PVD4_TASK
+bad += 0 if centre_ok else 1
+print(
+    "  s8d4 existing presentation3 P+V+D4 identity: %s"
+    % ("MATCH" if centre_ok else "*** MISMATCH ***")
+)
 
 print()
 caps_ok = list(map(float, IMP_J_LIMIT)) == CAPS

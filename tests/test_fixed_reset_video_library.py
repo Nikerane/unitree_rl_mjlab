@@ -2101,6 +2101,34 @@ _P_TASK = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress"
 _PV_TASK = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel"
 _PD4_TASK = f"{_P_TASK}-Delivered4"
 _PVD4_TASK = f"{_PV_TASK}-Delivered4"
+_IMPULSE6 = {
+    "s0d0": (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D0",
+        0.0,
+        0.0,
+    ),
+    "s0d4": (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D4",
+        0.0,
+        4.0,
+    ),
+    "s0d16": (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S0-D16",
+        0.0,
+        16.0,
+    ),
+    "s8d0": (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S8-D0",
+        8.0,
+        0.0,
+    ),
+    "s8d4": (_PVD4_TASK, 8.0, 4.0),
+    "s8d16": (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-S8-D16",
+        8.0,
+        16.0,
+    ),
+}
 
 
 def test_treatment_geometry_follows_the_reward_the_arm_actually_received():
@@ -2281,6 +2309,87 @@ def test_presentation3_resolves_all_three_registered_task_identities():
     assert expected_task("presentation3", "P+V") == _PV_TASK
     assert expected_task("presentation3", "P+D4") == _PD4_TASK
     assert expected_task("presentation3", "P+V+D4") == _PVD4_TASK
+
+
+@pytest.mark.parametrize("arm,row", _IMPULSE6.items())
+def test_impulse6_resolves_each_screen_arm_to_its_registered_task(arm, row):
+    """A crossed arm/task identity would silently mislabel a screen plot."""
+    from evaluation.analysis.fixed_reset_video_library import expected_task
+
+    task, _, _ = row
+    assert expected_task("impulse6", arm) == task
+
+
+def test_impulse6_s8d4_is_the_existing_presentation3_pv_d4_identity():
+    """The centre screen cell must reuse—not rename—the already published task."""
+    from evaluation.analysis.fixed_reset_video_library import expected_task
+
+    assert expected_task("impulse6", "s8d4") == _PVD4_TASK
+    assert expected_task("presentation3", "P+V+D4") == _PVD4_TASK
+
+
+@pytest.mark.parametrize("arm,row", _IMPULSE6.items())
+def test_impulse6_titles_and_plot_geometry_state_the_actual_screen_treatment(
+    arm, row, tmp_path, monkeypatch
+):
+    """A screen plot must show waypoint points, not a gate tolerance or corridor."""
+    from matplotlib.axes import Axes
+
+    from evaluation.analysis.fixed_reset_video_library import write_substep_trajectory_png
+
+    calls = {"plot": [], "scatter": [], "annotate": [], "patch": []}
+    original_plot = Axes.plot
+    original_scatter = Axes.scatter
+    original_annotate = Axes.annotate
+    original_add_patch = Axes.add_patch
+
+    def capture_plot(axis, *args, **kwargs):
+        calls["plot"].append(kwargs)
+        return original_plot(axis, *args, **kwargs)
+
+    def capture_scatter(axis, *args, **kwargs):
+        calls["scatter"].append(kwargs)
+        return original_scatter(axis, *args, **kwargs)
+
+    def capture_annotate(axis, text, *args, **kwargs):
+        calls["annotate"].append(str(text))
+        return original_annotate(axis, text, *args, **kwargs)
+
+    def capture_add_patch(axis, patch):
+        calls["patch"].append(patch)
+        return original_add_patch(axis, patch)
+
+    monkeypatch.setattr(Axes, "plot", capture_plot)
+    monkeypatch.setattr(Axes, "scatter", capture_scatter)
+    monkeypatch.setattr(Axes, "annotate", capture_annotate)
+    monkeypatch.setattr(Axes, "add_patch", capture_add_patch)
+
+    _, impact_weight, delivered_weight = row
+    kwargs = render_policy.substep_plot_kwargs(
+        _render_cfg("impulse6", arm), _wave1_trace(), terminal_reason="terminated"
+    )
+    title = kwargs["title"]
+    assert kwargs["treatment"].geometry == "waypoints"
+    assert "waypoint w=8" in title
+    assert "V-CaT 0.5 @ 500 Hz" in title
+    assert "I-CaT log-only" in title
+    assert f"S={impact_weight:g}" in title
+    assert f"D={delivered_weight:g}" in title
+
+    report = write_substep_trajectory_png(
+        _wave1_trace(), tmp_path / f"{arm}.png", treatment=kwargs["treatment"]
+    )
+    assert report["reference_source"] == "waypoint_progress_tracker_entry_to_nail"
+    assert report["waypoint_marker_count"] == 6
+    assert report["gate_disk_count"] == 0
+    assert sum(
+        call.get("color") == "black" and call.get("linestyle") == "--"
+        for call in calls["plot"]
+    ) == 2
+    diamonds = [call for call in calls["scatter"] if call.get("marker") == "D"]
+    assert len(diamonds) == 12 and all(call.get("facecolors") == "none" for call in diamonds)
+    assert calls["annotate"] == [str(order) for _ in range(2) for order in range(1, 7)]
+    assert calls["patch"] == []
 
 
 def test_treatment_table_matches_the_registered_environment_configuration():
