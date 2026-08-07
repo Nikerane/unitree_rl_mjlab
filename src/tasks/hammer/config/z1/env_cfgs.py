@@ -1,9 +1,11 @@
 """Unitree Z1 hammer-nail environment configurations."""
 
+from pathlib import Path
+
 import torch
 
 from mjlab.envs import ManagerBasedRlEnvCfg
-from mjlab.envs.mdp.actions import DifferentialIKActionCfg
+from mjlab.envs.mdp.actions import DifferentialIKActionCfg, JointPositionActionCfg
 from mjlab.envs.mdp.curriculums import reward_curriculum
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.metrics_manager import MetricsTermCfg
@@ -24,6 +26,9 @@ from src.assets.robots.unitree_z1.z1_constants import (
 from src.tasks.hammer import mdp as hammer_mdp
 from src.tasks.hammer.cat import CatSoftHook
 from src.tasks.hammer.hammer_env_cfg import make_hammer_env_cfg
+from src.tasks.hammer.config.z1.joint_position_contract import (
+  load_joint_position_contract,
+)
 from src.tasks.hammer.nail_block import (
   NAIL_TOP_SITE_NAME,
   get_nail_block_entity_cfg,
@@ -58,6 +63,37 @@ I_REF_DELIVERED: float = 0.6094  # N·s
 # on Task 3 deriving the event value with the production tracker across repeated
 # fresh environments and passing its provenance/reproducibility gate.
 I_REF_FIRST_STRIKE_SUCCESS: float = 0.3088  # N·s
+
+_JOINT_POSITION_CONTRACT_PATH = (
+  Path(__file__).with_name("data") / "z1_joint_position_stage1.json"
+)
+
+
+def install_z1_joint_position_action(
+  cfg: ManagerBasedRlEnvCfg,
+) -> ManagerBasedRlEnvCfg:
+  """Replace only ``cfg.actions`` with the qualified fixed-gain joint action."""
+  contract = load_joint_position_contract(_JOINT_POSITION_CONTRACT_PATH)
+  scale = dict(
+    zip(contract.joint_names, contract.scale_rad.tolist(), strict=True)
+  )
+  clip = {
+    name: tuple(float(bound) for bound in bounds)
+    for name, bounds in zip(
+      contract.joint_names, contract.physical_clip_rad, strict=True
+    )
+  }
+  cfg.actions = {
+    "joint_position": JointPositionActionCfg(
+      entity_name="robot",
+      actuator_names=contract.actuator_names,
+      scale=scale,
+      clip=clip,
+      use_default_offset=True,
+      preserve_order=True,
+    )
+  }
+  return cfg
 
 
 def _guideline_observation(env, reader, width: int):

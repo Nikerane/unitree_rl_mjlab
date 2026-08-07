@@ -640,6 +640,7 @@ class TestCartesianGuidelineStudy:
             self._C_PROGRESS + "-Delivered4",
             self._C_PROGRESS + "-Vel-Delivered0",
             self._C_PROGRESS + "-Vel-Delivered4",
+            self._C_PROGRESS + "-Vel-Delivered4-JointPosition-Fixed",
         }
 
     @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))

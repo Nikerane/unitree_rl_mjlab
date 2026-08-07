@@ -10,6 +10,7 @@ All tests share a single env instance (module scope) to avoid recompiling
 Warp kernels between tests.
 """
 
+from dataclasses import asdict
 import os
 from pathlib import Path
 import subprocess
@@ -26,6 +27,20 @@ _GUIDELINE_TASK_IDS = (
     "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate",
 )
 
+_JOINT_POSITION_PARENT_TASK = (
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
+    "CProgress-Vel-Delivered4"
+)
+_JOINT_POSITION_FIC0_TASK = f"{_JOINT_POSITION_PARENT_TASK}-JointPosition-Fixed"
+_JOINT_POSITION_NAMES = (
+    "joint1",
+    "joint2",
+    "joint3",
+    "joint4",
+    "joint5",
+    "joint6",
+)
+
 
 @pytest.fixture(scope="module")
 def guideline_envs_cpu():
@@ -39,6 +54,34 @@ def guideline_envs_cpu():
         for task_id in _GUIDELINE_TASK_IDS:
             cfg = load_env_cfg(task_id)
             cfg.scene.num_envs = 1
+            envs[task_id] = ManagerBasedRlEnv(cfg, device="cpu")
+        yield envs
+    finally:
+        for env in envs.values():
+            env.close()
+
+
+@pytest.fixture(scope="module")
+def joint_position_envs_cpu():
+    """Construct the additive FIC-0 arm and its matched Cartesian parent on CPU."""
+    from mjlab.envs import ManagerBasedRlEnv
+    from mjlab.tasks.registry import list_tasks, load_env_cfg
+    import src.tasks  # noqa: F401  # populate the task registry in isolated runs
+
+    if _JOINT_POSITION_FIC0_TASK not in list_tasks():
+        # Intentional RED: keep each consumer as a normal assertion failure rather
+        # than turning the whole module into a fixture-setup KeyError.
+        yield {}
+        return
+
+    envs = {}
+    try:
+        for task_id in (
+            _JOINT_POSITION_PARENT_TASK,
+            _JOINT_POSITION_FIC0_TASK,
+        ):
+            cfg = load_env_cfg(task_id, play=True)
+            cfg.scene.num_envs = 2
             envs[task_id] = ManagerBasedRlEnv(cfg, device="cpu")
         yield envs
     finally:
@@ -62,6 +105,21 @@ def _get_site_z(entity, site_name: str) -> float:
     """Return world-frame Z position of a named site for env 0."""
     site_ids, _ = entity.find_sites((site_name,))
     return entity.data.site_pos_w[0, site_ids[0], 2].item()
+
+
+def _joint_position_env(envs):
+    assert _JOINT_POSITION_FIC0_TASK in envs, (
+        f"missing registered task {_JOINT_POSITION_FIC0_TASK}"
+    )
+    return envs[_JOINT_POSITION_FIC0_TASK]
+
+
+def _apply_joint_action(env, action: torch.Tensor) -> torch.Tensor:
+    env.action_manager.process_action(action)
+    env.action_manager.apply_action()
+    term = env.action_manager.get_term("joint_position")
+    robot = env.scene["robot"]
+    return robot.data.joint_pos_target[:, term.target_ids].clone()
 
 
 # ---------------------------------------------------------------------------
@@ -417,6 +475,288 @@ class TestStep:
             assert torch.isfinite(tensor).all(), (
                 f"Non-finite values in obs['{key}'] after step"
             )
+
+
+# ---------------------------------------------------------------------------
+# Fixed-gain joint-position production action
+# ---------------------------------------------------------------------------
+
+
+class TestJointPositionFixedConstruction:
+    def test_joint_and_cartesian_runtime_dimensions_are_isolated(
+        self, joint_position_envs_cpu
+    ):
+        joint = _joint_position_env(joint_position_envs_cpu)
+        parent = joint_position_envs_cpu[_JOINT_POSITION_PARENT_TASK]
+
+        joint_obs, _ = joint.reset(seed=20260807)
+        joint_step_obs, _, _, _, _ = joint.step(
+            torch.zeros((joint.num_envs, 6), device=joint.device)
+        )
+        for observations in (joint_obs, joint_step_obs):
+            assert observations["actor"].shape == (joint.num_envs, 47)
+            assert observations["critic"].shape == (joint.num_envs, 47)
+            assert torch.isfinite(observations["actor"]).all()
+            assert torch.isfinite(observations["critic"]).all()
+        assert joint.action_manager.total_action_dim == 6
+
+        parent_obs, _ = parent.reset(seed=20260807)
+        assert parent.action_manager.total_action_dim == 3
+        assert parent_obs["actor"].shape == (parent.num_envs, 44)
+        assert parent_obs["critic"].shape == (parent.num_envs, 44)
+        assert torch.isfinite(parent_obs["actor"]).all()
+        assert torch.isfinite(parent_obs["critic"]).all()
+
+    def test_live_reference_and_p_observation_widths_stay_four_and_seven(
+        self, joint_position_envs_cpu
+    ):
+        env = _joint_position_env(joint_position_envs_cpu)
+        env.reset(seed=20260807)
+        expected_widths = {
+            "strike_phase": 1,
+            "strike_ref_error": 3,
+            "next_gate_vector": 3,
+            "completed_gate_fraction": 1,
+            "guideline_perpendicular_error": 1,
+            "waypoint_progress_state": 2,
+        }
+        for group_name in ("actor", "critic"):
+            term_names = env.observation_manager.active_terms[group_name]
+            term_dims = env.observation_manager.group_obs_term_dim[group_name]
+            widths = {
+                name: term_dims[term_names.index(name)][0]
+                for name in expected_widths
+            }
+            assert widths == expected_widths
+            assert widths["strike_phase"] + widths["strike_ref_error"] == 4
+            assert sum(
+                widths[name]
+                for name in (
+                    "next_gate_vector",
+                    "completed_gate_fraction",
+                    "guideline_perpendicular_error",
+                    "waypoint_progress_state",
+                )
+            ) == 7
+
+    def test_live_targets_ids_bias_and_exact_affine_map(
+        self, joint_position_envs_cpu
+    ):
+        from src.tasks.hammer.config.z1.joint_position_contract import (
+            load_joint_position_contract,
+        )
+
+        env = _joint_position_env(joint_position_envs_cpu)
+        env.reset(seed=20260807)
+        term = env.action_manager.get_term("joint_position")
+        robot = env.scene["robot"]
+        live_ids, live_names = robot.find_joints(_JOINT_POSITION_NAMES)
+        assert tuple(term.target_names) == _JOINT_POSITION_NAMES
+        assert tuple(term.target_ids.tolist()) == tuple(live_ids)
+        assert tuple(live_names) == _JOINT_POSITION_NAMES
+        assert torch.count_nonzero(robot.data.encoder_bias[:, term.target_ids]) == 0
+
+        artifact = (
+            Path(__file__).resolve().parents[1]
+            / "src/tasks/hammer/config/z1/data/z1_joint_position_stage1.json"
+        )
+        contract = load_joint_position_contract(artifact)
+        default = robot.data.default_joint_pos[:, term.target_ids]
+        scale = torch.as_tensor(
+            contract.scale_rad.tolist(),
+            dtype=default.dtype,
+            device=default.device,
+        ).unsqueeze(0)
+        zero = torch.zeros((env.num_envs, 6), device=env.device)
+        torch.testing.assert_close(_apply_joint_action(env, zero), default)
+        for sign in (-1.0, 1.0):
+            raw = torch.full_like(zero, sign)
+            torch.testing.assert_close(
+                _apply_joint_action(env, raw),
+                default + sign * scale,
+                rtol=0.0,
+                atol=2e-7,
+            )
+
+    def test_unwrapped_oversized_actions_hit_only_the_physical_target_clip(
+        self, joint_position_envs_cpu
+    ):
+        from src.tasks.hammer.config.z1.joint_position_contract import (
+            load_joint_position_contract,
+        )
+
+        env = _joint_position_env(joint_position_envs_cpu)
+        env.reset(seed=20260807)
+        raw_row = torch.tensor(
+            (1e6, -1e6, 1e6, -1e6, 1e6, -1e6),
+            dtype=torch.float32,
+            device=env.device,
+        )
+        raw = raw_row.unsqueeze(0).repeat(env.num_envs, 1)
+        target = _apply_joint_action(env, raw)
+        artifact = (
+            Path(__file__).resolve().parents[1]
+            / "src/tasks/hammer/config/z1/data/z1_joint_position_stage1.json"
+        )
+        clips = load_joint_position_contract(artifact).physical_clip_rad
+        expected_row = torch.as_tensor(
+            tuple(
+                bounds[1] if action > 0 else bounds[0]
+                for action, bounds in zip(raw_row.tolist(), clips, strict=True)
+            ),
+            dtype=target.dtype,
+            device=target.device,
+        )
+        torch.testing.assert_close(
+            env.action_manager.action, raw, rtol=0.0, atol=0.0
+        )
+        torch.testing.assert_close(
+            target,
+            expected_row.unsqueeze(0).repeat(env.num_envs, 1),
+            rtol=0.0,
+            atol=2e-7,
+        )
+
+    def test_rsl_wrapper_clips_raw_actions_before_the_physical_action_map(
+        self, joint_position_envs_cpu
+    ):
+        from mjlab.rl import RslRlVecEnvWrapper
+        from src.tasks.hammer.config.z1.joint_position_contract import (
+            load_joint_position_contract,
+        )
+
+        env = _joint_position_env(joint_position_envs_cpu)
+        wrapped = RslRlVecEnvWrapper(env, clip_actions=1.0)
+        raw_row = torch.tensor(
+            (5.0, -5.0, 5.0, -5.0, 5.0, -5.0),
+            dtype=torch.float32,
+            device=env.device,
+        )
+        wrapped.step(raw_row.unsqueeze(0).repeat(env.num_envs, 1))
+        clipped = raw_row.clamp(-1.0, 1.0).unsqueeze(0).repeat(env.num_envs, 1)
+        torch.testing.assert_close(
+            env.action_manager.action, clipped, rtol=0.0, atol=0.0
+        )
+
+        term = env.action_manager.get_term("joint_position")
+        robot = env.scene["robot"]
+        default = robot.data.default_joint_pos[:, term.target_ids]
+        artifact = (
+            Path(__file__).resolve().parents[1]
+            / "src/tasks/hammer/config/z1/data/z1_joint_position_stage1.json"
+        )
+        scale = torch.as_tensor(
+            load_joint_position_contract(artifact).scale_rad.tolist(),
+            dtype=default.dtype,
+            device=default.device,
+        ).unsqueeze(0)
+        target = robot.data.joint_pos_target[:, term.target_ids]
+        torch.testing.assert_close(
+            target,
+            default + clipped * scale,
+            rtol=0.0,
+            atol=2e-7,
+        )
+
+    def test_desired_target_is_independent_of_current_joint_state(
+        self, joint_position_envs_cpu
+    ):
+        env = _joint_position_env(joint_position_envs_cpu)
+        env.reset(seed=20260807)
+        term = env.action_manager.get_term("joint_position")
+        robot = env.scene["robot"]
+        default = robot.data.default_joint_pos[:, term.target_ids]
+        action = torch.tensor(
+            (0.25, -0.5, 0.75, -0.25, 0.5, -0.75),
+            dtype=torch.float32,
+            device=env.device,
+        ).unsqueeze(0).repeat(env.num_envs, 1)
+
+        robot.write_joint_position_to_sim(default + 0.02, joint_ids=term.target_ids)
+        target_a = _apply_joint_action(env, action)
+        robot.write_joint_position_to_sim(default - 0.02, joint_ids=term.target_ids)
+        target_b = _apply_joint_action(env, action)
+        torch.testing.assert_close(target_a, target_b, rtol=0.0, atol=0.0)
+        env.reset(seed=20260807)
+
+    def test_reset_clears_last_action_then_zero_restores_the_default_target(
+        self, joint_position_envs_cpu
+    ):
+        env = _joint_position_env(joint_position_envs_cpu)
+        env.reset(seed=20260807)
+        env.step(torch.ones((env.num_envs, 6), device=env.device))
+        assert torch.count_nonzero(env.action_manager.action) == env.num_envs * 6
+
+        env.reset(seed=20260807)
+        observation_term = env.cfg.observations["actor"].terms["actions"]
+        last_action = observation_term.func(env, **observation_term.params)
+        assert torch.count_nonzero(last_action) == 0
+        term = env.action_manager.get_term("joint_position")
+        robot = env.scene["robot"]
+        default = robot.data.default_joint_pos[:, term.target_ids]
+        zero = torch.zeros((env.num_envs, 6), device=env.device)
+        torch.testing.assert_close(_apply_joint_action(env, zero), default)
+
+    def test_joint_action_never_changes_the_gripper_target(
+        self, joint_position_envs_cpu
+    ):
+        env = _joint_position_env(joint_position_envs_cpu)
+        env.reset(seed=20260807)
+        robot = env.scene["robot"]
+        gripper_ids, gripper_names = robot.find_joints(("jointGripper",))
+        assert tuple(gripper_names) == ("jointGripper",)
+        gripper_ids_tensor = torch.tensor(
+            gripper_ids, dtype=torch.long, device=env.device
+        )
+        sentinel = torch.full(
+            (env.num_envs, 1), 0.123, dtype=torch.float32, device=env.device
+        )
+        robot.set_joint_position_target(sentinel, joint_ids=gripper_ids_tensor)
+        before = robot.data.joint_pos_target[:, gripper_ids_tensor].clone()
+        _apply_joint_action(
+            env, torch.ones((env.num_envs, 6), device=env.device)
+        )
+        torch.testing.assert_close(
+            robot.data.joint_pos_target[:, gripper_ids_tensor],
+            before,
+            rtol=0.0,
+            atol=0.0,
+        )
+
+    def test_cartesian_checkpoint_shape_fails_loudly_on_joint_runner(
+        self, joint_position_envs_cpu, tmp_path
+    ):
+        from mjlab.rl import RslRlVecEnvWrapper
+        from mjlab.tasks.registry import load_rl_cfg, load_runner_cls
+
+        joint = _joint_position_env(joint_position_envs_cpu)
+        parent = joint_position_envs_cpu[_JOINT_POSITION_PARENT_TASK]
+        runner_cls = load_runner_cls(_JOINT_POSITION_FIC0_TASK)
+        assert runner_cls is not None
+        parent_runner = runner_cls(
+            RslRlVecEnvWrapper(parent, clip_actions=1.0),
+            asdict(load_rl_cfg(_JOINT_POSITION_PARENT_TASK)),
+            log_dir=None,
+            device="cpu",
+        )
+        joint_runner = runner_cls(
+            RslRlVecEnvWrapper(joint, clip_actions=1.0),
+            asdict(load_rl_cfg(_JOINT_POSITION_FIC0_TASK)),
+            log_dir=None,
+            device="cpu",
+        )
+        checkpoint = parent_runner.alg.save()
+        checkpoint.update(
+            {
+                "iter": 0,
+                "infos": {"env_state": {"common_step_counter": 0}},
+            }
+        )
+        checkpoint_path = tmp_path / "cartesian_44x3.pt"
+        torch.save(checkpoint, checkpoint_path)
+
+        with pytest.raises(RuntimeError, match=r"size mismatch|shape"):
+            joint_runner.load(str(checkpoint_path), map_location="cpu")
 
 
 # ---------------------------------------------------------------------------

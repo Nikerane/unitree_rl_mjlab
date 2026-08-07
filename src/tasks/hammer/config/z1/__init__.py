@@ -1,7 +1,10 @@
 """Z1 hammer-nail task configurations."""
 
 from mjlab.tasks.registry import register_mjlab_task
-from src.tasks.hammer.config.z1.env_cfgs import z1_hammer_env_cfg
+from src.tasks.hammer.config.z1.env_cfgs import (
+    install_z1_joint_position_action,
+    z1_hammer_env_cfg,
+)
 from src.tasks.hammer.mdp.rewards import FirstStrikeBoundedImpactRewardTerm
 from src.tasks.hammer.config.z1.rl_cfg import z1_hammer_ppo_runner_cfg
 from src.tasks.hammer.rl.runner import HammerOnPolicyRunner
@@ -296,6 +299,25 @@ register_mjlab_task(
     play_env_cfg=_presentation_i_off_env_cfg(
         play=True, velocity_cat=True, delivered_weight=4.0
     ),
+    rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+    runner_cls=HammerOnPolicyRunner,
+)
+
+
+def _joint_position_fixed_env_cfg(*, play: bool = False):
+    cfg = _presentation_i_off_env_cfg(
+        play=play, velocity_cat=True, delivered_weight=4.0
+    )
+    return install_z1_joint_position_action(cfg)
+
+
+register_mjlab_task(
+    task_id=(
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
+        "CProgress-Vel-Delivered4-JointPosition-Fixed"
+    ),
+    env_cfg=_joint_position_fixed_env_cfg(),
+    play_env_cfg=_joint_position_fixed_env_cfg(play=True),
     rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
     runner_cls=HammerOnPolicyRunner,
 )
