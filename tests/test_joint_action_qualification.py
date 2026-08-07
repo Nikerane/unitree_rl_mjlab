@@ -263,6 +263,221 @@ def test_terminal_transition_is_read_before_reset_and_matches_tracking_input() -
     ) == pytest.approx(terminal["live_tracking_input"])
 
 
+@pytest.mark.integration
+def test_live_cartesian_terminal_capture_precedes_manual_reset() -> None:
+    """Reset-first capture or a non-manager tracking oracle would fail this strike."""
+    import torch
+
+    import src.tasks  # noqa: F401
+    from mjlab.envs import ManagerBasedRlEnv
+    from mjlab.envs.mdp.actions import DifferentialIKActionCfg
+    from mjlab.managers.manager_base import ManagerTermBase
+    from mjlab.managers.reward_manager import RewardTermCfg
+    from mjlab.managers.scene_entity_config import SceneEntityCfg
+    from mjlab.tasks.registry import load_env_cfg
+
+    from src.assets.robots.unitree_z1.z1_constants import (
+        ARM_JOINT_NAMES,
+        HAMMER_HEAD_SITE_NAME,
+        Z1_HAMMER_DELTA_POS_SCALE,
+    )
+    from src.tasks.hammer.mdp.first_strike import (
+        REASON_SUCCESS,
+        _ENV_FIRST_STRIKE_ATTR,
+    )
+    from src.tasks.hammer.mdp.references import SingleStrikeReference
+    from src.tasks.hammer.mdp.rewards import clamped_nail_depth
+    from src.tasks.hammer.nail_block import NAIL_SUCCESS_THRESHOLD
+
+    cfg = load_env_cfg(qualifier.SOURCE_TASK_ID, play=True)
+    assert list(cfg.actions) == ["ik_hammer_head"]
+    assert isinstance(cfg.actions["ik_hammer_head"], DifferentialIKActionCfg)
+    assert cfg.rewards["delivered_impulse"].weight == 4.0
+    assert cfg.metrics["cat_soft"].params["use_vel"] is True
+    cfg.scene.num_envs = 1
+    cfg.auto_reset = False
+
+    class LiveTargetTrackingError(ManagerTermBase):
+        def __init__(
+            self, cfg: RewardTermCfg, env: ManagerBasedRlEnv
+        ) -> None:
+            super().__init__(env)
+            self.last_input: torch.Tensor | None = None
+
+        def reset(self, env_ids: torch.Tensor | slice | None) -> None:
+            del env_ids
+            self.last_input = None
+
+        def __call__(
+            self, live_env: ManagerBasedRlEnv, robot_cfg: SceneEntityCfg
+        ) -> torch.Tensor:
+            live_robot = live_env.scene[robot_cfg.name]
+            error = (
+                live_robot.data.joint_pos_target[:, robot_cfg.joint_ids]
+                - live_robot.data.joint_pos[:, robot_cfg.joint_ids]
+            )
+            self.last_input = torch.square(error).sum(dim=-1).detach().clone()
+            return self.last_input
+
+    # Test-only observer: it runs in the real reward-manager pass but cannot
+    # influence the scripted actions or physics trajectory.
+    cfg.rewards["test_target_tracking_error_sq"] = RewardTermCfg(
+        func=LiveTargetTrackingError,
+        weight=1.0,
+        params={
+            "robot_cfg": SceneEntityCfg(
+                "robot", joint_names=ARM_JOINT_NAMES
+            )
+        },
+    )
+
+    env = ManagerBasedRlEnv(cfg, device="cpu")
+    try:
+        tracking_reader = env.reward_manager.get_term_cfg(
+            "test_target_tracking_error_sq"
+        ).func
+        assert isinstance(tracking_reader, LiveTargetTrackingError)
+        robot = env.scene["robot"]
+        nail = env.scene["nail_block"]
+        arm_cfg = SceneEntityCfg("robot", joint_names=ARM_JOINT_NAMES)
+        head_cfg = SceneEntityCfg(
+            "robot", site_names=(HAMMER_HEAD_SITE_NAME,)
+        )
+        nail_top_cfg = SceneEntityCfg(
+            "nail_block", site_names=("nail_top",)
+        )
+        nail_joint_cfg = SceneEntityCfg(
+            "nail_block", joint_names=("nail_slide",)
+        )
+        for entity_cfg in (arm_cfg, head_cfg, nail_top_cfg, nail_joint_cfg):
+            entity_cfg.resolve(env.scene)
+        arm_ids = arm_cfg.joint_ids
+        assert [robot.joint_names[index] for index in arm_ids] == JOINT_NAMES
+
+        def copy_arm(value: object) -> np.ndarray:
+            return (
+                value[0, arm_ids]
+                .detach()
+                .cpu()
+                .numpy()
+                .astype(np.float64, copy=True)
+            )
+
+        def head_position() -> torch.Tensor:
+            return robot.data.site_pos_w[:, head_cfg.site_ids].squeeze(1)
+
+        def nail_top_position() -> torch.Tensor:
+            return nail.data.site_pos_w[:, nail_top_cfg.site_ids].squeeze(1)
+
+        first_strike = getattr(env, _ENV_FIRST_STRIKE_ATTR)
+        env.reset(seed=1000)
+        reference = SingleStrikeReference(1, env.device)
+        reference.update(
+            head_position(), nail_top_position(), env.episode_length_buf
+        )
+        playback_length = reference.playback_length()
+        terminal = None
+
+        for control_step in range(
+            1,
+            playback_length + qualifier.POST_REFERENCE_HOLD_CONTROL_STEPS + 1,
+        ):
+            target = reference.playback_target(
+                min(control_step, playback_length)
+            )
+            action = (
+                (target - head_position()) / Z1_HAMMER_DELTA_POS_SCALE
+            ).clamp(-1.0, 1.0)
+
+            def read_transition() -> dict[str, object]:
+                manager_terms = dict(
+                    env.reward_manager.get_active_iterable_terms(0)
+                )
+                return {
+                    "q_next": copy_arm(robot.data.joint_pos),
+                    "nail_depth": float(
+                        clamped_nail_depth(env, nail_joint_cfg)[0]
+                    ),
+                    "first_strike": {
+                        "started": bool(first_strike.started[0]),
+                        "finalized": bool(first_strike.finalized[0]),
+                        "productive": bool(first_strike.productive[0]),
+                        "reason": int(first_strike.reason[0]),
+                    },
+                    "applied_target": copy_arm(robot.data.joint_pos_target),
+                    "live_tracking_input": (
+                        None
+                        if tracking_reader.last_input is None
+                        else float(tracking_reader.last_input[0])
+                    ),
+                    "manager_tracking_term": manager_terms.get(
+                        "test_target_tracking_error_sq"
+                    ),
+                    "episode_step": int(env.episode_length_buf[0]),
+                }
+
+            captured = qualifier.capture_control_step(
+                env,
+                action,
+                action_term_name="ik_hammer_head",
+                robot_data=robot.data,
+                joint_ids=arm_ids,
+                terminal_reader=read_transition,
+            )
+            assert captured["applied_substeps"] == cfg.decimation
+            assert captured["first_applied_target"].shape == (6,)
+            terminal = captured["terminal"]
+            if bool(env.reset_buf[0]):
+                break
+
+        assert terminal is not None
+        assert bool(env.reset_terminated[0])
+        assert not bool(env.reset_time_outs[0])
+        assert terminal["episode_step"] == int(env.episode_length_buf[0]) > 0
+        assert terminal["nail_depth"] >= NAIL_SUCCESS_THRESHOLD
+        assert terminal["first_strike"] == {
+            "started": True,
+            "finalized": True,
+            "productive": True,
+            "reason": REASON_SUCCESS,
+        }
+        assert terminal["q_next"].shape == (6,)
+        assert terminal["applied_target"].shape == (6,)
+        np.testing.assert_array_equal(
+            terminal["q_next"], copy_arm(robot.data.joint_pos)
+        )
+        np.testing.assert_array_equal(
+            terminal["applied_target"],
+            copy_arm(robot.data.joint_pos_target),
+        )
+        assert terminal["live_tracking_input"] is not None
+        manager_tracking_term = terminal["manager_tracking_term"]
+        assert manager_tracking_term is not None
+        assert len(manager_tracking_term) == 1
+        assert qualifier.squared_tracking_error(
+            terminal["applied_target"], terminal["q_next"]
+        ) == pytest.approx(
+            terminal["live_tracking_input"], rel=1e-6, abs=1e-8
+        )
+        assert terminal["live_tracking_input"] == pytest.approx(
+            manager_tracking_term[0], rel=0.0, abs=1e-8
+        )
+
+        terminal_q_next = terminal["q_next"].copy()
+        terminal_target = terminal["applied_target"].copy()
+        env.reset(seed=1001)
+        assert tracking_reader.last_input is None
+        assert not bool(first_strike.started[0])
+        assert not bool(first_strike.finalized[0])
+        assert float(clamped_nail_depth(env, nail_joint_cfg)[0]) == pytest.approx(
+            0.0, abs=1e-8
+        )
+        np.testing.assert_array_equal(terminal["q_next"], terminal_q_next)
+        np.testing.assert_array_equal(terminal["applied_target"], terminal_target)
+    finally:
+        env.close()
+
+
 def _passing_rollout_record(*, mode: str = "source") -> dict[str, object]:
     geometry = {
         "entry_m": [0.1, 0.2, 0.3],
