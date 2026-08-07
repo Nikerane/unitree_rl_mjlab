@@ -1,0 +1,380 @@
+"""Deterministically calibrate the fixed-joint one-step tracking cost."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import math
+from pathlib import Path
+import subprocess
+from typing import Any, Sequence
+
+import numpy as np
+
+from evaluation.joint_position.qualify_joint_action import (
+    canonical_sha256,
+    normalized_action_for_target,
+    scheduled_replay_targets,
+)
+
+
+REQUIRED_SEEDS = tuple(range(1000, 1016))
+JOINT_NAMES = ("joint1", "joint2", "joint3", "joint4", "joint5", "joint6")
+FIC0_TASK_ID = (
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
+    "CProgress-Vel-Delivered4-JointPosition-Fixed"
+)
+TARGET_Q90_COST = 0.1
+MIN_Q90 = 1e-8
+MAX_PRE_DT_CUMULATIVE_COST = 5.0
+REWARD_MANAGER_DT_S = 0.02
+
+
+def derive_k_tt(
+    squared_errors: object, target_q90_cost: float = TARGET_Q90_COST
+) -> float:
+    """Derive ``k_tt`` from one unique trajectory's 90th-percentile error."""
+    if (
+        isinstance(target_q90_cost, bool)
+        or not isinstance(target_q90_cost, (int, float))
+        or not math.isfinite(float(target_q90_cost))
+        or float(target_q90_cost) <= 0.0
+    ):
+        raise ValueError("target_q90_cost must be finite and strictly positive")
+    try:
+        errors = np.asarray(squared_errors, dtype=np.float64)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("squared_errors must be numeric") from exc
+    if (
+        errors.ndim != 1
+        or errors.size == 0
+        or not np.all(np.isfinite(errors))
+        or np.any(errors < 0.0)
+    ):
+        raise ValueError("squared_errors must be a nonempty finite nonnegative vector")
+    q90 = float(np.quantile(errors, 0.90))
+    if not math.isfinite(q90) or q90 < MIN_Q90:
+        raise ValueError(f"q90 must be finite and at least {MIN_Q90}")
+    gain = float(target_q90_cost) / q90
+    if not math.isfinite(gain) or gain <= 0.0:
+        raise ValueError("derived k_tt must be finite and strictly positive")
+    return gain
+
+
+def _canonical_payload_sha(payload: dict[str, Any]) -> str:
+    unsigned = dict(payload)
+    unsigned.pop("payload_sha256", None)
+    encoded = json.dumps(
+        unsigned, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _required_hash(value: object, *, name: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ValueError(f"{name} must be a lowercase SHA-256 digest")
+    return value
+
+
+def _required_revision(value: object, *, name: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 40
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ValueError(f"{name} must be a lowercase Git commit")
+    return value
+
+
+def _validated_run(run: object, *, expected_seed: int) -> tuple[dict[str, Any], np.ndarray]:
+    if not isinstance(run, dict):
+        raise ValueError("each calibration run must be a mapping")
+    if run.get("seed") != expected_seed or isinstance(run.get("seed"), bool):
+        raise ValueError("calibration runs must be ordered seeds 1000 through 1015")
+    if run.get("terminal_transition_captured") is not True:
+        raise ValueError("every calibration run must capture its terminal transition")
+    try:
+        targets = np.asarray(run.get("applied_target_tape_rad"), dtype=np.float64)
+        errors = np.asarray(run.get("squared_errors_rad2"), dtype=np.float64)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("calibration run targets and errors must be numeric") from exc
+    if (
+        targets.ndim != 2
+        or targets.shape[0] == 0
+        or targets.shape[1] != len(JOINT_NAMES)
+        or errors.ndim != 1
+        or errors.shape[0] != targets.shape[0]
+        or not np.all(np.isfinite(targets))
+        or not np.all(np.isfinite(errors))
+        or np.any(errors < 0.0)
+    ):
+        raise ValueError("each run needs matching finite [step,6] targets and squared errors")
+    row = {
+        "seed": expected_seed,
+        "sample_count": int(errors.size),
+        "terminal_transition_captured": True,
+        "applied_target_tape_sha256": canonical_sha256(targets.tolist()),
+        "squared_errors_sha256": canonical_sha256(errors.tolist()),
+    }
+    return row, errors
+
+
+def build_trackability_payload(
+    *,
+    runs: Sequence[dict[str, Any]],
+    source_qualification_payload_sha256: str,
+    source_qualification_code_revision: str,
+    source_asset_revision: str,
+    calibration_code_revision: str,
+) -> dict[str, Any]:
+    """Build a PASS artifact from one trajectory plus 15 identity witnesses."""
+    if len(runs) != len(REQUIRED_SEEDS):
+        raise ValueError("calibration requires exactly 16 repeatability runs")
+    rows: list[dict[str, Any]] = []
+    canonical_errors: np.ndarray | None = None
+    for run, seed in zip(runs, REQUIRED_SEEDS, strict=True):
+        row, errors = _validated_run(run, expected_seed=seed)
+        rows.append(row)
+        if canonical_errors is None:
+            canonical_errors = errors
+        elif (
+            row["sample_count"] != rows[0]["sample_count"]
+            or row["applied_target_tape_sha256"]
+            != rows[0]["applied_target_tape_sha256"]
+            or row["squared_errors_sha256"] != rows[0]["squared_errors_sha256"]
+        ):
+            raise ValueError(
+                "repeatability witness differs from the unique seed-1000 canonical trajectory"
+            )
+    assert canonical_errors is not None
+    q90 = float(np.quantile(canonical_errors, 0.90))
+    k_tt = derive_k_tt(canonical_errors)
+    pre_dt_cost = float(k_tt * np.sum(canonical_errors, dtype=np.float64))
+    if not math.isfinite(pre_dt_cost) or pre_dt_cost > MAX_PRE_DT_CUMULATIVE_COST:
+        raise ValueError(
+            "canonical pre-dt cumulative cost exceeds the preregistered 5.0 ceiling"
+        )
+
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "joint_names": list(JOINT_NAMES),
+        "physics_dt_s": 0.002,
+        "control_decimation": 10,
+        "reward_manager_dt_s": REWARD_MANAGER_DT_S,
+        "target_q90_cost": TARGET_Q90_COST,
+        "q90_squared_error_rad2": q90,
+        "k_tt": k_tt,
+        "canonical_seed": REQUIRED_SEEDS[0],
+        "canonical_sample_count": int(canonical_errors.size),
+        "canonical_pre_dt_cumulative_cost": pre_dt_cost,
+        "canonical_returned_dose": pre_dt_cost * REWARD_MANAGER_DT_S,
+        "canonical_applied_target_tape_sha256": rows[0][
+            "applied_target_tape_sha256"
+        ],
+        "canonical_squared_errors_rad2": canonical_errors.tolist(),
+        "canonical_squared_errors_sha256": rows[0]["squared_errors_sha256"],
+        "repeatability_rows": rows,
+        "source_qualification_payload_sha256": _required_hash(
+            source_qualification_payload_sha256,
+            name="source_qualification_payload_sha256",
+        ),
+        "source_qualification_code_revision": _required_revision(
+            source_qualification_code_revision,
+            name="source_qualification_code_revision",
+        ),
+        "source_asset_revision": _required_revision(
+            source_asset_revision, name="source_asset_revision"
+        ),
+        "calibration_code_revision": _required_revision(
+            calibration_code_revision, name="calibration_code_revision"
+        ),
+        "decision": "PASS",
+    }
+    payload["payload_sha256"] = _canonical_payload_sha(payload)
+    return payload
+
+
+def write_canonical_json(path: str | Path, payload: object) -> None:
+    """Serialize deterministically while rejecting NaN and infinity."""
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        json.dumps(payload, sort_keys=True, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _git_revision(path: Path) -> str:
+    return subprocess.run(
+        ("git", "rev-parse", "HEAD"),
+        cwd=path,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def _scheduled_replay_tape(source_contract: Any) -> np.ndarray:
+    """Reconstruct the preregistered zero-order hold used by qualification."""
+    rows = source_contract.per_seed_replay_rows
+    if not rows:
+        raise ValueError("source contract has no replay rows")
+    playback_length = int(rows[0]["source"]["playback_length"])
+    scheduled = scheduled_replay_targets(
+        source_contract.source_target_tape_rad,
+        playback_length=playback_length,
+    )
+    for row in rows:
+        if int(row["source"]["playback_length"]) != playback_length:
+            raise ValueError("qualified source playback lengths are not repeatable")
+        expected_count = int(row["replay"]["target_count"])
+        if expected_count <= 0 or expected_count > len(scheduled):
+            raise ValueError("qualified replay target count exceeds the scheduled tape")
+    return scheduled
+
+
+def _require_accepted_terminal(env: Any, expected_replay: Any) -> None:
+    """Reject a same-length replay that ended for anything but productive success."""
+    tracker = getattr(env, "_hammer_first_strike", None)
+    if (
+        expected_replay.get("terminal_reason") != "success"
+        or not bool(env.reset_buf[0])
+        or not bool(env.reset_terminated[0])
+        or bool(env.reset_time_outs[0])
+        or tracker is None
+        or not bool(tracker.finalized[0])
+        or not bool(tracker.productive[0])
+        or int(tracker.reason[0]) != 1
+    ):
+        raise RuntimeError(
+            "calibration replay must reproduce the banked productive success terminal"
+        )
+
+
+def _rollout_repeated_trajectory(source_contract: Any) -> list[dict[str, Any]]:
+    """Replay the banked tape once per fixed reset and read every post-step error."""
+    import torch
+    from mjlab.envs import ManagerBasedRlEnv
+    from mjlab.managers.scene_entity_config import SceneEntityCfg
+    from mjlab.tasks.registry import load_env_cfg
+
+    import src.tasks  # noqa: F401 - populate task registry
+    from src.tasks.hammer.mdp.trackability import joint_target_squared_error
+
+    cfg = load_env_cfg(FIC0_TASK_ID, play=True)
+    cfg.scene.num_envs = 1
+    cfg.auto_reset = False
+    env = ManagerBasedRlEnv(cfg, device="cpu")
+    try:
+        arm_cfg = SceneEntityCfg(
+            "robot", joint_names=JOINT_NAMES, preserve_order=True
+        )
+        arm_cfg.resolve(env.scene)
+        robot = env.scene["robot"]
+        action_term = env.action_manager.get_term("joint_position")
+        target_ids = action_term.target_ids
+        normalized = normalized_action_for_target(
+            _scheduled_replay_tape(source_contract),
+            source_contract.default_joint_pos_rad,
+            source_contract.scale_rad,
+        )
+        runs: list[dict[str, Any]] = []
+        for seed, qualification_row in zip(
+            source_contract.seeds,
+            source_contract.per_seed_replay_rows,
+            strict=True,
+        ):
+            expected_replay = qualification_row["replay"]
+            expected_count = int(expected_replay["target_count"])
+            env.reset(seed=int(seed))
+            targets: list[list[float]] = []
+            errors: list[float] = []
+            for row in normalized:
+                action = torch.tensor(
+                    row[None, :], dtype=torch.float32, device=env.device
+                )
+                env.step(action)
+                applied = (
+                    robot.data.joint_pos_target[0, target_ids]
+                    .detach()
+                    .cpu()
+                    .to(torch.float64)
+                    .tolist()
+                )
+                error = float(joint_target_squared_error(env, arm_cfg)[0])
+                targets.append(applied)
+                errors.append(error)
+                if bool(env.reset_buf[0]):
+                    break
+            terminal = bool(env.reset_buf[0])
+            if len(errors) != expected_count or not terminal:
+                raise RuntimeError(
+                    "calibration did not reproduce the complete accepted-contact terminal replay"
+                )
+            _require_accepted_terminal(env, expected_replay)
+            runs.append(
+                {
+                    "seed": int(seed),
+                    "applied_target_tape_rad": targets,
+                    "squared_errors_rad2": errors,
+                    "terminal_transition_captured": terminal,
+                }
+            )
+        return runs
+    finally:
+        env.close()
+
+
+def run_calibration(qualification_path: str | Path) -> dict[str, Any]:
+    """Load, replay, cross-check, and calibrate one banked qualification tape."""
+    from src.assets.robots.unitree_z1.z1_constants import Z1_HAMMER_XML
+    from src.tasks.hammer.config.z1.joint_position_contract import (
+        load_joint_position_contract,
+    )
+
+    contract = load_joint_position_contract(qualification_path)
+    asset_root = Path(
+        subprocess.run(
+            ("git", "rev-parse", "--show-toplevel"),
+            cwd=Path(Z1_HAMMER_XML).parent,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    )
+    live_asset_revision = _git_revision(asset_root)
+    if live_asset_revision != contract.source_asset_revision:
+        raise RuntimeError("live asset revision differs from the qualified asset revision")
+    root = Path(__file__).resolve().parents[2]
+    runs = _rollout_repeated_trajectory(contract)
+    return build_trackability_payload(
+        runs=runs,
+        source_qualification_payload_sha256=contract.payload_sha256,
+        source_qualification_code_revision=contract.source_code_revision,
+        source_asset_revision=live_asset_revision,
+        calibration_code_revision=_git_revision(root),
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--qualification", required=True, type=Path)
+    parser.add_argument("--out", required=True, type=Path)
+    args = parser.parse_args(argv)
+    payload = run_calibration(args.qualification)
+    write_canonical_json(args.out, payload)
+    print(
+        "joint trackability calibration: PASS "
+        f"q90={payload['q90_squared_error_rad2']:.9g} "
+        f"k_tt={payload['k_tt']:.9g}"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -18,8 +18,10 @@ from src.tasks.hammer.mdp.velocity_bound import _ENV_SUBSTEP_ATTR, Z1_JOINT_VEL_
 
 LIM = Z1_JOINT_VEL_LIMIT
 ACTIVE = ["approach", "nail_driven", "nail_depth_delta", "impact_progress", "completion",
-          "action_rate", "joint_pos_limits"]
-I_ACTION_RATE, I_JOINT_LIM = ACTIVE.index("action_rate"), ACTIVE.index("joint_pos_limits")
+          "action_rate", "joint_pos_limits", "r_tt"]
+I_ACTION_RATE = ACTIVE.index("action_rate")
+I_JOINT_LIM = ACTIVE.index("joint_pos_limits")
+I_R_TT = ACTIVE.index("r_tt")
 
 
 def _hook(max_p=0.5, tau=0.95, min_p=0.0, vel_detection="control_rate"):
@@ -68,7 +70,8 @@ def _ihook(imp_max_p=0.0, imp_seed=0.2, imp_limit=0.1, use_vel=False, tau=0.95, 
 
 
 def _term_cfg(n):
-  w = -0.01 if n == "action_rate" else (-10.0 if n == "joint_pos_limits" else 1.0)
+  weights = {"action_rate": -0.01, "joint_pos_limits": -10.0, "r_tt": -1.0}
+  w = weights.get(n, 1.0)
   return SimpleNamespace(weight=w)
 
 
@@ -108,10 +111,11 @@ def test_r_pos_excludes_negative_terms_and_is_dt_scaled():
   step[:, ACTIVE.index("impact_progress")] = 6.0   # +6  -> positives = 10
   step[:, I_ACTION_RATE] = -0.1                     # negatives ...
   step[:, I_JOINT_LIM] = -5.0                       # -> r_neg = -5.1
+  step[:, I_R_TT] = -0.8                            # -> r_neg = -5.9
   dt = 0.02
   env = _env(torch.full((B, 6), 1.0), step, step_dt=dt)
   _hook()(env)
-  # r_total_rate=4.9, r_neg_rate=-5.1 -> r_pos_rate=10.0 -> *dt
+  # r_total_rate=4.1, r_neg_rate=-5.9 -> r_pos_rate=10.0 -> *dt
   assert torch.allclose(env.extras[CAT_R_POS_KEY], torch.full((B,), 10.0 * dt), atol=1e-6)
 
 
@@ -124,7 +128,7 @@ def test_r_pos_equals_reward_minus_negatives_identity():
   env = _env(torch.zeros(B, 6), step, step_dt=dt)
   _hook()(env)
   reward_buf = step.sum(dim=1) * dt                                  # what the env returns
-  r_neg = step[:, [I_ACTION_RATE, I_JOINT_LIM]].sum(dim=1) * dt
+  r_neg = step[:, [I_ACTION_RATE, I_JOINT_LIM, I_R_TT]].sum(dim=1) * dt
   assert torch.allclose(env.extras[CAT_R_POS_KEY], reward_buf - r_neg, atol=1e-6)
 
 
@@ -142,8 +146,27 @@ def test_neg_term_indices_resolved_lazily():
   h = _hook()
   assert h._neg_idx is None
   h(_env(torch.full((1, 6), 1.0), torch.zeros(1, len(ACTIVE))))
-  assert h._neg_idx == [I_ACTION_RATE, I_JOINT_LIM]
-  assert _NEG_TERMS == ("action_rate", "joint_pos_limits")
+  assert h._neg_idx == [I_ACTION_RATE, I_JOINT_LIM, I_R_TT]
+  assert _NEG_TERMS == ("action_rate", "joint_pos_limits", "r_tt")
+
+
+def test_nonzero_delta_leaves_all_three_penalties_unscaled() -> None:
+  """CaT may discount only task return; r_tt cannot be evaded through velocity excess."""
+  step = torch.zeros(1, len(ACTIVE))
+  step[:, ACTIVE.index("approach")] = 10.0
+  step[:, I_ACTION_RATE] = -0.1
+  step[:, I_JOINT_LIM] = -5.0
+  step[:, I_R_TT] = -0.8
+  env = _env(torch.full((1, 6), 5.0), step)
+  hook = _hook(max_p=0.5, tau=0.0)
+  hook(env)
+  delta = env.extras[CAT_DELTA_KEY]
+  assert bool((delta > 0).all())
+  r_pos = env.extras[CAT_R_POS_KEY]
+  r_neg = step[:, [I_ACTION_RATE, I_JOINT_LIM, I_R_TT]].sum(dim=1) * env.step_dt
+  cat_return = r_pos * (1.0 - delta) + r_neg
+  expected = 10.0 * env.step_dt * (1.0 - delta) - 5.9 * env.step_dt
+  torch.testing.assert_close(cat_return, expected)
 
 
 def test_neg_sign_guard_raises_on_unregistered_negative_term():
@@ -154,7 +177,7 @@ def test_neg_sign_guard_raises_on_unregistered_negative_term():
   active = list(ACTIVE) + ["rogue_penalty"]
 
   def term_cfg(n):
-    w = -3.0 if n in ("action_rate", "joint_pos_limits", "rogue_penalty") else 1.0
+    w = -3.0 if n in ("action_rate", "joint_pos_limits", "r_tt", "rogue_penalty") else 1.0
     return SimpleNamespace(weight=w)
 
   rm = SimpleNamespace(_step_reward=torch.zeros(2, len(active)), active_terms=active,

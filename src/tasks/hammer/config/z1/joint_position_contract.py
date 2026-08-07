@@ -72,6 +72,42 @@ _REQUIRED_FIELDS = frozenset(
     }
 )
 
+_TRACKABILITY_REQUIRED_FIELDS = frozenset(
+    {
+        "schema_version",
+        "joint_names",
+        "physics_dt_s",
+        "control_decimation",
+        "reward_manager_dt_s",
+        "target_q90_cost",
+        "q90_squared_error_rad2",
+        "k_tt",
+        "canonical_seed",
+        "canonical_sample_count",
+        "canonical_pre_dt_cumulative_cost",
+        "canonical_returned_dose",
+        "canonical_applied_target_tape_sha256",
+        "canonical_squared_errors_rad2",
+        "canonical_squared_errors_sha256",
+        "repeatability_rows",
+        "source_qualification_payload_sha256",
+        "source_qualification_code_revision",
+        "source_asset_revision",
+        "calibration_code_revision",
+        "decision",
+        "payload_sha256",
+    }
+)
+_TRACKABILITY_ROW_FIELDS = frozenset(
+    {
+        "seed",
+        "sample_count",
+        "terminal_transition_captured",
+        "applied_target_tape_sha256",
+        "squared_errors_sha256",
+    }
+)
+
 
 @dataclass(frozen=True)
 class JointPositionContract:
@@ -94,6 +130,32 @@ class JointPositionContract:
     source_target_tape_rad: np.ndarray
     source_target_tape_sha256: str
     per_seed_replay_rows: tuple[Mapping[str, Any], ...]
+    payload_sha256: str
+
+
+@dataclass(frozen=True)
+class JointTrackabilityContract:
+    """Validated calibration bound to one immutable joint-position contract."""
+
+    joint_names: tuple[str, ...]
+    physics_dt_s: float
+    control_decimation: int
+    reward_manager_dt_s: float
+    target_q90_cost: float
+    q90_squared_error_rad2: float
+    k_tt: float
+    canonical_seed: int
+    canonical_sample_count: int
+    canonical_pre_dt_cumulative_cost: float
+    canonical_returned_dose: float
+    canonical_applied_target_tape_sha256: str
+    canonical_squared_errors_rad2: np.ndarray
+    canonical_squared_errors_sha256: str
+    repeatability_rows: tuple[Mapping[str, Any], ...]
+    source_qualification_payload_sha256: str
+    source_qualification_code_revision: str
+    source_asset_revision: str
+    calibration_code_revision: str
     payload_sha256: str
 
 
@@ -347,5 +409,211 @@ def load_joint_position_contract(path: str | Path) -> JointPositionContract:
         source_target_tape_rad=source_target_tape_rad,
         source_target_tape_sha256=source_target_tape_sha256,
         per_seed_replay_rows=frozen_rows,
+        payload_sha256=supplied_payload_sha256,
+    )
+
+
+def _finite_number(value: object, *, name: str, positive: bool = False) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a finite number")
+    number = float(value)
+    if not math.isfinite(number) or (positive and number <= 0.0):
+        qualifier = "finite and strictly positive" if positive else "finite"
+        raise ValueError(f"{name} must be {qualifier}")
+    return number
+
+
+def load_joint_trackability_contract(
+    path: str | Path, *, source_contract: JointPositionContract
+) -> JointTrackabilityContract:
+    """Load a complete PASS calibration bound to ``source_contract``.
+
+    The calibration revision is evidence provenance, not a demand that later
+    training use the same code revision.  The immutable source qualification
+    digest, task revision, asset revision, timing, and joint order are the
+    scientific-identity binding.
+    """
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot load joint-trackability contract: {exc}") from exc
+    if not isinstance(payload, dict) or not _is_finite_json(payload):
+        raise ValueError("trackability contract must be a finite JSON object")
+    missing = sorted(_TRACKABILITY_REQUIRED_FIELDS - set(payload))
+    unexpected = sorted(set(payload) - _TRACKABILITY_REQUIRED_FIELDS)
+    if missing or unexpected:
+        raise ValueError(
+            "trackability contract fields are not exact; "
+            f"missing={missing}, unexpected={unexpected}"
+        )
+
+    supplied_payload_sha256 = _require_hash(
+        payload["payload_sha256"], name="payload_sha256"
+    )
+    unsigned_payload = dict(payload)
+    unsigned_payload.pop("payload_sha256")
+    if _sha256(unsigned_payload) != supplied_payload_sha256:
+        raise ValueError("payload_sha256 does not match canonical trackability payload")
+    if isinstance(payload["schema_version"], bool) or payload["schema_version"] != 1:
+        raise ValueError("unsupported joint-trackability schema_version")
+    if payload["decision"] != "PASS":
+        raise ValueError("joint-trackability contract decision must be PASS")
+    joint_names = _require_exact_joint_order(payload["joint_names"], name="joint_names")
+    if joint_names != tuple(source_contract.joint_names):
+        raise ValueError("trackability joint_names do not match source qualification")
+
+    physics_dt_s = _finite_number(payload["physics_dt_s"], name="physics_dt_s", positive=True)
+    if physics_dt_s != 0.002 or physics_dt_s != float(source_contract.physics_dt_s):
+        raise ValueError("physics_dt_s does not match the source 500 Hz contract")
+    control_decimation = payload["control_decimation"]
+    if (
+        isinstance(control_decimation, bool)
+        or control_decimation != 10
+        or control_decimation != source_contract.control_decimation
+    ):
+        raise ValueError("control_decimation does not match the source contract")
+    reward_manager_dt_s = _finite_number(
+        payload["reward_manager_dt_s"], name="reward_manager_dt_s", positive=True
+    )
+    if reward_manager_dt_s != physics_dt_s * control_decimation or reward_manager_dt_s != 0.02:
+        raise ValueError("reward_manager_dt_s must be exactly physics_dt_s * decimation = 0.02")
+
+    target_q90_cost = _finite_number(
+        payload["target_q90_cost"], name="target_q90_cost", positive=True
+    )
+    if target_q90_cost != 0.1:
+        raise ValueError("target_q90_cost must be exactly 0.1")
+    q90 = _finite_number(
+        payload["q90_squared_error_rad2"],
+        name="q90_squared_error_rad2",
+        positive=True,
+    )
+    if q90 < 1e-8:
+        raise ValueError("q90_squared_error_rad2 is below 1e-8")
+    k_tt = _finite_number(payload["k_tt"], name="k_tt", positive=True)
+    if not math.isclose(k_tt, target_q90_cost / q90, rel_tol=1e-12, abs_tol=0.0):
+        raise ValueError("k_tt does not equal target_q90_cost / q90")
+
+    canonical_seed = payload["canonical_seed"]
+    canonical_sample_count = payload["canonical_sample_count"]
+    if canonical_seed != REQUIRED_SEEDS[0] or isinstance(canonical_seed, bool):
+        raise ValueError("canonical_seed must be 1000")
+    if (
+        isinstance(canonical_sample_count, bool)
+        or not isinstance(canonical_sample_count, int)
+        or canonical_sample_count <= 0
+    ):
+        raise ValueError("canonical_sample_count must be a positive integer")
+    pre_dt_cost = _finite_number(
+        payload["canonical_pre_dt_cumulative_cost"],
+        name="canonical_pre_dt_cumulative_cost",
+    )
+    if pre_dt_cost < 0.0 or pre_dt_cost > 5.0:
+        raise ValueError("canonical pre-dt cumulative cost must lie in [0, 5]")
+    returned_dose = _finite_number(
+        payload["canonical_returned_dose"], name="canonical_returned_dose"
+    )
+    if not math.isclose(
+        returned_dose, pre_dt_cost * reward_manager_dt_s, rel_tol=1e-12, abs_tol=1e-15
+    ):
+        raise ValueError("canonical_returned_dose does not equal pre-dt cost times 0.02")
+    target_hash = _require_hash(
+        payload["canonical_applied_target_tape_sha256"],
+        name="canonical_applied_target_tape_sha256",
+    )
+    error_hash = _require_hash(
+        payload["canonical_squared_errors_sha256"],
+        name="canonical_squared_errors_sha256",
+    )
+    if _contains_json_bool(payload["canonical_squared_errors_rad2"]):
+        raise ValueError("canonical_squared_errors_rad2 must not contain JSON booleans")
+    try:
+        canonical_errors = np.asarray(
+            payload["canonical_squared_errors_rad2"], dtype=np.float64
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("canonical_squared_errors_rad2 must be numeric") from exc
+    if (
+        canonical_errors.shape != (canonical_sample_count,)
+        or not np.all(np.isfinite(canonical_errors))
+        or np.any(canonical_errors < 0.0)
+    ):
+        raise ValueError("canonical squared errors must be finite, nonnegative, and complete")
+    if _sha256(payload["canonical_squared_errors_rad2"]) != error_hash:
+        raise ValueError("canonical squared-error hash does not match its samples")
+    derived_q90 = float(np.quantile(canonical_errors, 0.90))
+    if not math.isclose(q90, derived_q90, rel_tol=1e-12, abs_tol=0.0):
+        raise ValueError("q90 does not match the canonical squared-error samples")
+    derived_pre_dt_cost = k_tt * float(np.sum(canonical_errors, dtype=np.float64))
+    if not math.isclose(pre_dt_cost, derived_pre_dt_cost, rel_tol=1e-12, abs_tol=1e-15):
+        raise ValueError("pre-dt cumulative cost does not match canonical samples")
+
+    rows = payload["repeatability_rows"]
+    if not isinstance(rows, list) or len(rows) != len(REQUIRED_SEEDS):
+        raise ValueError("repeatability_rows must contain exactly seeds 1000 through 1015")
+    for row, expected_seed in zip(rows, REQUIRED_SEEDS, strict=True):
+        if not isinstance(row, dict) or set(row) != _TRACKABILITY_ROW_FIELDS:
+            raise ValueError("each repeatability row must have the exact frozen schema")
+        if (
+            isinstance(row["seed"], bool)
+            or row["seed"] != expected_seed
+            or row["sample_count"] != canonical_sample_count
+            or isinstance(row["sample_count"], bool)
+            or row["terminal_transition_captured"] is not True
+        ):
+            raise ValueError("repeatability row seed, count, or terminal evidence is invalid")
+        if _require_hash(
+            row["applied_target_tape_sha256"], name="applied target tape hash"
+        ) != target_hash or _require_hash(
+            row["squared_errors_sha256"], name="squared errors hash"
+        ) != error_hash:
+            raise ValueError("repeatability rows must match the unique canonical trajectory")
+
+    qualification_hash = _require_hash(
+        payload["source_qualification_payload_sha256"],
+        name="source_qualification_payload_sha256",
+    )
+    if qualification_hash != source_contract.payload_sha256:
+        raise ValueError("trackability calibration is bound to another qualification payload")
+    qualified_replay_hash = source_contract.per_seed_replay_rows[0]["replay"][
+        "replay_applied_target_tape_sha256"
+    ]
+    if target_hash != qualified_replay_hash:
+        raise ValueError("calibration target tape does not match the qualified applied replay")
+    source_code_revision = _require_revision(
+        payload["source_qualification_code_revision"],
+        name="source_qualification_code_revision",
+    )
+    if source_code_revision != source_contract.source_code_revision:
+        raise ValueError("source qualification code revision does not match")
+    source_asset_revision = _require_revision(
+        payload["source_asset_revision"], name="source_asset_revision"
+    )
+    if source_asset_revision != source_contract.source_asset_revision:
+        raise ValueError("source asset revision does not match")
+    calibration_code_revision = _require_revision(
+        payload["calibration_code_revision"], name="calibration_code_revision"
+    )
+
+    return JointTrackabilityContract(
+        joint_names=joint_names,
+        physics_dt_s=physics_dt_s,
+        control_decimation=control_decimation,
+        reward_manager_dt_s=reward_manager_dt_s,
+        target_q90_cost=target_q90_cost,
+        q90_squared_error_rad2=q90,
+        k_tt=k_tt,
+        canonical_seed=canonical_seed,
+        canonical_sample_count=canonical_sample_count,
+        canonical_pre_dt_cumulative_cost=pre_dt_cost,
+        canonical_returned_dose=returned_dose,
+        canonical_applied_target_tape_sha256=target_hash,
+        canonical_squared_errors_rad2=_immutable_array(canonical_errors),
+        canonical_squared_errors_sha256=error_hash,
+        repeatability_rows=tuple(_freeze_json(row) for row in rows),
+        source_qualification_payload_sha256=qualification_hash,
+        source_qualification_code_revision=source_code_revision,
+        source_asset_revision=source_asset_revision,
+        calibration_code_revision=calibration_code_revision,
         payload_sha256=supplied_payload_sha256,
     )

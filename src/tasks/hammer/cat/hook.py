@@ -35,9 +35,10 @@ if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
 
 # Reward terms with negative weight. r_neg rides through the discount UNSCALED (Decision 1) — only the
-# positive task return is multiplied by (1−δ). This is the complete negative set (CLAUDE.md live
-# weights: action_rate=-0.01, joint_pos_limits=-10; every other term is positive).
-_NEG_TERMS: tuple[str, ...] = ("action_rate", "joint_pos_limits")
+# positive task return is multiplied by (1−δ). This is the complete negative set for the
+# fixed-joint treatments (action_rate=-0.01, joint_pos_limits=-10, r_tt=-1). ``r_tt`` emits a
+# positive raw cost; its negative reward weight must ride through CaT unscaled.
+_NEG_TERMS: tuple[str, ...] = ("action_rate", "joint_pos_limits", "r_tt")
 
 # Where the velocity margin |q̇_j| is sampled. "control_rate" is the shipped signal (post-decimation
 # joint_vel — it ALIASES the within-window strike spike). "substep" reads the per-joint 500 Hz peak

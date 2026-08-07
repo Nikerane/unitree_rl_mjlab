@@ -40,6 +40,11 @@ from .impulse_bound import (  # noqa: F401
 from .observations import *  # noqa: F403
 from .rewards import *  # noqa: F403
 from .terminations import *  # noqa: F403
+from .trackability import (  # noqa: F401
+  joint_target_rmse,
+  joint_target_squared_error,
+  joint_trackability_cost,
+)
 from .velocity_bound import (  # noqa: F401
   CaTJointVelConstraint,
   SubstepPeakJointVel,
