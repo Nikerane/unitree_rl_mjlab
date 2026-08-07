@@ -243,7 +243,83 @@ def test_cli_does_not_print_pass_before_consumer_round_trip(
 
     with pytest.raises(ValueError, match="physics_dt_s"):
         calibration.main(["--qualification", "synthetic.json", "--out", str(output)])
+    assert not output.exists()
+
+    sentinel = b"PREEXISTING VALID EVIDENCE\n"
+    output.write_bytes(sentinel)
+    with pytest.raises(ValueError, match="physics_dt_s"):
+        calibration.main(["--qualification", "synthetic.json", "--out", str(output)])
+    assert output.read_bytes() == sentinel
+    assert list(tmp_path.glob(".consumer-invalid.json.*.tmp")) == []
     assert "PASS" not in capsys.readouterr().out
+
+
+def _orchestration_source_contract():
+    return SimpleNamespace(
+        payload_sha256="a" * 64,
+        source_code_revision="b" * 40,
+        source_asset_revision="c" * 40,
+    )
+
+
+@pytest.mark.parametrize("changed_label", ("code", "asset"))
+def test_run_calibration_rejects_worktree_that_becomes_dirty_after_rollout(
+    monkeypatch: pytest.MonkeyPatch, changed_label: str
+) -> None:
+    source = _orchestration_source_contract()
+    monkeypatch.setattr(calibration, "load_joint_position_contract", lambda path: source)
+    monkeypatch.setattr(
+        calibration,
+        "_rollout_repeated_trajectory",
+        lambda contract: (_runs(), 0.002, 10),
+    )
+    monkeypatch.setattr(
+        calibration,
+        "_git_revision",
+        lambda path: source.source_asset_revision
+        if "safe_impact_manipulation" in str(path)
+        else "d" * 40,
+    )
+    checks = {"code": 0, "asset": 0}
+
+    def clean(path: Path, *, label: str) -> None:
+        checks[label] += 1
+        if label == changed_label and checks[label] == 2:
+            raise RuntimeError(f"{label} worktree is dirty after rollout")
+
+    monkeypatch.setattr(calibration, "_require_clean_git_worktree", clean)
+
+    with pytest.raises(RuntimeError, match="dirty after rollout"):
+        calibration.run_calibration("synthetic.json")
+
+
+@pytest.mark.parametrize("changed_label", ("code", "asset"))
+def test_run_calibration_rejects_head_change_during_rollout(
+    monkeypatch: pytest.MonkeyPatch, changed_label: str
+) -> None:
+    source = _orchestration_source_contract()
+    monkeypatch.setattr(calibration, "load_joint_position_contract", lambda path: source)
+    monkeypatch.setattr(calibration, "_require_clean_git_worktree", lambda path, label: None)
+    monkeypatch.setattr(
+        calibration,
+        "_rollout_repeated_trajectory",
+        lambda contract: (_runs(), 0.002, 10),
+    )
+    code_root = Path(calibration.__file__).resolve().parents[2]
+    reads = {"code": 0, "asset": 0}
+
+    def revision(path: Path) -> str:
+        label = "code" if path == code_root else "asset"
+        reads[label] += 1
+        initial = "d" * 40 if label == "code" else source.source_asset_revision
+        if label == changed_label and reads[label] == 2:
+            return "e" * 40
+        return initial
+
+    monkeypatch.setattr(calibration, "_git_revision", revision)
+
+    with pytest.raises(RuntimeError, match=f"{changed_label} HEAD changed"):
+        calibration.run_calibration("synthetic.json")
 
 
 def test_calibration_uses_seed_1000_once_and_15_runs_only_as_witnesses() -> None:

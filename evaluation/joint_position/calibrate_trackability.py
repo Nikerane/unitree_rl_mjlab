@@ -6,8 +6,10 @@ import argparse
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import subprocess
+import tempfile
 from typing import Any, Sequence
 
 import numpy as np
@@ -253,6 +255,27 @@ def load_joint_trackability_contract(path: str | Path, *, source_contract: Any) 
     return load(path, source_contract=source_contract)
 
 
+def publish_validated_json(
+    path: str | Path, payload: object, *, source_contract: Any
+) -> None:
+    """Strict-load deterministic sibling bytes before atomically publishing them."""
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        write_canonical_json(temporary, payload)
+        load_joint_trackability_contract(
+            temporary, source_contract=source_contract
+        )
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def _git_revision(path: Path) -> str:
     return subprocess.run(
         ("git", "rev-parse", "HEAD"),
@@ -432,16 +455,23 @@ def run_calibration(qualification_path: str | Path) -> dict[str, Any]:
     )
     _require_clean_git_worktree(root, label="code")
     _require_clean_git_worktree(asset_root, label="asset")
-    live_asset_revision = _git_revision(asset_root)
-    if live_asset_revision != contract.source_asset_revision:
+    code_revision = _git_revision(root)
+    asset_revision = _git_revision(asset_root)
+    if asset_revision != contract.source_asset_revision:
         raise RuntimeError("live asset revision differs from the qualified asset revision")
     runs, physics_dt_s, control_decimation = _rollout_repeated_trajectory(contract)
+    _require_clean_git_worktree(root, label="code")
+    _require_clean_git_worktree(asset_root, label="asset")
+    if _git_revision(root) != code_revision:
+        raise RuntimeError("code HEAD changed during calibration rollout")
+    if _git_revision(asset_root) != asset_revision:
+        raise RuntimeError("asset HEAD changed during calibration rollout")
     return build_trackability_payload(
         runs=runs,
         source_qualification_payload_sha256=contract.payload_sha256,
         source_qualification_code_revision=contract.source_code_revision,
-        source_asset_revision=live_asset_revision,
-        calibration_code_revision=_git_revision(root),
+        source_asset_revision=asset_revision,
+        calibration_code_revision=code_revision,
         physics_dt_s=physics_dt_s,
         control_decimation=control_decimation,
     )
@@ -453,9 +483,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", required=True, type=Path)
     args = parser.parse_args(argv)
     payload = run_calibration(args.qualification)
-    write_canonical_json(args.out, payload)
     source_contract = load_joint_position_contract(args.qualification)
-    load_joint_trackability_contract(args.out, source_contract=source_contract)
+    publish_validated_json(
+        args.out, payload, source_contract=source_contract
+    )
     print(
         "joint trackability calibration: PASS "
         f"q90={payload['q90_squared_error_rad2']:.9g} "
