@@ -131,6 +131,7 @@ def test_derive_k_tt_rejects_degenerate_or_nonfinite_calibration(errors) -> None
 
 def _runs(*, changed_witness: bool = False):
     targets = [[0.2] * 6, [0.3] * 6, [0.4] * 6]
+    qualified_target_hash = canonical_sha256(targets)
     errors = [0.01, 0.02, 0.04]
     runs = []
     for seed in range(1000, 1016):
@@ -141,6 +142,7 @@ def _runs(*, changed_witness: bool = False):
             {
                 "seed": seed,
                 "applied_target_tape_rad": copy.deepcopy(targets),
+                "qualified_applied_target_tape_sha256": qualified_target_hash,
                 "squared_errors_rad2": run_errors,
                 "terminal_transition_captured": True,
             }
@@ -221,8 +223,21 @@ def test_calibration_rejects_witness_drift_and_excessive_cumulative_cost() -> No
     for run in expensive:
         run["squared_errors_rad2"] = [1e-8] * 1000 + [1.0]
         run["applied_target_tape_rad"] = [[0.2] * 6] * 1001
+        run["qualified_applied_target_tape_sha256"] = canonical_sha256(
+            run["applied_target_tape_rad"]
+        )
     with pytest.raises(ValueError, match="cumulative"):
         _build_payload(runs=expensive)
+
+
+def test_calibration_rejects_mutually_repeatable_live_tape_not_banked_per_seed() -> None:
+    """Sixteen identical live runs are invalid when they do not replay the qualified tape."""
+    runs = _runs()
+    different_live_tape = [[0.25] * 6, [0.35] * 6, [0.45] * 6]
+    for run in runs:
+        run["applied_target_tape_rad"] = copy.deepcopy(different_live_tape)
+    with pytest.raises(ValueError, match="qualified replay"):
+        _build_payload(runs=runs)
 
 
 def _source_contract():
@@ -234,12 +249,14 @@ def _source_contract():
         joint_names=JOINT_NAMES,
         physics_dt_s=0.002,
         control_decimation=10,
-        per_seed_replay_rows=(
+        per_seed_replay_rows=tuple(
             {
                 "replay": {
-                    "replay_applied_target_tape_sha256": qualified_target_hash
+                    "replay_applied_target_tape_sha256": qualified_target_hash,
+                    "target_count": 3,
                 }
-            },
+            }
+            for _ in range(16)
         ),
     )
 
@@ -258,6 +275,40 @@ def test_trackability_loader_is_strict_identity_bound_and_deeply_immutable(
     assert loaded.repeatability_rows[0]["seed"] == 1000
     with pytest.raises(TypeError):
         loaded.repeatability_rows[0]["seed"] = 42
+
+
+def test_trackability_loader_rejects_self_consistent_truncated_sample_set(
+    tmp_path: Path,
+) -> None:
+    """A rehashed two-step calibration cannot stand in for the three-step qualified replay."""
+    payload = _build_payload()
+    errors = payload["canonical_squared_errors_rad2"][:-1]
+    q90 = float(np.quantile(errors, 0.90))
+    k_tt = 0.1 / q90
+    error_hash = canonical_sha256(errors)
+    pre_dt_cost = k_tt * float(np.sum(errors, dtype=np.float64))
+    payload.update(
+        canonical_sample_count=len(errors),
+        canonical_squared_errors_rad2=errors,
+        canonical_squared_errors_sha256=error_hash,
+        q90_squared_error_rad2=q90,
+        k_tt=k_tt,
+        canonical_pre_dt_cumulative_cost=pre_dt_cost,
+        canonical_returned_dose=pre_dt_cost * 0.02,
+    )
+    for row in payload["repeatability_rows"]:
+        row["sample_count"] = len(errors)
+        row["squared_errors_sha256"] = error_hash
+    unsigned = dict(payload)
+    unsigned.pop("payload_sha256")
+    payload["payload_sha256"] = canonical_sha256(unsigned)
+    artifact = tmp_path / "truncated-trackability.json"
+    write_canonical_json(artifact, payload)
+
+    with pytest.raises(ValueError, match="qualified replay target_count"):
+        load_joint_trackability_contract(
+            artifact, source_contract=_source_contract()
+        )
 
 
 @pytest.mark.parametrize(

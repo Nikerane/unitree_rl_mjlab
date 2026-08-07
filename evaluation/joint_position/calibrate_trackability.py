@@ -114,11 +114,20 @@ def _validated_run(run: object, *, expected_seed: int) -> tuple[dict[str, Any], 
         or np.any(errors < 0.0)
     ):
         raise ValueError("each run needs matching finite [step,6] targets and squared errors")
+    applied_target_hash = canonical_sha256(targets.tolist())
+    qualified_target_hash = _required_hash(
+        run.get("qualified_applied_target_tape_sha256"),
+        name="qualified_applied_target_tape_sha256",
+    )
+    if applied_target_hash != qualified_target_hash:
+        raise ValueError(
+            f"seed {expected_seed} live target tape does not match its qualified replay"
+        )
     row = {
         "seed": expected_seed,
         "sample_count": int(errors.size),
         "terminal_transition_captured": True,
-        "applied_target_tape_sha256": canonical_sha256(targets.tolist()),
+        "applied_target_tape_sha256": applied_target_hash,
         "squared_errors_sha256": canonical_sha256(errors.tolist()),
     }
     return row, errors
@@ -321,6 +330,9 @@ def _rollout_repeated_trajectory(source_contract: Any) -> list[dict[str, Any]]:
                 {
                     "seed": int(seed),
                     "applied_target_tape_rad": targets,
+                    "qualified_applied_target_tape_sha256": expected_replay[
+                        "replay_applied_target_tape_sha256"
+                    ],
                     "squared_errors_rad2": errors,
                     "terminal_transition_captured": terminal,
                 }

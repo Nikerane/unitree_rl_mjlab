@@ -504,6 +504,21 @@ def load_joint_trackability_contract(
         or canonical_sample_count <= 0
     ):
         raise ValueError("canonical_sample_count must be a positive integer")
+    for qualified_row in source_contract.per_seed_replay_rows:
+        qualified_replay = qualified_row.get("replay")
+        qualified_count = (
+            qualified_replay.get("target_count")
+            if isinstance(qualified_replay, Mapping)
+            else None
+        )
+        if (
+            isinstance(qualified_count, bool)
+            or not isinstance(qualified_count, int)
+            or qualified_count != canonical_sample_count
+        ):
+            raise ValueError(
+                "canonical_sample_count must equal every qualified replay target_count"
+            )
     pre_dt_cost = _finite_number(
         payload["canonical_pre_dt_cumulative_cost"],
         name="canonical_pre_dt_cumulative_cost",

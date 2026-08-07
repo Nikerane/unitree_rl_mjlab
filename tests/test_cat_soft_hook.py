@@ -169,6 +169,35 @@ def test_nonzero_delta_leaves_all_three_penalties_unscaled() -> None:
   torch.testing.assert_close(cat_return, expected)
 
 
+def test_legacy_reward_table_without_optional_r_tt_keeps_previous_split() -> None:
+  """FIC-0 and Cartesian tasks omit r_tt but retain the original two penalty columns."""
+  legacy_active = [name for name in ACTIVE if name != "r_tt"]
+  step = torch.zeros(1, len(legacy_active))
+  step[:, legacy_active.index("approach")] = 4.0
+  step[:, legacy_active.index("impact_progress")] = 6.0
+  step[:, legacy_active.index("action_rate")] = -0.1
+  step[:, legacy_active.index("joint_pos_limits")] = -5.0
+  rm = SimpleNamespace(
+    _step_reward=step,
+    active_terms=legacy_active,
+    get_term_cfg=_term_cfg,
+    _scale_by_dt=True,
+  )
+  env = SimpleNamespace(
+    scene={"robot": SimpleNamespace(data=SimpleNamespace(joint_vel=torch.ones(1, 6)))},
+    reward_manager=rm,
+    step_dt=0.02,
+    extras={},
+  )
+  hook = _hook()
+  hook(env)
+  assert hook._neg_idx == [
+    legacy_active.index("action_rate"),
+    legacy_active.index("joint_pos_limits"),
+  ]
+  torch.testing.assert_close(env.extras[CAT_R_POS_KEY], torch.tensor([0.2]))
+
+
 def test_neg_sign_guard_raises_on_unregistered_negative_term():
   # MF-3: a future negative-weight reward term not in _NEG_TERMS would be silently discounted by
   # (1-δ) (penalty-evasion exploit). The hook must fail loudly on first __call__.
