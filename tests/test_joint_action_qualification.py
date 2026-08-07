@@ -57,6 +57,15 @@ def _canonical_sha256(value: object) -> str:
 
 
 TAPE_SHA256 = _canonical_sha256(TAPE)
+REPLAY_TAPE_SHA256 = _canonical_sha256(
+    [
+        [
+            value + (5e-11 if index == 0 else 0.0)
+            for index, value in enumerate(row)
+        ]
+        for row in TAPE
+    ]
+)
 
 
 def _canonical_payload_sha256(payload: dict[str, object]) -> str:
@@ -75,6 +84,9 @@ def _passing_rows() -> list[dict[str, object]]:
             "seed": seed,
             "passed": True,
             "source_target_tape_sha256": TAPE_SHA256,
+            "replay": {
+                "replay_applied_target_tape_sha256": REPLAY_TAPE_SHA256,
+            },
         }
         for seed in range(1000, 1016)
     ]
@@ -260,7 +272,7 @@ def _passing_rollout_record(*, mode: str = "source") -> dict[str, object]:
             for index in range(6)
         ],
     }
-    return {
+    record: dict[str, object] = {
         "seed": 1000,
         "mode": mode,
         "joint_names": copy.deepcopy(JOINT_NAMES),
@@ -295,6 +307,9 @@ def _passing_rollout_record(*, mode: str = "source") -> dict[str, object]:
         "waypoint_credit_after_contact": False,
         "geometry": geometry,
     }
+    if mode == "replay":
+        record["replay_applied_target_tape_sha256"] = REPLAY_TAPE_SHA256
+    return record
 
 
 @pytest.mark.parametrize(
@@ -433,6 +448,108 @@ def test_contract_builder_is_deterministic_and_loader_compatible(
     assert loaded.payload_sha256 == first["payload_sha256"]
     assert loaded.per_seed_replay_rows[0]["source"]["mode"] == "source"
     assert loaded.per_seed_replay_rows[0]["replay"]["mode"] == "replay"
+
+
+def test_replay_target_tape_drift_fails_qualification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Overwriting a replay seed's measured target hash would hide backend drift."""
+    import mjlab.tasks.registry
+
+    seeds = tuple(range(1000, 1016))
+    source_tape = np.repeat(np.asarray(TAPE, dtype=np.float64), 6, axis=0)
+    source_hash = qualifier.canonical_sha256(source_tape.tolist())
+    source_rows: list[dict[str, object]] = []
+    replay_rows: list[dict[str, object]] = []
+    source_tapes: dict[int, np.ndarray] = {}
+    replay_tapes: dict[int, np.ndarray] = {}
+    conforming_replay_hash = ""
+    for seed in seeds:
+        source = _passing_rollout_record()
+        replay = _passing_rollout_record(mode="replay")
+        source.update({"seed": seed, "source_target_tape_sha256": source_hash})
+        replay_tape = source_tape.copy()
+        replay_tape[0, 0] += 5e-11
+        if seed == 1000:
+            replay_tape[0, 0] += 1e-4
+        replay_hash = qualifier.canonical_sha256(replay_tape.tolist())
+        if seed == 1001:
+            conforming_replay_hash = replay_hash
+        replay.update({"seed": seed, "source_target_tape_sha256": replay_hash})
+        source_rows.append(source)
+        replay_rows.append(replay)
+        source_tapes[seed] = source_tape.copy()
+        replay_tapes[seed] = replay_tape
+
+    rollout_calls = 0
+
+    def fake_rollout(
+        cfg: object,
+        *,
+        seeds: tuple[int, ...],
+        mode: str,
+        **kwargs: object,
+    ) -> tuple[list[dict[str, object]], dict[int, np.ndarray], np.ndarray, np.ndarray]:
+        nonlocal rollout_calls
+        del cfg, kwargs
+        assert seeds == tuple(range(1000, 1016))
+        rollout_calls += 1
+        if mode == "source":
+            return (
+                copy.deepcopy(source_rows),
+                copy.deepcopy(source_tapes),
+                np.asarray([0.0, 0.5, -0.5, 0.0, 0.1, -0.1]),
+                np.asarray(PHYSICAL_CLIPS),
+            )
+        return (
+            copy.deepcopy(replay_rows),
+            copy.deepcopy(replay_tapes),
+            np.asarray([0.0, 0.5, -0.5, 0.0, 0.1, -0.1]),
+            np.asarray(PHYSICAL_CLIPS),
+        )
+
+    cfg = SimpleNamespace(scene=SimpleNamespace(num_envs=1), auto_reset=True)
+    monkeypatch.setattr(
+        mjlab.tasks.registry, "load_env_cfg", lambda *args, **kwargs: cfg
+    )
+    monkeypatch.setattr(qualifier, "_rollout_mode", fake_rollout)
+    monkeypatch.setattr(
+        qualifier, "configure_replay_cfg", lambda parent, **kwargs: parent
+    )
+    monkeypatch.setattr(
+        qualifier,
+        "source_task_config_projection",
+        lambda source_cfg: copy.deepcopy(SOURCE_TASK_CONFIG_PROJECTION),
+    )
+    monkeypatch.setattr(qualifier, "_git_revision", lambda root: "a" * 40)
+    monkeypatch.setattr(qualifier, "_external_asset_revision", lambda path: "b" * 40)
+
+    payload = qualifier.run_qualification(seeds)
+
+    assert rollout_calls == 2
+    assert payload["decision"] == "FAIL"
+    assert all(
+        row["failures"]
+        == ["replay applied target-tape hash is not identical across seeds"]
+        for row in payload["per_seed_replay_rows"]
+    )
+    assert all(
+        row["replay"]["passed"] is False
+        for row in payload["per_seed_replay_rows"]
+    )
+    drifted = payload["per_seed_replay_rows"][0]["replay"]
+    conforming = payload["per_seed_replay_rows"][1]["replay"]
+    assert drifted["source_target_tape_sha256"] == source_hash
+    assert conforming["source_target_tape_sha256"] == source_hash
+    assert (
+        drifted["replay_applied_target_tape_sha256"]
+        != conforming_replay_hash
+    )
+    assert (
+        conforming["replay_applied_target_tape_sha256"]
+        == conforming_replay_hash
+    )
+    assert conforming_replay_hash != source_hash
 
 
 def test_failed_contract_still_serializes_but_loader_rejects_it(
@@ -1081,6 +1198,20 @@ def test_loader_rejects_inconsistent_source_tape_hashes(tmp_path: Path) -> None:
     _write_payload(artifact, payload)
 
     with pytest.raises(ValueError):
+        load_joint_position_contract(artifact)
+
+
+def test_loader_rejects_replay_applied_tape_hash_drift(tmp_path: Path) -> None:
+    """Trusting a claimed PASS after replay drift would admit nondeterministic evidence."""
+    payload = _passing_payload()
+    payload["per_seed_replay_rows"][3]["replay"][
+        "replay_applied_target_tape_sha256"
+    ] = "d" * 64
+    payload["payload_sha256"] = _canonical_payload_sha256(payload)
+    artifact = tmp_path / "drifted-replay-tape.json"
+    _write_payload(artifact, payload)
+
+    with pytest.raises(ValueError, match="replay applied target-tape"):
         load_joint_position_contract(artifact)
 
 

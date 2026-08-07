@@ -304,9 +304,23 @@ def load_joint_position_contract(path: str | Path) -> JointPositionContract:
     rows = payload["per_seed_replay_rows"]
     if not isinstance(rows, list) or not qualification_passes(rows, REQUIRED_SEEDS):
         raise ValueError("per_seed_replay_rows must contain one passing row per required seed")
-    for row in rows:
+    replay_applied_reference_sha256: str | None = None
+    for index, row in enumerate(rows):
         if row.get("source_target_tape_sha256") != source_target_tape_sha256:
             raise ValueError("per-seed replay rows must bind the same source target tape")
+        replay = row.get("replay")
+        if not isinstance(replay, Mapping):
+            raise ValueError("per-seed replay row must contain replay evidence")
+        replay_applied_sha256 = _require_hash(
+            replay.get("replay_applied_target_tape_sha256"),
+            name="replay applied target-tape SHA-256",
+        )
+        if index == 0:
+            replay_applied_reference_sha256 = replay_applied_sha256
+        elif replay_applied_sha256 != replay_applied_reference_sha256:
+            raise ValueError(
+                "replay applied target-tape SHA-256 must be identical across seeds"
+            )
 
     default_joint_pos_rad = _immutable_array(default_joint_pos_rad)
     physical_clip_rad = _immutable_array(physical_clip_rad)

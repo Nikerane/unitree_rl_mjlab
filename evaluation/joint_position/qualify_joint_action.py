@@ -113,6 +113,14 @@ def canonical_sha256(value: object) -> str:
     return hashlib.sha256(_canonical_json_bytes(value)).hexdigest()
 
 
+def _is_sha256_hex(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
 def _finite_json(value: object) -> bool:
     if value is None or isinstance(value, (str, bool)):
         return True
@@ -295,6 +303,21 @@ def build_contract_payload(
     tape_sha256 = canonical_sha256(tape_json)
     projection = copy.deepcopy(source_task_config_projection)
     projection_sha256 = canonical_sha256(projection)
+    replay_applied_hashes = [
+        row.get("replay_applied_target_tape_sha256") for row in replay_rows
+    ]
+    if not replay_applied_hashes or not all(
+        _is_sha256_hex(value) for value in replay_applied_hashes
+    ):
+        replay_hash_failure = (
+            "replay applied target-tape hash is missing or malformed"
+        )
+    elif len(set(replay_applied_hashes)) != 1:
+        replay_hash_failure = (
+            "replay applied target-tape hash is not identical across seeds"
+        )
+    else:
+        replay_hash_failure = None
 
     paired_rows: list[dict[str, Any]] = []
     pair_count = max(len(source_rows), len(replay_rows))
@@ -305,6 +328,8 @@ def build_contract_payload(
         replay_failures = rollout_gate_failures(
             replay, expected_geometry=source.get("geometry")
         )
+        if replay_hash_failure is not None:
+            replay_failures.append(replay_hash_failure)
         source["failures"] = source_failures
         source["passed"] = not source_failures
         replay["failures"] = replay_failures
@@ -1257,6 +1282,9 @@ def run_qualification(seeds: tuple[int, ...]) -> dict[str, Any]:
     if not np.allclose(replay_physical, physical, rtol=0.0, atol=1e-12):
         raise RuntimeError("source/replay physical limits differ")
     for row in replay_rows:
+        row["replay_applied_target_tape_sha256"] = row.get(
+            "source_target_tape_sha256"
+        )
         row["source_target_tape_sha256"] = canonical_hash
 
     return build_contract_payload(

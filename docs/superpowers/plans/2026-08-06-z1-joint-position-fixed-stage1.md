@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Work locally only in `/Users/nikerane/repos/unitree_rl_mjlab-worktrees/overnight-impulse-minimal`.
-- Create the implementation branch `codex/z1-joint-position-fixed-stage1` in this same worktree. Do not use the stale `joint-position-fic` branch at `83b050b` and do not create a new `/private/tmp` worktree.
+- Create the implementation branch `z1-joint-position-fixed` in this same worktree. Do not use the stale `joint-position-fic` branch at `83b050b` and do not create a new `/private/tmp` worktree.
 - Preserve every existing Cartesian registration, signature, test, checkpoint contract, and presentation result.
 - Fixed impedance only. Keep the current `BuiltinPositionActuator` gains and effort limits; do not call `set_gains`, introduce gain actions, or change actuator classes.
 - Command exactly `joint1` through `joint6`; never command `jointGripper`.
@@ -195,7 +195,7 @@ Seeds `1000` through `1015` in G1 are deterministic repeatability runs under the
 ```bash
 cd /Users/nikerane/repos/unitree_rl_mjlab-worktrees/overnight-impulse-minimal
 git status --short --branch
-git branch --list 'codex/z1-joint-position-fixed-stage1'
+git branch --list 'z1-joint-position-fixed'
 ```
 
 Require the two existing untracked presentation result directories to remain visible and unchanged. If the target branch name already exists, stop and inspect it; do not reuse or overwrite it automatically.
@@ -215,7 +215,7 @@ confirm that the seven named documentation changes belong in this checkpoint. Do
 not infer ownership from their modified status. After confirmation:
 
 ```bash
-git switch -c codex/z1-joint-position-fixed-stage1
+git switch -c z1-joint-position-fixed
 git status --short --branch
 ```
 
@@ -499,7 +499,7 @@ PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python \
 git add evaluation/joint_position/qualify_joint_action.py
 git add tests/test_joint_action_qualification.py
 git commit -m "feat(eval): implement causal joint action qualification"
-git push -u origin codex/z1-joint-position-fixed-stage1
+git push -u origin z1-joint-position-fixed
 ```
 
 - [ ] **Step 7: Reproduce on a clean revision-pinned checkout and bank the artifact**
@@ -1134,7 +1134,7 @@ git add tests/test_slurm_launchers.py
 git add docs/results/2026-08-06_joint_position_fixed_stage1_preregistration.md
 git commit -m "docs(hammer): freeze joint-position stage1 pilot"
 git status --short --branch
-git push -u origin codex/z1-joint-position-fixed-stage1
+git push -u origin z1-joint-position-fixed
 ```
 
 Only the clean pushed revision may train. The local untracked presentation evidence remains untouched.
