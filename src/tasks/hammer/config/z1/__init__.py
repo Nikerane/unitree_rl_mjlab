@@ -1,11 +1,21 @@
 """Z1 hammer-nail task configurations."""
 
+from pathlib import Path
+
+from mjlab.managers.reward_manager import RewardTermCfg
+from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.tasks.registry import register_mjlab_task
 from src.tasks.hammer.config.z1.env_cfgs import (
     install_z1_joint_position_action,
     z1_hammer_env_cfg,
 )
+from src.tasks.hammer.config.z1.joint_position_contract import (
+    JOINT_NAMES,
+    load_joint_position_contract,
+    load_joint_trackability_contract,
+)
 from src.tasks.hammer.mdp.rewards import FirstStrikeBoundedImpactRewardTerm
+from src.tasks.hammer.mdp.trackability import joint_trackability_cost
 from src.tasks.hammer.config.z1.rl_cfg import z1_hammer_ppo_runner_cfg
 from src.tasks.hammer.rl.runner import HammerOnPolicyRunner
 
@@ -304,11 +314,40 @@ register_mjlab_task(
 )
 
 
-def _joint_position_fixed_env_cfg(*, play: bool = False):
+_JOINT_POSITION_ARTIFACT = (
+    Path(__file__).resolve().parent / "data/z1_joint_position_stage1.json"
+)
+_JOINT_TRACKABILITY_ARTIFACT = _JOINT_POSITION_ARTIFACT.with_name(
+    "z1_joint_trackability_stage1.json"
+)
+
+
+def _install_joint_trackability_cost(cfg):
+    source_contract = load_joint_position_contract(_JOINT_POSITION_ARTIFACT)
+    calibration = load_joint_trackability_contract(
+        _JOINT_TRACKABILITY_ARTIFACT, source_contract=source_contract
+    )
+    cfg.rewards["r_tt"] = RewardTermCfg(
+        func=joint_trackability_cost,
+        weight=-1.0,
+        params={
+            "robot_cfg": SceneEntityCfg(
+                "robot", joint_names=JOINT_NAMES, preserve_order=True
+            ),
+            "k_tt": calibration.k_tt,
+        },
+    )
+    return cfg
+
+
+def _joint_position_fixed_env_cfg(*, play: bool, trackability: bool):
     cfg = _presentation_i_off_env_cfg(
         play=play, velocity_cat=True, delivered_weight=4.0
     )
-    return install_z1_joint_position_action(cfg)
+    install_z1_joint_position_action(cfg)
+    if trackability:
+        _install_joint_trackability_cost(cfg)
+    return cfg
 
 
 register_mjlab_task(
@@ -316,8 +355,19 @@ register_mjlab_task(
         "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
         "CProgress-Vel-Delivered4-JointPosition-Fixed"
     ),
-    env_cfg=_joint_position_fixed_env_cfg(),
-    play_env_cfg=_joint_position_fixed_env_cfg(play=True),
+    env_cfg=_joint_position_fixed_env_cfg(play=False, trackability=False),
+    play_env_cfg=_joint_position_fixed_env_cfg(play=True, trackability=False),
+    rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+    runner_cls=HammerOnPolicyRunner,
+)
+
+register_mjlab_task(
+    task_id=(
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
+        "CProgress-Vel-Delivered4-JointPosition-Fixed-TT"
+    ),
+    env_cfg=_joint_position_fixed_env_cfg(play=False, trackability=True),
+    play_env_cfg=_joint_position_fixed_env_cfg(play=True, trackability=True),
     rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
     runner_cls=HammerOnPolicyRunner,
 )

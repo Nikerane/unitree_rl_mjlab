@@ -32,6 +32,7 @@ _JOINT_POSITION_PARENT_TASK = (
     "CProgress-Vel-Delivered4"
 )
 _JOINT_POSITION_FIC0_TASK = f"{_JOINT_POSITION_PARENT_TASK}-JointPosition-Fixed"
+_JOINT_POSITION_FICTT_TASK = f"{_JOINT_POSITION_FIC0_TASK}-TT"
 _JOINT_POSITION_NAMES = (
     "joint1",
     "joint2",
@@ -63,7 +64,7 @@ def guideline_envs_cpu():
 
 @pytest.fixture(scope="module")
 def joint_position_envs_cpu():
-    """Construct the additive FIC-0 arm and its matched Cartesian parent on CPU."""
+    """Construct the joint study arms and their matched Cartesian parent on CPU."""
     from mjlab.envs import ManagerBasedRlEnv
     from mjlab.tasks.registry import list_tasks, load_env_cfg
     import src.tasks  # noqa: F401  # populate the task registry in isolated runs
@@ -76,10 +77,13 @@ def joint_position_envs_cpu():
 
     envs = {}
     try:
-        for task_id in (
+        task_ids = [
             _JOINT_POSITION_PARENT_TASK,
             _JOINT_POSITION_FIC0_TASK,
-        ):
+        ]
+        if _JOINT_POSITION_FICTT_TASK in list_tasks():
+            task_ids.append(_JOINT_POSITION_FICTT_TASK)
+        for task_id in task_ids:
             cfg = load_env_cfg(task_id, play=True)
             cfg.scene.num_envs = 2
             envs[task_id] = ManagerBasedRlEnv(cfg, device="cpu")
@@ -112,6 +116,13 @@ def _joint_position_env(envs):
         f"missing registered task {_JOINT_POSITION_FIC0_TASK}"
     )
     return envs[_JOINT_POSITION_FIC0_TASK]
+
+
+def _joint_position_trackability_env(envs):
+    assert _JOINT_POSITION_FICTT_TASK in envs, (
+        f"missing registered task {_JOINT_POSITION_FICTT_TASK}"
+    )
+    return envs[_JOINT_POSITION_FICTT_TASK]
 
 
 def _apply_joint_action(env, action: torch.Tensor) -> torch.Tensor:
@@ -483,6 +494,47 @@ class TestStep:
 
 
 class TestJointPositionFixedConstruction:
+    def test_fictt_live_manager_exposes_raw_cost_and_external_dt_weighting(
+        self, joint_position_envs_cpu
+    ):
+        """The live TT term is a nonnegative rate; manager sign and dt stay external."""
+        env = _joint_position_trackability_env(joint_position_envs_cpu)
+        obs, _ = env.reset(seed=20260807)
+        assert obs["actor"].shape == (env.num_envs, 47)
+        assert obs["critic"].shape == (env.num_envs, 47)
+        assert torch.isfinite(obs["actor"]).all()
+        assert torch.isfinite(obs["critic"]).all()
+        assert env.action_manager.total_action_dim == 6
+
+        action = torch.full(
+            (env.num_envs, 6), 0.5, dtype=torch.float32, device=env.device
+        )
+        step_obs, _, _, _, _ = env.step(action)
+        assert step_obs["actor"].shape == (env.num_envs, 47)
+        assert step_obs["critic"].shape == (env.num_envs, 47)
+        assert torch.isfinite(step_obs["actor"]).all()
+        assert torch.isfinite(step_obs["critic"]).all()
+
+        term = env.reward_manager.get_term_cfg("r_tt")
+        raw_cost = term.func(env, **term.params)
+        assert torch.isfinite(raw_cost).all()
+        assert torch.all(raw_cost >= 0.0)
+        assert torch.any(raw_cost > 0.0)
+        term_index = env.reward_manager.active_terms.index("r_tt")
+        weighted_rate = env.reward_manager._step_reward[:, term_index]
+        assert torch.isfinite(weighted_rate).all()
+        assert torch.all(weighted_rate <= 0.0)
+        torch.testing.assert_close(weighted_rate, raw_cost * term.weight)
+        torch.testing.assert_close(
+            env.reward_manager._episode_sums["r_tt"],
+            weighted_rate * env.step_dt,
+        )
+
+        fic0 = _joint_position_env(joint_position_envs_cpu)
+        assert "r_tt" not in fic0.reward_manager.active_terms
+        with pytest.raises(ValueError, match="r_tt"):
+            fic0.reward_manager.get_term_cfg("r_tt")
+
     def test_joint_and_cartesian_runtime_dimensions_are_isolated(
         self, joint_position_envs_cpu
     ):

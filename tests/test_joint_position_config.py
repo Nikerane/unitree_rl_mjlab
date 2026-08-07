@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import dataclasses
 from pathlib import Path
 import re
@@ -15,12 +16,17 @@ from mjlab.envs.mdp.actions import (
     JointPositionActionCfg,
     RelativeJointPositionActionCfg,
 )
+from mjlab.managers.reward_manager import RewardTermCfg
+from mjlab.managers.scene_entity_config import SceneEntityCfg
+from mjlab.tasks import registry as task_registry
 from mjlab.tasks.registry import list_tasks, load_env_cfg, load_rl_cfg
 
 from src.tasks.hammer.config.z1.joint_position_contract import (
     JOINT_NAMES,
     load_joint_position_contract,
+    load_joint_trackability_contract,
 )
+from src.tasks.hammer.mdp.trackability import joint_trackability_cost
 
 
 PARENT_TASK = (
@@ -28,10 +34,12 @@ PARENT_TASK = (
     "CProgress-Vel-Delivered4"
 )
 FIC0_TASK = f"{PARENT_TASK}-JointPosition-Fixed"
+FICTT_TASK = f"{FIC0_TASK}-TT"
 ARTIFACT = (
     Path(__file__).resolve().parents[1]
     / "src/tasks/hammer/config/z1/data/z1_joint_position_stage1.json"
 )
+TRACKABILITY_ARTIFACT = ARTIFACT.with_name("z1_joint_trackability_stage1.json")
 
 
 def _load_fic0(*, play: bool = False):
@@ -41,6 +49,11 @@ def _load_fic0(*, play: bool = False):
     return load_env_cfg(FIC0_TASK, play=play)
 
 
+def _load_fictt(*, play: bool = False):
+    assert FICTT_TASK in list_tasks(), f"missing registered task {FICTT_TASK}"
+    return load_env_cfg(FICTT_TASK, play=play)
+
+
 def _canonicalize(value):
     """Turn config trees into stable, content-only values for exact diffing."""
     if dataclasses.is_dataclass(value):
@@ -48,8 +61,8 @@ def _canonicalize(value):
             field.name: _canonicalize(getattr(value, field.name))
             for field in dataclasses.fields(value)
         }
-    if isinstance(value, dict):
-        return {key: _canonicalize(item) for key, item in value.items()}
+    if isinstance(value, Mapping):
+        return tuple((key, _canonicalize(item)) for key, item in value.items())
     if isinstance(value, (list, tuple)):
         return tuple(_canonicalize(item) for item in value)
     if isinstance(value, np.ndarray):
@@ -60,6 +73,85 @@ def _canonicalize(value):
     if callable(value):
         return (value.__module__, value.__qualname__)
     return value
+
+
+def test_config_canonicalizer_detects_pure_mapping_insertion_order_changes() -> None:
+    """Reordering a manager term must not disappear inside exact config diffing."""
+    first = {"nested": {"alpha": 1, "beta": 2}}
+    reordered = {"nested": {"beta": 2, "alpha": 1}}
+
+    assert _canonicalize(first) != _canonicalize(reordered)
+
+
+def test_fictt_is_registered_for_train_and_play_with_the_parent_learner() -> None:
+    """The calibrated treatment must be launchable under the matched CatPPO."""
+    assert FICTT_TASK in list_tasks()
+    train = _load_fictt()
+    play = _load_fictt(play=True)
+    assert list(train.actions) == ["joint_position"]
+    assert list(play.actions) == ["joint_position"]
+    assert _canonicalize(load_rl_cfg(FICTT_TASK)) == _canonicalize(
+        load_rl_cfg(PARENT_TASK)
+    )
+    assert (
+        load_rl_cfg(FICTT_TASK).algorithm.class_name
+        == "src.tasks.hammer.rl.cat_ppo:CatPPO"
+    )
+
+
+@pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
+def test_fictt_installs_only_the_strict_banked_trackability_cost(play: bool) -> None:
+    """Wrong gain, sign, function, joint order, or a second mutation confounds TT."""
+    source = load_joint_position_contract(ARTIFACT)
+    calibration = load_joint_trackability_contract(
+        TRACKABILITY_ARTIFACT, source_contract=source
+    )
+    fic0 = _load_fic0(play=play)
+    fictt = _load_fictt(play=play)
+
+    assert "r_tt" not in fic0.rewards
+    assert tuple(fictt.rewards) == (*tuple(fic0.rewards), "r_tt")
+    term = fictt.rewards["r_tt"]
+    assert isinstance(term, RewardTermCfg)
+    assert term.func is joint_trackability_cost
+    assert term.weight == -1.0
+    assert set(term.params) == {"robot_cfg", "k_tt"}
+    assert term.params["k_tt"] == calibration.k_tt
+    robot_cfg = term.params["robot_cfg"]
+    assert isinstance(robot_cfg, SceneEntityCfg)
+    assert robot_cfg.name == "robot"
+    assert tuple(robot_cfg.joint_names) == JOINT_NAMES
+    assert robot_cfg.preserve_order is True
+
+    fic0_tree = _canonicalize(fic0)
+    fictt_tree = _canonicalize(fictt)
+    assert {
+        field for field in fic0_tree if fic0_tree[field] != fictt_tree[field]
+    } == {"rewards"}
+    assert fictt_tree["rewards"] == (
+        *fic0_tree["rewards"],
+        ("r_tt", _canonicalize(term)),
+    )
+    fictt_tree["rewards"] = fictt_tree["rewards"][:-1]
+    assert fictt_tree == fic0_tree
+
+
+def test_registered_fic0_and_fictt_train_play_configs_do_not_alias() -> None:
+    """Mutating one registered cell must never mutate another study cell."""
+    registered = (
+        task_registry._REGISTRY[FIC0_TASK].env_cfg,
+        task_registry._REGISTRY[FIC0_TASK].play_env_cfg,
+        task_registry._REGISTRY[FICTT_TASK].env_cfg,
+        task_registry._REGISTRY[FICTT_TASK].play_env_cfg,
+    )
+    assert len({id(cfg) for cfg in registered}) == 4
+    assert len({id(cfg.rewards) for cfg in registered}) == 4
+    for name in registered[0].rewards:
+        assert len({id(cfg.rewards[name]) for cfg in registered}) == 4
+    assert (
+        registered[2].rewards["r_tt"]
+        is not registered[3].rewards["r_tt"]
+    )
 
 
 def _actuator_signature(cfg) -> tuple[tuple[object, ...], ...]:
