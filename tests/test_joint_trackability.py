@@ -6,12 +6,14 @@ import copy
 import json
 import math
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 import torch
 
+import evaluation.joint_position.calibrate_trackability as calibration
 from evaluation.joint_position.calibrate_trackability import (
     _require_accepted_terminal,
     _scheduled_replay_tape,
@@ -29,6 +31,7 @@ from src.tasks.hammer.mdp.trackability import (
     joint_target_squared_error,
     joint_trackability_cost,
 )
+from src.tasks.hammer.mdp.first_strike import REASON_SUCCESS
 
 
 def _reader_env(*, terminal: bool = False, action_name: str = "joint_position"):
@@ -73,8 +76,8 @@ def test_readers_use_public_applied_target_and_only_six_ordered_arm_joints() -> 
     )
 
 
-def test_reader_keeps_accepted_contact_terminal_transition_with_auto_reset_disabled() -> None:
-    """A terminal mask must not zero or replace the accepted-contact post-step sample."""
+def test_reader_uses_current_state_even_when_terminal_mask_is_set() -> None:
+    """The pure reader does not zero or replace state based on a terminal mask."""
     env, arm_cfg = _reader_env(terminal=True)
     torch.testing.assert_close(
         joint_target_squared_error(env, arm_cfg), torch.tensor([0.06])
@@ -157,7 +160,90 @@ def _build_payload(*, runs=None):
         source_qualification_code_revision="b" * 40,
         source_asset_revision="c" * 40,
         calibration_code_revision="d" * 40,
+        physics_dt_s=0.002,
+        control_decimation=10,
     )
+
+
+def test_live_cfg_timing_must_match_the_qualified_source_before_rollout() -> None:
+    from evaluation.joint_position.calibrate_trackability import (
+        _validated_cfg_timing,
+    )
+
+    cfg = SimpleNamespace(
+        sim=SimpleNamespace(mujoco=SimpleNamespace(timestep=0.002)),
+        decimation=10,
+    )
+    source = SimpleNamespace(physics_dt_s=0.002, control_decimation=10)
+    assert _validated_cfg_timing(cfg, source) == (0.002, 10)
+
+    cfg.sim.mujoco.timestep = 0.004
+    with pytest.raises(RuntimeError, match="physics timestep"):
+        _validated_cfg_timing(cfg, source)
+    cfg.sim.mujoco.timestep = 0.002
+    cfg.decimation = True
+    with pytest.raises(RuntimeError, match="control decimation"):
+        _validated_cfg_timing(cfg, source)
+
+
+def test_payload_uses_measured_timing_and_rejects_boolean_decimation() -> None:
+    kwargs = dict(
+        runs=_runs(),
+        source_qualification_payload_sha256="a" * 64,
+        source_qualification_code_revision="b" * 40,
+        source_asset_revision="c" * 40,
+        calibration_code_revision="d" * 40,
+        physics_dt_s=0.001,
+    )
+    payload = build_trackability_payload(**kwargs, control_decimation=20)
+    assert payload["physics_dt_s"] == 0.001
+    assert payload["control_decimation"] == 20
+    assert payload["reward_manager_dt_s"] == pytest.approx(0.02)
+    with pytest.raises(ValueError, match="control_decimation"):
+        build_trackability_payload(**kwargs, control_decimation=True)
+
+
+def test_calibration_provenance_rejects_a_dirty_git_worktree(tmp_path: Path) -> None:
+    from evaluation.joint_position.calibrate_trackability import (
+        _require_clean_git_worktree,
+    )
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(("git", "init", "-q"), cwd=repo, check=True)
+    _require_clean_git_worktree(repo, label="code")
+
+    (repo / "untracked-evidence.txt").write_text("dirty\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="code worktree is dirty"):
+        _require_clean_git_worktree(repo, label="code")
+
+
+def test_cli_does_not_print_pass_before_consumer_round_trip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    invalid_for_consumer = build_trackability_payload(
+        runs=_runs(),
+        source_qualification_payload_sha256="a" * 64,
+        source_qualification_code_revision="b" * 40,
+        source_asset_revision="c" * 40,
+        calibration_code_revision="d" * 40,
+        physics_dt_s=0.001,
+        control_decimation=20,
+    )
+    monkeypatch.setattr(
+        calibration, "run_calibration", lambda qualification: invalid_for_consumer
+    )
+    monkeypatch.setattr(
+        calibration,
+        "load_joint_position_contract",
+        lambda qualification: _source_contract(),
+        raising=False,
+    )
+    output = tmp_path / "consumer-invalid.json"
+
+    with pytest.raises(ValueError, match="physics_dt_s"):
+        calibration.main(["--qualification", "synthetic.json", "--out", str(output)])
+    assert "PASS" not in capsys.readouterr().out
 
 
 def test_calibration_uses_seed_1000_once_and_15_runs_only_as_witnesses() -> None:
@@ -207,7 +293,7 @@ def test_calibration_requires_the_banked_productive_success_terminal() -> None:
         _hammer_first_strike=SimpleNamespace(
             finalized=torch.tensor([True]),
             productive=torch.tensor([True]),
-            reason=torch.tensor([1]),
+            reason=torch.tensor([REASON_SUCCESS]),
         ),
     )
     _require_accepted_terminal(env, {"terminal_reason": "success"})
@@ -318,6 +404,7 @@ def test_trackability_loader_rejects_self_consistent_truncated_sample_set(
         lambda p: p.update(k_tt=math.nan),
         lambda p: p.update(decision="FAIL"),
         lambda p: p.update(source_qualification_payload_sha256="f" * 64),
+        lambda p: p.update(control_decimation=10.0),
         lambda p: p["repeatability_rows"].pop(),
     ],
 )

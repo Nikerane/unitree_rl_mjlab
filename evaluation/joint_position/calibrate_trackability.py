@@ -17,6 +17,7 @@ from evaluation.joint_position.qualify_joint_action import (
     normalized_action_for_target,
     scheduled_replay_targets,
 )
+from src.tasks.hammer.mdp.first_strike import REASON_SUCCESS
 
 
 REQUIRED_SEEDS = tuple(range(1000, 1016))
@@ -28,7 +29,6 @@ FIC0_TASK_ID = (
 TARGET_Q90_COST = 0.1
 MIN_Q90 = 1e-8
 MAX_PRE_DT_CUMULATIVE_COST = 5.0
-REWARD_MANAGER_DT_S = 0.02
 
 
 def derive_k_tt(
@@ -140,8 +140,25 @@ def build_trackability_payload(
     source_qualification_code_revision: str,
     source_asset_revision: str,
     calibration_code_revision: str,
+    physics_dt_s: float,
+    control_decimation: int,
 ) -> dict[str, Any]:
     """Build a PASS artifact from one trajectory plus 15 identity witnesses."""
+    if (
+        isinstance(physics_dt_s, bool)
+        or not isinstance(physics_dt_s, (int, float))
+        or not math.isfinite(float(physics_dt_s))
+        or float(physics_dt_s) <= 0.0
+    ):
+        raise ValueError("physics_dt_s must be finite and strictly positive")
+    if (
+        isinstance(control_decimation, bool)
+        or not isinstance(control_decimation, int)
+        or control_decimation <= 0
+    ):
+        raise ValueError("control_decimation must be a positive non-bool integer")
+    measured_physics_dt_s = float(physics_dt_s)
+    reward_manager_dt_s = measured_physics_dt_s * control_decimation
     if len(runs) != len(REQUIRED_SEEDS):
         raise ValueError("calibration requires exactly 16 repeatability runs")
     rows: list[dict[str, Any]] = []
@@ -172,16 +189,16 @@ def build_trackability_payload(
     payload: dict[str, Any] = {
         "schema_version": 1,
         "joint_names": list(JOINT_NAMES),
-        "physics_dt_s": 0.002,
-        "control_decimation": 10,
-        "reward_manager_dt_s": REWARD_MANAGER_DT_S,
+        "physics_dt_s": measured_physics_dt_s,
+        "control_decimation": control_decimation,
+        "reward_manager_dt_s": reward_manager_dt_s,
         "target_q90_cost": TARGET_Q90_COST,
         "q90_squared_error_rad2": q90,
         "k_tt": k_tt,
         "canonical_seed": REQUIRED_SEEDS[0],
         "canonical_sample_count": int(canonical_errors.size),
         "canonical_pre_dt_cumulative_cost": pre_dt_cost,
-        "canonical_returned_dose": pre_dt_cost * REWARD_MANAGER_DT_S,
+        "canonical_returned_dose": pre_dt_cost * reward_manager_dt_s,
         "canonical_applied_target_tape_sha256": rows[0][
             "applied_target_tape_sha256"
         ],
@@ -218,6 +235,24 @@ def write_canonical_json(path: str | Path, payload: object) -> None:
     )
 
 
+def load_joint_position_contract(path: str | Path) -> Any:
+    """Late-bound source loader, kept patchable for CLI boundary tests."""
+    from src.tasks.hammer.config.z1.joint_position_contract import (
+        load_joint_position_contract as load,
+    )
+
+    return load(path)
+
+
+def load_joint_trackability_contract(path: str | Path, *, source_contract: Any) -> Any:
+    """Late-bound consumer loader used for the CLI's pre-PASS round trip."""
+    from src.tasks.hammer.config.z1.joint_position_contract import (
+        load_joint_trackability_contract as load,
+    )
+
+    return load(path, source_contract=source_contract)
+
+
 def _git_revision(path: Path) -> str:
     return subprocess.run(
         ("git", "rev-parse", "HEAD"),
@@ -226,6 +261,19 @@ def _git_revision(path: Path) -> str:
         capture_output=True,
         text=True,
     ).stdout.strip()
+
+
+def _require_clean_git_worktree(path: Path, *, label: str) -> None:
+    """Fail before recording a commit as provenance for dirty worktree content."""
+    status = subprocess.run(
+        ("git", "status", "--porcelain=v1", "--untracked-files=all"),
+        cwd=path,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    if status:
+        raise RuntimeError(f"{label} worktree is dirty; refusing calibration provenance")
 
 
 def _scheduled_replay_tape(source_contract: Any) -> np.ndarray:
@@ -258,14 +306,38 @@ def _require_accepted_terminal(env: Any, expected_replay: Any) -> None:
         or tracker is None
         or not bool(tracker.finalized[0])
         or not bool(tracker.productive[0])
-        or int(tracker.reason[0]) != 1
+        or int(tracker.reason[0]) != REASON_SUCCESS
     ):
         raise RuntimeError(
             "calibration replay must reproduce the banked productive success terminal"
         )
 
 
-def _rollout_repeated_trajectory(source_contract: Any) -> list[dict[str, Any]]:
+def _validated_cfg_timing(cfg: Any, source_contract: Any) -> tuple[float, int]:
+    """Read the live config timing and bind it to the qualified source timing."""
+    physics_dt_s = cfg.sim.mujoco.timestep
+    control_decimation = cfg.decimation
+    if (
+        isinstance(physics_dt_s, bool)
+        or not isinstance(physics_dt_s, (int, float))
+        or not math.isfinite(float(physics_dt_s))
+        or float(physics_dt_s) <= 0.0
+        or float(physics_dt_s) != float(source_contract.physics_dt_s)
+    ):
+        raise RuntimeError("live FIC-0 physics timestep does not match the source contract")
+    if (
+        isinstance(control_decimation, bool)
+        or not isinstance(control_decimation, int)
+        or control_decimation <= 0
+        or control_decimation != source_contract.control_decimation
+    ):
+        raise RuntimeError("live FIC-0 control decimation does not match the source contract")
+    return float(physics_dt_s), control_decimation
+
+
+def _rollout_repeated_trajectory(
+    source_contract: Any,
+) -> tuple[list[dict[str, Any]], float, int]:
     """Replay the banked tape once per fixed reset and read every post-step error."""
     import torch
     from mjlab.envs import ManagerBasedRlEnv
@@ -276,6 +348,7 @@ def _rollout_repeated_trajectory(source_contract: Any) -> list[dict[str, Any]]:
     from src.tasks.hammer.mdp.trackability import joint_target_squared_error
 
     cfg = load_env_cfg(FIC0_TASK_ID, play=True)
+    physics_dt_s, control_decimation = _validated_cfg_timing(cfg, source_contract)
     cfg.scene.num_envs = 1
     cfg.auto_reset = False
     env = ManagerBasedRlEnv(cfg, device="cpu")
@@ -337,7 +410,7 @@ def _rollout_repeated_trajectory(source_contract: Any) -> list[dict[str, Any]]:
                     "terminal_transition_captured": terminal,
                 }
             )
-        return runs
+        return runs, physics_dt_s, control_decimation
     finally:
         env.close()
 
@@ -345,11 +418,9 @@ def _rollout_repeated_trajectory(source_contract: Any) -> list[dict[str, Any]]:
 def run_calibration(qualification_path: str | Path) -> dict[str, Any]:
     """Load, replay, cross-check, and calibrate one banked qualification tape."""
     from src.assets.robots.unitree_z1.z1_constants import Z1_HAMMER_XML
-    from src.tasks.hammer.config.z1.joint_position_contract import (
-        load_joint_position_contract,
-    )
 
     contract = load_joint_position_contract(qualification_path)
+    root = Path(__file__).resolve().parents[2]
     asset_root = Path(
         subprocess.run(
             ("git", "rev-parse", "--show-toplevel"),
@@ -359,17 +430,20 @@ def run_calibration(qualification_path: str | Path) -> dict[str, Any]:
             text=True,
         ).stdout.strip()
     )
+    _require_clean_git_worktree(root, label="code")
+    _require_clean_git_worktree(asset_root, label="asset")
     live_asset_revision = _git_revision(asset_root)
     if live_asset_revision != contract.source_asset_revision:
         raise RuntimeError("live asset revision differs from the qualified asset revision")
-    root = Path(__file__).resolve().parents[2]
-    runs = _rollout_repeated_trajectory(contract)
+    runs, physics_dt_s, control_decimation = _rollout_repeated_trajectory(contract)
     return build_trackability_payload(
         runs=runs,
         source_qualification_payload_sha256=contract.payload_sha256,
         source_qualification_code_revision=contract.source_code_revision,
         source_asset_revision=live_asset_revision,
         calibration_code_revision=_git_revision(root),
+        physics_dt_s=physics_dt_s,
+        control_decimation=control_decimation,
     )
 
 
@@ -380,6 +454,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     payload = run_calibration(args.qualification)
     write_canonical_json(args.out, payload)
+    source_contract = load_joint_position_contract(args.qualification)
+    load_joint_trackability_contract(args.out, source_contract=source_contract)
     print(
         "joint trackability calibration: PASS "
         f"q90={payload['q90_squared_error_rad2']:.9g} "

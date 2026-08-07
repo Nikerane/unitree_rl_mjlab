@@ -468,6 +468,7 @@ def load_joint_trackability_contract(
     control_decimation = payload["control_decimation"]
     if (
         isinstance(control_decimation, bool)
+        or not isinstance(control_decimation, int)
         or control_decimation != 10
         or control_decimation != source_contract.control_decimation
     ):
