@@ -21,6 +21,7 @@ from src.tasks.hammer.config.z1.joint_position_contract import (
     load_joint_position_contract,
 )
 from src.tasks.hammer.rl.runner import _get_hammer_metadata
+from scripts.smoke_joint_position_fixed import run_checks
 
 
 PARENT_TASK = (
@@ -34,6 +35,15 @@ _CONTRACT_PATH = (
     Path(__file__).resolve().parents[1]
     / "src/tasks/hammer/config/z1/data/z1_joint_position_stage1.json"
 )
+
+
+@pytest.mark.parametrize("task_id", (FIC0_TASK, FICTT_TASK), ids=("fic0", "fictt"))
+def test_live_joint_position_smoke_passes_every_check(task_id: str) -> None:
+    """Both registered fixed-impedance arms must pass the live manager gate."""
+    results = run_checks(task=task_id, device="cpu", num_envs=4, steps=2)
+
+    assert results
+    assert all(passed for _, passed, _ in results), results
 
 
 @pytest.fixture(scope="module")

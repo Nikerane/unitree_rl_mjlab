@@ -11,8 +11,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterator, Mapping
+from pathlib import Path
 import tempfile
 from dataclasses import asdict
+
+import torch
 
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.rl.vecenv_wrapper import RslRlVecEnvWrapper
@@ -23,37 +27,113 @@ from src.tasks.hammer.rl.cat_ppo import CatPPO
 from src.tasks.hammer.rl.cat_storage import CatRolloutStorage
 
 TASK = "Unitree-Z1-Hammer-CaT-Soft"
+FIC0_TASK = (
+  "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
+  "CProgress-Vel-Delivered4-JointPosition-Fixed"
+)
+FICTT_TASK = f"{FIC0_TASK}-TT"
+TASKS = (TASK, FIC0_TASK, FICTT_TASK)
+
+
+def _tensors(value: object) -> Iterator[torch.Tensor]:
+  if isinstance(value, torch.Tensor):
+    yield value
+  elif isinstance(value, Mapping):
+    for item in value.values():
+      yield from _tensors(item)
+  elif isinstance(value, (list, tuple)):
+    for item in value:
+      yield from _tensors(item)
+
+
+def _assert_finite_tensors(value: object, *, state_name: str) -> None:
+  tensors = list(_tensors(value))
+  assert tensors, f"{state_name} contains no tensors"
+  nonfinite = [tuple(tensor.shape) for tensor in tensors if not torch.isfinite(tensor).all()]
+  assert not nonfinite, f"{state_name} contains non-finite tensors with shapes {nonfinite}"
+
+
+def run_smoke(
+  task: str = TASK,
+  device: str = "cpu",
+  num_envs: int = 16,
+  iters: int = 3,
+) -> Path:
+  """Run the registered CatPPO rollout/update path and return its temp checkpoint."""
+  if task not in TASKS:
+    raise ValueError(f"unsupported CatPPO smoke task: {task}")
+
+  env_cfg = load_env_cfg(task)
+  env_cfg.scene.num_envs = num_envs
+  agent = load_rl_cfg(task)
+  agent.max_iterations = iters
+  agent.logger = "tensorboard"  # avoid wandb network/prompt
+
+  env = ManagerBasedRlEnv(cfg=env_cfg, device=device, render_mode=None)
+  env = RslRlVecEnvWrapper(env, clip_actions=agent.clip_actions)
+  runner_cls = load_runner_cls(task)
+  log_dir = tempfile.mkdtemp(prefix="cat_smoke_")
+  runner_cfg = asdict(agent)
+  runner_cfg["upload_model"] = False
+  runner = runner_cls(env, runner_cfg, log_dir, device)
+
+  try:
+    # construct_algorithm wiring (the one untested-on-CPU path)
+    assert isinstance(runner.alg, CatPPO), f"runner.alg is {type(runner.alg).__name__}, expected CatPPO"
+    assert isinstance(runner.alg.storage, CatRolloutStorage), (
+      f"storage is {type(runner.alg.storage).__name__}, expected CatRolloutStorage"
+    )
+    assert runner.alg.storage.soft_dones.dtype.is_floating_point, "soft_dones must be float"
+    assert runner_cfg["num_steps_per_env"] == 24, "CatPPO smoke must use the registered 24-step rollout"
+    assert runner.alg.storage.num_transitions_per_env == 24, "storage must hold the real 24-step rollout"
+
+    observations = env.get_observations()
+    requested_device = torch.empty(0, device=device).device
+    actual_devices = {value.device for value in observations.values()}
+    actual_devices.add(runner.alg.storage.actions.device)
+    assert actual_devices == {requested_device}, (
+      f"requested device {requested_device}, got tensors on {sorted(map(str, actual_devices))}"
+    )
+    if task in (FIC0_TASK, FICTT_TASK):
+      assert env.num_actions == 6, f"joint task has {env.num_actions} actions, expected 6"
+      assert tuple(observations["actor"].shape) == (num_envs, 47)
+      assert tuple(observations["critic"].shape) == (num_envs, 47)
+
+    print(
+      f"[smoke] {task}: CatPPO + CatRolloutStorage wired; "
+      f"running {iters} update(s) on {device} ..."
+    )
+    runner.learn(num_learning_iterations=iters, init_at_random_ep_len=True)
+
+    _assert_finite_tensors(runner.alg.save(), state_name="learned CatPPO state")
+    checkpoints = sorted(Path(log_dir).glob("model_*.pt"))
+    assert checkpoints, f"runner wrote no checkpoint under temporary log path {log_dir}"
+    checkpoint = checkpoints[-1]
+    checkpoint_state = torch.load(checkpoint, map_location="cpu", weights_only=False)
+    _assert_finite_tensors(checkpoint_state, state_name=f"checkpoint {checkpoint}")
+  finally:
+    env.close()
+
+  print(
+    f"\nSMOKE_CAT_SOFT: learn() completed {iters} update(s); "
+    f"learned/checkpoint tensors finite (checkpoint={checkpoint})"
+  )
+  return checkpoint
 
 
 def main() -> None:
   ap = argparse.ArgumentParser()
+  ap.add_argument("--task", choices=TASKS, default=TASK)
   ap.add_argument("--num-envs", type=int, default=16)
   ap.add_argument("--iters", type=int, default=3)
   ap.add_argument("--device", default="cpu")
   args = ap.parse_args()
-
-  env_cfg = load_env_cfg(TASK)
-  env_cfg.scene.num_envs = args.num_envs
-  agent = load_rl_cfg(TASK)
-  agent.max_iterations = args.iters
-  agent.logger = "tensorboard"  # avoid wandb network/prompt
-
-  env = ManagerBasedRlEnv(cfg=env_cfg, device=args.device, render_mode=None)
-  env = RslRlVecEnvWrapper(env, clip_actions=agent.clip_actions)
-  runner_cls = load_runner_cls(TASK)
-  log_dir = tempfile.mkdtemp(prefix="cat_smoke_")
-  runner = runner_cls(env, asdict(agent), log_dir, args.device)
-
-  # construct_algorithm wiring (the one untested-on-CPU path)
-  assert isinstance(runner.alg, CatPPO), f"runner.alg is {type(runner.alg).__name__}, expected CatPPO"
-  assert isinstance(runner.alg.storage, CatRolloutStorage), (
-    f"storage is {type(runner.alg.storage).__name__}, expected CatRolloutStorage"
+  run_smoke(
+    task=args.task,
+    device=args.device,
+    num_envs=args.num_envs,
+    iters=args.iters,
   )
-  assert runner.alg.storage.soft_dones.dtype.is_floating_point, "soft_dones must be float"
-  print(f"[smoke] CatPPO + CatRolloutStorage wired OK; running {args.iters} iters on {args.device} ...")
-
-  runner.learn(num_learning_iterations=args.iters, init_at_random_ep_len=True)
-  print(f"\nSMOKE_CAT_SOFT: learn() completed {args.iters} iters with no crash (log_dir={log_dir})")
 
 
 if __name__ == "__main__":
