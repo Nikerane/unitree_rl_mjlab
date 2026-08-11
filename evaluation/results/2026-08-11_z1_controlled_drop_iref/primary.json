@@ -1,0 +1,106 @@
+{
+  "execution": {
+    "asset_revision": "b58ccd2f81fd246f27c1e8d88cf86484cd888703",
+    "backend": "mujoco-warp",
+    "code_revision": "b769ed6838fe3171ff1cb3c0827aad5399a7e5b8",
+    "device": "cuda:0",
+    "friction": [
+      1.5,
+      0.02,
+      0.002
+    ],
+    "h0_m": 0.15,
+    "half_height_m": 0.004,
+    "mass_kg": 0.2,
+    "mjlab_version": "1.4.0",
+    "mujoco_version": "3.8.1",
+    "mujoco_warp_version": "3.8.1",
+    "physics_dt_s": 0.002,
+    "radius_m": 0.012,
+    "slide_axis": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "slide_damping": 0.0,
+    "slide_frictionloss": 0.0,
+    "tracker_axis": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "tracker_progress_eps": 0.0005,
+    "tracker_window_substeps": 25
+  },
+  "schema_version": 1,
+  "summary": {
+    "i_ref_mean_n_s": 0.10635668784379959,
+    "trials": [
+      {
+        "contacted": true,
+        "depth_at_contact_m": 0.0,
+        "finalized": true,
+        "h0_m": 0.15,
+        "impulse_n_s": 0.10635668784379959,
+        "peak_depth_m": 0.014746523462235928,
+        "precontact_velocity_m_s": 1.7069429159164429,
+        "productive": true,
+        "reason": "window",
+        "release_velocity_m_s": 0.0,
+        "trial_index": 1
+      },
+      {
+        "contacted": true,
+        "depth_at_contact_m": 0.0,
+        "finalized": true,
+        "h0_m": 0.15,
+        "impulse_n_s": 0.10635668784379959,
+        "peak_depth_m": 0.014746523462235928,
+        "precontact_velocity_m_s": 1.7069429159164429,
+        "productive": true,
+        "reason": "window",
+        "release_velocity_m_s": 0.0,
+        "trial_index": 2
+      },
+      {
+        "contacted": true,
+        "depth_at_contact_m": 0.0,
+        "finalized": true,
+        "h0_m": 0.15,
+        "impulse_n_s": 0.10635668784379959,
+        "peak_depth_m": 0.014746523462235928,
+        "precontact_velocity_m_s": 1.7069429159164429,
+        "productive": true,
+        "reason": "window",
+        "release_velocity_m_s": 0.0,
+        "trial_index": 3
+      },
+      {
+        "contacted": true,
+        "depth_at_contact_m": 0.0,
+        "finalized": true,
+        "h0_m": 0.15,
+        "impulse_n_s": 0.10635668784379959,
+        "peak_depth_m": 0.014746523462235928,
+        "precontact_velocity_m_s": 1.7069429159164429,
+        "productive": true,
+        "reason": "window",
+        "release_velocity_m_s": 0.0,
+        "trial_index": 4
+      },
+      {
+        "contacted": true,
+        "depth_at_contact_m": 0.0,
+        "finalized": true,
+        "h0_m": 0.15,
+        "impulse_n_s": 0.10635668784379959,
+        "peak_depth_m": 0.014746523462235928,
+        "precontact_velocity_m_s": 1.7069429159164429,
+        "productive": true,
+        "reason": "window",
+        "release_velocity_m_s": 0.0,
+        "trial_index": 5
+      }
+    ]
+  }
+}
