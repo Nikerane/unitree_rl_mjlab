@@ -6,6 +6,7 @@ import copy
 from dataclasses import asdict
 import json
 from pathlib import Path
+from typing import NoReturn
 
 import onnx
 import pytest
@@ -21,6 +22,7 @@ from src.tasks.hammer.config.z1.joint_position_contract import (
     load_joint_position_contract,
 )
 from src.tasks.hammer.rl.runner import _get_hammer_metadata
+import scripts.smoke_cat_soft as smoke_cat_soft
 from scripts.smoke_joint_position_fixed import run_checks
 
 
@@ -44,6 +46,81 @@ def test_live_joint_position_smoke_passes_every_check(task_id: str) -> None:
 
     assert results
     assert all(passed for _, passed, _ in results), results
+
+
+def test_live_smoke_rejects_nonfinite_output_from_an_earlier_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A later healthy manager buffer must not hide an earlier corrupt transition."""
+    original_step = ManagerBasedRlEnv.step
+    call_count = 0
+
+    def step_with_early_nonfinite(self, action):
+        nonlocal call_count
+        transition = original_step(self, action)
+        call_count += 1
+        if call_count != 1:
+            return transition
+
+        observations, reward, terminated, truncated, extras = transition
+        poisoned_observations = dict(observations)
+        poisoned_observations["actor"] = observations["actor"].clone()
+        poisoned_observations["actor"][0, 0] = float("nan")
+        poisoned_reward = reward.clone()
+        poisoned_reward[0] = float("nan")
+        poisoned_terminated = terminated.float()
+        poisoned_terminated[0] = float("nan")
+        poisoned_truncated = truncated.float()
+        poisoned_truncated[0] = float("nan")
+        return (
+            poisoned_observations,
+            poisoned_reward,
+            poisoned_terminated,
+            poisoned_truncated,
+            extras,
+        )
+
+    monkeypatch.setattr(ManagerBasedRlEnv, "step", step_with_early_nonfinite)
+
+    results = run_checks(task=FIC0_TASK, device="cpu", num_envs=1, steps=2)
+    passed_by_name = {name: passed for name, passed, _ in results}
+
+    assert call_count == 2
+    assert passed_by_name["reset and stepped observations are finite (N,47)"] is False
+    assert passed_by_name["step rewards and done flags are finite"] is False
+
+
+@pytest.mark.parametrize("failure_stage", ("wrapper", "runner"))
+def test_catppo_smoke_closes_raw_env_when_setup_fails(
+    monkeypatch: pytest.MonkeyPatch, failure_stage: str
+) -> None:
+    """Setup failures after real environment creation must not leak the raw environment."""
+    closed_envs: list[ManagerBasedRlEnv] = []
+    original_close = smoke_cat_soft.ManagerBasedRlEnv.close
+
+    def recording_close(env: ManagerBasedRlEnv) -> None:
+        closed_envs.append(env)
+        original_close(env)
+
+    def fail_construction(*args, **kwargs) -> NoReturn:
+        del args, kwargs
+        raise RuntimeError(f"injected {failure_stage} construction failure")
+
+    monkeypatch.setattr(smoke_cat_soft.ManagerBasedRlEnv, "close", recording_close)
+    if failure_stage == "wrapper":
+        monkeypatch.setattr(smoke_cat_soft, "RslRlVecEnvWrapper", fail_construction)
+    else:
+        monkeypatch.setattr(smoke_cat_soft, "load_runner_cls", lambda task: fail_construction)
+
+    with pytest.raises(RuntimeError, match=f"injected {failure_stage}"):
+        smoke_cat_soft.run_smoke(
+            task=FIC0_TASK,
+            device="cpu",
+            num_envs=1,
+            iters=1,
+        )
+
+    assert len(closed_envs) == 1
 
 
 @pytest.fixture(scope="module")

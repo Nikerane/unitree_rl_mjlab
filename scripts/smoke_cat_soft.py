@@ -69,15 +69,15 @@ def run_smoke(
   agent.max_iterations = iters
   agent.logger = "tensorboard"  # avoid wandb network/prompt
 
-  env = ManagerBasedRlEnv(cfg=env_cfg, device=device, render_mode=None)
-  env = RslRlVecEnvWrapper(env, clip_actions=agent.clip_actions)
-  runner_cls = load_runner_cls(task)
-  log_dir = tempfile.mkdtemp(prefix="cat_smoke_")
-  runner_cfg = asdict(agent)
-  runner_cfg["upload_model"] = False
-  runner = runner_cls(env, runner_cfg, log_dir, device)
-
+  raw_env = ManagerBasedRlEnv(cfg=env_cfg, device=device, render_mode=None)
   try:
+    env = RslRlVecEnvWrapper(raw_env, clip_actions=agent.clip_actions)
+    runner_cls = load_runner_cls(task)
+    log_dir = tempfile.mkdtemp(prefix="cat_smoke_")
+    runner_cfg = asdict(agent)
+    runner_cfg["upload_model"] = False
+    runner = runner_cls(env, runner_cfg, log_dir, device)
+
     # construct_algorithm wiring (the one untested-on-CPU path)
     assert isinstance(runner.alg, CatPPO), f"runner.alg is {type(runner.alg).__name__}, expected CatPPO"
     assert isinstance(runner.alg.storage, CatRolloutStorage), (
@@ -112,7 +112,7 @@ def run_smoke(
     checkpoint_state = torch.load(checkpoint, map_location="cpu", weights_only=False)
     _assert_finite_tensors(checkpoint_state, state_name=f"checkpoint {checkpoint}")
   finally:
-    env.close()
+    raw_env.close()
 
   print(
     f"\nSMOKE_CAT_SOFT: learn() completed {iters} update(s); "

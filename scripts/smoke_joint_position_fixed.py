@@ -104,31 +104,48 @@ def run_checks(
       0.25,
       device=env.device,
     )
-    transitions = []
-    for _ in range(steps):
-      transitions.append(env.step(command))
-    final_obs, reward, terminated, truncated, _ = transitions[-1]
-
     observation_tensors = [
-      obs["actor"], obs["critic"], final_obs["actor"], final_obs["critic"]
+      obs["actor"],
+      obs["critic"],
     ]
+    observation_records = [
+      (tuple(value.shape), str(value.device)) for value in observation_tensors
+    ]
+    observations_are_finite = all(
+      tuple(value.shape) == (num_envs, 47) and bool(torch.isfinite(value).all())
+      for value in observation_tensors
+    )
+    step_outputs_are_finite = True
+    actual_devices = {value.device for value in (*observation_tensors, command)}
+    for _ in range(steps):
+      step_obs, reward, terminated, truncated, _ = env.step(command)
+      step_observations = [step_obs["actor"], step_obs["critic"]]
+      observation_records.extend(
+        (tuple(value.shape), str(value.device)) for value in step_observations
+      )
+      observations_are_finite = observations_are_finite and all(
+        tuple(value.shape) == (num_envs, 47) and bool(torch.isfinite(value).all())
+        for value in step_observations
+      )
+      step_outputs_are_finite = step_outputs_are_finite and (
+        bool(torch.isfinite(reward).all())
+        and bool(torch.isfinite(terminated.float()).all())
+        and bool(torch.isfinite(truncated.float()).all())
+      )
+      actual_devices.update(
+        value.device
+        for value in (*step_observations, reward, terminated, truncated)
+      )
+
     check(
       "reset and stepped observations are finite (N,47)",
-      all(
-        tuple(value.shape) == (num_envs, 47) and bool(torch.isfinite(value).all())
-        for value in observation_tensors
-      ),
-      str([(tuple(value.shape), str(value.device)) for value in observation_tensors]),
+      observations_are_finite,
+      str(observation_records),
     )
     check(
       "step rewards and done flags are finite",
-      bool(torch.isfinite(reward).all())
-      and bool(torch.isfinite(terminated.float()).all())
-      and bool(torch.isfinite(truncated.float()).all()),
+      step_outputs_are_finite,
     )
-    actual_devices = {
-      value.device for value in (*observation_tensors, reward, terminated, truncated, command)
-    }
     check(
       "actual tensor device matches the requested device",
       actual_devices == {requested_device},
