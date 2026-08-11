@@ -70,6 +70,10 @@ def _get_hammer_metadata(env, run_path: str, *, raw_policy_clip: float) -> dict:
     robot: Entity = env.scene["robot"]
     action = env.action_manager.get_term(action_term)
     if isinstance(action, DifferentialIKAction):
+        if action_term != "ik_hammer_head":
+            raise ValueError(
+                f"unsupported action term for Cartesian metadata: {action_term}"
+            )
         return {
             "run_path": run_path,
             "action_type": "ik_delta_pos",
@@ -94,8 +98,28 @@ def _get_hammer_metadata(env, run_path: str, *, raw_policy_clip: float) -> dict:
         raise ValueError("joint metadata requires the canonical Z1 actuator order")
     if not action.cfg.use_default_offset:
         raise ValueError("joint metadata requires default-offset action semantics")
-    if not math.isfinite(float(raw_policy_clip)):
-        raise ValueError("raw policy clip must be finite")
+    physics_dt_s = env.cfg.sim.mujoco.timestep
+    if (
+        isinstance(physics_dt_s, bool)
+        or not isinstance(physics_dt_s, (int, float))
+        or not math.isfinite(float(physics_dt_s))
+        or physics_dt_s != 0.002
+    ):
+        raise ValueError("joint metadata requires physics timestep 0.002 s")
+    control_decimation = env.cfg.decimation
+    if (
+        isinstance(control_decimation, bool)
+        or not isinstance(control_decimation, int)
+        or control_decimation != 10
+    ):
+        raise ValueError("joint metadata requires control decimation 10")
+    if (
+        isinstance(raw_policy_clip, bool)
+        or not isinstance(raw_policy_clip, (int, float))
+        or not math.isfinite(float(raw_policy_clip))
+        or raw_policy_clip != 1.0
+    ):
+        raise ValueError("joint metadata requires raw policy clip 1.0")
     scales = _finite_row(action.scale, name="joint action scale")
     offsets = _finite_row(action.offset, name="joint action default offsets")
     clips = action._clip
@@ -125,8 +149,8 @@ def _get_hammer_metadata(env, run_path: str, *, raw_policy_clip: float) -> dict:
         "action_scale": scales,
         "physical_clips": clips[0].detach().cpu().tolist(),
         "raw_policy_clip": float(raw_policy_clip),
-        "physics_dt_s": float(env.cfg.sim.mujoco.timestep),
-        "control_decimation": int(env.cfg.decimation),
+        "physics_dt_s": float(physics_dt_s),
+        "control_decimation": control_decimation,
         "fixed_actuator_signature": _fixed_actuator_signature(env),
         "joint_action_qualification_payload_sha256": contract.payload_sha256,
         "r_tt_enabled": r_tt_enabled,
