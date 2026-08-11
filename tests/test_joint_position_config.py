@@ -24,7 +24,6 @@ from mjlab.tasks.registry import list_tasks, load_env_cfg, load_rl_cfg
 from src.tasks.hammer.config.z1.joint_position_contract import (
     JOINT_NAMES,
     load_joint_position_contract,
-    load_joint_trackability_contract,
 )
 from src.tasks.hammer.mdp.trackability import joint_trackability_cost
 
@@ -39,7 +38,6 @@ ARTIFACT = (
     Path(__file__).resolve().parents[1]
     / "src/tasks/hammer/config/z1/data/z1_joint_position_stage1.json"
 )
-TRACKABILITY_ARTIFACT = ARTIFACT.with_name("z1_joint_trackability_stage1.json")
 
 
 def _load_fic0(*, play: bool = False):
@@ -102,10 +100,6 @@ def test_fictt_is_registered_for_train_and_play_with_the_parent_learner() -> Non
 @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
 def test_fictt_installs_only_the_strict_banked_trackability_cost(play: bool) -> None:
     """Wrong gain, sign, function, joint order, or a second mutation confounds TT."""
-    source = load_joint_position_contract(ARTIFACT)
-    calibration = load_joint_trackability_contract(
-        TRACKABILITY_ARTIFACT, source_contract=source
-    )
     fic0 = _load_fic0(play=play)
     fictt = _load_fictt(play=play)
 
@@ -116,7 +110,7 @@ def test_fictt_installs_only_the_strict_banked_trackability_cost(play: bool) -> 
     assert term.func is joint_trackability_cost
     assert term.weight == -1.0
     assert set(term.params) == {"robot_cfg", "k_tt"}
-    assert term.params["k_tt"] == calibration.k_tt
+    assert term.params["k_tt"] == 1.0
     robot_cfg = term.params["robot_cfg"]
     assert isinstance(robot_cfg, SceneEntityCfg)
     assert robot_cfg.name == "robot"

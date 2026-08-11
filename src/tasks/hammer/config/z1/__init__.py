@@ -12,7 +12,6 @@ from src.tasks.hammer.config.z1.env_cfgs import (
 from src.tasks.hammer.config.z1.joint_position_contract import (
     JOINT_NAMES,
     load_joint_position_contract,
-    load_joint_trackability_contract,
 )
 from src.tasks.hammer.mdp.rewards import FirstStrikeBoundedImpactRewardTerm
 from src.tasks.hammer.mdp.trackability import joint_trackability_cost
@@ -317,16 +316,7 @@ register_mjlab_task(
 _JOINT_POSITION_ARTIFACT = (
     Path(__file__).resolve().parent / "data/z1_joint_position_stage1.json"
 )
-_JOINT_TRACKABILITY_ARTIFACT = _JOINT_POSITION_ARTIFACT.with_name(
-    "z1_joint_trackability_stage1.json"
-)
-
-
 def _install_joint_trackability_cost(cfg):
-    source_contract = load_joint_position_contract(_JOINT_POSITION_ARTIFACT)
-    calibration = load_joint_trackability_contract(
-        _JOINT_TRACKABILITY_ARTIFACT, source_contract=source_contract
-    )
     cfg.rewards["r_tt"] = RewardTermCfg(
         func=joint_trackability_cost,
         weight=-1.0,
@@ -334,7 +324,7 @@ def _install_joint_trackability_cost(cfg):
             "robot_cfg": SceneEntityCfg(
                 "robot", joint_names=JOINT_NAMES, preserve_order=True
             ),
-            "k_tt": calibration.k_tt,
+            "k_tt": 1.0,
         },
     )
     return cfg
