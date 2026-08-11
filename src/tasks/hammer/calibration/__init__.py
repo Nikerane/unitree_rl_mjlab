@@ -1,5 +1,10 @@
 """Calibration contracts and fixtures for the hammer task."""
 
+from src.tasks.hammer.calibration.controlled_drop import (
+  capture_clean_execution_identity,
+  run_one_primary_drop,
+  run_primary_calibration,
+)
 from src.tasks.hammer.calibration.controlled_drop_env import (
   PRIMARY_AXIS,
   PRIMARY_DROP_FRICTION,
@@ -23,5 +28,8 @@ __all__ = (
   "PRIMARY_PHYSICS_DT_S",
   "PRIMARY_PROGRESS_EPS",
   "PRIMARY_WINDOW_SUBSTEPS",
+  "capture_clean_execution_identity",
   "make_controlled_drop_env_cfg",
+  "run_one_primary_drop",
+  "run_primary_calibration",
 )

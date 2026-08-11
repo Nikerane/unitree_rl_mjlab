@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import math
 
 import mujoco
 import numpy as np
@@ -16,6 +17,7 @@ from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.registry import load_env_cfg
 
 import src.tasks.hammer.calibration as calibration
+from src.tasks.hammer.calibration.controlled_drop import run_one_primary_drop
 from src.tasks.hammer.mdp.first_strike import FirstStrikeEventTracker
 from src.tasks.hammer.nail_block import get_nail_block_entity_cfg
 
@@ -348,3 +350,19 @@ def test_primary_fixture_compiles_exact_protocol() -> None:
     finally:
         production_env.close()
         fixture_env.close()
+
+
+@pytest.mark.integration
+def test_one_primary_drop_contacts_and_finalizes_with_finite_positive_measurements():
+    trial = run_one_primary_drop(device="cpu", trial_index=1)
+
+    assert trial.trial_index == 1
+    assert trial.release_velocity_m_s == 0.0
+    assert trial.contacted is True
+    assert trial.finalized is True
+    assert trial.productive is True
+    assert trial.reason in {"success", "window"}
+    assert math.isfinite(trial.precontact_velocity_m_s)
+    assert trial.precontact_velocity_m_s > 0.0
+    assert math.isfinite(trial.impulse_n_s)
+    assert trial.impulse_n_s > 0.0
