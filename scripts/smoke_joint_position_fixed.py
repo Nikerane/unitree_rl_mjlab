@@ -14,7 +14,7 @@ sys.path.insert(0, _REPO_ROOT_STR)
 import torch
 
 from mjlab.envs import ManagerBasedRlEnv
-from mjlab.tasks.registry import load_env_cfg
+from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
 
 import src.tasks.hammer.config.z1  # noqa: F401  (registers tasks)
 from src.tasks.hammer.cat.hook import CatSoftHook
@@ -47,9 +47,10 @@ _FIXED_ACTUATOR_SIGNATURE = (
     1000.0,
     100.0,
     30.0,
+    0.01,
   ),
-  ("BuiltinPositionActuatorCfg", ("joint2",), 1500.0, 150.0, 60.0),
-  ("BuiltinPositionActuatorCfg", ("jointGripper",), 100.0, 20.0, 30.0),
+  ("BuiltinPositionActuatorCfg", ("joint2",), 1500.0, 150.0, 60.0, 0.02),
+  ("BuiltinPositionActuatorCfg", ("jointGripper",), 100.0, 20.0, 30.0, 0.005),
 )
 _IMPULSE_LIMITS = (1.64, 3.28, 1.64, 1.64, 1.64, 1.64)
 
@@ -70,6 +71,7 @@ def _actuator_signature(env: ManagerBasedRlEnv) -> tuple[tuple[object, ...], ...
       float(actuator.stiffness),
       float(actuator.damping),
       float(actuator.effort_limit),
+      float(actuator.armature),
     )
     for actuator in env.cfg.scene.entities["robot"].articulation.actuators
   )
@@ -84,12 +86,17 @@ def run_checks(
   """Return ``(name, passed, detail)`` checks from one real registered environment."""
   if task not in TASKS:
     raise ValueError(f"unsupported fixed joint-position smoke task: {task}")
+  if isinstance(num_envs, bool) or not isinstance(num_envs, int) or num_envs <= 0:
+    raise ValueError("num_envs must be a positive integer")
+  if isinstance(steps, bool) or not isinstance(steps, int) or steps <= 0:
+    raise ValueError("steps must be a positive integer")
   results: list[tuple[str, bool, str]] = []
 
   def check(name: str, ok: bool, detail: str = "") -> None:
     results.append((name, bool(ok), detail))
 
   cfg = load_env_cfg(task, play=True)
+  raw_policy_clip = load_rl_cfg(task).clip_actions
   cfg.scene.num_envs = num_envs
   env = ManagerBasedRlEnv(cfg, device=device, render_mode=None)
   try:
@@ -293,11 +300,16 @@ def run_checks(
         f"weighted_max={float(live_weighted_cost.max()):.6f}",
       )
 
-    metadata = _get_hammer_metadata(env, "joint-position-smoke", raw_policy_clip=1.0)
+    metadata = _get_hammer_metadata(
+      env,
+      "joint-position-smoke",
+      raw_policy_clip=raw_policy_clip,
+    )
     check(
       "live export metadata constructs successfully",
       metadata["action_type"] == "joint_position"
       and metadata["action_dim"] == 6
+      and metadata["raw_policy_clip"] == raw_policy_clip == 1.0
       and metadata["r_tt_enabled"] is (task == FICTT_TASK)
       and metadata["r_tt_k_tt"] == (1.0 if task == FICTT_TASK else "not_applicable"),
       str({key: metadata[key] for key in ("action_dim", "r_tt_enabled", "r_tt_k_tt")}),

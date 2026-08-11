@@ -1,5 +1,6 @@
 """On-policy runner for the hammer-nail task."""
 
+import json
 import math
 from pathlib import Path
 
@@ -158,6 +159,23 @@ def _get_hammer_metadata(env, run_path: str, *, raw_policy_clip: float) -> dict:
     }
 
 
+def _metadata_for_onnx(metadata: dict) -> dict:
+    """Encode structured joint-policy fields without upstream CSV rounding."""
+    if metadata.get("action_type") != "joint_position":
+        return metadata
+    return {
+        key: json.dumps(
+            value,
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        if isinstance(value, (list, dict))
+        else value
+        for key, value in metadata.items()
+    }
+
+
 class HammerOnPolicyRunner(MjlabOnPolicyRunner):
   env: RslRlVecEnvWrapper
 
@@ -173,9 +191,10 @@ class HammerOnPolicyRunner(MjlabOnPolicyRunner):
     metadata = _get_hammer_metadata(
       self.env.unwrapped, run_name, raw_policy_clip=self.env.clip_actions
     )
+    metadata_for_onnx = _metadata_for_onnx(metadata)
     try:
       self.export_policy_to_onnx(str(policy_dir), filename)
-      attach_metadata_to_onnx(str(onnx_path), metadata)
+      attach_metadata_to_onnx(str(onnx_path), metadata_for_onnx)
       if is_wandb and self.cfg.get("upload_model"):
         wandb.save(str(onnx_path), base_path=str(policy_dir))
     except Exception as e:

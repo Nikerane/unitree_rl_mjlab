@@ -1,7 +1,5 @@
 """Z1 hammer-nail task configurations."""
 
-from pathlib import Path
-
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.tasks.registry import register_mjlab_task
@@ -9,10 +7,7 @@ from src.tasks.hammer.config.z1.env_cfgs import (
     install_z1_joint_position_action,
     z1_hammer_env_cfg,
 )
-from src.tasks.hammer.config.z1.joint_position_contract import (
-    JOINT_NAMES,
-    load_joint_position_contract,
-)
+from src.tasks.hammer.config.z1.joint_position_contract import JOINT_NAMES
 from src.tasks.hammer.mdp.rewards import FirstStrikeBoundedImpactRewardTerm
 from src.tasks.hammer.mdp.trackability import joint_trackability_cost
 from src.tasks.hammer.config.z1.rl_cfg import z1_hammer_ppo_runner_cfg
@@ -313,9 +308,6 @@ register_mjlab_task(
 )
 
 
-_JOINT_POSITION_ARTIFACT = (
-    Path(__file__).resolve().parent / "data/z1_joint_position_stage1.json"
-)
 def _install_joint_trackability_cost(cfg):
     cfg.rewards["r_tt"] = RewardTermCfg(
         func=joint_trackability_cost,

@@ -62,6 +62,10 @@ def run_smoke(
   """Run the registered CatPPO rollout/update path and return its temp checkpoint."""
   if task not in TASKS:
     raise ValueError(f"unsupported CatPPO smoke task: {task}")
+  if isinstance(num_envs, bool) or not isinstance(num_envs, int) or num_envs <= 0:
+    raise ValueError("num_envs must be a positive integer")
+  if isinstance(iters, bool) or not isinstance(iters, int) or iters <= 0:
+    raise ValueError("iters must be a positive integer")
 
   env_cfg = load_env_cfg(task)
   env_cfg.scene.num_envs = num_envs

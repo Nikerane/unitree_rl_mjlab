@@ -23,7 +23,11 @@ from src.tasks.hammer.config.z1.joint_position_contract import (
 )
 from src.tasks.hammer.rl.runner import _get_hammer_metadata
 import scripts.smoke_cat_soft as smoke_cat_soft
+import scripts.smoke_joint_position_fixed as smoke_joint_position_fixed
 from scripts.smoke_joint_position_fixed import run_checks
+
+
+pytestmark = pytest.mark.integration
 
 
 PARENT_TASK = (
@@ -39,6 +43,74 @@ _CONTRACT_PATH = (
 )
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "invalid_name"),
+    (
+        ({"num_envs": True}, "num_envs"),
+        ({"num_envs": 1.5}, "num_envs"),
+        ({"num_envs": 0}, "num_envs"),
+        ({"num_envs": -1}, "num_envs"),
+        ({"steps": True}, "steps"),
+        ({"steps": 1.5}, "steps"),
+        ({"steps": 0}, "steps"),
+        ({"steps": -1}, "steps"),
+    ),
+)
+def test_live_smoke_rejects_invalid_sizes_before_environment_creation(
+    monkeypatch: pytest.MonkeyPatch,
+    kwargs: dict[str, object],
+    invalid_name: str,
+) -> None:
+    """The importable live gate must fail malformed public inputs before MuJoCo setup."""
+
+    def unexpected_environment_creation(*args, **kwargs):
+        del args, kwargs
+        pytest.fail("environment was created before public inputs were validated")
+
+    monkeypatch.setattr(
+        smoke_joint_position_fixed,
+        "ManagerBasedRlEnv",
+        unexpected_environment_creation,
+    )
+
+    with pytest.raises(ValueError, match=invalid_name):
+        run_checks(task=FIC0_TASK, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "invalid_name"),
+    (
+        ({"num_envs": True}, "num_envs"),
+        ({"num_envs": 1.5}, "num_envs"),
+        ({"num_envs": 0}, "num_envs"),
+        ({"num_envs": -1}, "num_envs"),
+        ({"iters": True}, "iters"),
+        ({"iters": 1.5}, "iters"),
+        ({"iters": 0}, "iters"),
+        ({"iters": -1}, "iters"),
+    ),
+)
+def test_catppo_smoke_rejects_invalid_sizes_before_environment_creation(
+    monkeypatch: pytest.MonkeyPatch,
+    kwargs: dict[str, object],
+    invalid_name: str,
+) -> None:
+    """The importable train gate must reject malformed sizes before MuJoCo setup."""
+
+    def unexpected_environment_creation(*args, **kwargs):
+        del args, kwargs
+        pytest.fail("environment was created before public inputs were validated")
+
+    monkeypatch.setattr(
+        smoke_cat_soft,
+        "ManagerBasedRlEnv",
+        unexpected_environment_creation,
+    )
+
+    with pytest.raises(ValueError, match=invalid_name):
+        smoke_cat_soft.run_smoke(task=FIC0_TASK, **kwargs)
+
+
 @pytest.mark.parametrize("task_id", (FIC0_TASK, FICTT_TASK), ids=("fic0", "fictt"))
 def test_live_joint_position_smoke_passes_every_check(task_id: str) -> None:
     """Both registered fixed-impedance arms must pass the live manager gate."""
@@ -46,6 +118,22 @@ def test_live_joint_position_smoke_passes_every_check(task_id: str) -> None:
 
     assert results
     assert all(passed for _, passed, _ in results), results
+
+
+def test_live_smoke_uses_the_registered_raw_policy_clip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A changed registered clip must reach metadata validation instead of a literal."""
+    drifted_rl_cfg = copy.deepcopy(load_rl_cfg(FIC0_TASK))
+    drifted_rl_cfg.clip_actions = 0.5
+    monkeypatch.setattr(
+        smoke_joint_position_fixed,
+        "load_rl_cfg",
+        lambda task: drifted_rl_cfg,
+    )
+
+    with pytest.raises(ValueError, match="raw policy clip 1.0"):
+        run_checks(task=FIC0_TASK, device="cpu", num_envs=1, steps=1)
 
 
 def test_live_smoke_rejects_nonfinite_output_from_an_earlier_step(
@@ -193,6 +281,24 @@ def _fixed_actuator_signature(env) -> list[dict[str, object]]:
     ]
 
 
+def test_live_smoke_actuator_signature_includes_literal_armature(metadata_envs) -> None:
+    """The live fixed-plant gate must pin rotor inertia as well as PD and effort."""
+    env = metadata_envs[FIC0_TASK]
+
+    assert smoke_joint_position_fixed._actuator_signature(env) == (
+        (
+            "BuiltinPositionActuatorCfg",
+            ("joint1", "joint3", "joint4", "joint5", "joint6"),
+            1000.0,
+            100.0,
+            30.0,
+            0.01,
+        ),
+        ("BuiltinPositionActuatorCfg", ("joint2",), 1500.0, 150.0, 60.0, 0.02),
+        ("BuiltinPositionActuatorCfg", ("jointGripper",), 100.0, 20.0, 30.0, 0.005),
+    )
+
+
 def _make_env(cfg) -> ManagerBasedRlEnv:
     cfg.scene.num_envs = 1
     return ManagerBasedRlEnv(cfg, device="cpu")
@@ -326,12 +432,20 @@ def test_save_attaches_joint_metadata_with_the_wrapper_owned_clip(joint_runner) 
         entry.key: entry.value
         for entry in onnx.load(onnx_path).metadata_props
     }
+    live_metadata = _get_hammer_metadata(
+        runner.env.unwrapped,
+        "local",
+        raw_policy_clip=runner.env.clip_actions,
+    )
     assert checkpoint.is_file()
     assert metadata["action_type"] == "joint_position"
     assert metadata["action_term"] == "joint_position"
     assert metadata["raw_policy_clip"] == "1.0"
     assert metadata["physics_dt_s"] == "0.002"
     assert metadata["control_decimation"] == "10"
+    for key, live_value in live_metadata.items():
+        if isinstance(live_value, (list, dict)):
+            assert json.loads(metadata[key]) == live_value
 
 
 def test_save_propagates_metadata_contract_errors_before_onnx_export(
