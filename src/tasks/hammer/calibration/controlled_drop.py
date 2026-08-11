@@ -16,6 +16,7 @@ from src.tasks.hammer.calibration.controlled_drop_contract import (
   ControlledDropExecution,
   ControlledDropResult,
   ControlledDropTrial,
+  _validate_primary_trial,
   build_primary_result,
 )
 from src.tasks.hammer.calibration.controlled_drop_env import (
@@ -119,10 +120,21 @@ def run_primary_calibration(
     expected_asset_revision=expected_asset_revision,
   )
 
-  trials = tuple(
-    run_one_primary_drop(device=device, trial_index=trial_index)
-    for trial_index in range(1, 6)
-  )
+  trials: list[ControlledDropTrial] = []
+  for trial_index in range(1, 6):
+    trial = run_one_primary_drop(device=device, trial_index=trial_index)
+    try:
+      _validate_primary_trial(trial, expected_index=trial_index)
+    except ValueError as error:
+      raise ValueError(
+        f"trial {trial_index} is invalid: {trial!r}; validation error: {error}"
+      ) from error
+    if trials and trial.reason != trials[0].reason:
+      raise ValueError(
+        f"trial {trial_index} has mixed finalization reason: {trial!r}; "
+        f"expected {trials[0].reason!r}"
+      )
+    trials.append(trial)
 
   post_identity = capture_clean_execution_identity(
     expected_code_revision=expected_code_revision,

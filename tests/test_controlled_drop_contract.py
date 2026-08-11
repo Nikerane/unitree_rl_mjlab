@@ -1,5 +1,6 @@
 from dataclasses import replace
 import json
+from typing import get_type_hints
 
 import pytest
 
@@ -39,22 +40,22 @@ def _execution() -> ControlledDropExecution:
         code_revision="a" * 40,
         asset_revision="b" * 40,
         device="cpu",
-        backend="mujoco",
+        backend="mujoco-warp",
         mujoco_version="3.8.1",
         mujoco_warp_version="3.8.1",
         mjlab_version="1.4.0",
         physics_dt_s=0.002,
         h0_m=0.150,
-        mass_kg=0.2,
-        radius_m=0.02,
-        half_height_m=0.10,
-        friction=(1.0, 0.005, 0.0001),
-        slide_axis="z",
-        slide_damping=0.1,
+        mass_kg=0.200,
+        radius_m=0.012,
+        half_height_m=0.004,
+        friction=(1.5, 0.02, 0.002),
+        slide_axis=(0.0, 0.0, -1.0),
+        slide_damping=0.0,
         slide_frictionloss=0.0,
-        tracker_axis="z",
+        tracker_axis=(0.0, 0.0, -1.0),
         tracker_window_substeps=25,
-        tracker_progress_eps=0.001,
+        tracker_progress_eps=5e-4,
     )
 
 
@@ -183,7 +184,27 @@ def test_primary_result_json_has_one_execution_and_nested_unfiltered_summary():
 
     assert set(payload) == {"schema_version", "execution", "summary"}
     assert payload["schema_version"] == 1
-    assert payload["execution"]["code_revision"] == "a" * 40
+    assert payload["execution"] == {
+        "code_revision": "a" * 40,
+        "asset_revision": "b" * 40,
+        "device": "cpu",
+        "backend": "mujoco-warp",
+        "mujoco_version": "3.8.1",
+        "mujoco_warp_version": "3.8.1",
+        "mjlab_version": "1.4.0",
+        "physics_dt_s": 0.002,
+        "h0_m": 0.150,
+        "mass_kg": 0.200,
+        "radius_m": 0.012,
+        "half_height_m": 0.004,
+        "friction": [1.5, 0.02, 0.002],
+        "slide_axis": [0.0, 0.0, -1.0],
+        "slide_damping": 0.0,
+        "slide_frictionloss": 0.0,
+        "tracker_axis": [0.0, 0.0, -1.0],
+        "tracker_window_substeps": 25,
+        "tracker_progress_eps": 5e-4,
+    }
     assert [row["trial_index"] for row in payload["summary"]["trials"]] == [1, 2, 3, 4, 5]
     assert [row["impulse_n_s"] for row in payload["summary"]["trials"]] == [
         0.1,
@@ -194,3 +215,11 @@ def test_primary_result_json_has_one_execution_and_nested_unfiltered_summary():
     ]
     assert payload["summary"]["i_ref_mean_n_s"] == 0.3
     json.dumps(payload, sort_keys=True, allow_nan=False)
+
+
+def test_execution_schema_types_match_fixed_three_vector_protocol():
+    hints = get_type_hints(ControlledDropExecution)
+
+    assert hints["friction"] == tuple[float, float, float]
+    assert hints["slide_axis"] == tuple[float, float, float]
+    assert hints["tracker_axis"] == tuple[float, float, float]

@@ -141,6 +141,84 @@ def test_primary_calibration_calls_five_ordered_fresh_trials_and_keeps_every_row
     assert result.summary.i_ref_mean_n_s == 0.3
 
 
+def test_primary_calibration_stops_on_invalid_trial_with_full_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trial_calls = []
+    identity_calls = []
+    invalid_trial = replace(
+        _trial(2, impulse=0.2),
+        productive=False,
+        precontact_velocity_m_s=float("nan"),
+    )
+
+    def fake_run_one(*, device, trial_index):
+        trial_calls.append((device, trial_index))
+        if trial_index == 2:
+            return invalid_trial
+        return _trial(trial_index, impulse=trial_index / 10)
+
+    def fake_identity(**kwargs):
+        identity_calls.append(kwargs)
+        return "a" * 40, "b" * 40
+
+    monkeypatch.setattr(controlled_drop, "run_one_primary_drop", fake_run_one)
+    monkeypatch.setattr(
+        controlled_drop,
+        "capture_clean_execution_identity",
+        fake_identity,
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        run_primary_calibration(
+            device="cpu",
+            expected_code_revision="a" * 40,
+            expected_asset_revision="b" * 40,
+        )
+
+    assert trial_calls == [("cpu", 1), ("cpu", 2)]
+    assert len(identity_calls) == 1
+    assert "trial 2" in str(exc_info.value)
+    assert str(invalid_trial) in str(exc_info.value)
+
+
+def test_primary_calibration_stops_on_mixed_reason_with_full_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trial_calls = []
+    identity_calls = []
+    mixed_trial = replace(_trial(2, impulse=0.2), reason="window")
+
+    def fake_run_one(*, device, trial_index):
+        trial_calls.append((device, trial_index))
+        if trial_index == 2:
+            return mixed_trial
+        return _trial(trial_index, impulse=trial_index / 10)
+
+    def fake_identity(**kwargs):
+        identity_calls.append(kwargs)
+        return "a" * 40, "b" * 40
+
+    monkeypatch.setattr(controlled_drop, "run_one_primary_drop", fake_run_one)
+    monkeypatch.setattr(
+        controlled_drop,
+        "capture_clean_execution_identity",
+        fake_identity,
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        run_primary_calibration(
+            device="cpu",
+            expected_code_revision="a" * 40,
+            expected_asset_revision="b" * 40,
+        )
+
+    assert trial_calls == [("cpu", 1), ("cpu", 2)]
+    assert len(identity_calls) == 1
+    assert "trial 2" in str(exc_info.value)
+    assert str(mixed_trial) in str(exc_info.value)
+
+
 @pytest.mark.parametrize(
     (
         "observed_code",
