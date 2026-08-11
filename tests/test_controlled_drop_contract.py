@@ -81,10 +81,17 @@ def test_primary_summary_keeps_all_five_trials_and_uses_arithmetic_mean():
             lambda rows: rows[:2] + (replace(rows[2], h0_m=float("nan")),) + rows[3:],
             "h0",
         ),
+        (lambda rows: rows[:2] + (replace(rows[2], h0_m=True),) + rows[3:], "h0"),
         (lambda rows: tuple(replace(row, h0_m=0.149) for row in rows), "exactly 0.150"),
         (
             lambda rows: rows[:2]
             + (replace(rows[2], release_velocity_m_s=0.01),)
+            + rows[3:],
+            "released from rest",
+        ),
+        (
+            lambda rows: rows[:2]
+            + (replace(rows[2], release_velocity_m_s=True),)
             + rows[3:],
             "released from rest",
         ),
@@ -95,13 +102,26 @@ def test_primary_summary_keeps_all_five_trials_and_uses_arithmetic_mean():
             "pre-contact velocity",
         ),
         (
+            lambda rows: rows[:2]
+            + (replace(rows[2], precontact_velocity_m_s=True),)
+            + rows[3:],
+            "pre-contact velocity",
+        ),
+        (
             lambda rows: rows[:2] + (replace(rows[2], impulse_n_s=float("nan")),) + rows[3:],
             "impulse",
         ),
+        (lambda rows: rows[:2] + (replace(rows[2], impulse_n_s=True),) + rows[3:], "impulse"),
         (lambda rows: rows[:2] + (replace(rows[2], impulse_n_s=0.0),) + rows[3:], "impulse"),
         (
             lambda rows: rows[:2]
             + (replace(rows[2], precontact_velocity_m_s=0.0),)
+            + rows[3:],
+            "pre-contact velocity",
+        ),
+        (
+            lambda rows: rows[:2]
+            + (replace(rows[2], precontact_velocity_m_s=-1.0),)
             + rows[3:],
             "pre-contact velocity",
         ),
@@ -120,14 +140,40 @@ def test_primary_summary_keeps_all_five_trials_and_uses_arithmetic_mean():
             "depth",
         ),
         (
+            lambda rows: rows[:2]
+            + (replace(rows[2], depth_at_contact_m=True),)
+            + rows[3:],
+            "depth",
+        ),
+        (
             lambda rows: rows[:2] + (replace(rows[2], peak_depth_m=0.0005),) + rows[3:],
             "depth progress",
+        ),
+        (
+            lambda rows: rows[:2] + (replace(rows[2], peak_depth_m=True),) + rows[3:],
+            "depth",
         ),
     ],
 )
 def test_primary_summary_fails_closed_on_invalid_trial_sets(mutate, message):
     with pytest.raises(ValueError, match=message):
         summarize_primary_trials(mutate(_valid_trials()))
+
+
+def test_primary_summary_uses_strict_tracker_depth_progress_threshold():
+    at_tracker_eps = _valid_trials()[:2] + (
+        replace(_valid_trials()[2], peak_depth_m=0.0005),
+    ) + _valid_trials()[3:]
+    just_above_tracker_eps = _valid_trials()[:2] + (
+        replace(_valid_trials()[2], peak_depth_m=0.0005001),
+    ) + _valid_trials()[3:]
+
+    with pytest.raises(ValueError, match="depth progress"):
+        summarize_primary_trials(at_tracker_eps)
+
+    summary = summarize_primary_trials(just_above_tracker_eps)
+
+    assert summary.trials == just_above_tracker_eps
 
 
 def test_primary_result_json_has_one_execution_and_nested_unfiltered_summary():

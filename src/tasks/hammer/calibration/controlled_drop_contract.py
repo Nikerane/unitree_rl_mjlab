@@ -97,9 +97,9 @@ def summarize_primary_trials(
             isinstance(row.precontact_velocity_m_s, bool)
             or not isinstance(row.precontact_velocity_m_s, (int, float))
             or not math.isfinite(row.precontact_velocity_m_s)
-            or row.precontact_velocity_m_s == 0.0
+            or row.precontact_velocity_m_s <= 0.0
         ):
-            raise ValueError("pre-contact velocity must be finite and nonzero")
+            raise ValueError("pre-contact velocity must be finite and positive")
         if (
             isinstance(row.impulse_n_s, bool)
             or not isinstance(row.impulse_n_s, (int, float))
@@ -125,8 +125,8 @@ def summarize_primary_trials(
                 or not math.isfinite(value)
             ):
                 raise ValueError(f"{field} depth must be a finite numeric value")
-        if row.peak_depth_m - row.depth_at_contact_m < 0.001:
-            raise ValueError("trial must show at least 1 mm depth progress")
+        if row.peak_depth_m - row.depth_at_contact_m <= 5e-4:
+            raise ValueError("trial must show depth progress above 5e-4 m")
     if len({row.reason for row in rows}) != 1:
         raise ValueError("primary trials must have one finalization reason")
     return ControlledDropSummary(
