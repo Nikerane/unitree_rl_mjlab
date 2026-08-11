@@ -136,6 +136,10 @@ def test_precontact_path_ratio_is_nan_only_when_the_chord_is_degenerate():
     assert np.isnan(mod.precontact_path_ratio(pos, contact, np.zeros(3)))
 
 
+@pytest.mark.skipif(
+    not (REPO / "evaluation/results/2026-08-02_wave1_waypoint/videos").is_dir(),
+    reason="frozen Wave-1 artifacts not present",
+)
 def test_build_rows_shares_one_precontact_window_with_the_tested_helper():
     """Every pre-contact metric must use the interval the tests actually cover."""
     mod = _load()
