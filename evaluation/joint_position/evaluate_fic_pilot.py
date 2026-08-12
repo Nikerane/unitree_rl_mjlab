@@ -28,7 +28,8 @@ from mjlab.actuator.actuator import TransmissionType
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.envs.mdp.curriculums import reward_curriculum
-from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
+from mjlab.envs.mdp.terminations import time_out as time_out_termination
+from mjlab.rl import MjlabOnPolicyRunner, RslRlPpoAlgorithmCfg, RslRlVecEnvWrapper
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 
 import mjlab.tasks  # noqa: F401
@@ -39,16 +40,21 @@ from src.tasks.hammer.config.z1.joint_position_contract import (
     load_joint_position_contract,
 )
 from src.tasks.hammer.mdp.first_strike import (
+    FirstStrikeEventTracker,
     REASON_SUCCESS,
     REASON_WINDOW,
     _ENV_FIRST_STRIKE_ATTR,
 )
-from src.tasks.hammer.mdp.impulse_bound import _ENV_SUBSTEP_IMPULSE_ATTR
+from src.tasks.hammer.mdp.impulse_bound import (
+    SubstepImpulseAccumulator,
+    _ENV_SUBSTEP_IMPULSE_ATTR,
+)
 from src.tasks.hammer.mdp.references import get_strike_reference
-from src.tasks.hammer.mdp.rewards import ImitationPriorTerm
+from src.tasks.hammer.mdp.rewards import ImitationPriorTerm, action_rate_penalty
+from src.tasks.hammer.mdp.terminations import nail_fully_driven
 from src.tasks.hammer.mdp.trackability import joint_trackability_cost
-from src.tasks.hammer.mdp.velocity_bound import _ENV_SUBSTEP_ATTR
-from src.tasks.hammer.nail_block import NAIL_GOAL_DEPTH
+from src.tasks.hammer.mdp.velocity_bound import SubstepPeakJointVel, _ENV_SUBSTEP_ATTR
+from src.tasks.hammer.nail_block import NAIL_GOAL_DEPTH, NAIL_SUCCESS_THRESHOLD
 
 
 PARENT_TASK = (
@@ -229,6 +235,13 @@ def validate_fic_contract(task: str, env_cfg, agent_cfg) -> dict[str, object]:
         raise ValueError(f"unsupported FIC pilot task: {task}")
     if _finite_number(getattr(agent_cfg, "clip_actions", None), name="clip_actions") != 1.0:
         raise ValueError("FIC pilot requires raw policy clip 1.0")
+    algorithm = getattr(agent_cfg, "algorithm", None)
+    if (
+        type(algorithm) is not RslRlPpoAlgorithmCfg
+        or getattr(algorithm, "class_name", None)
+        != "src.tasks.hammer.rl.cat_ppo:CatPPO"
+    ):
+        raise ValueError("FIC pilot requires the exact CatPPO algorithm class")
     if getattr(getattr(agent_cfg, "actor", None), "obs_normalization", None) is not True:
         raise ValueError("FIC pilot requires actor observation normalization")
     if getattr(getattr(agent_cfg, "critic", None), "obs_normalization", None) is not True:
@@ -294,6 +307,30 @@ def validate_fic_contract(task: str, env_cfg, agent_cfg) -> dict[str, object]:
     ):
         raise ValueError("FIC pilot fixed joint reset drift")
 
+    terminations = getattr(env_cfg, "terminations", {})
+    if tuple(terminations) != ("time_out", "nail_driven"):
+        raise ValueError("FIC pilot termination names or order drift")
+    time_out = terminations["time_out"]
+    nail_driven = terminations["nail_driven"]
+    nail_params = getattr(nail_driven, "params", {})
+    nail_cfg = nail_params.get("nail_cfg")
+    if (
+        getattr(time_out, "func", None) is not time_out_termination
+        or getattr(time_out, "time_out", None) is not True
+        or getattr(time_out, "params", None) != {}
+        or getattr(nail_driven, "func", None) is not nail_fully_driven
+        or getattr(nail_driven, "time_out", None) is not False
+        or set(nail_params) != {"success_depth", "nail_cfg"}
+        or _finite_number(
+            nail_params.get("success_depth"), name="nail_driven success_depth"
+        )
+        != NAIL_SUCCESS_THRESHOLD
+        or getattr(nail_cfg, "name", None) != "nail_block"
+        or tuple(getattr(nail_cfg, "joint_names", ())) != ("nail_slide",)
+        or getattr(nail_cfg, "preserve_order", None) is not False
+    ):
+        raise ValueError("FIC pilot termination contract drift")
+
     rewards = getattr(env_cfg, "rewards", {})
     expected_rewards = (
         "approach",
@@ -309,6 +346,16 @@ def validate_fic_contract(task: str, env_cfg, agent_cfg) -> dict[str, object]:
     )
     if tuple(rewards) != expected_rewards:
         raise ValueError("FIC pilot direct-reference reward or waypoint behavior drift")
+    action_rate = _cfg_value(rewards, "action_rate")
+    if (
+        getattr(action_rate, "func", None) is not action_rate_penalty
+        or _finite_number(
+            getattr(action_rate, "weight", None), name="action_rate weight"
+        )
+        != -0.01
+        or getattr(action_rate, "params", None) != {}
+    ):
+        raise ValueError("FIC pilot action_rate contract drift")
     delivered = _cfg_value(rewards, "delivered_impulse")
     if _finite_number(getattr(delivered, "weight", None), name="D4 weight") != 4.0:
         raise ValueError("FIC pilot requires D4 weight 4.0")
@@ -360,6 +407,86 @@ def validate_fic_contract(task: str, env_cfg, agent_cfg) -> dict[str, object]:
     metrics = getattr(env_cfg, "metrics", {})
     if "waypoint_progress" in metrics or {"r_gate", "r_waypoint_progress"} & set(rewards):
         raise ValueError("FIC pilot forbids waypoint behavior")
+
+    qvel_producer = _cfg_value(metrics, "substep_peak_qv")
+    qvel_reduce = getattr(qvel_producer, "reduce", None)
+    if (
+        getattr(qvel_producer, "func", None) is not SubstepPeakJointVel
+        or getattr(qvel_producer, "per_substep", None) is not True
+        or type(qvel_reduce) is not str
+        or qvel_reduce != "mean"
+        or getattr(qvel_producer, "params", None) != {}
+    ):
+        raise ValueError("FIC pilot substep-qvel producer contract drift")
+
+    impulse_producer = _cfg_value(metrics, "substep_impulse")
+    impulse_reduce = getattr(impulse_producer, "reduce", None)
+    impulse_params = getattr(impulse_producer, "params", {})
+    impulse_robot_cfg = impulse_params.get("robot_cfg")
+    if (
+        getattr(impulse_producer, "func", None) is not SubstepImpulseAccumulator
+        or getattr(impulse_producer, "per_substep", None) is not True
+        or type(impulse_reduce) is not str
+        or impulse_reduce != "last"
+        or set(impulse_params)
+        != {
+            "sensor_name",
+            "robot_cfg",
+            "subtract_baseline",
+            "event_window_substeps",
+        }
+        or impulse_params.get("sensor_name") != "hammer_nail_contact"
+        or getattr(impulse_robot_cfg, "name", None) != "robot"
+        or tuple(getattr(impulse_robot_cfg, "joint_names", ())) != JOINT_NAMES
+        or getattr(impulse_robot_cfg, "preserve_order", None) is not False
+        or impulse_params.get("subtract_baseline") is not True
+        or type(impulse_params.get("event_window_substeps")) is not int
+        or impulse_params.get("event_window_substeps") != 25
+    ):
+        raise ValueError("FIC pilot substep-impulse producer/CaT contract drift")
+
+    strike_producer = _cfg_value(metrics, "first_strike")
+    strike_reduce = getattr(strike_producer, "reduce", None)
+    strike_params = getattr(strike_producer, "params", {})
+    strike_robot_cfg = strike_params.get("robot_cfg")
+    strike_nail_cfg = strike_params.get("nail_cfg")
+    strike_axis = strike_params.get("axis")
+    if (
+        getattr(strike_producer, "func", None) is not FirstStrikeEventTracker
+        or getattr(strike_producer, "per_substep", None) is not True
+        or type(strike_reduce) is not str
+        or strike_reduce != "last"
+        or set(strike_params)
+        != {
+            "contact_sensor_name",
+            "impulse_sensor_name",
+            "robot_cfg",
+            "nail_cfg",
+            "axis",
+            "window_substeps",
+            "progress_eps",
+        }
+        or strike_params.get("contact_sensor_name") != "hammer_nail_contact"
+        or strike_params.get("impulse_sensor_name") != "hammer_nail_impulse"
+        or getattr(strike_robot_cfg, "name", None) != "robot"
+        or tuple(getattr(strike_robot_cfg, "site_names", ()))
+        != ("hammer_head_site",)
+        or getattr(strike_robot_cfg, "preserve_order", None) is not False
+        or getattr(strike_nail_cfg, "name", None) != "nail_block"
+        or tuple(getattr(strike_nail_cfg, "joint_names", ())) != ("nail_slide",)
+        or tuple(getattr(strike_nail_cfg, "site_names", ())) != ("nail_top",)
+        or getattr(strike_nail_cfg, "preserve_order", None) is not False
+        or type(strike_axis) is not tuple
+        or strike_axis != (0.0, 0.0, -1.0)
+        or type(strike_params.get("window_substeps")) is not int
+        or strike_params.get("window_substeps") != 25
+        or _finite_number(
+            strike_params.get("progress_eps"), name="first-strike progress_eps"
+        )
+        != 0.0005
+    ):
+        raise ValueError("FIC pilot first-strike producer contract drift")
+
     cat = _cfg_value(metrics, "cat_soft")
     cat_reduce = getattr(cat, "reduce", None)
     if (
@@ -453,10 +580,13 @@ def validate_fic_contract(task: str, env_cfg, agent_cfg) -> dict[str, object]:
         "observation_width": OBSERVATION_WIDTH,
         "actor_obs_normalization": True,
         "critic_obs_normalization": True,
+        "algorithm_class": "src.tasks.hammer.rl.cat_ppo:CatPPO",
         "d4_weight": 4.0,
         "delivered_impulse_i_ref_n_s": i_ref,
         "r_imit_weight": 0.10,
         "r_imit_sigma_m": 0.05,
+        "action_rate_weight": -0.01,
+        "success_termination": "nail_driven",
         "r_imit_curriculum": [
             {"step": step, "weight": weight}
             for step, weight in IMITATION_CURRICULUM
@@ -464,6 +594,7 @@ def validate_fic_contract(task: str, env_cfg, agent_cfg) -> dict[str, object]:
         "velocity_cat_substep": True,
         "impulse_cat_log_only": True,
         "row_attribution_enabled": False,
+        "endpoint_producers_substep": True,
         "r_tt_enabled": task == FICTT_TASK,
         "r_tt_k_tt": 1.0 if task == FICTT_TASK else None,
     }
@@ -629,7 +760,7 @@ def capture_first_terminals(
     *,
     records: dict[int, dict[str, object]],
     done: torch.Tensor,
-    terminated: torch.Tensor,
+    nail_driven: torch.Tensor,
     timed_out: torch.Tensor,
     steps: torch.Tensor,
     tracker,
@@ -650,7 +781,7 @@ def capture_first_terminals(
         impulse_peak = _finite_six(joint_impulse_peak[env_id])
         record = {
             "env_id": int(env_id),
-            "success": bool(terminated[env_id]),
+            "success": bool(nail_driven[env_id]),
             "timeout": bool(timed_out[env_id]),
             "episode_steps": int(steps[env_id].item()),
             "first_strike_started": bool(tracker.started[env_id]),
@@ -946,7 +1077,7 @@ def evaluate_checkpoint(
             done_ids = capture_first_terminals(
                 records=records,
                 done=done,
-                terminated=env.reset_terminated,
+                nail_driven=env.termination_manager.get_term("nail_driven"),
                 timed_out=env.reset_time_outs,
                 steps=steps,
                 tracker=tracker,

@@ -101,6 +101,67 @@ def test_contract_rejects_action_order_and_normalizer_drift():
         pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent)
 
 
+def test_contract_rejects_stock_ppo_that_would_bypass_soft_cat():
+    env_cfg, agent_cfg = _live_configs()
+    agent_cfg.algorithm.class_name = "PPO"
+
+    with pytest.raises(ValueError, match="CatPPO"):
+        pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent_cfg)
+
+
+@pytest.mark.parametrize("mutation", ("function", "weight", "params"))
+def test_contract_rejects_action_rate_scientific_drift(mutation):
+    env_cfg, agent_cfg = _live_configs()
+    action_rate = env_cfg.rewards["action_rate"]
+    if mutation == "function":
+        action_rate.func = object
+    elif mutation == "weight":
+        action_rate.weight = -0.02
+    else:
+        action_rate.params["scale"] = 1.0
+
+    with pytest.raises(ValueError, match="action_rate"):
+        pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent_cfg)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "extra_non_timeout",
+        "timeout_function",
+        "timeout_flag",
+        "timeout_params",
+        "success_function",
+        "success_flag",
+        "success_depth",
+        "success_nail",
+    ),
+)
+def test_contract_rejects_termination_semantic_drift(mutation):
+    env_cfg, agent_cfg = _live_configs()
+    time_out = env_cfg.terminations["time_out"]
+    nail_driven = env_cfg.terminations["nail_driven"]
+    if mutation == "extra_non_timeout":
+        env_cfg.terminations["failure"] = nail_driven
+    elif mutation == "timeout_function":
+        time_out.func = object
+    elif mutation == "timeout_flag":
+        time_out.time_out = False
+    elif mutation == "timeout_params":
+        time_out.params["limit"] = 1
+    elif mutation == "success_function":
+        nail_driven.func = object
+    elif mutation == "success_flag":
+        nail_driven.time_out = True
+    elif mutation == "success_depth":
+        nail_driven.params["success_depth"] = 0.031
+    else:
+        nail_driven.params["nail_cfg"].joint_names = ("other_joint",)
+
+    with pytest.raises(ValueError, match="termination"):
+        pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent_cfg)
+
+
 @pytest.mark.parametrize("group", ("actor", "critic"))
 def test_contract_rejects_direct_observation_name_or_order_drift(group):
     env_cfg, agent_cfg = _live_configs()
@@ -398,6 +459,71 @@ def test_contract_rejects_unknown_velocity_cat_hook_parameter():
         pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent_cfg)
 
 
+@pytest.mark.parametrize(
+    ("name", "mutation"),
+    (
+        ("substep_peak_qv", "per_substep"),
+        ("substep_peak_qv", "function"),
+        ("substep_peak_qv", "reduce"),
+        ("substep_peak_qv", "params"),
+        ("substep_impulse", "per_substep"),
+        ("substep_impulse", "function"),
+        ("substep_impulse", "reduce"),
+        ("substep_impulse", "sensor"),
+        ("substep_impulse", "joints"),
+        ("substep_impulse", "baseline"),
+        ("substep_impulse", "window"),
+        ("first_strike", "per_substep"),
+        ("first_strike", "function"),
+        ("first_strike", "reduce"),
+        ("first_strike", "contact_sensor"),
+        ("first_strike", "impulse_sensor"),
+        ("first_strike", "head"),
+        ("first_strike", "nail_joint"),
+        ("first_strike", "nail_site"),
+        ("first_strike", "axis"),
+        ("first_strike", "window"),
+        ("first_strike", "progress_eps"),
+    ),
+)
+def test_contract_rejects_endpoint_producer_metric_drift(name, mutation):
+    env_cfg, agent_cfg = _live_configs()
+    metric = env_cfg.metrics[name]
+    if mutation == "per_substep":
+        metric.per_substep = False
+    elif mutation == "function":
+        metric.func = object
+    elif mutation == "reduce":
+        metric.reduce = "last" if name == "substep_peak_qv" else "mean"
+    elif mutation == "params":
+        metric.params["unexpected"] = True
+    elif mutation in ("sensor", "contact_sensor"):
+        key = "sensor_name" if name == "substep_impulse" else "contact_sensor_name"
+        metric.params[key] = "other_contact"
+    elif mutation == "impulse_sensor":
+        metric.params["impulse_sensor_name"] = "other_impulse"
+    elif mutation == "joints":
+        metric.params["robot_cfg"].joint_names = pilot.JOINT_NAMES[:-1]
+    elif mutation == "baseline":
+        metric.params["subtract_baseline"] = False
+    elif mutation == "head":
+        metric.params["robot_cfg"].site_names = ("other_head",)
+    elif mutation == "nail_joint":
+        metric.params["nail_cfg"].joint_names = ("other_joint",)
+    elif mutation == "nail_site":
+        metric.params["nail_cfg"].site_names = ("other_site",)
+    elif mutation == "axis":
+        metric.params["axis"] = (0.0, 0.0, 1.0)
+    elif mutation == "progress_eps":
+        metric.params["progress_eps"] = 0.001
+    else:
+        key = "event_window_substeps" if name == "substep_impulse" else "window_substeps"
+        metric.params[key] = 24
+
+    with pytest.raises(ValueError, match="producer"):
+        pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent_cfg)
+
+
 def test_contract_rejects_cat_negative_term_split_drift(monkeypatch):
     env_cfg, agent_cfg = _live_configs(pilot.FICTT_TASK)
     monkeypatch.setattr(pilot, "_NEG_TERMS", ("action_rate", "joint_pos_limits"), raising=False)
@@ -615,7 +741,7 @@ def test_capture_records_each_first_terminal_before_tracker_mutation():
     ids = pilot.capture_first_terminals(
         records=records,
         done=done,
-        terminated=torch.tensor([True, False]),
+        nail_driven=torch.tensor([True, False]),
         timed_out=torch.tensor([False, True]),
         steps=torch.tensor([9, 10]),
         tracker=tracker,
@@ -627,7 +753,7 @@ def test_capture_records_each_first_terminal_before_tracker_mutation():
     pilot.capture_first_terminals(
         records=records,
         done=done,
-        terminated=torch.tensor([True, False]),
+        nail_driven=torch.tensor([True, False]),
         timed_out=torch.tensor([False, True]),
         steps=torch.tensor([99, 99]),
         tracker=tracker,
@@ -644,6 +770,36 @@ def test_capture_records_each_first_terminal_before_tracker_mutation():
     assert records[0]["joint_impulse_utilization"] == pytest.approx(
         [1.0 / 1.64, 1.0 / 3.28, 1.0 / 1.64, 1.0 / 1.64, 1.0 / 1.64, 1.0 / 1.64]
     )
+
+
+def test_capture_does_not_label_an_aggregate_failure_termination_as_success():
+    tracker = SimpleNamespace(
+        started=torch.tensor([False]),
+        finalized=torch.tensor([False]),
+        productive=torch.tensor([False]),
+        reason=torch.tensor([0]),
+        v_precontact=torch.tensor([0.0]),
+        delivered=torch.tensor([0.0]),
+    )
+    measurements = pilot._new_episode_accumulators(1, torch.device("cpu"))
+    measurements.target_samples[:] = 1
+    measurements.reference_samples[:] = 1
+    aggregate_non_timeout = torch.tensor([True])
+
+    records = {}
+    pilot.capture_first_terminals(
+        records=records,
+        done=aggregate_non_timeout,
+        nail_driven=torch.tensor([False]),
+        timed_out=torch.tensor([False]),
+        steps=torch.tensor([1]),
+        tracker=tracker,
+        nail_depth=torch.tensor([0.0]),
+        joint_impulse_peak=torch.zeros(1, 6),
+        episode_accumulators=measurements,
+    )
+
+    assert records[0]["success"] is False
 
 
 def test_partial_reset_preserves_unfinished_inputs_and_torch_rng(monkeypatch):
