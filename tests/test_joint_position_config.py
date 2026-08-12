@@ -34,6 +34,7 @@ PARENT_TASK = (
 )
 FIC0_TASK = f"{PARENT_TASK}-JointPosition-Fixed"
 FICTT_TASK = f"{FIC0_TASK}-TT"
+FIC_CONTROLLED_DROP_I_REF_N_S = 0.2799950838088989
 ARTIFACT = (
     Path(__file__).resolve().parents[1]
     / "src/tasks/hammer/config/z1/data/z1_joint_position_stage1.json"
@@ -209,8 +210,40 @@ def test_fic0_action_is_the_exact_banked_absolute_joint_contract(play: bool) -> 
 
 
 @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
-def test_fic0_differs_from_the_exact_cartesian_parent_only_by_actions(play: bool) -> None:
-    """Any second config mutation would confound the action-space treatment."""
+def test_fic_reference_and_row_diagnostic_are_isolated_from_cartesian_tasks(
+    play: bool,
+) -> None:
+    """Only the joint pilot receives the calibrated normalizer and scale-safe diagnostic flag."""
+    parent = load_env_cfg(PARENT_TASK, play=play)
+    fic0 = _load_fic0(play=play)
+    fictt = _load_fictt(play=play)
+
+    parent_delivered = parent.rewards["delivered_impulse"]
+    assert parent_delivered.params["i_ref"] == 0.3088
+    assert parent_delivered.weight == 4.0
+    assert parent.metrics["substep_impulse_rows"].params["enabled"] is True
+
+    for task_id in list_tasks():
+        if "JointPosition-Fixed" in task_id:
+            continue
+        cartesian = load_env_cfg(task_id, play=play)
+        delivered = cartesian.rewards.get("delivered_impulse")
+        if delivered is None or delivered.func.__name__ != "FirstStrikeDeliveredRewardTerm":
+            continue
+        assert delivered.params["i_ref"] == 0.3088
+
+    for fic in (fic0, fictt):
+        delivered = fic.rewards["delivered_impulse"]
+        assert delivered.params["i_ref"] == FIC_CONTROLLED_DROP_I_REF_N_S
+        assert delivered.weight == 4.0
+        assert fic.metrics["substep_impulse_rows"].params["enabled"] is False
+
+
+@pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
+def test_fic0_differs_from_the_exact_cartesian_parent_only_at_approved_seams(
+    play: bool,
+) -> None:
+    """Any change beyond action, calibrated normalizer, and row diagnostics confounds FIC-0."""
     parent = load_env_cfg(PARENT_TASK, play=play)
     fic0 = _load_fic0(play=play)
     parent_tree = _canonicalize(parent)
@@ -219,9 +252,14 @@ def test_fic0_differs_from_the_exact_cartesian_parent_only_by_actions(play: bool
     assert set(parent_tree) == set(fic0_tree)
     assert {
         field for field in parent_tree if parent_tree[field] != fic0_tree[field]
-    } == {"actions"}
-    parent_tree["actions"] = fic0_tree["actions"]
-    assert parent_tree == fic0_tree
+    } == {"actions", "metrics", "rewards"}
+
+    parent.actions = fic0.actions
+    parent.rewards["delivered_impulse"].params["i_ref"] = (
+        FIC_CONTROLLED_DROP_I_REF_N_S
+    )
+    parent.metrics["substep_impulse_rows"].params["enabled"] = False
+    assert _canonicalize(parent) == fic0_tree
 
 
 @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))

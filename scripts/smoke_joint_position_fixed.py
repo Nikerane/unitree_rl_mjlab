@@ -53,6 +53,7 @@ _FIXED_ACTUATOR_SIGNATURE = (
   ("BuiltinPositionActuatorCfg", ("jointGripper",), 100.0, 20.0, 30.0, 0.005),
 )
 _IMPULSE_LIMITS = (1.64, 3.28, 1.64, 1.64, 1.64, 1.64)
+_FIC_CONTROLLED_DROP_I_REF_N_S = 0.2799950838088989
 
 
 def _hook_of(env: ManagerBasedRlEnv) -> CatSoftHook:
@@ -201,6 +202,19 @@ def run_checks(
       reward_weights.get("delivered_impulse") == 4.0,
       str(reward_weights.get("delivered_impulse")),
     )
+    delivered_cfg = env.reward_manager.get_term_cfg("delivered_impulse")
+    check(
+      "delivered impulse uses the corrected FIC-only controlled-drop reference",
+      delivered_cfg.params["i_ref"] == _FIC_CONTROLLED_DROP_I_REF_N_S,
+      str(delivered_cfg.params["i_ref"]),
+    )
+    check(
+      "contact-row attribution is disabled while production impulse remains active",
+      env.cfg.metrics["substep_impulse_rows"].params["enabled"] is False
+      and "substep_impulse" in env.metrics_manager.active_terms,
+      f"rows_enabled={env.cfg.metrics['substep_impulse_rows'].params['enabled']}; "
+      f"metrics={tuple(env.metrics_manager.active_terms)}",
+    )
 
     check(
       "velocity CaT reads a six-joint substep tracker",
@@ -310,9 +324,19 @@ def run_checks(
       metadata["action_type"] == "joint_position"
       and metadata["action_dim"] == 6
       and metadata["raw_policy_clip"] == raw_policy_clip == 1.0
+      and metadata["delivered_impulse_i_ref_n_s"]
+      == _FIC_CONTROLLED_DROP_I_REF_N_S
       and metadata["r_tt_enabled"] is (task == FICTT_TASK)
       and metadata["r_tt_k_tt"] == (1.0 if task == FICTT_TASK else "not_applicable"),
-      str({key: metadata[key] for key in ("action_dim", "r_tt_enabled", "r_tt_k_tt")}),
+      str({
+        key: metadata[key]
+        for key in (
+          "action_dim",
+          "delivered_impulse_i_ref_n_s",
+          "r_tt_enabled",
+          "r_tt_k_tt",
+        )
+      }),
     )
   finally:
     env.close()

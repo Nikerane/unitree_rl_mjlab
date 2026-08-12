@@ -322,10 +322,22 @@ def _install_joint_trackability_cost(cfg):
     return cfg
 
 
+_FIC_CONTROLLED_DROP_I_REF_N_S = 0.2799950838088989
+
+
 def _joint_position_fixed_env_cfg(*, play: bool, trackability: bool):
     cfg = _presentation_i_off_env_cfg(
         play=play, velocity_cat=True, delivered_weight=4.0
     )
+    # FIC-only calibration: exact five-drop mean from the corrected 17.5 mm
+    # controlled-drop fixture. Cartesian registrations retain their historical
+    # first-strike normalizer through z1_hammer_env_cfg.
+    cfg.rewards["delivered_impulse"].params["i_ref"] = (
+        _FIC_CONTROLLED_DROP_I_REF_N_S
+    )
+    # This diagnostic-only contact-row decomposition is not qualified at the
+    # 4,096-environment pilot scale. The production impulse accumulator remains on.
+    cfg.metrics["substep_impulse_rows"].params["enabled"] = False
     install_z1_joint_position_action(cfg)
     if trackability:
         _install_joint_trackability_cost(cfg)

@@ -130,6 +130,17 @@ def _get_hammer_metadata(env, run_path: str, *, raw_policy_clip: float) -> dict:
         raise ValueError("joint physical clips must be finite increasing intervals")
     contract = load_joint_position_contract(_JOINT_POSITION_CONTRACT_PATH)
 
+    delivered_i_ref = env.reward_manager.get_term_cfg(
+        "delivered_impulse"
+    ).params["i_ref"]
+    if (
+        isinstance(delivered_i_ref, bool)
+        or not isinstance(delivered_i_ref, (int, float))
+        or not math.isfinite(float(delivered_i_ref))
+        or float(delivered_i_ref) <= 0.0
+    ):
+        raise ValueError("delivered impulse i_ref must be finite and strictly positive")
+
     r_tt_enabled = "r_tt" in env.reward_manager.active_terms
     if r_tt_enabled:
         r_tt_k_tt = float(env.reward_manager.get_term_cfg("r_tt").params["k_tt"])
@@ -154,6 +165,7 @@ def _get_hammer_metadata(env, run_path: str, *, raw_policy_clip: float) -> dict:
         "control_decimation": control_decimation,
         "fixed_actuator_signature": _fixed_actuator_signature(env),
         "joint_action_qualification_payload_sha256": contract.payload_sha256,
+        "delivered_impulse_i_ref_n_s": float(delivered_i_ref),
         "r_tt_enabled": r_tt_enabled,
         "r_tt_k_tt": r_tt_k_tt,
     }

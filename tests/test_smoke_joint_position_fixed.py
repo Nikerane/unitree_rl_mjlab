@@ -370,6 +370,7 @@ def test_joint_metadata_is_resolved_from_the_live_action_and_robot(
         "control_decimation": int(env.cfg.decimation),
         "fixed_actuator_signature": _fixed_actuator_signature(env),
         "joint_action_qualification_payload_sha256": contract.payload_sha256,
+        "delivered_impulse_i_ref_n_s": 0.2799950838088989,
         "r_tt_enabled": r_tt_enabled,
         "r_tt_k_tt": r_tt_k_tt,
     }
@@ -443,6 +444,7 @@ def test_save_attaches_joint_metadata_with_the_wrapper_owned_clip(joint_runner) 
     assert metadata["raw_policy_clip"] == "1.0"
     assert metadata["physics_dt_s"] == "0.002"
     assert metadata["control_decimation"] == "10"
+    assert metadata["delivered_impulse_i_ref_n_s"] == "0.2799950838088989"
     for key, live_value in live_metadata.items():
         if isinstance(live_value, (list, dict)):
             assert json.loads(metadata[key]) == live_value
@@ -466,6 +468,24 @@ def test_save_propagates_metadata_contract_errors_before_onnx_export(
 
     assert checkpoint.is_file()
     assert not (export_dir / "invalid-clip.onnx").exists()
+
+
+@pytest.mark.parametrize(
+    "invalid_i_ref", (float("nan"), 0.0, -1.0, True, "not-a-number")
+)
+def test_joint_metadata_rejects_invalid_live_delivered_impulse_reference(
+    metadata_envs, invalid_i_ref: object
+) -> None:
+    """Joint policy exports must fail closed on malformed live normalization."""
+    env = metadata_envs[FIC0_TASK]
+    term = env.reward_manager.get_term_cfg("delivered_impulse")
+    original = term.params["i_ref"]
+    term.params["i_ref"] = invalid_i_ref
+    try:
+        with pytest.raises(ValueError, match="delivered impulse i_ref"):
+            _get_hammer_metadata(env, "test-run", raw_policy_clip=RAW_POLICY_CLIP)
+    finally:
+        term.params["i_ref"] = original
 
 
 @pytest.mark.parametrize(
