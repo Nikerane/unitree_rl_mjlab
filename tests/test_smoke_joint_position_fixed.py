@@ -195,6 +195,58 @@ def test_live_joint_position_smoke_passes_every_check(task_id: str) -> None:
     assert all(passed for _, passed, _ in results), results
 
 
+def test_vic_nominal_parity_and_authority_qualification_passes_every_check() -> None:
+    """The live VIC gate must prove its matched FIC baseline and bounded authority."""
+    results = smoke_joint_position_fixed.run_vic_qualification_checks(
+        device="cpu", num_envs=2
+    )
+
+    assert results
+    assert all(passed for _, passed, _ in results), results
+
+
+@pytest.mark.parametrize(
+    ("task_id", "expected_qualification_calls"),
+    (
+        (DIRECT_FICTT_TASK, []),
+        (VIC_TT_TASK, [("cpu", 2)]),
+        ("all", [("cpu", 2)]),
+    ),
+)
+def test_cli_runs_vic_qualification_once_only_when_selected(
+    monkeypatch: pytest.MonkeyPatch,
+    task_id: str,
+    expected_qualification_calls: list[tuple[str, int]],
+) -> None:
+    """Fixed-only smoke invocations must not pay for the paired VIC qualification."""
+    qualification_calls: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        smoke_joint_position_fixed,
+        "run_checks",
+        lambda *args, **kwargs: [("ordinary smoke", True, "")],
+    )
+
+    def record_qualification(
+        device: str = "cpu", num_envs: int = 2
+    ) -> list[tuple[str, bool, str]]:
+        qualification_calls.append((device, num_envs))
+        return [("VIC qualification", True, "")]
+
+    monkeypatch.setattr(
+        smoke_joint_position_fixed,
+        "run_vic_qualification_checks",
+        record_qualification,
+    )
+    monkeypatch.setattr(
+        smoke_joint_position_fixed.sys,
+        "argv",
+        ["smoke_joint_position_fixed.py", "--task", task_id, "--device", "cpu"],
+    )
+
+    assert smoke_joint_position_fixed.main() == 0
+    assert qualification_calls == expected_qualification_calls
+
+
 def test_vic_catppo_smoke_runs_one_real_update() -> None:
     """VIC-TT must complete the real 24-step CatPPO rollout/update path on CPU."""
     checkpoint = smoke_cat_soft.run_smoke(

@@ -1,4 +1,4 @@
-"""Lean live-manager gate for the two fixed-impedance joint-policy arms."""
+"""Lean live-manager gate for the fixed- and variable-impedance joint policies."""
 
 from __future__ import annotations
 
@@ -20,7 +20,14 @@ import src.tasks.hammer.config.z1  # noqa: F401  (registers tasks)
 from src.tasks.hammer.cat.hook import CatSoftHook
 from src.tasks.hammer.cat.keys import CAT_R_POS_KEY
 from src.tasks.hammer.config.z1.env_cfgs import IMP_J_LIMIT
-from src.tasks.hammer.config.z1.joint_position_contract import JOINT_NAMES
+from src.tasks.hammer.config.z1.joint_position_contract import (
+  JOINT_NAMES,
+  load_joint_position_contract,
+)
+from src.tasks.hammer.mdp.impulse_bound import (
+  _ENV_SUBSTEP_DELIVERED_ATTR,
+  _ENV_SUBSTEP_IMPULSE_ATTR,
+)
 from src.tasks.hammer.mdp.velocity_bound import _ENV_SUBSTEP_ATTR, Z1_JOINT_VEL_LIMIT
 from src.tasks.hammer.rl.runner import _get_hammer_metadata
 
@@ -85,6 +92,12 @@ _FIXED_ACTUATOR_SIGNATURE = (
   ("BuiltinPositionActuatorCfg", ("jointGripper",), 100.0, 20.0, 30.0, 0.005),
 )
 _FIC_CONTROLLED_DROP_I_REF_N_S = 0.2799950838088989
+_JOINT_POSITION_CONTRACT_PATH = (
+  _REPO_ROOT / "src/tasks/hammer/config/z1/data/z1_joint_position_stage1.json"
+)
+_ARM_CONTROL_IDS = (0, 5, 1, 2, 3, 4)
+_CPU_PARITY_TOLERANCE = 1.0e-6
+_AUTHORITY_POSITION_ERROR_RAD = 1.0e-3
 
 
 def _hook_of(env: ManagerBasedRlEnv) -> CatSoftHook:
@@ -107,6 +120,477 @@ def _actuator_signature(env: ManagerBasedRlEnv) -> tuple[tuple[object, ...], ...
     )
     for actuator in env.cfg.scene.entities["robot"].articulation.actuators
   )
+
+
+def _stack_trace(rows: dict[str, list[torch.Tensor]]) -> dict[str, torch.Tensor]:
+  return {name: torch.stack(values) for name, values in rows.items()}
+
+
+def _capture_nominal_trace(
+  task: str,
+  device: str,
+  *,
+  num_envs: int,
+  seed: int = 1000,
+) -> dict[str, torch.Tensor]:
+  """Run the banked direct-reference target tape and capture every physics substep."""
+  cfg = load_env_cfg(task, play=True)
+  cfg.scene.num_envs = num_envs
+  cfg.auto_reset = False
+  env = ManagerBasedRlEnv(cfg, device=device, render_mode=None)
+  original_compute_substep = None
+  try:
+    env.reset(seed=seed)
+    position = env.action_manager.get_term("joint_position")
+    robot = env.scene["robot"]
+    contact = env.scene["hammer_nail_contact"]
+    tracker = getattr(env, _ENV_SUBSTEP_ATTR)
+    impulse = getattr(env, _ENV_SUBSTEP_IMPULSE_ATTR)
+    delivered = getattr(env, _ENV_SUBSTEP_DELIVERED_ATTR)
+    hook = _hook_of(env)
+    control_ids = torch.tensor(
+      _ARM_CONTROL_IDS, dtype=torch.long, device=env.device
+    )
+    r_tt_index = env.reward_manager.active_terms.index("r_tt")
+    substep_rows: dict[str, list[torch.Tensor]] = {
+      name: []
+      for name in (
+        "qpos",
+        "qvel",
+        "qtarget",
+        "gain_kp",
+        "bias_kp",
+        "bias_kd",
+        "contact",
+        "peak_qv",
+        "impulse",
+        "delivered",
+      )
+    }
+    control_rows: dict[str, list[torch.Tensor]] = {
+      name: []
+      for name in (
+        "expected_qtarget",
+        "r_tt",
+        "vel_raw",
+        "imp_raw",
+        "vel_prob",
+        "imp_prob",
+        "cat_delta",
+      )
+    }
+
+    original_compute_substep = env.metrics_manager.compute_substep
+
+    def capture_after_substep() -> None:
+      original_compute_substep()
+      model = env.sim.model
+      values = {
+        "qpos": robot.data.joint_pos[:, position.target_ids],
+        "qvel": robot.data.joint_vel[:, position.target_ids],
+        "qtarget": robot.data.joint_pos_target[:, position.target_ids],
+        "gain_kp": model.actuator_gainprm[:, control_ids, 0],
+        "bias_kp": model.actuator_biasprm[:, control_ids, 1],
+        "bias_kd": model.actuator_biasprm[:, control_ids, 2],
+        "contact": (contact.data.found > 0).any(dim=-1),
+        "peak_qv": tracker.peak_qv_joint,
+        "impulse": impulse.impulse,
+        "delivered": delivered.delivered,
+      }
+      for name, value in values.items():
+        substep_rows[name].append(value.detach().clone())
+
+    env.metrics_manager.compute_substep = capture_after_substep
+    contract = load_joint_position_contract(_JOINT_POSITION_CONTRACT_PATH)
+    target_tape = torch.tensor(
+      contract.source_target_tape_rad.copy(),
+      dtype=position.scale.dtype,
+      device=env.device,
+    )
+    for target in target_tape:
+      expected_target = target.expand(num_envs, -1)
+      raw_position = (expected_target - position.offset) / position.scale
+      command = raw_position
+      if task == VIC_TT_TASK:
+        command = torch.cat((raw_position, torch.zeros_like(raw_position)), dim=1)
+      _, _, terminated, truncated, _ = env.step(command)
+      control_rows["expected_qtarget"].append(expected_target.detach().clone())
+      control_rows["r_tt"].append(
+        env.reward_manager._step_reward[:, r_tt_index].detach().clone()
+      )
+      control_rows["vel_raw"].append(
+        hook._cat.raw_constraints["joint_velocity_excess"].detach().clone()
+      )
+      control_rows["imp_raw"].append(
+        hook._cat.raw_constraints["joint_impulse_excess"].detach().clone()
+      )
+      control_rows["vel_prob"].append(
+        hook._cat.probs["joint_velocity_excess"].detach().clone()
+      )
+      control_rows["imp_prob"].append(
+        hook._cat.probs["joint_impulse_excess"].detach().clone()
+      )
+      control_rows["cat_delta"].append(hook._cat.get_probs().detach().clone())
+      if bool((terminated | truncated).any()):
+        break
+
+    if torch.device(env.device).type == "cuda":
+      torch.cuda.synchronize(env.device)
+    return _stack_trace(substep_rows) | _stack_trace(control_rows)
+  finally:
+    if original_compute_substep is not None:
+      env.metrics_manager.compute_substep = original_compute_substep
+    env.close()
+
+
+def _max_abs_difference(left: torch.Tensor, right: torch.Tensor) -> float:
+  if left.shape != right.shape:
+    return float("inf")
+  if left.dtype == torch.bool:
+    return float(torch.count_nonzero(left != right))
+  return float((left - right).abs().max())
+
+
+def _allclose_trace(
+  left: dict[str, torch.Tensor],
+  right: dict[str, torch.Tensor],
+  names: tuple[str, ...],
+  *,
+  atol: float,
+  rtol: float,
+) -> bool:
+  return all(
+    left[name].shape == right[name].shape
+    and torch.allclose(left[name], right[name], atol=atol, rtol=rtol)
+    for name in names
+  )
+
+
+def _run_authority_probe(device: str) -> dict[str, object]:
+  """Exercise C=1.25 corners, a selected reset, and a live alternating tape."""
+  cfg = load_env_cfg(VIC_TT_TASK, play=True)
+  cfg.scene.num_envs = 2
+  cfg.auto_reset = False
+  env = ManagerBasedRlEnv(cfg, device=device, render_mode=None)
+  original_compute_substep = None
+  try:
+    env.reset(seed=1000)
+    position = env.action_manager.get_term("joint_position")
+    stiffness = env.action_manager.get_term("joint_stiffness")
+    robot = env.scene["robot"]
+    control_ids = stiffness.control_ids
+    model = env.sim.model
+    force_range_before = model.actuator_forcerange.clone()
+    force_limited_before = model.actuator_forcelimited.clone()
+    p_tape = torch.tensor(
+      (
+        ((-1.0,) * 6, (1.0,) * 6),
+        ((0.0,) * 6, (0.0,) * 6),
+        ((1.0,) * 6, (-1.0,) * 6),
+      ),
+      dtype=position.scale.dtype,
+      device=env.device,
+    )
+    physical_target = (
+      robot.data.joint_pos[:, position.target_ids].clone()
+      + _AUTHORITY_POSITION_ERROR_RAD
+    )
+    raw_position = (physical_target - position.offset) / position.scale
+    static_rows: dict[str, list[torch.Tensor]] = {
+      name: []
+      for name in (
+        "p",
+        "kp",
+        "kd",
+        "bias_kp",
+        "bias_kd",
+        "force",
+        "error",
+      )
+    }
+    for p in p_tape:
+      env.action_manager.process_action(torch.cat((raw_position, p), dim=1))
+      env.action_manager.apply_action()
+      env.scene.write_data_to_sim()
+      env.sim.forward()
+      telemetry = stiffness.telemetry
+      values = {
+        "p": telemetry.p,
+        "kp": model.actuator_gainprm[:, control_ids, 0],
+        "kd": -model.actuator_biasprm[:, control_ids, 2],
+        "bias_kp": model.actuator_biasprm[:, control_ids, 1],
+        "bias_kd": model.actuator_biasprm[:, control_ids, 2],
+        "force": env.sim.data.actuator_force[:, control_ids],
+        "error": (
+          robot.data.joint_pos_target[:, position.target_ids]
+          - robot.data.joint_pos[:, position.target_ids]
+        ),
+      }
+      for name, value in values.items():
+        static_rows[name].append(value.detach().clone())
+
+    kept_before = {
+      "raw": stiffness.raw_action[1].detach().clone(),
+      "p": stiffness.telemetry.p[1].detach().clone(),
+      "multiplier": stiffness.telemetry.multiplier[1].detach().clone(),
+      "kp": stiffness.telemetry.kp[1].detach().clone(),
+      "kd": stiffness.telemetry.kd[1].detach().clone(),
+      "gain": model.actuator_gainprm[1, control_ids].detach().clone(),
+      "bias": model.actuator_biasprm[1, control_ids].detach().clone(),
+    }
+    env.reset(env_ids=torch.tensor((0,), dtype=torch.long, device=env.device))
+    kept_after = {
+      "raw": stiffness.raw_action[1].detach().clone(),
+      "p": stiffness.telemetry.p[1].detach().clone(),
+      "multiplier": stiffness.telemetry.multiplier[1].detach().clone(),
+      "kp": stiffness.telemetry.kp[1].detach().clone(),
+      "kd": stiffness.telemetry.kd[1].detach().clone(),
+      "gain": model.actuator_gainprm[1, control_ids].detach().clone(),
+      "bias": model.actuator_biasprm[1, control_ids].detach().clone(),
+    }
+    reset_world_is_nominal = (
+      torch.equal(stiffness.raw_action[0], torch.zeros_like(stiffness.raw_action[0]))
+      and torch.equal(stiffness.telemetry.p[0], torch.zeros_like(stiffness.telemetry.p[0]))
+      and torch.equal(
+        stiffness.telemetry.multiplier[0],
+        torch.ones_like(stiffness.telemetry.multiplier[0]),
+      )
+      and torch.equal(stiffness.telemetry.kp[0], stiffness.nominal_kp)
+      and torch.equal(stiffness.telemetry.kd[0], stiffness.nominal_kd)
+      and torch.equal(
+        model.actuator_gainprm[0, control_ids, 0], stiffness.nominal_kp
+      )
+      and torch.equal(
+        model.actuator_biasprm[0, control_ids, 1], -stiffness.nominal_kp
+      )
+      and torch.equal(
+        model.actuator_biasprm[0, control_ids, 2], -stiffness.nominal_kd
+      )
+    )
+
+    env.reset()
+    physical_target = (
+      robot.data.joint_pos[:, position.target_ids].clone()
+      + _AUTHORITY_POSITION_ERROR_RAD
+    )
+    raw_position = (physical_target - position.offset) / position.scale
+    dynamic_rows: dict[str, list[torch.Tensor]] = {
+      name: [] for name in ("qpos", "qvel", "force", "kp", "bias")
+    }
+    original_compute_substep = env.metrics_manager.compute_substep
+
+    def capture_authority_substep() -> None:
+      original_compute_substep()
+      values = {
+        "qpos": robot.data.joint_pos[:, position.target_ids],
+        "qvel": robot.data.joint_vel[:, position.target_ids],
+        "force": env.sim.data.actuator_force[:, control_ids],
+        "kp": model.actuator_gainprm[:, control_ids, 0],
+        "bias": model.actuator_biasprm[:, control_ids],
+      }
+      for name, value in values.items():
+        dynamic_rows[name].append(value.detach().clone())
+
+    env.metrics_manager.compute_substep = capture_authority_substep
+    for p in (p_tape[0], p_tape[2], p_tape[0], p_tape[2]):
+      env.step(torch.cat((raw_position, p), dim=1))
+    env.metrics_manager.compute_substep = original_compute_substep
+    original_compute_substep = None
+
+    if torch.device(env.device).type == "cuda":
+      torch.cuda.synchronize(env.device)
+    static = _stack_trace(static_rows)
+    dynamic = _stack_trace(dynamic_rows)
+    multiplier = torch.pow(torch.tensor(1.25, device=env.device), p_tape)
+    expected_kp = multiplier * stiffness.nominal_kp
+    expected_kd = torch.sqrt(multiplier) * stiffness.nominal_kd
+    force_range = force_range_before[:, control_ids]
+    force_limit = force_range.abs().amax(dim=-1)
+    static_force = static["force"]
+    dynamic_force = dynamic["force"]
+    soft_force = torch.stack((static_force[0, 0], static_force[2, 1])).abs()
+    nominal_force = static_force[1].abs()
+    stiff_force = torch.stack((static_force[2, 0], static_force[0, 1])).abs()
+    static_in_range = (
+      (static_force >= force_range[None, :, :, 0])
+      & (static_force <= force_range[None, :, :, 1])
+    ).all()
+    dynamic_in_range = (
+      (dynamic_force >= force_range[None, :, :, 0])
+      & (dynamic_force <= force_range[None, :, :, 1])
+    ).all()
+    selected_reset_isolated = reset_world_is_nominal and all(
+      torch.equal(kept_before[name], kept_after[name]) for name in kept_before
+    )
+    native_limits_unchanged = torch.equal(
+      force_range_before, model.actuator_forcerange
+    ) and torch.equal(force_limited_before, model.actuator_forcelimited)
+    targeted_force_limited = (
+      force_limited_before[control_ids]
+      if force_limited_before.ndim == 1
+      else force_limited_before[:, control_ids]
+    )
+    finite_tensors = (*static.values(), *dynamic.values())
+    return {
+      "gain_map": (
+        torch.equal(static["p"], p_tape)
+        and torch.equal(static["kp"], expected_kp)
+        and torch.equal(static["kd"], expected_kd)
+        and torch.equal(static["bias_kp"], -expected_kp)
+        and torch.equal(static["bias_kd"], -expected_kd)
+      ),
+      "finite": all(bool(torch.isfinite(value).all()) for value in finite_tensors),
+      "force_order": bool((soft_force < nominal_force).all())
+      and bool((nominal_force < stiff_force).all()),
+      "nonsaturated": bool(
+        (static_force.abs() < 0.1 * force_limit[None]).all()
+      ),
+      "force_limits": bool(static_in_range)
+      and bool(dynamic_in_range)
+      and bool((targeted_force_limited != 0).all())
+      and native_limits_unchanged,
+      "declared_error": bool(
+        torch.allclose(
+          static["error"],
+          torch.full_like(static["error"], _AUTHORITY_POSITION_ERROR_RAD),
+          rtol=0.0,
+          atol=1.0e-6,
+        )
+      ),
+      "selected_reset": selected_reset_isolated,
+      "alternating_substeps": dynamic["force"].shape[0],
+      "force_max": float(static_force.abs().max()),
+      "force_limit_min": float(force_limit.min()),
+    }
+  finally:
+    if original_compute_substep is not None:
+      env.metrics_manager.compute_substep = original_compute_substep
+    env.close()
+
+
+def run_vic_qualification_checks(
+  device: str = "cpu", num_envs: int = 2
+) -> list[tuple[str, bool, str]]:
+  """Prove FIC parity and bounded VIC authority through the live manager seam."""
+  if isinstance(num_envs, bool) or not isinstance(num_envs, int) or num_envs != 2:
+    raise ValueError("VIC qualification requires exactly two environments")
+  results: list[tuple[str, bool, str]] = []
+
+  def check(name: str, ok: bool, detail: str = "") -> None:
+    results.append((name, bool(ok), detail))
+
+  fic = _capture_nominal_trace(
+    DIRECT_FICTT_TASK, device, num_envs=num_envs
+  )
+  vic = _capture_nominal_trace(VIC_TT_TASK, device, num_envs=num_envs)
+  decimation = 10
+  fic_steps = fic["r_tt"].shape[0]
+  vic_steps = vic["r_tt"].shape[0]
+  substep_count_ok = (
+    fic_steps == vic_steps
+    and fic["qpos"].shape[0] == fic_steps * decimation
+    and vic["qpos"].shape[0] == vic_steps * decimation
+  )
+  fic_expected = fic["expected_qtarget"].repeat_interleave(decimation, dim=0)
+  vic_expected = vic["expected_qtarget"].repeat_interleave(decimation, dim=0)
+  targets_are_paired = (
+    fic["qtarget"].shape == fic_expected.shape
+    and vic["qtarget"].shape == vic_expected.shape
+    and torch.allclose(fic["qtarget"], fic_expected, rtol=0.0, atol=1.0e-7)
+    and torch.allclose(vic["qtarget"], vic_expected, rtol=0.0, atol=1.0e-7)
+  )
+  check(
+    "nominal tape captures exactly ten paired physics substeps per target",
+    substep_count_ok and targets_are_paired,
+    f"fic_steps={fic_steps}; vic_steps={vic_steps}; "
+    f"fic_substeps={fic['qpos'].shape[0]}; vic_substeps={vic['qpos'].shape[0]}",
+  )
+
+  exact_names = ("qtarget", "gain_kp", "bias_kp", "bias_kd")
+  exact_parity = all(
+    fic[name].shape == vic[name].shape and torch.equal(fic[name], vic[name])
+    for name in exact_names
+  )
+  check(
+    "p=0 applies exactly equal position targets and native gains",
+    exact_parity,
+    str({name: _max_abs_difference(fic[name], vic[name]) for name in exact_names}),
+  )
+
+  physical_names = ("qpos", "qvel")
+  check(
+    "nominal CPU physical traces match FIC-TT within 1e-6",
+    _allclose_trace(
+      fic,
+      vic,
+      physical_names,
+      atol=_CPU_PARITY_TOLERANCE,
+      rtol=_CPU_PARITY_TOLERANCE,
+    ),
+    str({name: _max_abs_difference(fic[name], vic[name]) for name in physical_names}),
+  )
+
+  cat_names = (
+    "r_tt",
+    "peak_qv",
+    "impulse",
+    "delivered",
+    "vel_raw",
+    "imp_raw",
+    "vel_prob",
+    "imp_prob",
+    "cat_delta",
+  )
+  contact_parity = fic["contact"].shape == vic["contact"].shape and torch.equal(
+    fic["contact"], vic["contact"]
+  )
+  check(
+    "nominal RTT, contact, and CaT traces match FIC-TT within 1e-6",
+    contact_parity
+    and _allclose_trace(
+      fic,
+      vic,
+      cat_names,
+      atol=_CPU_PARITY_TOLERANCE,
+      rtol=_CPU_PARITY_TOLERANCE,
+    ),
+    str(
+      {name: _max_abs_difference(fic[name], vic[name]) for name in cat_names}
+      | {"contact": _max_abs_difference(fic["contact"], vic["contact"])}
+    ),
+  )
+  check(
+    "nominal parity tape exercises live hammer-nail contact",
+    bool(fic["contact"].any()) and bool(vic["contact"].any()),
+    f"fic_contact_substeps={int(fic['contact'].any(dim=1).sum())}; "
+    f"vic_contact_substeps={int(vic['contact'].any(dim=1).sum())}",
+  )
+
+  authority = _run_authority_probe(device)
+  check(
+    "C=1.25 corners implement the declared native gain map",
+    bool(authority["gain_map"]),
+  )
+  check(
+    "declared nonsaturated 1 mrad error produces soft < nominal < stiff force",
+    bool(authority["declared_error"])
+    and bool(authority["nonsaturated"])
+    and bool(authority["force_order"]),
+    f"force_max={authority['force_max']:.6f}; "
+    f"smallest_limit={authority['force_limit_min']:.6f}",
+  )
+  check(
+    "opposite-corner and alternating commands stay finite within native force limits",
+    bool(authority["finite"])
+    and bool(authority["force_limits"])
+    and authority["alternating_substeps"] == 40,
+    f"captured_substeps={authority['alternating_substeps']}",
+  )
+  check(
+    "selected reset restores only the requested world's nominal gains",
+    bool(authority["selected_reset"]),
+  )
+  return results
 
 
 def run_checks(
@@ -495,10 +979,19 @@ def main() -> int:
         failed.append(f"{task}: {name}")
     print(f"=== {sum(passed for _, passed, _ in results)}/{len(results)} checks passed ===")
 
+  if args.task in (VIC_TT_TASK, "all"):
+    print(f"\n[qualification] FIC-TT vs VIC-TT device={args.device} envs=2")
+    results = run_vic_qualification_checks(args.device, num_envs=2)
+    for name, passed, detail in results:
+      print(f"[{'PASS' if passed else 'FAIL'}] {name}" + (f"  {detail}" if detail else ""))
+      if not passed:
+        failed.append(f"VIC qualification: {name}")
+    print(f"=== {sum(passed for _, passed, _ in results)}/{len(results)} checks passed ===")
+
   if failed:
     print("FAILED:", *failed, sep="\n  ")
     return 1
-  print("\nFixed-impedance joint-policy live managers verified.")
+  print("\nSelected joint-policy live managers verified.")
   return 0
 
 
