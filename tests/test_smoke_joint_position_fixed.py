@@ -627,8 +627,23 @@ def test_real_waypoint_checkpoint_strictly_rejects_direct_runner_width(
         device="cpu",
     )
     try:
-        with pytest.raises(RuntimeError, match="size mismatch"):
+        with pytest.raises(RuntimeError) as exc_info:
             direct_runner.load(str(checkpoint), strict=True, map_location="cpu")
+        assert str(exc_info.value) == (
+            "Error(s) in loading state_dict for MLPModel:\n"
+            "\tsize mismatch for obs_normalizer._mean: copying a param with shape "
+            "torch.Size([1, 47]) from checkpoint, the shape in current model is "
+            "torch.Size([1, 40]).\n"
+            "\tsize mismatch for obs_normalizer._var: copying a param with shape "
+            "torch.Size([1, 47]) from checkpoint, the shape in current model is "
+            "torch.Size([1, 40]).\n"
+            "\tsize mismatch for obs_normalizer._std: copying a param with shape "
+            "torch.Size([1, 47]) from checkpoint, the shape in current model is "
+            "torch.Size([1, 40]).\n"
+            "\tsize mismatch for mlp.0.weight: copying a param with shape "
+            "torch.Size([256, 47]) from checkpoint, the shape in current model is "
+            "torch.Size([256, 40])."
+        )
     finally:
         direct_env.close()
 
