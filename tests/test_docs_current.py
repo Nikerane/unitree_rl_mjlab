@@ -116,3 +116,29 @@ def test_index_and_claude_md_paths_exist():
             if not (REPO / ref).exists():
                 missing.append(f"{src.name} -> {ref}")
     assert not missing, "Dangling doc references:\n" + "\n".join(missing)
+
+
+def test_index_points_to_current_direct_reference_fic_route():
+    text = (REPO / "docs/README.md").read_text(encoding="utf-8")
+    required_refs = (
+        "docs/superpowers/specs/2026-08-12-z1-direct-reference-fic-design.md",
+        "docs/superpowers/plans/2026-08-12-z1-direct-reference-fic.md",
+        "scripts/slurm/vega_fic_direct_reference_smoke.sbatch",
+        "scripts/slurm/vega_fic_direct_reference.sbatch",
+        "evaluation/joint_position/evaluate_fic_pilot.py",
+    )
+    missing = [ref for ref in required_refs if f"`{ref}`" not in text]
+    assert not missing, "Current direct-reference FIC paths missing from index:\n" + "\n".join(
+        missing
+    )
+
+    assert "# Docs index — current truth map (2026-08-12)" in text
+    assert "the checked-out code wins" in text
+    route = next(
+        line for line in text.splitlines() if line.startswith("**Current GPU route:**")
+    )
+    assert "direct-reference FIC-0/FIC-TT campaign" in route
+    assert (
+        "fixed-reset C0/C-Gate and waypoint-guided FIC campaigns are banked prior work"
+        in route
+    )

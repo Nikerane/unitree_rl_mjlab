@@ -1,8 +1,8 @@
-# Docs index — current truth map (2026-07-14)
+# Docs index — current truth map (2026-08-12)
 
 **Authority rule: code > this index > the living docs it lists.** `docs/archive/**` and dated
 records are historical evidence — never act on them without checking here first. When a doc and
-the code disagree, the code on branch `soft-cat` wins; fix the doc.
+the code disagree, the checked-out code wins; fix the doc.
 
 ## 1. Current truth map (the living set)
 
@@ -10,6 +10,8 @@ the code disagree, the code on branch `soft-cat` wins; fix the doc.
 |---|---|
 | `CLAUDE.md` (repo root) | Agent context: thesis direction, live reward weights, pre-train gate, environment |
 | `docs/thesis/README.md` | Curated thesis digest: confirmed contributions, decisions, defense points, citations |
+| `docs/superpowers/specs/2026-08-12-z1-direct-reference-fic-design.md` | Approved direct-reference fixed-impedance FIC-0/FIC-TT task and treatment contract |
+| `docs/superpowers/plans/2026-08-12-z1-direct-reference-fic.md` | Executable implementation, Vega qualification/training, and result-banking plan for that campaign |
 | `docs/research/reward-design/IMPULSE_CAT_IMPL_PLAN.md` | The impulse-CaT arm (the thesis headline): quantity Λ_j, substep accumulator, staged plan C0–C5, current status |
 | `docs/research/reward-design/FAITHFUL_SOFT_CAT_IMPL_PLAN.md` | Faithful soft `γ(1−δ)` CaT: design, Decisions 1–7, file map, phases + the CaT conceptual deep-dive appendix |
 | `docs/research/reward-design/CONSTRAINED_RL_LANDSCAPE.md` | Why soft-CaT over Lagrangian/CMDP (constraint-TYPE argument) + the joint-velocity-bound research appendix |
@@ -85,8 +87,12 @@ Dated research records kept in place (bannered, bodies frozen):
 `docs/research/reward-design/derive_impulse_thresholds.py` (impulse quantity gate; re-run after any EE change) ·
 `docs/research/reward-design/playback_reference.py` (strike feasibility gate; the crude `test_single_strike.py` probe was retired 2026-07-10 — the script remains but is not a gate).
 
-**Current GPU route:** EuroHPC Vega. For the fixed-reset C0/C-Gate campaign, run the two required CUDA smokes before seeking authorization for a training pilot. `scripts/lightning_pair.sh` is retained as a legacy Lightning.ai launcher, not the current route.
-**Entry scripts:** `scripts/train.py` · `scripts/play.py` · `scripts/lightning_pair.sh` (legacy Lightning.ai prior-vs-none launcher) ·
+**Current GPU route:** EuroHPC Vega direct-reference FIC-0/FIC-TT campaign. Qualify the reviewed revision with `scripts/slurm/vega_fic_direct_reference_smoke.sbatch`, then run `scripts/slurm/vega_fic_direct_reference.sbatch`; the fixed-reset C0/C-Gate and waypoint-guided FIC campaigns are banked prior work. `scripts/lightning_pair.sh` is retained as a legacy Lightning.ai launcher, not the current route.
+**Entry scripts:** `scripts/train.py` · `scripts/play.py` ·
+`scripts/slurm/vega_fic_direct_reference_smoke.sbatch` (direct-reference CUDA qualification) ·
+`scripts/slurm/vega_fic_direct_reference.sbatch` (direct-reference matched training) ·
+`evaluation/joint_position/evaluate_fic_pilot.py` (compact direct-reference FIC evaluator) ·
+`scripts/lightning_pair.sh` (legacy Lightning.ai prior-vs-none launcher) ·
 `scripts/diag_policy_trace.py` (strike-vs-press classifier + peak-|q̇| eval) ·
 `scripts/eval_impulse.py` + `scripts/eval_impulse.sh` (**standalone C3 checkpoint eval**: per-joint Λ max/p95, worst Λ/cap ratios, delivered impulse, success — one summary.csv row per checkpoint, same-env cross-arm protocol) ·
 `scripts/diag_impulse_trace.py` (per-substep impulse trace) · `scripts/compare_runs.py` ·
