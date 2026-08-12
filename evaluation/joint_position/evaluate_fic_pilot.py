@@ -28,6 +28,7 @@ from mjlab.actuator.actuator import TransmissionType
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.envs.mdp.curriculums import reward_curriculum
+from mjlab.envs.mdp.events import reset_joints_by_offset
 from mjlab.envs.mdp.rewards import joint_pos_limits
 from mjlab.envs.mdp.terminations import time_out as time_out_termination
 from mjlab.managers.scene_entity_config import SceneEntityCfg
@@ -252,7 +253,9 @@ def _contract_value(value: object) -> object:
             value.preserve_order,
         )
     if isinstance(value, Mapping):
-        return tuple((key, _contract_value(item)) for key, item in value.items())
+        return tuple(
+            (key, _contract_value(item)) for key, item in sorted(value.items())
+        )
     if type(value) is tuple:
         return ("tuple", tuple(_contract_value(item) for item in value))
     if type(value) in (type(None), bool, int, float, str):
@@ -408,14 +411,31 @@ def validate_fic_contract(task: str, env_cfg, agent_cfg) -> dict[str, object]:
     if _fixed_actuator_signature(env_cfg) != _FIXED_ACTUATOR_SIGNATURE:
         raise ValueError("FIC pilot fixed actuator signature drift")
 
-    reset = getattr(env_cfg, "events", {}).get("reset_robot_joints")
-    reset_params = getattr(reset, "params", {}) if reset is not None else {}
-    if (
-        reset is None
-        or reset_params.get("position_range") != (0.0, 0.0)
-        or reset_params.get("velocity_range") != (0.0, 0.0)
-    ):
-        raise ValueError("FIC pilot fixed joint reset drift")
+    events = getattr(env_cfg, "events", {})
+    expected_resets = {
+        "reset_robot_joints": SceneEntityCfg("robot", joint_names=(".*",)),
+        "reset_nail": SceneEntityCfg("nail_block", joint_names=("nail_slide",)),
+    }
+    if tuple(events) != tuple(expected_resets):
+        raise ValueError("FIC pilot fixed reset event names or order drift")
+    for name, asset_cfg in expected_resets.items():
+        reset = events[name]
+        expected_params = _contract_value(
+            {
+                "position_range": (0.0, 0.0),
+                "velocity_range": (0.0, 0.0),
+                "asset_cfg": asset_cfg,
+            }
+        )
+        if (
+            getattr(reset, "func", None) is not reset_joints_by_offset
+            or getattr(reset, "mode", None) != "reset"
+            or getattr(reset, "interval_range_s", None) is not None
+            or getattr(reset, "is_global_time", None) is not False
+            or getattr(reset, "min_step_count_between_reset", None) != 0
+            or _contract_value(getattr(reset, "params", None)) != expected_params
+        ):
+            raise ValueError(f"FIC pilot {name} fixed reset contract drift")
 
     terminations = getattr(env_cfg, "terminations", {})
     if tuple(terminations) != ("time_out", "nail_driven"):

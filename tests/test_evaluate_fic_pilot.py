@@ -255,9 +255,36 @@ def test_contract_rejects_observation_group_and_waypoint_behavior_drift():
         pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent_cfg)
 
 
-def test_contract_rejects_fixed_joint_reset_drift():
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "extra_event",
+        "robot_function",
+        "robot_mode",
+        "robot_asset",
+        "robot_extra_param",
+        "nail_randomization",
+        "nail_function",
+    ),
+)
+def test_contract_rejects_fixed_joint_reset_drift(mutation):
     env_cfg, agent_cfg = _live_configs()
-    env_cfg.events["reset_robot_joints"].params["velocity_range"] = (-0.1, 0.1)
+    robot_reset = env_cfg.events["reset_robot_joints"]
+    nail_reset = env_cfg.events["reset_nail"]
+    if mutation == "extra_event":
+        env_cfg.events["domain_randomization"] = robot_reset
+    elif mutation == "robot_function":
+        robot_reset.func = object
+    elif mutation == "robot_mode":
+        robot_reset.mode = "interval"
+    elif mutation == "robot_asset":
+        robot_reset.params["asset_cfg"].name = "other_robot"
+    elif mutation == "robot_extra_param":
+        robot_reset.params["unexpected"] = 1.0
+    elif mutation == "nail_randomization":
+        nail_reset.params["position_range"] = (-0.01, 0.01)
+    else:
+        nail_reset.func = object
 
     with pytest.raises(ValueError, match="reset"):
         pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent_cfg)
