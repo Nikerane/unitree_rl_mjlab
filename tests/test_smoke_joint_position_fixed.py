@@ -96,6 +96,51 @@ def _rtt_alias(env, robot_cfg, k_tt: float) -> torch.Tensor:
     return joint_trackability_cost(env, robot_cfg=robot_cfg, k_tt=k_tt)
 
 
+def _synthetic_nominal_trace() -> dict[str, torch.Tensor]:
+    """Small deterministic trace for exercising CUDA qualification routing without a GPU."""
+    substep_joint = torch.zeros(10, 2, 6)
+    control_joint = torch.zeros(1, 2, 6)
+    substep_env = torch.zeros(10, 2)
+    control_env = torch.zeros(1, 2)
+    contact = torch.zeros(10, 2, dtype=torch.bool)
+    contact[0] = True
+    return {
+        "qpos": substep_joint.clone(),
+        "qvel": substep_joint.clone(),
+        "qtarget": substep_joint.clone(),
+        "gain_kp": torch.full_like(substep_joint, 1000.0),
+        "bias_kp": torch.full_like(substep_joint, -1000.0),
+        "bias_kd": torch.full_like(substep_joint, -100.0),
+        "contact": contact,
+        "peak_qv": substep_joint.clone(),
+        "impulse": substep_joint.clone(),
+        "delivered": substep_env.clone(),
+        "expected_qtarget": control_joint.clone(),
+        "r_tt": control_env.clone(),
+        "vel_raw": control_joint.clone(),
+        "imp_raw": control_joint.clone(),
+        "vel_prob": control_joint.clone(),
+        "imp_prob": control_joint.clone(),
+        "cat_delta": control_env.clone(),
+    }
+
+
+def _passing_authority_probe() -> dict[str, object]:
+    return {
+        "gain_map": True,
+        "finite": True,
+        "force_order": True,
+        "nonsaturated": True,
+        "force_limits": True,
+        "declared_error": True,
+        "selected_reset": True,
+        "alternating_hold": True,
+        "alternating_substeps": 40,
+        "force_max": 1.875,
+        "force_limit_min": 30.0,
+    }
+
+
 def test_live_smoke_uses_the_authoritative_production_impulse_caps() -> None:
     assert smoke_joint_position_fixed.IMP_J_LIMIT is IMP_J_LIMIT
     assert smoke_joint_position_fixed.IMP_J_LIMIT == [
@@ -203,6 +248,207 @@ def test_vic_nominal_parity_and_authority_qualification_passes_every_check() -> 
 
     assert results
     assert all(passed for _, passed, _ in results), results
+
+
+def test_cuda_qualification_calibrates_repeatability_before_vic_comparison(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CUDA must freeze same-arm repeatability before observing a FIC/VIC discrepancy."""
+    capture_order: list[str] = []
+
+    def capture(task: str, device: str, *, num_envs: int, seed: int = 1000):
+        del device, num_envs, seed
+        capture_order.append(task)
+        return {name: value.clone() for name, value in _synthetic_nominal_trace().items()}
+
+    monkeypatch.setattr(smoke_joint_position_fixed, "_capture_nominal_trace", capture)
+    monkeypatch.setattr(
+        smoke_joint_position_fixed,
+        "_run_authority_probe",
+        lambda device: _passing_authority_probe(),
+    )
+
+    results = smoke_joint_position_fixed.run_vic_qualification_checks(
+        device="cuda", num_envs=2
+    )
+
+    assert capture_order == [DIRECT_FICTT_TASK, DIRECT_FICTT_TASK, VIC_TT_TASK]
+    assert all(passed for _, passed, _ in results), results
+
+
+def test_cuda_repeatability_tolerances_are_per_tensor_with_a_fixed_floor() -> None:
+    """Each CUDA trace field gets exactly twice its own repeat delta or the 1e-6 floor."""
+    first = {
+        "qpos": torch.tensor([0.0], dtype=torch.float64),
+        "qvel": torch.tensor([0.0], dtype=torch.float64),
+    }
+    repeated = {
+        "qpos": torch.tensor([2.0e-5], dtype=torch.float64),
+        "qvel": torch.tensor([0.0], dtype=torch.float64),
+    }
+
+    tolerances = smoke_joint_position_fixed._cuda_repeat_tolerances(
+        first, repeated, ("qpos", "qvel")
+    )
+
+    assert tolerances == pytest.approx({"qpos": 4.0e-5, "qvel": 1.0e-6})
+
+
+@pytest.mark.parametrize("failure", ("shape", "nonfinite"))
+def test_cuda_repeatability_calibration_rejects_invalid_trace_pairs(
+    failure: str,
+) -> None:
+    """Malformed same-arm evidence must fail instead of widening the CUDA tolerance."""
+    first = {"qpos": torch.zeros(1)}
+    if failure == "shape":
+        repeated = {"qpos": torch.zeros(2)}
+    else:
+        repeated = {"qpos": torch.tensor([float("nan")])}
+
+    with pytest.raises(ValueError, match="qpos"):
+        smoke_joint_position_fixed._cuda_repeat_tolerances(
+            first, repeated, ("qpos",)
+        )
+
+
+@pytest.mark.parametrize(
+    "field", ("qtarget", "gain_kp", "bias_kp", "bias_kd", "contact")
+)
+def test_cuda_repeatability_requires_exact_targets_gains_and_contact_before_vic(
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+) -> None:
+    """A nondeterministic exact field invalidates calibration before VIC is observed."""
+    first = _synthetic_nominal_trace()
+    repeated = {name: value.clone() for name, value in first.items()}
+    if field == "contact":
+        repeated[field][0, 0] = ~repeated[field][0, 0]
+    else:
+        repeated[field][0, 0, 0] += 1.0
+    captures = iter((first, repeated))
+
+    def capture(*args, **kwargs):
+        del args, kwargs
+        try:
+            return next(captures)
+        except StopIteration:
+            pytest.fail("VIC was captured before exact CUDA repeatability passed")
+
+    monkeypatch.setattr(smoke_joint_position_fixed, "_capture_nominal_trace", capture)
+
+    with pytest.raises(RuntimeError, match=field):
+        smoke_joint_position_fixed.run_vic_qualification_checks(
+            device="cuda", num_envs=2
+        )
+
+
+def test_cuda_repeatability_rejects_matching_nonfinite_native_gains_before_vic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two identically corrupt native traces are not valid repeatability evidence."""
+    first = _synthetic_nominal_trace()
+    first["gain_kp"][0, 0, 0] = float("inf")
+    repeated = {name: value.clone() for name, value in first.items()}
+    captures = iter((first, repeated))
+
+    def capture(*args, **kwargs):
+        del args, kwargs
+        try:
+            return next(captures)
+        except StopIteration:
+            pytest.fail("VIC was captured after non-finite same-arm evidence")
+
+    monkeypatch.setattr(smoke_joint_position_fixed, "_capture_nominal_trace", capture)
+
+    with pytest.raises(RuntimeError, match="gain_kp.*non-finite"):
+        smoke_joint_position_fixed.run_vic_qualification_checks(
+            device="cuda", num_envs=2
+        )
+
+
+def test_cuda_qualification_uses_frozen_repeatability_tolerance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A FIC/VIC delta inside twice the prior same-arm delta must pass."""
+    first = _synthetic_nominal_trace()
+    repeated = {name: value.clone() for name, value in first.items()}
+    vic = {name: value.clone() for name, value in first.items()}
+    repeated["qpos"] += 2.0e-5
+    vic["qpos"] += 3.0e-5
+    traces = iter((first, repeated, vic))
+    monkeypatch.setattr(
+        smoke_joint_position_fixed,
+        "_capture_nominal_trace",
+        lambda *args, **kwargs: next(traces),
+    )
+    monkeypatch.setattr(
+        smoke_joint_position_fixed,
+        "_run_authority_probe",
+        lambda device: _passing_authority_probe(),
+    )
+
+    results = smoke_joint_position_fixed.run_vic_qualification_checks(
+        device="cuda", num_envs=2
+    )
+    physical = next(row for row in results if "physical traces" in row[0])
+
+    assert physical[1] is True, physical
+    assert "repeat_deltas" in physical[2]
+    assert "cuda_tolerances" in physical[2]
+
+
+def test_cuda_qualification_uses_absolute_not_relative_tolerances(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A large baseline cannot make an over-floor cross-arm delta pass via rtol."""
+    first = _synthetic_nominal_trace()
+    first["qvel"] = torch.full((10, 2, 6), 100.0, dtype=torch.float64)
+    repeated = {name: value.clone() for name, value in first.items()}
+    vic = {name: value.clone() for name, value in first.items()}
+    vic["qvel"] += 2.0e-6
+    traces = iter((first, repeated, vic))
+    monkeypatch.setattr(
+        smoke_joint_position_fixed,
+        "_capture_nominal_trace",
+        lambda *args, **kwargs: next(traces),
+    )
+    monkeypatch.setattr(
+        smoke_joint_position_fixed,
+        "_run_authority_probe",
+        lambda device: _passing_authority_probe(),
+    )
+
+    results = smoke_joint_position_fixed.run_vic_qualification_checks(
+        device="cuda", num_envs=2
+    )
+    physical = next(row for row in results if "physical traces" in row[0])
+
+    assert physical[1] is False, physical
+
+
+def test_qualification_rejects_an_unheld_alternating_gain_tape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Finite forces cannot hide gains or targets that changed within a control window."""
+    monkeypatch.setattr(
+        smoke_joint_position_fixed,
+        "_capture_nominal_trace",
+        lambda *args, **kwargs: _synthetic_nominal_trace(),
+    )
+    authority = _passing_authority_probe()
+    authority["alternating_hold"] = False
+    monkeypatch.setattr(
+        smoke_joint_position_fixed,
+        "_run_authority_probe",
+        lambda device: authority,
+    )
+
+    results = smoke_joint_position_fixed.run_vic_qualification_checks(
+        device="cpu", num_envs=2
+    )
+    alternating = next(row for row in results if "alternating commands" in row[0])
+
+    assert alternating[1] is False, alternating
 
 
 @pytest.mark.parametrize(

@@ -251,6 +251,34 @@ def _max_abs_difference(left: torch.Tensor, right: torch.Tensor) -> float:
   return float((left - right).abs().max())
 
 
+def _cuda_repeat_tolerances(
+  first: dict[str, torch.Tensor],
+  repeated: dict[str, torch.Tensor],
+  names: tuple[str, ...],
+) -> dict[str, float]:
+  """Freeze one absolute CUDA parity tolerance from each same-arm repeat delta."""
+  tolerances: dict[str, float] = {}
+  for name in names:
+    first_value = first[name]
+    repeated_value = repeated[name]
+    if first_value.shape != repeated_value.shape:
+      raise ValueError(
+        f"CUDA repeatability field {name!r} changed shape: "
+        f"{tuple(first_value.shape)} != {tuple(repeated_value.shape)}"
+      )
+    if not bool(torch.isfinite(first_value).all()) or not bool(
+      torch.isfinite(repeated_value).all()
+    ):
+      raise ValueError(
+        f"CUDA repeatability field {name!r} contains a non-finite value"
+      )
+    tolerances[name] = max(
+      _CPU_PARITY_TOLERANCE,
+      2.0 * _max_abs_difference(first_value, repeated_value),
+    )
+  return tolerances
+
+
 def _allclose_trace(
   left: dict[str, torch.Tensor],
   right: dict[str, torch.Tensor],
@@ -263,6 +291,19 @@ def _allclose_trace(
     left[name].shape == right[name].shape
     and torch.allclose(left[name], right[name], atol=atol, rtol=rtol)
     for name in names
+  )
+
+
+def _trace_matches_tolerances(
+  left: dict[str, torch.Tensor],
+  right: dict[str, torch.Tensor],
+  tolerances: dict[str, float],
+) -> bool:
+  """Compare each CUDA trace field against its pre-frozen absolute tolerance."""
+  return all(
+    left[name].shape == right[name].shape
+    and torch.allclose(left[name], right[name], atol=atol, rtol=0.0)
+    for name, atol in tolerances.items()
   )
 
 
@@ -374,8 +415,13 @@ def _run_authority_probe(device: str) -> dict[str, object]:
       + _AUTHORITY_POSITION_ERROR_RAD
     )
     raw_position = (physical_target - position.offset) / position.scale
+    alternating_p_tape = torch.stack(
+      (p_tape[0], p_tape[2], p_tape[0], p_tape[2])
+    )
+    decimation = int(env.cfg.decimation)
     dynamic_rows: dict[str, list[torch.Tensor]] = {
-      name: [] for name in ("qpos", "qvel", "force", "kp", "bias")
+      name: []
+      for name in ("qpos", "qvel", "qtarget", "force", "kp", "bias")
     }
     original_compute_substep = env.metrics_manager.compute_substep
 
@@ -384,6 +430,7 @@ def _run_authority_probe(device: str) -> dict[str, object]:
       values = {
         "qpos": robot.data.joint_pos[:, position.target_ids],
         "qvel": robot.data.joint_vel[:, position.target_ids],
+        "qtarget": robot.data.joint_pos_target[:, position.target_ids],
         "force": env.sim.data.actuator_force[:, control_ids],
         "kp": model.actuator_gainprm[:, control_ids, 0],
         "bias": model.actuator_biasprm[:, control_ids],
@@ -392,7 +439,7 @@ def _run_authority_probe(device: str) -> dict[str, object]:
         dynamic_rows[name].append(value.detach().clone())
 
     env.metrics_manager.compute_substep = capture_authority_substep
-    for p in (p_tape[0], p_tape[2], p_tape[0], p_tape[2]):
+    for p in alternating_p_tape:
       env.step(torch.cat((raw_position, p), dim=1))
     env.metrics_manager.compute_substep = original_compute_substep
     original_compute_substep = None
@@ -404,6 +451,30 @@ def _run_authority_probe(device: str) -> dict[str, object]:
     multiplier = torch.pow(torch.tensor(1.25, device=env.device), p_tape)
     expected_kp = multiplier * stiffness.nominal_kp
     expected_kd = torch.sqrt(multiplier) * stiffness.nominal_kd
+    alternating_multiplier = torch.pow(
+      torch.tensor(1.25, dtype=p_tape.dtype, device=env.device),
+      alternating_p_tape,
+    )
+    alternating_kp = (
+      alternating_multiplier * stiffness.nominal_kp
+    ).repeat_interleave(decimation, dim=0)
+    alternating_kd = (
+      torch.sqrt(alternating_multiplier) * stiffness.nominal_kd
+    ).repeat_interleave(decimation, dim=0)
+    alternating_qtarget = physical_target.unsqueeze(0).expand(
+      alternating_kp.shape[0], -1, -1
+    )
+    alternating_hold = (
+      torch.equal(dynamic["kp"], alternating_kp)
+      and torch.equal(dynamic["bias"][..., 1], -alternating_kp)
+      and torch.equal(dynamic["bias"][..., 2], -alternating_kd)
+      and torch.allclose(
+        dynamic["qtarget"],
+        alternating_qtarget,
+        rtol=0.0,
+        atol=1.0e-7,
+      )
+    )
     force_range = force_range_before[:, control_ids]
     force_limit = force_range.abs().amax(dim=-1)
     static_force = static["force"]
@@ -458,6 +529,7 @@ def _run_authority_probe(device: str) -> dict[str, object]:
         )
       ),
       "selected_reset": selected_reset_isolated,
+      "alternating_hold": bool(alternating_hold),
       "alternating_substeps": dynamic["force"].shape[0],
       "force_max": float(static_force.abs().max()),
       "force_limit_min": float(force_limit.min()),
@@ -479,9 +551,53 @@ def run_vic_qualification_checks(
   def check(name: str, ok: bool, detail: str = "") -> None:
     results.append((name, bool(ok), detail))
 
+  exact_names = ("qtarget", "gain_kp", "bias_kp", "bias_kd", "contact")
+  physical_names = ("qpos", "qvel")
+  cat_names = (
+    "r_tt",
+    "peak_qv",
+    "impulse",
+    "delivered",
+    "vel_raw",
+    "imp_raw",
+    "vel_prob",
+    "imp_prob",
+    "cat_delta",
+  )
+  tolerance_names = physical_names + cat_names
+  is_cuda = torch.device(device).type == "cuda"
   fic = _capture_nominal_trace(
     DIRECT_FICTT_TASK, device, num_envs=num_envs
   )
+  cuda_tolerances: dict[str, float] | None = None
+  cuda_repeat_deltas: dict[str, float] | None = None
+  if is_cuda:
+    fic_repeat = _capture_nominal_trace(
+      DIRECT_FICTT_TASK, device, num_envs=num_envs
+    )
+    for name in exact_names:
+      if name != "contact" and (
+        not bool(torch.isfinite(fic[name]).all())
+        or not bool(torch.isfinite(fic_repeat[name]).all())
+      ):
+        raise RuntimeError(
+          f"same-arm CUDA repeatability field {name!r} contains a non-finite value"
+        )
+      if (
+        fic[name].shape != fic_repeat[name].shape
+        or not torch.equal(fic[name], fic_repeat[name])
+      ):
+        raise RuntimeError(
+          f"same-arm CUDA repeatability field {name!r} must be exactly equal "
+          "before freezing tolerances or observing VIC"
+        )
+    cuda_tolerances = _cuda_repeat_tolerances(
+      fic, fic_repeat, tolerance_names
+    )
+    cuda_repeat_deltas = {
+      name: _max_abs_difference(fic[name], fic_repeat[name])
+      for name in tolerance_names
+    }
   vic = _capture_nominal_trace(VIC_TT_TASK, device, num_envs=num_envs)
   decimation = 10
   fic_steps = fic["r_tt"].shape[0]
@@ -506,57 +622,89 @@ def run_vic_qualification_checks(
     f"fic_substeps={fic['qpos'].shape[0]}; vic_substeps={vic['qpos'].shape[0]}",
   )
 
-  exact_names = ("qtarget", "gain_kp", "bias_kp", "bias_kd")
+  cross_exact_names = ("qtarget", "gain_kp", "bias_kp", "bias_kd")
   exact_parity = all(
     fic[name].shape == vic[name].shape and torch.equal(fic[name], vic[name])
-    for name in exact_names
+    for name in cross_exact_names
   )
   check(
     "p=0 applies exactly equal position targets and native gains",
     exact_parity,
-    str({name: _max_abs_difference(fic[name], vic[name]) for name in exact_names}),
+    str({name: _max_abs_difference(fic[name], vic[name]) for name in cross_exact_names}),
   )
 
-  physical_names = ("qpos", "qvel")
-  check(
-    "nominal CPU physical traces match FIC-TT within 1e-6",
-    _allclose_trace(
+  physical_parity = (
+    _trace_matches_tolerances(
+      fic,
+      vic,
+      {name: cuda_tolerances[name] for name in physical_names},
+    )
+    if cuda_tolerances is not None
+    else _allclose_trace(
       fic,
       vic,
       physical_names,
       atol=_CPU_PARITY_TOLERANCE,
       rtol=_CPU_PARITY_TOLERANCE,
-    ),
-    str({name: _max_abs_difference(fic[name], vic[name]) for name in physical_names}),
-  )
-
-  cat_names = (
-    "r_tt",
-    "peak_qv",
-    "impulse",
-    "delivered",
-    "vel_raw",
-    "imp_raw",
-    "vel_prob",
-    "imp_prob",
-    "cat_delta",
-  )
-  contact_parity = fic["contact"].shape == vic["contact"].shape and torch.equal(
-    fic["contact"], vic["contact"]
+    )
   )
   check(
-    "nominal RTT, contact, and CaT traces match FIC-TT within 1e-6",
-    contact_parity
-    and _allclose_trace(
+    (
+      "nominal CUDA physical traces match frozen same-arm tolerances"
+      if is_cuda
+      else "nominal CPU physical traces match FIC-TT within 1e-6"
+    ),
+    physical_parity,
+    str(
+      {name: _max_abs_difference(fic[name], vic[name]) for name in physical_names}
+      | (
+        {
+          "repeat_deltas": cuda_repeat_deltas,
+          "cuda_tolerances": cuda_tolerances,
+        }
+        if is_cuda
+        else {}
+      )
+    ),
+  )
+
+  cat_parity = (
+    _trace_matches_tolerances(
+      fic,
+      vic,
+      {name: cuda_tolerances[name] for name in cat_names},
+    )
+    if cuda_tolerances is not None
+    else _allclose_trace(
       fic,
       vic,
       cat_names,
       atol=_CPU_PARITY_TOLERANCE,
       rtol=_CPU_PARITY_TOLERANCE,
+    )
+  )
+  contact_parity = fic["contact"].shape == vic["contact"].shape and torch.equal(
+    fic["contact"], vic["contact"]
+  )
+  check(
+    (
+      "nominal CUDA RTT, contact, and CaT traces match frozen same-arm tolerances"
+      if is_cuda
+      else "nominal RTT, contact, and CaT traces match FIC-TT within 1e-6"
     ),
+    contact_parity
+    and cat_parity,
     str(
       {name: _max_abs_difference(fic[name], vic[name]) for name in cat_names}
       | {"contact": _max_abs_difference(fic["contact"], vic["contact"])}
+      | (
+        {
+          "repeat_deltas": cuda_repeat_deltas,
+          "cuda_tolerances": cuda_tolerances,
+        }
+        if is_cuda
+        else {}
+      )
     ),
   )
   check(
@@ -580,9 +728,10 @@ def run_vic_qualification_checks(
     f"smallest_limit={authority['force_limit_min']:.6f}",
   )
   check(
-    "opposite-corner and alternating commands stay finite within native force limits",
+    "alternating commands hold paired targets and gains within native force limits",
     bool(authority["finite"])
     and bool(authority["force_limits"])
+    and bool(authority["alternating_hold"])
     and authority["alternating_substeps"] == 40,
     f"captured_substeps={authority['alternating_substeps']}",
   )
