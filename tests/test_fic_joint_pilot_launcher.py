@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 import subprocess
@@ -82,12 +83,31 @@ def _install_fake_commands(tmp_path: Path, env: dict[str, str]) -> None:
     py.write_text(
         "#!/bin/sh\n"
         "printf '%s\\n' \"$*\" >> \"$HOME/python_calls.log\"\n"
+        "if [ \"${FAKE_PY_MODE:-success}\" = checkpoint-fail ] "
+        "&& [ \"${1:-}\" = - ] && [ -n \"${2:-}\" ]; then\n"
+        "  exit 9\n"
+        "fi\n"
         "case \"$*\" in\n"
         "  *scripts/train.py*)\n"
-        "    mkdir -p \"$PWD/logs/rsl_rl/z1_hammer/fixture_$RUN_NAME\"\n"
-        "    : > \"$PWD/logs/rsl_rl/z1_hammer/fixture_$RUN_NAME/model_199.pt\"\n"
+        "    case \"${FAKE_PY_MODE:-success}\" in\n"
+        "      no-run-dir) ;;\n"
+        "      multiple-run-dirs)\n"
+        "        for suffix in a b; do\n"
+        "          dir=\"$PWD/logs/rsl_rl/z1_hammer/${suffix}_$RUN_NAME\"\n"
+        "          mkdir -p \"$dir\"\n"
+        "          printf 'fake checkpoint\\n' > \"$dir/model_199.pt\"\n"
+        "        done\n"
+        "        ;;\n"
+        "      *)\n"
+        "        dir=\"$PWD/logs/rsl_rl/z1_hammer/fixture_$RUN_NAME\"\n"
+        "        mkdir -p \"$dir\"\n"
+        "        printf 'fake checkpoint\\n' > \"$dir/model_199.pt\"\n"
+        "        ;;\n"
+        "    esac\n"
         "    ;;\n"
         "  *evaluate_fic_pilot.py*)\n"
+        "    if [ \"${FAKE_PY_MODE:-success}\" = evaluator-fail ]; then exit 17; fi\n"
+        "    if [ \"${FAKE_PY_MODE:-success}\" = evaluator-missing-output ]; then exit 0; fi\n"
         "    while [ $# -gt 0 ]; do\n"
         "      if [ \"$1\" = --output ]; then shift; printf '{}' > \"$1\"; break; fi\n"
         "      shift\n"
@@ -97,6 +117,23 @@ def _install_fake_commands(tmp_path: Path, env: dict[str, str]) -> None:
         "exit 0\n"
     )
     py.chmod(0o755)
+
+
+def _prepared_fake_env(
+    tmp_path: Path, *, array_index: str = "0", fake_mode: str
+) -> dict[str, str]:
+    env = _clean_repo_env(tmp_path, array_index=array_index)
+    _install_fake_commands(tmp_path, env)
+    evaluator = Path(env["RUN_ROOT"]) / "evaluation/joint_position/evaluate_fic_pilot.py"
+    evaluator.parent.mkdir(parents=True)
+    evaluator.write_text("# evaluator fixture\n")
+    _git(Path(env["RUN_ROOT"]), "add", "evaluation/joint_position/evaluate_fic_pilot.py")
+    _git(Path(env["RUN_ROOT"]), "commit", "-q", "-m", "evaluator fixture")
+    env["EXPECTED_CODE_REVISION"] = _git(
+        Path(env["RUN_ROOT"]), "rev-parse", "HEAD"
+    ).stdout.strip()
+    env["FAKE_PY_MODE"] = fake_mode
+    return env
 
 
 def test_fic_pilot_launcher_has_frozen_two_arm_contract() -> None:
@@ -270,14 +307,7 @@ def test_fic_pilot_launcher_rejects_reused_attempt_before_python(
 def test_fic_pilot_launcher_runs_exact_frozen_arm_and_evaluator(
     tmp_path: Path, array_index: str, task_suffix: str, short: str
 ) -> None:
-    env = _clean_repo_env(tmp_path, array_index=array_index)
-    _install_fake_commands(tmp_path, env)
-    evaluator = Path(env["RUN_ROOT"]) / "evaluation/joint_position/evaluate_fic_pilot.py"
-    evaluator.parent.mkdir(parents=True)
-    evaluator.write_text("# evaluator fixture\n")
-    _git(Path(env["RUN_ROOT"]), "add", "evaluation/joint_position/evaluate_fic_pilot.py")
-    _git(Path(env["RUN_ROOT"]), "commit", "-q", "-m", "evaluator fixture")
-    env["EXPECTED_CODE_REVISION"] = _git(Path(env["RUN_ROOT"]), "rev-parse", "HEAD").stdout.strip()
+    env = _prepared_fake_env(tmp_path, array_index=array_index, fake_mode="success")
 
     result = _run(env)
 
@@ -310,5 +340,79 @@ def test_fic_pilot_launcher_runs_exact_frozen_arm_and_evaluator(
         / env["EXPECTED_CODE_REVISION"]
         / f"12345_{array_index}_{short}_seed2"
     )
-    assert (attempt / f"{short}.json").is_file()
+    evaluation = attempt / f"{short}.json"
+    assert evaluation.is_file()
+    checkpoint = next(
+        (attempt / "logs/rsl_rl/z1_hammer").glob("*/model_199.pt")
+    )
+    checkpoint_sha256 = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+    evaluation_sha256 = hashlib.sha256(evaluation.read_bytes()).hexdigest()
+    assert f"FIC_PILOT_CHECKPOINT_SHA256={checkpoint_sha256}" in result.stdout
+    assert f"FIC_PILOT_EVALUATION_SHA256={evaluation_sha256}" in result.stdout
     assert "FIC_PILOT_DONE" in result.stdout
+
+
+@pytest.mark.parametrize("fake_mode", ("no-run-dir", "multiple-run-dirs"))
+def test_fic_pilot_launcher_rejects_wrong_run_directory_count(
+    tmp_path: Path, fake_mode: str
+) -> None:
+    env = _prepared_fake_env(tmp_path, fake_mode=fake_mode)
+
+    result = _run(env)
+
+    assert result.returncode == 2
+    assert (
+        "FIC_PILOT_FAIL: expected exactly one matching training run directory"
+        in result.stdout
+    )
+    assert "evaluate_fic_pilot.py" not in (
+        Path(env["HOME"]) / "python_calls.log"
+    ).read_text()
+    assert "FIC_PILOT_DONE" not in result.stdout
+
+
+def test_fic_pilot_launcher_rejects_failed_checkpoint_validation(
+    tmp_path: Path,
+) -> None:
+    env = _prepared_fake_env(tmp_path, fake_mode="checkpoint-fail")
+
+    result = _run(env)
+
+    assert result.returncode == 2
+    assert (
+        "FIC_PILOT_FAIL: model_199.pt contains no finite checkpoint state"
+        in result.stdout
+    )
+    assert "evaluate_fic_pilot.py" not in (
+        Path(env["HOME"]) / "python_calls.log"
+    ).read_text()
+    assert "FIC_PILOT_DONE" not in result.stdout
+
+
+def test_fic_pilot_launcher_propagates_evaluator_failure(
+    tmp_path: Path,
+) -> None:
+    env = _prepared_fake_env(tmp_path, fake_mode="evaluator-fail")
+
+    result = _run(env)
+
+    assert result.returncode == 17
+    assert "evaluate_fic_pilot.py" in (
+        Path(env["HOME"]) / "python_calls.log"
+    ).read_text()
+    assert "FIC_PILOT_DONE" not in result.stdout
+
+
+def test_fic_pilot_launcher_rejects_missing_evaluator_output(
+    tmp_path: Path,
+) -> None:
+    env = _prepared_fake_env(tmp_path, fake_mode="evaluator-missing-output")
+
+    result = _run(env)
+
+    assert result.returncode == 2
+    assert (
+        "FIC_PILOT_FAIL: evaluator did not create a non-empty JSON result"
+        in result.stdout
+    )
+    assert "FIC_PILOT_DONE" not in result.stdout
