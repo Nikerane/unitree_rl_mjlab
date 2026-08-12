@@ -89,12 +89,38 @@ def test_contract_rejects_cartesian_task_and_treatment_drift():
         pilot.validate_fic_contract(BANKED_FIC0_TASK, env_cfg, agent_cfg)
     drifted, agent_cfg = _live_configs()
     drifted.rewards["delivered_impulse"].params["i_ref"] = 0.3088
-    with pytest.raises(ValueError, match="i_ref drift"):
+    with pytest.raises(ValueError, match="delivered_impulse contract"):
         pilot.validate_fic_contract(pilot.FIC0_TASK, drifted, agent_cfg)
     tt, agent_cfg = _live_configs(pilot.FICTT_TASK)
     tt.rewards["r_tt"].params["k_tt"] = 2.0
     with pytest.raises(ValueError, match="r_tt contract"):
         pilot.validate_fic_contract(pilot.FICTT_TASK, tt, agent_cfg)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("function", "weight", "i_ref", "eps", "saturate", "nail", "extra"),
+)
+def test_contract_rejects_delivered_impulse_scientific_drift(mutation):
+    env_cfg, agent_cfg = _live_configs()
+    reward = env_cfg.rewards["delivered_impulse"]
+    if mutation == "function":
+        reward.func = object
+    elif mutation == "weight":
+        reward.weight = 3.0
+    elif mutation == "i_ref":
+        reward.params["i_ref"] = 0.3088
+    elif mutation == "eps":
+        reward.params["eps"] = 0.1
+    elif mutation == "saturate":
+        reward.params["saturate"] = True
+    elif mutation == "nail":
+        reward.params["nail_cfg"].joint_names = ("other_joint",)
+    else:
+        reward.params["unexpected"] = 1.0
+
+    with pytest.raises(ValueError, match="delivered_impulse contract"):
+        pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent_cfg)
 
 
 def test_contract_rejects_action_order_and_normalizer_drift():

@@ -54,6 +54,7 @@ from src.tasks.hammer.mdp.impulse_bound import (
 )
 from src.tasks.hammer.mdp.references import get_strike_reference
 from src.tasks.hammer.mdp.rewards import (
+    FirstStrikeDeliveredRewardTerm,
     FirstStrikeImpactRewardTerm,
     ImitationPriorTerm,
     NailDepthDeltaTerm,
@@ -323,6 +324,18 @@ _BASELINE_REWARD_CONTRACT = {
             {"asset_cfg": SceneEntityCfg("robot", joint_names=(".*",))}
         ),
     ),
+    "delivered_impulse": (
+        FirstStrikeDeliveredRewardTerm,
+        4.0,
+        _contract_value(
+            {
+                "i_ref": I_REF_N_S,
+                "eps": 0.0005,
+                "nail_cfg": SceneEntityCfg("nail_block", joint_names=("nail_slide",)),
+                "saturate": False,
+            }
+        ),
+    ),
 }
 
 
@@ -457,13 +470,9 @@ def validate_fic_contract(task: str, env_cfg, agent_cfg) -> dict[str, object]:
         ):
             raise ValueError(f"FIC pilot {name} contract drift")
     delivered = _cfg_value(rewards, "delivered_impulse")
-    if _finite_number(getattr(delivered, "weight", None), name="D4 weight") != 4.0:
-        raise ValueError("FIC pilot requires D4 weight 4.0")
     i_ref = _finite_number(
         getattr(delivered, "params", {}).get("i_ref"), name="delivered i_ref"
     )
-    if i_ref != I_REF_N_S:
-        raise ValueError(f"FIC pilot delivered i_ref drift: {i_ref}")
 
     imitation = _cfg_value(rewards, "r_imit")
     imitation_params = getattr(imitation, "params", {})
