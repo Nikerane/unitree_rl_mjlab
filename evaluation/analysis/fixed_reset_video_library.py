@@ -1190,8 +1190,13 @@ def write_substep_trajectory_png(
     Wave-1/Wave-2 leaves record their trajectory.png SHA-256 inside hash-bound manifests, so that
     path must never drift. Pass a ``Treatment`` to draw only the geometry the arm was paid for.
     """
-    report = validate_substep_trace(trace)
     geometry = GEOMETRY_GATES if treatment is None else treatment.geometry
+    if geometry == GEOMETRY_REFERENCE:
+        raise ValueError(
+            "direct-reference geometry cannot use the waypoint substep renderer; "
+            "use the control-rate direct-reference renderer"
+        )
+    report = validate_substep_trace(trace)
     positions = np.asarray(trace["substep_head_position_m"], dtype=float)
     contact = np.asarray(trace["substep_contact"], dtype=bool)
     boundary = np.asarray(trace["substep_is_control_boundary"], dtype=bool)

@@ -2341,6 +2341,26 @@ def test_progress_arms_draw_the_reference_line_and_six_ordered_waypoints(tmp_pat
         assert report["gate_disk_count"] == 0
 
 
+@pytest.mark.parametrize("task", (_DIRECT_FIC0_TASK, _DIRECT_FICTT_TASK))
+def test_direct_reference_geometry_is_rejected_by_waypoint_substep_plotter(
+    tmp_path, task
+):
+    from evaluation.analysis.fixed_reset_video_library import (
+        treatment_for_task,
+        write_substep_trajectory_png,
+    )
+
+    output = tmp_path / "mislabelled.png"
+    with pytest.raises(
+        ValueError,
+        match="direct-reference geometry.*waypoint substep renderer",
+    ):
+        write_substep_trajectory_png(
+            _wave1_trace(), output, treatment=treatment_for_task(task)
+        )
+    assert not output.exists()
+
+
 def test_frozen_render_path_reproduces_a_REAL_frozen_figure_byte_for_byte(tmp_path):
     """Re-render a frozen Wave-2 leaf's trace and match the SHA-256 in its own manifest.
 
