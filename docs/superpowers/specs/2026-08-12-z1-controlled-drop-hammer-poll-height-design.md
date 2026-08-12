@@ -16,11 +16,11 @@ not be propagated into FIC.
 
 ## Approved geometry
 
-The corrected cylinder matches the axial thickness of the production
-`hammer_head_0` striking-poll collision mesh (`claw_hammer_c4`):
+The corrected cylinder uses the owner-approved rounded axial thickness of the
+production `hammer_head_0` striking-poll collision mesh (`claw_hammer_c4`):
 
-- total axial height: `0.01756416 m`;
-- half-height used by MuJoCo: `0.00878208 m`;
+- total axial height: `0.0175 m` (`17.5 mm`);
+- half-height used by MuJoCo: `0.00875 m`;
 - radius: `0.012 m` (`0.024 m` diameter), unchanged;
 - mass: `0.200 kg`, unchanged and set explicitly;
 - lower-face-to-nail-head clearance: exactly `0.150 m`, unchanged;
@@ -29,9 +29,11 @@ The corrected cylinder matches the axial thickness of the production
 - contact properties, production nail, solver, tracker, timestep, event window,
   and five-release protocol: unchanged.
 
-The axial dimension is the poll mesh's physical thickness along its face normal,
-not its pose-dependent world-axis bounding-box projection. The radius remains
-nail-matched so this correction does not also change the contact footprint.
+The axial dimension is the owner's rounded representation of the poll mesh's
+physical thickness along its face normal, not its pose-dependent world-axis
+bounding-box projection. Millimetre-subdivision matching is not required. The
+radius remains nail-matched so this correction does not also change the contact
+footprint.
 
 ## Alternatives rejected
 
@@ -58,7 +60,7 @@ result is rewritten.
 
 ## Public test seams
 
-1. `make_controlled_drop_env_cfg()` must compile a `0.01756416 m`-tall,
+1. `make_controlled_drop_env_cfg()` must compile a `0.0175 m`-tall,
    `0.012 m`-radius, `0.200 kg` cylinder while preserving exactly `0.150 m`
    lower-face clearance and all frozen production contact/solver settings.
 2. `run_one_primary_drop(device="cpu", trial_index=1)` must produce a finite,
