@@ -1,5 +1,7 @@
 # Z1 controlled-drop impulse-reference calibration
 
+> **Superseded on 2026-08-12:** This `8 mm` contact-coupon result is preserved as historical evidence but must not be used for FIC normalization. The corrected `17.5 mm` hammer-poll-height calibration is recorded in [`2026-08-12_z1_controlled_drop_poll_height_iref.md`](2026-08-12_z1_controlled_drop_poll_height_iref.md).
+
 ## Objective and protocol
 
 This simulation-only calibration estimates the primary delivered-impulse reference for the Z1 hammer task. A passive `0.200 kg` cylindrical impactor was released from rest along one frictionless, undamped slide axis onto the unchanged production nail. Its lower face began exactly `0.150 m` above the nail-head contact surface. The run used the production first-strike tracker with axis `(0, 0, -1)`, a 25-substep inclusive window, and `progress_eps=5e-4`.
