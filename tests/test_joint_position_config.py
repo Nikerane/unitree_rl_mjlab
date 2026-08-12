@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import copy
 import dataclasses
+import math
 from pathlib import Path
 import re
 
@@ -16,6 +18,8 @@ from mjlab.envs.mdp.actions import (
     JointPositionActionCfg,
     RelativeJointPositionActionCfg,
 )
+from mjlab.envs.mdp.observations import last_action
+from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.tasks import registry as task_registry
@@ -26,7 +30,11 @@ from src.tasks.hammer.config.z1.joint_position_contract import (
     load_joint_position_contract,
 )
 from src.tasks.hammer.mdp.trackability import joint_trackability_cost
-from src.tasks.hammer.mdp.rewards import ImitationPriorTerm
+from src.tasks.hammer.mdp.rewards import ImitationPriorTerm, action_rate_penalty
+from src.tasks.hammer.mdp.variable_impedance import (
+    JointStiffnessActionCfg,
+    expand_variable_impedance_model_fields,
+)
 
 
 PARENT_TASK = (
@@ -40,6 +48,13 @@ DIRECT_FIC0_TASK = (
     "JointPosition-Fixed"
 )
 DIRECT_FICTT_TASK = f"{DIRECT_FIC0_TASK}-TT"
+VIC_TT_TASK = (
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-"
+    "JointPosition-VariableImpedance-TT"
+)
+JOINT_POLICY_TASKS = frozenset(
+    (FIC0_TASK, FICTT_TASK, DIRECT_FIC0_TASK, DIRECT_FICTT_TASK, VIC_TT_TASK)
+)
 FIC_CONTROLLED_DROP_I_REF_N_S = 0.2799950838088989
 ARTIFACT = (
     Path(__file__).resolve().parents[1]
@@ -71,6 +86,11 @@ def _load_direct_fictt(*, play: bool = False):
         f"missing registered task {DIRECT_FICTT_TASK}"
     )
     return load_env_cfg(DIRECT_FICTT_TASK, play=play)
+
+
+def _load_victt(*, play: bool = False):
+    assert VIC_TT_TASK in list_tasks(), f"missing registered task {VIC_TT_TASK}"
+    return load_env_cfg(VIC_TT_TASK, play=play)
 
 
 def _canonicalize(value):
@@ -204,6 +224,172 @@ def test_direct_fic_preserves_banked_identity_and_tt_isolation(play: bool) -> No
     fictt_tree = _canonicalize(fictt)
     fictt_tree["rewards"] = fictt_tree["rewards"][:-1]
     assert fictt_tree == _canonicalize(fic0)
+
+
+@pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
+def test_victt_registration_has_the_approved_ordered_policy_contract(play: bool) -> None:
+    """VIC-TT adds one bounded gain term while keeping FIC-TT's learning inputs."""
+    cfg = _load_victt(play=play)
+
+    assert tuple(cfg.actions) == ("joint_position", "joint_stiffness")
+    stiffness = cfg.actions["joint_stiffness"]
+    assert isinstance(stiffness, JointStiffnessActionCfg)
+    assert stiffness.entity_name == "robot"
+    assert tuple(stiffness.joint_names) == JOINT_NAMES
+    assert stiffness.C == pytest.approx(1.25)
+
+    expansion = cfg.events["expand_variable_impedance_model_fields"]
+    assert isinstance(expansion, EventTermCfg)
+    assert expansion.func is expand_variable_impedance_model_fields
+    assert expansion.mode == "startup"
+    assert expansion.params == {}
+    assert expansion.func.model_fields == (
+        "actuator_gainprm",
+        "actuator_biasprm",
+    )
+
+    for group_name in ("actor", "critic"):
+        actions = cfg.observations[group_name].terms["actions"]
+        assert actions.func is last_action
+        assert actions.params == {"action_name": "joint_position"}
+    action_rate = cfg.rewards["action_rate"]
+    assert action_rate.func is action_rate_penalty
+    assert action_rate.weight == pytest.approx(-0.01)
+    assert action_rate.params == {"action_name": "joint_position"}
+
+    r_tt = cfg.rewards["r_tt"]
+    assert r_tt.func is joint_trackability_cost
+    assert r_tt.weight == pytest.approx(-1.0)
+    assert r_tt.params["k_tt"] == pytest.approx(1.0)
+    reset = cfg.events["reset_robot_joints"].params
+    assert reset["position_range"] == (0.0, 0.0)
+    assert reset["velocity_range"] == (0.0, 0.0)
+    assert _canonicalize(load_rl_cfg(VIC_TT_TASK)) == _canonicalize(
+        load_rl_cfg(DIRECT_FICTT_TASK)
+    )
+
+
+@pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
+def test_victt_is_the_exact_approved_delta_from_direct_fictt(play: bool) -> None:
+    """No reward, constraint, reset, plant, or learner drift can hide in VIC-TT."""
+    fictt = _load_direct_fictt(play=play)
+    victt = _load_victt(play=play)
+    fictt_tree = _canonicalize(fictt)
+    victt_tree = _canonicalize(victt)
+
+    assert {
+        field for field in fictt_tree if fictt_tree[field] != victt_tree[field]
+    } == {"actions", "events", "observations", "rewards"}
+
+    reconstructed = copy.deepcopy(victt)
+    reconstructed.actions.pop("joint_stiffness")
+    reconstructed.events.pop("expand_variable_impedance_model_fields")
+    for group_name in ("actor", "critic"):
+        reconstructed.observations[group_name].terms["actions"].params.clear()
+    reconstructed.rewards["action_rate"].params.clear()
+    assert _canonicalize(reconstructed) == fictt_tree
+
+
+@pytest.mark.integration
+def test_victt_live_two_world_action_and_observation_contract() -> None:
+    """The registered task constructs live with isolated arm gains and 40 inputs."""
+    from mjlab.envs import ManagerBasedRlEnv
+
+    cfg = _load_victt(play=True)
+    cfg.scene.num_envs = 2
+    env = ManagerBasedRlEnv(cfg, device="cpu")
+    try:
+        observations, _ = env.reset(seed=20260813)
+        assert set(observations) == {"actor", "critic"}
+        for observation in observations.values():
+            assert observation.shape == (2, 40)
+            assert bool(torch.isfinite(observation).all())
+        assert env.action_manager.action.shape == (2, 12)
+        assert tuple(env.action_manager.active_terms) == (
+            "joint_position",
+            "joint_stiffness",
+        )
+
+        stiffness = env.action_manager.get_term("joint_stiffness")
+        assert tuple(stiffness.control_ids.tolist()) == (0, 5, 1, 2, 3, 4)
+        torch.testing.assert_close(
+            stiffness.nominal_kp,
+            torch.tensor(
+                [1000.0, 1500.0, 1000.0, 1000.0, 1000.0, 1000.0],
+                device=env.device,
+            ),
+        )
+        torch.testing.assert_close(
+            stiffness.nominal_kd,
+            torch.tensor(
+                [100.0, 150.0, 100.0, 100.0, 100.0, 100.0],
+                device=env.device,
+            ),
+        )
+        assert {"actuator_gainprm", "actuator_biasprm"}.issubset(
+            env.sim.expanded_fields
+        )
+
+        model = env.sim.model
+        force_range_before = model.actuator_forcerange.clone()
+        force_limited_before = model.actuator_forcelimited.clone()
+        gripper_ids = tuple(
+            sorted(set(range(model.nu)) - set(stiffness.control_ids.tolist()))
+        )
+        assert gripper_ids == (6,)
+        gripper_gain_before = model.actuator_gainprm[:, gripper_ids].clone()
+        gripper_bias_before = model.actuator_biasprm[:, gripper_ids].clone()
+
+        action = torch.zeros((2, 12), device=env.device)
+        action[0, 6:] = -1.0
+        action[1, 6:] = 1.0
+        observations, _, _, _, _ = env.step(action)
+        for observation in observations.values():
+            assert observation.shape == (2, 40)
+            assert bool(torch.isfinite(observation).all())
+
+        expected_kp = torch.stack(
+            (stiffness.nominal_kp / 1.25, stiffness.nominal_kp * 1.25)
+        )
+        expected_kd = torch.stack(
+            (
+                stiffness.nominal_kd / math.sqrt(1.25),
+                stiffness.nominal_kd * math.sqrt(1.25),
+            )
+        )
+        control_ids = stiffness.control_ids
+        torch.testing.assert_close(
+            model.actuator_gainprm[:, control_ids, 0], expected_kp
+        )
+        torch.testing.assert_close(
+            model.actuator_biasprm[:, control_ids, 1], -expected_kp
+        )
+        torch.testing.assert_close(
+            model.actuator_biasprm[:, control_ids, 2], -expected_kd
+        )
+        torch.testing.assert_close(
+            model.actuator_forcerange[:], force_range_before, rtol=0.0, atol=0.0
+        )
+        torch.testing.assert_close(
+            model.actuator_forcelimited[:],
+            force_limited_before,
+            rtol=0.0,
+            atol=0.0,
+        )
+        torch.testing.assert_close(
+            model.actuator_gainprm[:][:, gripper_ids],
+            gripper_gain_before,
+            rtol=0.0,
+            atol=0.0,
+        )
+        torch.testing.assert_close(
+            model.actuator_biasprm[:][:, gripper_ids],
+            gripper_bias_before,
+            rtol=0.0,
+            atol=0.0,
+        )
+    finally:
+        env.close()
 
 
 @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
@@ -372,7 +558,7 @@ def test_fic_reference_and_row_diagnostic_are_isolated_from_cartesian_tasks(
     assert parent.metrics["substep_impulse_rows"].params["enabled"] is True
 
     for task_id in list_tasks():
-        if "JointPosition-Fixed" in task_id:
+        if task_id in JOINT_POLICY_TASKS:
             continue
         cartesian = load_env_cfg(task_id, play=play)
         delivered = cartesian.rewards.get("delivered_impulse")

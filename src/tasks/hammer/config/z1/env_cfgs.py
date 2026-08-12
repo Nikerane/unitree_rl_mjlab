@@ -8,6 +8,7 @@ from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import DifferentialIKActionCfg, JointPositionActionCfg
 from mjlab.envs.mdp.curriculums import reward_curriculum
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
+from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.metrics_manager import MetricsTermCfg
 from mjlab.managers.observation_manager import ObservationGroupCfg, ObservationTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
@@ -93,6 +94,30 @@ def install_z1_joint_position_action(
       preserve_order=True,
     )
   }
+  return cfg
+
+
+def install_z1_variable_impedance_action(
+  cfg: ManagerBasedRlEnvCfg,
+  *,
+  C: float = 1.25,
+) -> ManagerBasedRlEnvCfg:
+  """Append the native gain action without widening policy observations or costs."""
+  contract = load_joint_position_contract(_JOINT_POSITION_CONTRACT_PATH)
+  cfg.actions["joint_stiffness"] = hammer_mdp.JointStiffnessActionCfg(
+    entity_name="robot",
+    joint_names=contract.joint_names,
+    C=C,
+  )
+  cfg.events["expand_variable_impedance_model_fields"] = EventTermCfg(
+    func=hammer_mdp.expand_variable_impedance_model_fields,
+    mode="startup",
+  )
+  for group_name in ("actor", "critic"):
+    cfg.observations[group_name].terms["actions"].params["action_name"] = (
+      "joint_position"
+    )
+  cfg.rewards["action_rate"].params["action_name"] = "joint_position"
   return cfg
 
 

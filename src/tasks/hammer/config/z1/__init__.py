@@ -5,6 +5,7 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.tasks.registry import register_mjlab_task
 from src.tasks.hammer.config.z1.env_cfgs import (
     install_z1_joint_position_action,
+    install_z1_variable_impedance_action,
     z1_hammer_env_cfg,
 )
 from src.tasks.hammer.config.z1.joint_position_contract import JOINT_NAMES
@@ -371,6 +372,14 @@ def _direct_reference_joint_position_fixed_env_cfg(*, play: bool, trackability: 
     return cfg
 
 
+def _direct_reference_joint_position_variable_impedance_env_cfg(*, play: bool):
+    """Build VIC-TT as the four-seam delta from direct-reference FIC-TT."""
+    cfg = _direct_reference_joint_position_fixed_env_cfg(
+        play=play, trackability=True
+    )
+    return install_z1_variable_impedance_action(cfg, C=1.25)
+
+
 register_mjlab_task(
     task_id=(
         "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
@@ -420,6 +429,19 @@ register_mjlab_task(
     ),
     play_env_cfg=_direct_reference_joint_position_fixed_env_cfg(
         play=True, trackability=True
+    ),
+    rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+    runner_cls=HammerOnPolicyRunner,
+)
+
+register_mjlab_task(
+    task_id=(
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-"
+        "JointPosition-VariableImpedance-TT"
+    ),
+    env_cfg=_direct_reference_joint_position_variable_impedance_env_cfg(play=False),
+    play_env_cfg=_direct_reference_joint_position_variable_impedance_env_cfg(
+        play=True
     ),
     rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
     runner_cls=HammerOnPolicyRunner,
