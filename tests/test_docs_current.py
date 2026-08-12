@@ -142,3 +142,9 @@ def test_index_points_to_current_direct_reference_fic_route():
         "fixed-reset C0/C-Gate and waypoint-guided FIC campaigns are banked prior work"
         in route
     )
+
+
+def test_claude_md_records_the_live_nail_driven_weight():
+    text = (REPO / "CLAUDE.md").read_text(encoding="utf-8")
+    assert "`nail_driven=0.5`" in text
+    assert "`nail_driven=2.0`" not in text
