@@ -725,6 +725,71 @@ def test_vic_metadata_rejects_mutated_action_pair(
 
 
 @pytest.mark.parametrize(
+    ("actuator_index", "field", "value"),
+    (
+        (0, "stiffness", 900.0),
+        (0, "damping", 90.0),
+        (0, "effort_limit", 29.0),
+        (0, "armature", 0.009),
+        (0, "frictionloss", 0.1),
+        (0, "viscous_damping", 0.1),
+        (0, "delay_max_lag", 1),
+        (2, "stiffness", 99.0),
+    ),
+    ids=(
+        "nominal-kp",
+        "nominal-kd",
+        "effort-limit",
+        "armature",
+        "friction-loss",
+        "viscous-damping",
+        "action-delay",
+        "gripper-gain",
+    ),
+)
+def test_vic_metadata_rejects_mutated_banked_actuator_contract(
+    actuator_index: int, field: str, value: object
+) -> None:
+    """A changed plant must not be relabeled as the approved nominal VIC plant."""
+    import src.tasks  # noqa: F401  # populate the isolated task registry
+
+    cfg = load_env_cfg(VIC_TT_TASK, play=True)
+    actuator = cfg.scene.entities["robot"].articulation.actuators[actuator_index]
+    setattr(actuator, field, value)
+    env = _make_env(cfg)
+    try:
+        with pytest.raises(ValueError, match="banked actuator contract"):
+            _get_hammer_metadata(env, "test-run", raw_policy_clip=RAW_POLICY_CLIP)
+    finally:
+        env.close()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("scale", "default_offset", "physical_clip"),
+)
+def test_vic_metadata_rejects_mutated_banked_position_contract(
+    mutation: str,
+) -> None:
+    """VIC must retain the exact position controller qualified for its FIC baseline."""
+    import src.tasks  # noqa: F401  # populate the isolated task registry
+
+    cfg = load_env_cfg(VIC_TT_TASK, play=True)
+    if mutation == "scale":
+        cfg.actions["joint_position"].scale["joint1"] *= 0.9
+    elif mutation == "default_offset":
+        cfg.scene.entities["robot"].init_state.joint_pos["joint1"] = 0.1
+    else:
+        cfg.actions["joint_position"].clip["joint1"] = (-2.5, 2.5)
+    env = _make_env(cfg)
+    try:
+        with pytest.raises(ValueError, match="banked joint-position contract"):
+            _get_hammer_metadata(env, "test-run", raw_policy_clip=RAW_POLICY_CLIP)
+    finally:
+        env.close()
+
+
+@pytest.mark.parametrize(
     ("mutation", "match"),
     (
         ("actor_source", "action observation"),

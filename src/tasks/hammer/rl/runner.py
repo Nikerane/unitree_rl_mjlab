@@ -6,6 +6,7 @@ from pathlib import Path
 
 import torch
 
+from mjlab.actuator import BuiltinPositionActuatorCfg
 from mjlab.entity import Entity
 from mjlab.envs.mdp.actions import DifferentialIKAction, JointPositionAction
 from mjlab.envs.mdp.observations import last_action
@@ -15,6 +16,7 @@ from mjlab.rl.runner import MjlabOnPolicyRunner
 
 from src.tasks.hammer.config.z1.joint_position_contract import (
     JOINT_NAMES,
+    JointPositionContract,
     load_joint_position_contract,
 )
 from src.tasks.hammer.mdp.rewards import action_rate_penalty
@@ -56,6 +58,21 @@ _WAYPOINT_OBSERVATION_TERMS = frozenset(
     _WAYPOINT_JOINT_OBSERVATIONS[len(_DIRECT_JOINT_OBSERVATIONS) :]
 )
 _GUIDANCE_REWARD_KEYS = frozenset(("r_imit", "r_gate", "r_waypoint_progress"))
+_BANKED_ACTUATOR_FIELDS = (
+    "target_names_expr",
+    "transmission_type",
+    "armature",
+    "frictionloss",
+    "viscous_damping",
+    "delay_min_lag",
+    "delay_max_lag",
+    "delay_hold_prob",
+    "delay_update_period",
+    "delay_per_env_phase",
+    "stiffness",
+    "damping",
+    "effort_limit",
+)
 _GUIDANCE_SCHEMAS = {
     _DIRECT_JOINT_OBSERVATIONS: {
         "width": 40,
@@ -125,6 +142,81 @@ def _callable_identity(value: object) -> str:
     module = getattr(value, "__module__", type(value).__module__)
     qualname = getattr(value, "__qualname__", type(value).__qualname__)
     return f"{module}.{qualname}"
+
+
+def _normalized_actuator_field(name: str, value: object) -> object:
+    if name == "target_names_expr":
+        return tuple(value)
+    if name == "transmission_type":
+        return getattr(value, "value", value)
+    return value
+
+
+def _require_banked_vic_actuators(
+    env, contract: JointPositionContract
+) -> None:
+    """Require the exact actuator rows from the immutable qualification artifact."""
+    expected_rows = contract.source_task_config_projection["actuators"]["robot"]
+    actuators = env.cfg.scene.entities["robot"].articulation.actuators
+    if len(actuators) != len(expected_rows) or any(
+        type(actuator) is not BuiltinPositionActuatorCfg for actuator in actuators
+    ):
+        raise ValueError("VIC metadata requires the banked actuator contract")
+
+    expected = tuple(
+        tuple(
+            _normalized_actuator_field(name, row[name])
+            for name in _BANKED_ACTUATOR_FIELDS
+        )
+        for row in expected_rows
+    )
+    actual = tuple(
+        tuple(
+            _normalized_actuator_field(name, getattr(actuator, name))
+            for name in _BANKED_ACTUATOR_FIELDS
+        )
+        for actuator in actuators
+    )
+    if actual != expected:
+        raise ValueError("VIC metadata requires the banked actuator contract")
+
+
+def _ordered_banked_nominal_gains(
+    contract: JointPositionContract,
+) -> tuple[list[float], list[float]]:
+    by_joint: dict[str, tuple[float, float]] = {}
+    for row in contract.source_task_config_projection["actuators"]["robot"]:
+        for joint_name in row["target_names_expr"]:
+            if joint_name not in JOINT_NAMES:
+                continue
+            if joint_name in by_joint:
+                raise ValueError("VIC banked actuator contract contains duplicate joints")
+            by_joint[joint_name] = (float(row["stiffness"]), float(row["damping"]))
+    if set(by_joint) != set(JOINT_NAMES):
+        raise ValueError("VIC banked actuator contract is missing canonical joints")
+    return (
+        [by_joint[name][0] for name in JOINT_NAMES],
+        [by_joint[name][1] for name in JOINT_NAMES],
+    )
+
+
+def _require_banked_vic_position_action(
+    action: JointPositionAction, contract: JointPositionContract
+) -> None:
+    """Reject any VIC position mapping that differs from its qualified FIC seam."""
+    expected_scale = action.scale.new_tensor(contract.scale_rad).expand_as(action.scale)
+    expected_offset = action.offset.new_tensor(contract.default_joint_pos_rad).expand_as(
+        action.offset
+    )
+    expected_clip = action._clip.new_tensor(contract.physical_clip_rad).expand_as(
+        action._clip
+    )
+    if not (
+        torch.equal(action.scale, expected_scale)
+        and torch.equal(action.offset, expected_offset)
+        and torch.equal(action._clip, expected_clip)
+    ):
+        raise ValueError("VIC metadata requires the banked joint-position contract")
 
 
 def _joint_observation_metadata(env) -> dict[str, object]:
@@ -201,8 +293,11 @@ def _vic_controller_metadata(
     env,
     robot: Entity,
     position_action: JointPositionAction,
+    contract: JointPositionContract,
 ) -> dict[str, object]:
     """Validate and serialize the immutable live VIC controller seams."""
+    _require_banked_vic_actuators(env, contract)
+    _require_banked_vic_position_action(position_action, contract)
     action_dims = list(env.action_manager.action_term_dim)
     if action_dims != [len(JOINT_NAMES), len(JOINT_NAMES)]:
         raise ValueError("VIC metadata requires action dimensions [6, 6]")
@@ -242,8 +337,9 @@ def _vic_controller_metadata(
 
     nominal_kp = _finite_vector(telemetry.nominal_kp, name="nominal Kp")
     nominal_kd = _finite_vector(telemetry.nominal_kd, name="nominal Kd")
-    if any(value <= 0.0 for value in (*nominal_kp, *nominal_kd)):
-        raise ValueError("VIC metadata nominal gains must be strictly positive")
+    expected_kp, expected_kd = _ordered_banked_nominal_gains(contract)
+    if nominal_kp != expected_kp or nominal_kd != expected_kd:
+        raise ValueError("VIC metadata requires the exact banked nominal Kp/Kd")
 
     native_model_fields = tuple(expand_variable_impedance_model_fields.model_fields)
     if native_model_fields != ("actuator_gainprm", "actuator_biasprm"):
@@ -434,7 +530,7 @@ def _get_hammer_metadata(env, run_path: str, *, raw_policy_clip: float) -> dict:
     if not is_vic:
         return metadata
 
-    controller_metadata = _vic_controller_metadata(env, robot, action)
+    controller_metadata = _vic_controller_metadata(env, robot, action, contract)
     nominal_actuator_signature = metadata.pop("fixed_actuator_signature")
     metadata.pop("action_term")
     metadata.update(
