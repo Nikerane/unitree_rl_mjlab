@@ -19,6 +19,7 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
 import src.tasks.hammer.config.z1  # noqa: F401  (registers tasks)
 from src.tasks.hammer.cat.hook import CatSoftHook
 from src.tasks.hammer.cat.keys import CAT_R_POS_KEY
+from src.tasks.hammer.config.z1.env_cfgs import IMP_J_LIMIT
 from src.tasks.hammer.config.z1.joint_position_contract import JOINT_NAMES
 from src.tasks.hammer.mdp.velocity_bound import _ENV_SUBSTEP_ATTR, Z1_JOINT_VEL_LIMIT
 from src.tasks.hammer.rl.runner import _get_hammer_metadata
@@ -63,7 +64,6 @@ _FIXED_ACTUATOR_SIGNATURE = (
   ("BuiltinPositionActuatorCfg", ("joint2",), 1500.0, 150.0, 60.0, 0.02),
   ("BuiltinPositionActuatorCfg", ("jointGripper",), 100.0, 20.0, 30.0, 0.005),
 )
-_IMPULSE_LIMITS = (1.64, 3.28, 1.64, 1.64, 1.64, 1.64)
 _FIC_CONTROLLED_DROP_I_REF_N_S = 0.2799950838088989
 
 
@@ -294,7 +294,7 @@ def run_checks(
       hook._use_impulse is True
       and bool(torch.allclose(
         hook._imp_limit,
-        torch.tensor(_IMPULSE_LIMITS, device=hook._imp_limit.device),
+        torch.tensor(IMP_J_LIMIT, device=hook._imp_limit.device),
         rtol=0.0,
         atol=1e-7,
       ))

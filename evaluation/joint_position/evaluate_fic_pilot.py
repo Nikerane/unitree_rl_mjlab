@@ -35,6 +35,7 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 import mjlab.tasks  # noqa: F401
 import src.tasks  # noqa: F401
 from src.tasks.hammer.cat.hook import CatSoftHook, _NEG_TERMS
+from src.tasks.hammer.config.z1.env_cfgs import IMP_J_LIMIT
 from src.tasks.hammer.config.z1.joint_position_contract import (
     JOINT_NAMES,
     load_joint_position_contract,
@@ -92,7 +93,7 @@ NUM_ENVS = 64
 EPISODE_LENGTH_S = 4.0
 I_REF_N_S = 0.2799950838088989
 JOINT_VELOCITY_LIMIT_RAD_S = 3.1415
-JOINT_IMPULSE_CAP_N_M_S = (1.64, 3.28, 1.64, 1.64, 1.64, 1.64)
+JOINT_IMPULSE_CAP_N_M_S = IMP_J_LIMIT
 _REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
 _JOINT_POSITION_CONTRACT_PATH = (
     Path(__file__).resolve().parents[2]
@@ -524,7 +525,7 @@ def validate_fic_contract(task: str, env_cfg, agent_cfg) -> dict[str, object]:
         or _finite_number(cat_params.get("min_p"), name="CaT min_p") != 0.0
         or _finite_number(cat_params.get("tau"), name="CaT tau") != 0.95
         or tuple(cat_params.get("imp_limit", ()))
-        != (1.64, 3.28, 1.64, 1.64, 1.64, 1.64)
+        != tuple(JOINT_IMPULSE_CAP_N_M_S)
         or _finite_number(cat_params.get("imp_max_p"), name="imp_max_p") != 0.0
         or _finite_number(cat_params.get("imp_seed"), name="imp_seed") != 0.001
     ):

@@ -7,6 +7,7 @@ import torch
 from tensordict import TensorDict
 
 from evaluation.joint_position import evaluate_fic_pilot as pilot
+from src.tasks.hammer.config.z1.env_cfgs import IMP_J_LIMIT
 
 
 DIRECT_FIC0_TASK = (
@@ -48,6 +49,11 @@ def _live_configs(task=pilot.FIC0_TASK):
 def test_public_evaluator_seams_are_exposed() -> None:
     assert callable(pilot.validate_fic_contract)
     assert callable(pilot.evaluate_checkpoint)
+
+
+def test_evaluator_uses_the_authoritative_production_impulse_caps() -> None:
+    assert pilot.JOINT_IMPULSE_CAP_N_M_S is IMP_J_LIMIT
+    assert pilot.JOINT_IMPULSE_CAP_N_M_S == [1.64, 3.28, 1.64, 1.64, 1.64, 1.64]
 
 
 def test_evaluator_targets_only_direct_reference_fic_treatments() -> None:

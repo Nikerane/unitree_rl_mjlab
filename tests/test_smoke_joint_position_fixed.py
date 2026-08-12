@@ -21,6 +21,7 @@ from src.tasks.hammer.config.z1.joint_position_contract import (
     JOINT_NAMES,
     load_joint_position_contract,
 )
+from src.tasks.hammer.config.z1.env_cfgs import IMP_J_LIMIT
 from src.tasks.hammer.rl.runner import _get_hammer_metadata
 import scripts.smoke_cat_soft as smoke_cat_soft
 import scripts.smoke_joint_position_fixed as smoke_joint_position_fixed
@@ -66,6 +67,18 @@ _CONTRACT_PATH = (
     Path(__file__).resolve().parents[1]
     / "src/tasks/hammer/config/z1/data/z1_joint_position_stage1.json"
 )
+
+
+def test_live_smoke_uses_the_authoritative_production_impulse_caps() -> None:
+    assert smoke_joint_position_fixed.IMP_J_LIMIT is IMP_J_LIMIT
+    assert smoke_joint_position_fixed.IMP_J_LIMIT == [
+        1.64,
+        3.28,
+        1.64,
+        1.64,
+        1.64,
+        1.64,
+    ]
 
 
 @pytest.mark.parametrize(
