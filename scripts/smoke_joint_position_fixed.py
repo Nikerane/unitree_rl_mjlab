@@ -36,11 +36,31 @@ DIRECT_FIC0_TASK = (
   "JointPosition-Fixed"
 )
 DIRECT_FICTT_TASK = f"{DIRECT_FIC0_TASK}-TT"
+VIC_TT_TASK = (
+  "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-"
+  "JointPosition-VariableImpedance-TT"
+)
 TASK_CONTRACTS = {
-  FIC0_TASK: {"width": 47, "guidance": "waypoint_progress", "tt": False},
-  FICTT_TASK: {"width": 47, "guidance": "waypoint_progress", "tt": True},
-  DIRECT_FIC0_TASK: {"width": 40, "guidance": "direct_reference", "tt": False},
-  DIRECT_FICTT_TASK: {"width": 40, "guidance": "direct_reference", "tt": True},
+  FIC0_TASK: {
+    "width": 47, "guidance": "waypoint_progress", "tt": False,
+    "action_width": 6, "vic": False,
+  },
+  FICTT_TASK: {
+    "width": 47, "guidance": "waypoint_progress", "tt": True,
+    "action_width": 6, "vic": False,
+  },
+  DIRECT_FIC0_TASK: {
+    "width": 40, "guidance": "direct_reference", "tt": False,
+    "action_width": 6, "vic": False,
+  },
+  DIRECT_FICTT_TASK: {
+    "width": 40, "guidance": "direct_reference", "tt": True,
+    "action_width": 6, "vic": False,
+  },
+  VIC_TT_TASK: {
+    "width": 40, "guidance": "direct_reference", "tt": True,
+    "action_width": 12, "vic": True,
+  },
 }
 TASKS = tuple(TASK_CONTRACTS)
 
@@ -106,6 +126,8 @@ def run_checks(
   observation_width = contract["width"]
   guidance = contract["guidance"]
   tt_enabled = contract["tt"]
+  action_width = contract["action_width"]
+  is_vic = contract["vic"]
   results: list[tuple[str, bool, str]] = []
 
   def check(name: str, ok: bool, detail: str = "") -> None:
@@ -122,11 +144,11 @@ def run_checks(
     obs, _ = env.reset()
 
     action = env.action_manager.get_term("joint_position")
-    command = torch.full(
+    command = torch.zeros(
       (env.num_envs, env.action_manager.total_action_dim),
-      0.25,
       device=env.device,
     )
+    command[:, :action.action_dim] = 0.25
     observation_tensors = [
       obs["actor"],
       obs["critic"],
@@ -179,7 +201,7 @@ def run_checks(
 
     check(
       "joint-position action is exactly six canonical arm joints",
-      env.action_manager.total_action_dim == 6
+      env.action_manager.total_action_dim == action_width
       and action.action_dim == 6
       and tuple(action.target_names) == JOINT_NAMES
       and tuple(action.cfg.actuator_names) == JOINT_NAMES,
@@ -199,11 +221,45 @@ def run_checks(
       _actuator_signature(env) == _FIXED_ACTUATOR_SIGNATURE,
       str(_actuator_signature(env)),
     )
-    check(
-      "there is no gain action",
-      tuple(env.action_manager.active_terms) == ("joint_position",),
-      str(env.action_manager.active_terms),
-    )
+    if not is_vic:
+      check(
+        "there is no gain action",
+        tuple(env.action_manager.active_terms) == ("joint_position",),
+        str(env.action_manager.active_terms),
+      )
+    else:
+      stiffness = env.action_manager.get_term("joint_stiffness")
+      telemetry = stiffness.telemetry
+      telemetry_tensors = (
+        telemetry.control_ids,
+        telemetry.nominal_kp,
+        telemetry.nominal_kd,
+        telemetry.p,
+        telemetry.multiplier,
+        telemetry.kp,
+        telemetry.kd,
+      )
+      check(
+        "VIC action is the exact ordered 6D position plus 6D stiffness pair",
+        tuple(env.action_manager.active_terms)
+        == ("joint_position", "joint_stiffness")
+        and tuple(env.action_manager.action_term_dim) == (6, 6)
+        and stiffness.action_dim == 6,
+        f"terms={tuple(env.action_manager.active_terms)}; "
+        f"dims={tuple(env.action_manager.action_term_dim)}",
+      )
+      check(
+        "VIC live immutable controller telemetry is finite and canonical",
+        telemetry.mapping_family == "author_v1_exponential"
+        and telemetry.C == 1.25
+        and telemetry.p_bounds == (-1.0, 1.0)
+        and telemetry.joint_names == JOINT_NAMES
+        and telemetry.control_ids.detach().cpu().tolist() == [0, 5, 1, 2, 3, 4]
+        and all(value.device == requested_device for value in telemetry_tensors)
+        and all(bool(torch.isfinite(value).all()) for value in telemetry_tensors),
+        f"family={telemetry.mapping_family}; C={telemetry.C}; "
+        f"control_ids={telemetry.control_ids.detach().cpu().tolist()}",
+      )
 
     reward_weights = {
       name: env.reward_manager.get_term_cfg(name).weight
@@ -374,8 +430,11 @@ def run_checks(
     )
     check(
       "live export metadata constructs successfully",
-      metadata["action_type"] == "joint_position"
-      and metadata["action_dim"] == 6
+      metadata["action_type"]
+      == (
+        "joint_position_variable_impedance" if is_vic else "joint_position"
+      )
+      and metadata["action_dim"] == action_width
       and metadata["raw_policy_clip"] == raw_policy_clip == 1.0
       and metadata["delivered_impulse_i_ref_n_s"]
       == _FIC_CONTROLLED_DROP_I_REF_N_S
@@ -385,7 +444,19 @@ def run_checks(
       and metadata["guidance_reward_key"]
       == ("r_imit" if guidance == "direct_reference" else "r_waypoint_progress")
       and metadata["r_tt_enabled"] is tt_enabled
-      and metadata["r_tt_k_tt"] == (1.0 if tt_enabled else "not_applicable"),
+      and metadata["r_tt_k_tt"] == (1.0 if tt_enabled else "not_applicable")
+      and (
+        not is_vic
+        or (
+          metadata["action_terms"] == ["joint_position", "joint_stiffness"]
+          and metadata["action_term_dims"] == [6, 6]
+          and metadata["position_action_dim"] == 6
+          and metadata["action_observation_source"] == "joint_position"
+          and metadata["action_rate_source"] == "joint_position"
+          and metadata["r_tt_weight"] == -1.0
+          and metadata["variable_impedance"]["C"] == 1.25
+        )
+      ),
       str({
         key: metadata[key]
         for key in (

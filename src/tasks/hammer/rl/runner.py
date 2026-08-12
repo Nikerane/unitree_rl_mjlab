@@ -8,6 +8,7 @@ import torch
 
 from mjlab.entity import Entity
 from mjlab.envs.mdp.actions import DifferentialIKAction, JointPositionAction
+from mjlab.envs.mdp.observations import last_action
 from mjlab.rl import RslRlVecEnvWrapper
 from mjlab.rl.exporter_utils import attach_metadata_to_onnx
 from mjlab.rl.runner import MjlabOnPolicyRunner
@@ -15,6 +16,14 @@ from mjlab.rl.runner import MjlabOnPolicyRunner
 from src.tasks.hammer.config.z1.joint_position_contract import (
     JOINT_NAMES,
     load_joint_position_contract,
+)
+from src.tasks.hammer.mdp.rewards import action_rate_penalty
+from src.tasks.hammer.mdp.trackability import joint_trackability_cost
+from src.tasks.hammer.mdp.variable_impedance import (
+    VARIABLE_IMPEDANCE_MAPPING_FAMILY,
+    VARIABLE_IMPEDANCE_P_BOUNDS,
+    JointStiffnessAction,
+    expand_variable_impedance_model_fields,
 )
 
 
@@ -78,6 +87,15 @@ def _finite_row(value: torch.Tensor | float, *, name: str) -> list[float]:
     if not math.isfinite(float(value)):
         raise ValueError(f"{name} must be finite")
     return [float(value)] * len(JOINT_NAMES)
+
+
+def _finite_vector(value: torch.Tensor, *, name: str) -> list[float]:
+    """Serialize one immutable six-joint controller vector without rounding."""
+    if value.ndim != 1 or value.shape[0] != len(JOINT_NAMES):
+        raise ValueError(f"{name} must contain one value for each Z1 arm joint")
+    if not torch.isfinite(value).all():
+        raise ValueError(f"{name} must contain only finite values")
+    return [float(item) for item in value.detach().cpu().tolist()]
 
 
 def _fixed_actuator_signature(env) -> list[dict[str, object]]:
@@ -179,13 +197,136 @@ def _joint_observation_metadata(env) -> dict[str, object]:
     }
 
 
+def _vic_controller_metadata(
+    env,
+    robot: Entity,
+    position_action: JointPositionAction,
+) -> dict[str, object]:
+    """Validate and serialize the immutable live VIC controller seams."""
+    action_dims = list(env.action_manager.action_term_dim)
+    if action_dims != [len(JOINT_NAMES), len(JOINT_NAMES)]:
+        raise ValueError("VIC metadata requires action dimensions [6, 6]")
+    if env.action_manager.total_action_dim != 2 * len(JOINT_NAMES):
+        raise ValueError("VIC metadata requires exactly twelve action dimensions")
+
+    stiffness = env.action_manager.get_term("joint_stiffness")
+    if not isinstance(stiffness, JointStiffnessAction):
+        raise ValueError("VIC metadata requires a typed joint stiffness action")
+    telemetry = stiffness.telemetry
+    if telemetry.mapping_family != VARIABLE_IMPEDANCE_MAPPING_FAMILY:
+        raise ValueError("VIC metadata requires the approved gain mapping family")
+    if telemetry.C != 1.25:
+        raise ValueError("VIC metadata requires C=1.25")
+    if telemetry.p_bounds != VARIABLE_IMPEDANCE_P_BOUNDS:
+        raise ValueError("VIC metadata requires policy bounds [-1, 1]")
+    if telemetry.joint_names != JOINT_NAMES:
+        raise ValueError("VIC metadata requires the canonical Z1 stiffness order")
+
+    control_id_by_joint: dict[str, int] = {}
+    for actuator in robot.actuators:
+        for joint_name, control_id in zip(
+            actuator.target_names, actuator.global_ctrl_ids.tolist(), strict=True
+        ):
+            if joint_name in JOINT_NAMES:
+                if joint_name in control_id_by_joint:
+                    raise ValueError(
+                        f"VIC metadata found duplicate actuator mapping for {joint_name}"
+                    )
+                control_id_by_joint[joint_name] = int(control_id)
+    if set(control_id_by_joint) != set(JOINT_NAMES):
+        raise ValueError("VIC metadata requires all canonical Z1 actuator mappings")
+    expected_control_ids = [control_id_by_joint[name] for name in JOINT_NAMES]
+    control_ids = telemetry.control_ids.detach().cpu().tolist()
+    if control_ids != expected_control_ids:
+        raise ValueError("VIC metadata control IDs must match the live Z1 actuators")
+
+    nominal_kp = _finite_vector(telemetry.nominal_kp, name="nominal Kp")
+    nominal_kd = _finite_vector(telemetry.nominal_kd, name="nominal Kd")
+    if any(value <= 0.0 for value in (*nominal_kp, *nominal_kd)):
+        raise ValueError("VIC metadata nominal gains must be strictly positive")
+
+    native_model_fields = tuple(expand_variable_impedance_model_fields.model_fields)
+    if native_model_fields != ("actuator_gainprm", "actuator_biasprm"):
+        raise ValueError("VIC metadata requires the approved native model fields")
+    if not set(native_model_fields).issubset(env.sim.expanded_fields):
+        raise ValueError("VIC metadata requires expanded native model fields")
+
+    for group_name in ("actor", "critic"):
+        term_cfg = env.observation_manager.get_term_cfg(group_name, "actions")
+        if term_cfg.func is not last_action or term_cfg.params != {
+            "action_name": "joint_position"
+        }:
+            raise ValueError(
+                "VIC action observation must be exact position-only last_action"
+            )
+
+    action_rate_cfg = env.reward_manager.get_term_cfg("action_rate")
+    if (
+        action_rate_cfg.func is not action_rate_penalty
+        or action_rate_cfg.weight != -0.01
+        or action_rate_cfg.params != {"action_name": "joint_position"}
+    ):
+        raise ValueError("VIC action-rate cost must be exact and position-only")
+
+    if "r_tt" not in env.reward_manager.active_terms:
+        raise ValueError("VIC metadata requires r_tt")
+    r_tt_cfg = env.reward_manager.get_term_cfg("r_tt")
+    if (
+        r_tt_cfg.func is not joint_trackability_cost
+        or r_tt_cfg.weight != -1.0
+        or set(r_tt_cfg.params) != {"robot_cfg", "k_tt"}
+        or r_tt_cfg.params["k_tt"] != 1.0
+    ):
+        raise ValueError("VIC r_tt must use the exact implementation, weight, and k_tt=1")
+    r_tt_robot_cfg = r_tt_cfg.params["robot_cfg"]
+    if (
+        r_tt_robot_cfg.name != "robot"
+        or tuple(r_tt_robot_cfg.joint_names or ()) != JOINT_NAMES
+        or list(r_tt_robot_cfg.joint_ids) != position_action.target_ids.detach().cpu().tolist()
+        or r_tt_robot_cfg.preserve_order is not True
+    ):
+        raise ValueError("VIC r_tt must use the canonical ordered Z1 robot selector")
+
+    return {
+        "action_observation_impl": _callable_identity(last_action),
+        "action_observation_source": "joint_position",
+        "action_rate_impl": _callable_identity(action_rate_penalty),
+        "action_rate_source": "joint_position",
+        "action_rate_weight": float(action_rate_cfg.weight),
+        "r_tt_weight": float(r_tt_cfg.weight),
+        "r_tt_impl": _callable_identity(r_tt_cfg.func),
+        "variable_impedance": {
+            "mapping_family": telemetry.mapping_family,
+            "C": float(telemetry.C),
+            "p_bounds": [float(value) for value in telemetry.p_bounds],
+            "joint_names": list(telemetry.joint_names),
+            "control_ids": control_ids,
+            "nominal_kp": nominal_kp,
+            "nominal_kd": nominal_kd,
+            "native_model_fields": list(native_model_fields),
+        },
+    }
+
+
 def _get_hammer_metadata(env, run_path: str, *, raw_policy_clip: float) -> dict:
-    action_terms = list(env.action_manager.active_terms)
-    if len(action_terms) != 1:
-        raise ValueError("hammer ONNX metadata requires exactly one active action")
+    action_terms = tuple(env.action_manager.active_terms)
+    qualified_signatures = (
+        ("ik_hammer_head",),
+        ("joint_position",),
+        ("joint_position", "joint_stiffness"),
+    )
+    if action_terms not in qualified_signatures:
+        if len(action_terms) == 1:
+            raise ValueError(
+                "unsupported action term for hammer ONNX metadata: "
+                f"{action_terms[0]}"
+            )
+        raise ValueError(
+            "hammer ONNX metadata requires exactly one supported action or the "
+            "exact VIC action signature ('joint_position', 'joint_stiffness')"
+        )
+    is_vic = action_terms == ("joint_position", "joint_stiffness")
     action_term = action_terms[0]
-    if action_term not in ("ik_hammer_head", "joint_position"):
-        raise ValueError(f"unsupported action term for hammer ONNX metadata: {action_term}")
 
     robot: Entity = env.scene["robot"]
     action = env.action_manager.get_term(action_term)
@@ -268,7 +409,7 @@ def _get_hammer_metadata(env, run_path: str, *, raw_policy_clip: float) -> dict:
             raise ValueError("r_tt k_tt must be finite")
     else:
         r_tt_k_tt = "not_applicable"
-    return {
+    metadata = {
         "run_path": run_path,
         "action_type": "joint_position",
         "action_term": action_term,
@@ -290,11 +431,32 @@ def _get_hammer_metadata(env, run_path: str, *, raw_policy_clip: float) -> dict:
         "r_tt_enabled": r_tt_enabled,
         "r_tt_k_tt": r_tt_k_tt,
     }
+    if not is_vic:
+        return metadata
+
+    controller_metadata = _vic_controller_metadata(env, robot, action)
+    nominal_actuator_signature = metadata.pop("fixed_actuator_signature")
+    metadata.pop("action_term")
+    metadata.update(
+        {
+            "action_type": "joint_position_variable_impedance",
+            "action_terms": list(action_terms),
+            "action_term_dims": list(env.action_manager.action_term_dim),
+            "action_dim": env.action_manager.total_action_dim,
+            "position_action_dim": action.action_dim,
+            "nominal_actuator_signature": nominal_actuator_signature,
+            **controller_metadata,
+        }
+    )
+    return metadata
 
 
 def _metadata_for_onnx(metadata: dict) -> dict:
     """Encode structured joint-policy fields without upstream CSV rounding."""
-    if metadata.get("action_type") != "joint_position":
+    if metadata.get("action_type") not in (
+        "joint_position",
+        "joint_position_variable_impedance",
+    ):
         return metadata
     return {
         key: json.dumps(

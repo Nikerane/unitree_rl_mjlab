@@ -14,6 +14,7 @@ import torch
 
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.envs.mdp.actions import JointVelocityActionCfg
+from mjlab.envs.mdp.observations import last_action
 from mjlab.rl import RslRlVecEnvWrapper
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 
@@ -22,6 +23,13 @@ from src.tasks.hammer.config.z1.joint_position_contract import (
     load_joint_position_contract,
 )
 from src.tasks.hammer.config.z1.env_cfgs import IMP_J_LIMIT
+from src.tasks.hammer.mdp.rewards import action_rate_penalty
+from src.tasks.hammer.mdp.trackability import joint_trackability_cost
+from src.tasks.hammer.mdp.variable_impedance import (
+    VARIABLE_IMPEDANCE_MAPPING_FAMILY,
+    VARIABLE_IMPEDANCE_P_BOUNDS,
+    expand_variable_impedance_model_fields,
+)
 from src.tasks.hammer.rl.runner import _get_hammer_metadata
 import scripts.smoke_cat_soft as smoke_cat_soft
 import scripts.smoke_joint_position_fixed as smoke_joint_position_fixed
@@ -42,6 +50,10 @@ DIRECT_FIC0_TASK = (
     "JointPosition-Fixed"
 )
 DIRECT_FICTT_TASK = f"{DIRECT_FIC0_TASK}-TT"
+VIC_TT_TASK = (
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-"
+    "JointPosition-VariableImpedance-TT"
+)
 RAW_POLICY_CLIP = 1.0
 DIRECT_OBSERVATION_NAMES = (
     "joint_pos",
@@ -67,6 +79,21 @@ _CONTRACT_PATH = (
     Path(__file__).resolve().parents[1]
     / "src/tasks/hammer/config/z1/data/z1_joint_position_stage1.json"
 )
+
+
+def _action_observation_alias(env, action_name: str) -> torch.Tensor:
+    """Shape-compatible noncanonical observation used by fail-closed tests."""
+    return env.action_manager.get_term(action_name).raw_action
+
+
+def _action_rate_alias(env, action_name: str) -> torch.Tensor:
+    """Numerically equivalent but noncanonical action-rate implementation."""
+    return action_rate_penalty(env, action_name=action_name)
+
+
+def _rtt_alias(env, robot_cfg, k_tt: float) -> torch.Tensor:
+    """Numerically equivalent but noncanonical RTT implementation."""
+    return joint_trackability_cost(env, robot_cfg=robot_cfg, k_tt=k_tt)
 
 
 def test_live_smoke_uses_the_authoritative_production_impulse_caps() -> None:
@@ -151,15 +178,33 @@ def test_catppo_smoke_rejects_invalid_sizes_before_environment_creation(
 
 @pytest.mark.parametrize(
     "task_id",
-    (FIC0_TASK, FICTT_TASK, DIRECT_FIC0_TASK, DIRECT_FICTT_TASK),
-    ids=("waypoint-fic0", "waypoint-fictt", "direct-fic0", "direct-fictt"),
+    (FIC0_TASK, FICTT_TASK, DIRECT_FIC0_TASK, DIRECT_FICTT_TASK, VIC_TT_TASK),
+    ids=(
+        "waypoint-fic0",
+        "waypoint-fictt",
+        "direct-fic0",
+        "direct-fictt",
+        "direct-victt",
+    ),
 )
 def test_live_joint_position_smoke_passes_every_check(task_id: str) -> None:
-    """All four registered fixed-impedance arms must pass the live manager gate."""
+    """Every registered joint-policy arm must pass the live manager gate."""
     results = run_checks(task=task_id, device="cpu", num_envs=4, steps=2)
 
     assert results
     assert all(passed for _, passed, _ in results), results
+
+
+def test_vic_catppo_smoke_runs_one_real_update() -> None:
+    """VIC-TT must complete the real 24-step CatPPO rollout/update path on CPU."""
+    checkpoint = smoke_cat_soft.run_smoke(
+        task=VIC_TT_TASK,
+        device="cpu",
+        num_envs=4,
+        iters=1,
+    )
+
+    assert checkpoint.is_file()
 
 
 def test_live_smoke_uses_the_registered_raw_policy_clip(
@@ -255,7 +300,7 @@ def test_catppo_smoke_closes_raw_env_when_setup_fails(
 
 @pytest.fixture(scope="module")
 def metadata_envs():
-    """Construct the Cartesian parent and all four fixed-impedance environments."""
+    """Construct the Cartesian parent and every qualified joint-policy environment."""
     import src.tasks  # noqa: F401  # populate the isolated task registry
 
     envs = {}
@@ -266,6 +311,7 @@ def metadata_envs():
             FICTT_TASK,
             DIRECT_FIC0_TASK,
             DIRECT_FICTT_TASK,
+            VIC_TT_TASK,
         ):
             cfg = load_env_cfg(task_id, play=True)
             cfg.scene.num_envs = 1
@@ -289,6 +335,34 @@ def joint_runner(tmp_path_factory):
     runner_cfg["upload_model"] = False
     run_root = tmp_path_factory.mktemp("joint-policy-save")
     runner_cls = load_runner_cls(FIC0_TASK)
+    assert runner_cls is not None
+    runner = runner_cls(
+        wrapper,
+        runner_cfg,
+        log_dir=str(run_root / "logs"),
+        device="cpu",
+    )
+    runner.logger.init_logging_writer()
+    try:
+        yield runner, run_root
+    finally:
+        runner.logger.stop_logging_writer()
+        env.close()
+
+
+@pytest.fixture(scope="module")
+def vic_runner(tmp_path_factory):
+    """Create the registered VIC-TT runner through its real wrapper/logger path."""
+    import src.tasks  # noqa: F401  # populate the isolated task registry
+
+    cfg = load_env_cfg(VIC_TT_TASK, play=True)
+    env = _make_env(cfg)
+    wrapper = RslRlVecEnvWrapper(env, clip_actions=RAW_POLICY_CLIP)
+    runner_cfg = asdict(load_rl_cfg(VIC_TT_TASK))
+    runner_cfg["logger"] = "tensorboard"
+    runner_cfg["upload_model"] = False
+    run_root = tmp_path_factory.mktemp("vic-policy-save")
+    runner_cls = load_runner_cls(VIC_TT_TASK)
     assert runner_cls is not None
     runner = runner_cls(
         wrapper,
@@ -491,6 +565,186 @@ def test_joint_metadata_is_resolved_from_the_live_action_and_robot(
     json.dumps(metadata, allow_nan=False)
 
 
+def test_vic_metadata_is_resolved_from_the_live_two_term_controller(
+    metadata_envs,
+) -> None:
+    """VIC export must freeze the immutable 12D native-gain controller contract."""
+    env = metadata_envs[VIC_TT_TASK]
+    action = env.action_manager.get_term("joint_position")
+    stiffness = env.action_manager.get_term("joint_stiffness")
+    telemetry = stiffness.telemetry
+    contract = load_joint_position_contract(_CONTRACT_PATH)
+
+    metadata = _get_hammer_metadata(
+        env, "test-run", raw_policy_clip=RAW_POLICY_CLIP
+    )
+
+    assert metadata == {
+        "run_path": "test-run",
+        "action_type": "joint_position_variable_impedance",
+        "action_terms": ["joint_position", "joint_stiffness"],
+        "action_term_dims": [6, 6],
+        "action_dim": 12,
+        "position_action_dim": 6,
+        "target_names": list(action.target_names),
+        "target_ids": action.target_ids.detach().cpu().tolist(),
+        "actuator_names": list(action.cfg.actuator_names),
+        "use_default_offset": True,
+        "default_offsets": _row(action.offset),
+        "action_scale": _row(action.scale),
+        "physical_clips": _clip_rows(action._clip),
+        "raw_policy_clip": RAW_POLICY_CLIP,
+        "physics_dt_s": float(env.cfg.sim.mujoco.timestep),
+        "control_decimation": int(env.cfg.decimation),
+        "nominal_actuator_signature": _fixed_actuator_signature(env),
+        "joint_action_qualification_payload_sha256": contract.payload_sha256,
+        "delivered_impulse_i_ref_n_s": 0.2799950838088989,
+        "observation_names": list(DIRECT_OBSERVATION_NAMES),
+        "observation_widths": {"actor": 40, "critic": 40},
+        "guidance_type": "direct_reference",
+        "guidance_reward_key": "r_imit",
+        "guidance_reward_impl": "src.tasks.hammer.mdp.rewards.ImitationPriorTerm",
+        "action_observation_impl": "mjlab.envs.mdp.observations.last_action",
+        "action_observation_source": "joint_position",
+        "action_rate_impl": "src.tasks.hammer.mdp.rewards.action_rate_penalty",
+        "action_rate_source": "joint_position",
+        "action_rate_weight": -0.01,
+        "r_tt_enabled": True,
+        "r_tt_k_tt": 1.0,
+        "r_tt_weight": -1.0,
+        "r_tt_impl": "src.tasks.hammer.mdp.trackability.joint_trackability_cost",
+        "variable_impedance": {
+            "mapping_family": "author_v1_exponential",
+            "C": 1.25,
+            "p_bounds": [-1.0, 1.0],
+            "joint_names": list(JOINT_NAMES),
+            "control_ids": [0, 5, 1, 2, 3, 4],
+            "nominal_kp": [1000.0, 1500.0, 1000.0, 1000.0, 1000.0, 1000.0],
+            "nominal_kd": [100.0, 150.0, 100.0, 100.0, 100.0, 100.0],
+            "native_model_fields": [
+                "actuator_gainprm",
+                "actuator_biasprm",
+            ],
+        },
+    }
+    assert telemetry.mapping_family == VARIABLE_IMPEDANCE_MAPPING_FAMILY
+    assert telemetry.p_bounds == VARIABLE_IMPEDANCE_P_BOUNDS
+    assert env.observation_manager.get_term_cfg("actor", "actions").func is last_action
+    assert env.observation_manager.get_term_cfg("critic", "actions").func is last_action
+    assert expand_variable_impedance_model_fields.model_fields == (
+        "actuator_gainprm",
+        "actuator_biasprm",
+    )
+    json.dumps(metadata, allow_nan=False)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "match"),
+    (
+        ("reversed", "action signature"),
+        ("renamed", "action signature"),
+        ("wrong_type", "stiffness action"),
+        ("wrong_c", "C=1.25"),
+    ),
+)
+def test_vic_metadata_rejects_mutated_action_pair(
+    mutation: str, match: str
+) -> None:
+    """Only the exact ordered, typed, frozen-C VIC pair is exportable."""
+    import src.tasks  # noqa: F401  # populate the isolated task registry
+
+    cfg = load_env_cfg(VIC_TT_TASK, play=True)
+    if mutation == "reversed":
+        cfg.actions = dict(reversed(tuple(cfg.actions.items())))
+    elif mutation == "renamed":
+        cfg.actions["gain_alias"] = cfg.actions.pop("joint_stiffness")
+    elif mutation == "wrong_type":
+        cfg.actions["joint_stiffness"] = copy.deepcopy(
+            cfg.actions["joint_position"]
+        )
+    else:
+        cfg.actions["joint_stiffness"].C = 1.5
+    env = _make_env(cfg)
+    try:
+        with pytest.raises(ValueError, match=match):
+            _get_hammer_metadata(env, "test-run", raw_policy_clip=RAW_POLICY_CLIP)
+    finally:
+        env.close()
+
+
+@pytest.mark.parametrize(
+    ("mutation", "match"),
+    (
+        ("actor_source", "action observation"),
+        ("critic_source", "action observation"),
+        ("observation_func", "action observation"),
+        ("action_rate_source", "action-rate"),
+        ("action_rate_func", "action-rate"),
+        ("action_rate_weight", "action-rate"),
+        ("rtt_func", "r_tt"),
+        ("rtt_weight", "r_tt"),
+        ("rtt_k", "r_tt"),
+        ("rtt_order", "r_tt"),
+    ),
+)
+def test_vic_metadata_rejects_mutated_position_only_or_rtt_seams(
+    metadata_envs, mutation: str, match: str
+) -> None:
+    """Same-width selector or cost drift must not masquerade as qualified VIC."""
+    env = metadata_envs[VIC_TT_TASK]
+    actor_cfg = env.observation_manager.get_term_cfg("actor", "actions")
+    critic_cfg = env.observation_manager.get_term_cfg("critic", "actions")
+    action_rate_cfg = env.reward_manager.get_term_cfg("action_rate")
+    rtt_cfg = env.reward_manager.get_term_cfg("r_tt")
+    originals = {
+        "actor_func": actor_cfg.func,
+        "actor_params": copy.deepcopy(actor_cfg.params),
+        "critic_func": critic_cfg.func,
+        "critic_params": copy.deepcopy(critic_cfg.params),
+        "action_rate_func": action_rate_cfg.func,
+        "action_rate_weight": action_rate_cfg.weight,
+        "action_rate_params": copy.deepcopy(action_rate_cfg.params),
+        "rtt_func": rtt_cfg.func,
+        "rtt_weight": rtt_cfg.weight,
+        "rtt_params": copy.deepcopy(rtt_cfg.params),
+    }
+    try:
+        if mutation == "actor_source":
+            actor_cfg.params["action_name"] = "joint_stiffness"
+        elif mutation == "critic_source":
+            critic_cfg.params["action_name"] = "joint_stiffness"
+        elif mutation == "observation_func":
+            actor_cfg.func = _action_observation_alias
+        elif mutation == "action_rate_source":
+            action_rate_cfg.params["action_name"] = "joint_stiffness"
+        elif mutation == "action_rate_func":
+            action_rate_cfg.func = _action_rate_alias
+        elif mutation == "action_rate_weight":
+            action_rate_cfg.weight = -0.02
+        elif mutation == "rtt_func":
+            rtt_cfg.func = _rtt_alias
+        elif mutation == "rtt_weight":
+            rtt_cfg.weight = -0.5
+        elif mutation == "rtt_k":
+            rtt_cfg.params["k_tt"] = 0.5
+        else:
+            rtt_cfg.params["robot_cfg"].joint_names = tuple(reversed(JOINT_NAMES))
+
+        with pytest.raises(ValueError, match=match):
+            _get_hammer_metadata(env, "test-run", raw_policy_clip=RAW_POLICY_CLIP)
+    finally:
+        actor_cfg.func = originals["actor_func"]
+        actor_cfg.params = originals["actor_params"]
+        critic_cfg.func = originals["critic_func"]
+        critic_cfg.params = originals["critic_params"]
+        action_rate_cfg.func = originals["action_rate_func"]
+        action_rate_cfg.weight = originals["action_rate_weight"]
+        action_rate_cfg.params = originals["action_rate_params"]
+        rtt_cfg.func = originals["rtt_func"]
+        rtt_cfg.weight = originals["rtt_weight"]
+        rtt_cfg.params = originals["rtt_params"]
+
+
 @pytest.mark.parametrize(
     ("mutation", "match"),
     (
@@ -613,6 +867,34 @@ def test_save_attaches_joint_metadata_with_the_wrapper_owned_clip(joint_runner) 
     for key, live_value in live_metadata.items():
         if isinstance(live_value, (list, dict)):
             assert json.loads(metadata[key]) == live_value
+
+
+def test_save_attaches_decodable_vic_metadata_to_a_real_onnx(vic_runner) -> None:
+    """The public save path must export a readable 12D VIC policy and metadata."""
+    runner, run_root = vic_runner
+    export_dir = run_root / "success"
+    export_dir.mkdir()
+    checkpoint = export_dir / "model_0.pt"
+
+    runner.save(str(checkpoint))
+
+    onnx_path = export_dir / "success.onnx"
+    model = onnx.load(onnx_path)
+    metadata = {entry.key: entry.value for entry in model.metadata_props}
+    live_metadata = _get_hammer_metadata(
+        runner.env.unwrapped,
+        "local",
+        raw_policy_clip=runner.env.clip_actions,
+    )
+    assert checkpoint.is_file()
+    assert onnx_path.is_file()
+    assert model.graph.output[0].type.tensor_type.shape.dim[-1].dim_value == 12
+    assert set(metadata) == set(live_metadata)
+    for key, live_value in live_metadata.items():
+        if isinstance(live_value, (list, dict)):
+            assert json.loads(metadata[key]) == live_value
+        else:
+            assert metadata[key] == str(live_value)
 
 
 def test_real_waypoint_checkpoint_strictly_rejects_direct_runner_width(
