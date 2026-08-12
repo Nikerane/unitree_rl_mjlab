@@ -516,6 +516,11 @@ class TestCartesianGuidelineStudy:
     _C0 = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-C0"
     _C_GATE = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CGate"
     _C_PROGRESS = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress"
+    _DIRECT_FIC0 = (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-"
+        "JointPosition-Fixed"
+    )
+    _DIRECT_FICTT = f"{_DIRECT_FIC0}-TT"
     _F8 = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear"
     _GUIDELINE_OBSERVATIONS = {
         "next_gate_vector": (next_gate_vector, 3),
@@ -628,7 +633,7 @@ class TestCartesianGuidelineStudy:
         with pytest.raises(ValueError, match="progress_reward.*guideline"):
             z1_hammer_env_cfg(progress_reward=True)
 
-    def test_new_registration_adds_only_the_guideline_task_ids(self):
+    def test_new_registration_adds_only_the_guideline_and_direct_fic_task_ids(self):
         registered_z1 = {
             task for task in list_tasks() if task.startswith("Unitree-Z1-Hammer")
         }
@@ -642,6 +647,8 @@ class TestCartesianGuidelineStudy:
             self._C_PROGRESS + "-Vel-Delivered4",
             self._C_PROGRESS + "-Vel-Delivered4-JointPosition-Fixed",
             self._C_PROGRESS + "-Vel-Delivered4-JointPosition-Fixed-TT",
+            self._DIRECT_FIC0,
+            self._DIRECT_FICTT,
         }
 
     @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))

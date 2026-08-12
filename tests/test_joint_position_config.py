@@ -26,6 +26,7 @@ from src.tasks.hammer.config.z1.joint_position_contract import (
     load_joint_position_contract,
 )
 from src.tasks.hammer.mdp.trackability import joint_trackability_cost
+from src.tasks.hammer.mdp.rewards import ImitationPriorTerm
 
 
 PARENT_TASK = (
@@ -34,6 +35,11 @@ PARENT_TASK = (
 )
 FIC0_TASK = f"{PARENT_TASK}-JointPosition-Fixed"
 FICTT_TASK = f"{FIC0_TASK}-TT"
+DIRECT_FIC0_TASK = (
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-"
+    "JointPosition-Fixed"
+)
+DIRECT_FICTT_TASK = f"{DIRECT_FIC0_TASK}-TT"
 FIC_CONTROLLED_DROP_I_REF_N_S = 0.2799950838088989
 ARTIFACT = (
     Path(__file__).resolve().parents[1]
@@ -51,6 +57,20 @@ def _load_fic0(*, play: bool = False):
 def _load_fictt(*, play: bool = False):
     assert FICTT_TASK in list_tasks(), f"missing registered task {FICTT_TASK}"
     return load_env_cfg(FICTT_TASK, play=play)
+
+
+def _load_direct_fic0(*, play: bool = False):
+    assert DIRECT_FIC0_TASK in list_tasks(), (
+        f"missing registered task {DIRECT_FIC0_TASK}"
+    )
+    return load_env_cfg(DIRECT_FIC0_TASK, play=play)
+
+
+def _load_direct_fictt(*, play: bool = False):
+    assert DIRECT_FICTT_TASK in list_tasks(), (
+        f"missing registered task {DIRECT_FICTT_TASK}"
+    )
+    return load_env_cfg(DIRECT_FICTT_TASK, play=play)
 
 
 def _canonicalize(value):
@@ -80,6 +100,134 @@ def test_config_canonicalizer_detects_pure_mapping_insertion_order_changes() -> 
     reordered = {"nested": {"beta": 2, "alpha": 1}}
 
     assert _canonicalize(first) != _canonicalize(reordered)
+
+
+@pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
+def test_direct_fic_treatment_registration_and_reference_contract(play: bool) -> None:
+    """Direct-reference FIC is launchable without waypoint guidance state."""
+    fic0 = _load_direct_fic0(play=play)
+    fictt = _load_direct_fictt(play=play)
+
+    assert _canonicalize(load_rl_cfg(DIRECT_FIC0_TASK)) == _canonicalize(
+        load_rl_cfg(PARENT_TASK)
+    )
+    assert _canonicalize(load_rl_cfg(DIRECT_FICTT_TASK)) == _canonicalize(
+        load_rl_cfg(PARENT_TASK)
+    )
+    assert tuple(fic0.observations["actor"].terms) == (
+        "joint_pos", "joint_vel", "ee_pos", "ee_vel", "head_pos", "head_vel",
+        "nail_top_pos", "nail_depth", "strike_phase", "strike_ref_error", "actions",
+    )
+    assert tuple(fic0.observations["critic"].terms) == tuple(
+        fic0.observations["actor"].terms
+    )
+    assert not {"next_gate_vector", "completed_gate_fraction",
+                "guideline_perpendicular_error", "waypoint_progress_state"} & set(
+        fic0.observations["actor"].terms
+    )
+    assert "waypoint_progress" not in fic0.metrics
+    assert {"r_gate", "r_waypoint_progress"}.isdisjoint(fic0.rewards)
+    assert "r_imit" in fic0.rewards
+    imit = fic0.rewards["r_imit"]
+    assert imit.func is ImitationPriorTerm
+    assert imit.weight == pytest.approx(0.10)
+    assert imit.params["sigma"] == pytest.approx(0.05)
+    assert imit.params["sensor_name"] == "hammer_nail_contact"
+    assert imit.params["robot_cfg"].site_names == ("hammer_head_site",)
+
+    reset = fic0.events["reset_robot_joints"].params
+    assert reset["position_range"] == (0.0, 0.0)
+    assert reset["velocity_range"] == (0.0, 0.0)
+    assert tuple(fictt.observations["actor"].terms) == tuple(
+        fic0.observations["actor"].terms
+    )
+
+    if play:
+        assert not fic0.curriculum
+        assert not fictt.curriculum
+    else:
+        assert fic0.curriculum["r_imit_anneal"].params["stages"] == [
+            {"step": 0, "weight": 0.10},
+            {"step": 1200, "weight": 0.08},
+            {"step": 2400, "weight": 0.06},
+            {"step": 3600, "weight": 0.04},
+            {"step": 4800, "weight": 0.02},
+            {"step": 6000, "weight": 0.00},
+        ]
+
+
+@pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
+def test_direct_fic_preserves_banked_identity_and_tt_isolation(play: bool) -> None:
+    """Direct FIC keeps D4/impulse machinery while TT adds only r_tt."""
+    fic0 = _load_direct_fic0(play=play)
+    fictt = _load_direct_fictt(play=play)
+
+    action = fic0.actions["joint_position"]
+    contract = load_joint_position_contract(ARTIFACT)
+    assert isinstance(action, JointPositionActionCfg)
+    assert tuple(action.actuator_names) == JOINT_NAMES == contract.joint_names
+    assert action.use_default_offset is True
+    assert action.scale == dict(zip(JOINT_NAMES, contract.scale_rad.tolist(), strict=True))
+    assert action.clip == {
+        name: tuple(bounds)
+        for name, bounds in zip(
+            JOINT_NAMES, contract.physical_clip_rad.tolist(), strict=True
+        )
+    }
+    assert _actuator_signature(fic0) == (
+        ("BuiltinPositionActuatorCfg", 1000.0, 100.0, 30.0, 0.01,
+         ("joint1", "joint3", "joint4", "joint5", "joint6")),
+        ("BuiltinPositionActuatorCfg", 1500.0, 150.0, 60.0, 0.02, ("joint2",)),
+        ("BuiltinPositionActuatorCfg", 100.0, 20.0, 30.0, 0.005, ("jointGripper",)),
+    )
+    assert fic0.rewards["delivered_impulse"].params["i_ref"] == (
+        FIC_CONTROLLED_DROP_I_REF_N_S
+    )
+    assert fic0.metrics["substep_impulse_rows"].params["enabled"] is False
+    assert "substep_impulse" in fic0.metrics
+    cat = fic0.metrics["cat_soft"].params
+    assert cat["use_vel"] is True
+    assert cat["vel_detection"] == "substep"
+    assert cat["use_impulse"] is True
+    assert tuple(cat["imp_limit"]) == (1.64, 3.28, 1.64, 1.64, 1.64, 1.64)
+    assert cat["imp_max_p"] == 0.0
+    assert "vel_hard" not in fic0.terminations
+    assert "cat_vel" not in fic0.terminations
+
+    assert tuple(fictt.rewards) == (*tuple(fic0.rewards), "r_tt")
+    term = fictt.rewards["r_tt"]
+    assert term.func is joint_trackability_cost
+    assert term.weight == -1.0
+    assert term.params["k_tt"] == 1.0
+    assert tuple(term.params["robot_cfg"].joint_names) == JOINT_NAMES
+    assert term.params["robot_cfg"].preserve_order is True
+    fictt_tree = _canonicalize(fictt)
+    fictt_tree["rewards"] = fictt_tree["rewards"][:-1]
+    assert fictt_tree == _canonicalize(fic0)
+
+
+@pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
+def test_direct_and_waypoint_fic_differ_only_at_guidance_seams(play: bool) -> None:
+    """The direct arm trades waypoint guidance only for the weak reference prior."""
+    direct = _load_direct_fic0(play=play)
+    waypoint = _load_fic0(play=play)
+
+    for group in ("actor", "critic"):
+        for name in (
+            "next_gate_vector", "completed_gate_fraction",
+            "guideline_perpendicular_error", "waypoint_progress_state",
+        ):
+            waypoint.observations[group].terms.pop(name)
+    waypoint.metrics.pop("waypoint_progress")
+    waypoint.rewards.pop("r_waypoint_progress")
+    waypoint.rewards["r_imit"] = direct.rewards["r_imit"]
+    waypoint.curriculum = direct.curriculum
+    # ``imitation=True`` creates r_imit before z1_hammer_env_cfg installs the
+    # delivered term; the waypoint factory appends its reward after delivery.
+    # Reward insertion order is not a treatment seam, so align it for content
+    # comparison after removing the two distinct guidance readers.
+    direct.rewards["r_imit"] = direct.rewards.pop("r_imit")
+    assert _canonicalize(waypoint) == _canonicalize(direct)
 
 
 def test_fictt_is_registered_for_train_and_play_with_the_parent_learner() -> None:

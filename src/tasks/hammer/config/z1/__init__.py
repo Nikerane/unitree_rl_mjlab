@@ -344,6 +344,33 @@ def _joint_position_fixed_env_cfg(*, play: bool, trackability: bool):
     return cfg
 
 
+def _direct_reference_joint_position_fixed_env_cfg(*, play: bool, trackability: bool):
+    """Build the direct-reference FIC treatment without waypoint guidance."""
+    cfg = z1_hammer_env_cfg(
+        play=play,
+        imitation=True,
+        cat_impulse=True,
+        event_correct=True,
+        event_linear=True,
+        cat_soft=True,
+        vel_cat_substep=True,
+    )
+    # FIC-only calibration and production-scale diagnostic setting match the
+    # banked joint-position pair.  The production accumulator remains enabled.
+    cfg.rewards["delivered_impulse"].weight = 4.0
+    cfg.rewards["delivered_impulse"].params["i_ref"] = (
+        _FIC_CONTROLLED_DROP_I_REF_N_S
+    )
+    cfg.metrics["substep_impulse_rows"].params["enabled"] = False
+    reset = cfg.events["reset_robot_joints"].params
+    reset["position_range"] = (0.0, 0.0)
+    reset["velocity_range"] = (0.0, 0.0)
+    install_z1_joint_position_action(cfg)
+    if trackability:
+        _install_joint_trackability_cost(cfg)
+    return cfg
+
+
 register_mjlab_task(
     task_id=(
         "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
@@ -362,6 +389,38 @@ register_mjlab_task(
     ),
     env_cfg=_joint_position_fixed_env_cfg(play=False, trackability=True),
     play_env_cfg=_joint_position_fixed_env_cfg(play=True, trackability=True),
+    rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+    runner_cls=HammerOnPolicyRunner,
+)
+
+# Direct-reference FIC pair: use the weak annealed task-space prior, but do not
+# install the Cartesian waypoint guidance observations, metric, or reward.
+register_mjlab_task(
+    task_id=(
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-"
+        "JointPosition-Fixed"
+    ),
+    env_cfg=_direct_reference_joint_position_fixed_env_cfg(
+        play=False, trackability=False
+    ),
+    play_env_cfg=_direct_reference_joint_position_fixed_env_cfg(
+        play=True, trackability=False
+    ),
+    rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+    runner_cls=HammerOnPolicyRunner,
+)
+
+register_mjlab_task(
+    task_id=(
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-"
+        "JointPosition-Fixed-TT"
+    ),
+    env_cfg=_direct_reference_joint_position_fixed_env_cfg(
+        play=False, trackability=True
+    ),
+    play_env_cfg=_direct_reference_joint_position_fixed_env_cfg(
+        play=True, trackability=True
+    ),
     rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
     runner_cls=HammerOnPolicyRunner,
 )
