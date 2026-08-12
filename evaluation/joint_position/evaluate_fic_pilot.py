@@ -28,7 +28,9 @@ from mjlab.actuator.actuator import TransmissionType
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.envs.mdp.curriculums import reward_curriculum
+from mjlab.envs.mdp.rewards import joint_pos_limits
 from mjlab.envs.mdp.terminations import time_out as time_out_termination
+from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.rl import MjlabOnPolicyRunner, RslRlPpoAlgorithmCfg, RslRlVecEnvWrapper
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 
@@ -51,7 +53,15 @@ from src.tasks.hammer.mdp.impulse_bound import (
     _ENV_SUBSTEP_IMPULSE_ATTR,
 )
 from src.tasks.hammer.mdp.references import get_strike_reference
-from src.tasks.hammer.mdp.rewards import ImitationPriorTerm, action_rate_penalty
+from src.tasks.hammer.mdp.rewards import (
+    FirstStrikeImpactRewardTerm,
+    ImitationPriorTerm,
+    NailDepthDeltaTerm,
+    action_rate_penalty,
+    completion_bonus,
+    hammer_approach_reward,
+    nail_driven_reward,
+)
 from src.tasks.hammer.mdp.terminations import nail_fully_driven
 from src.tasks.hammer.mdp.trackability import joint_trackability_cost
 from src.tasks.hammer.mdp.velocity_bound import SubstepPeakJointVel, _ENV_SUBSTEP_ATTR
@@ -230,6 +240,92 @@ def _fixed_actuator_signature(env_cfg) -> tuple[tuple[object, ...], ...]:
     )
 
 
+def _contract_value(value: object) -> object:
+    """Return a type-sensitive, immutable signature for reward parameters."""
+    if type(value) is SceneEntityCfg:
+        return (
+            "SceneEntityCfg",
+            value.name,
+            None if value.joint_names is None else tuple(value.joint_names),
+            None if value.site_names is None else tuple(value.site_names),
+            value.preserve_order,
+        )
+    if isinstance(value, Mapping):
+        return tuple((key, _contract_value(item)) for key, item in value.items())
+    if type(value) is tuple:
+        return ("tuple", tuple(_contract_value(item) for item in value))
+    if type(value) in (type(None), bool, int, float, str):
+        return (type(value).__name__, value)
+    return ("unsupported", type(value).__module__, type(value).__qualname__)
+
+
+_BASELINE_REWARD_CONTRACT = {
+    "approach": (
+        hammer_approach_reward,
+        0.1,
+        _contract_value(
+            {
+                "std": 0.08,
+                "robot_cfg": SceneEntityCfg("robot", site_names=("hammer_head_site",)),
+                "nail_cfg": SceneEntityCfg("nail_block", site_names=("nail_top",)),
+            }
+        ),
+    ),
+    "nail_driven": (
+        nail_driven_reward,
+        0.5,
+        _contract_value(
+            {
+                "goal_depth": NAIL_GOAL_DEPTH,
+                "std": 0.013,
+                "nail_cfg": SceneEntityCfg("nail_block", joint_names=("nail_slide",)),
+            }
+        ),
+    ),
+    "nail_depth_delta": (
+        NailDepthDeltaTerm,
+        600.0,
+        _contract_value(
+            {
+                "nail_cfg": SceneEntityCfg("nail_block", joint_names=("nail_slide",)),
+            }
+        ),
+    ),
+    "impact_progress": (
+        FirstStrikeImpactRewardTerm,
+        8.0,
+        _contract_value(
+            {
+                "sensor_name": "hammer_nail_contact",
+                "robot_cfg": SceneEntityCfg("robot", site_names=("hammer_head_site",)),
+                "nail_cfg": SceneEntityCfg("nail_block", joint_names=("nail_slide",)),
+                "axis": (0.0, 0.0, -1.0),
+                "eps": 0.0005,
+                "v_expected": 1.0,
+            }
+        ),
+    ),
+    "completion": (
+        completion_bonus,
+        100.0,
+        _contract_value(
+            {
+                "success_depth": NAIL_SUCCESS_THRESHOLD,
+                "nail_cfg": SceneEntityCfg("nail_block", joint_names=("nail_slide",)),
+            }
+        ),
+    ),
+    "action_rate": (action_rate_penalty, -0.01, _contract_value({})),
+    "joint_pos_limits": (
+        joint_pos_limits,
+        -10.0,
+        _contract_value(
+            {"asset_cfg": SceneEntityCfg("robot", joint_names=(".*",))}
+        ),
+    ),
+}
+
+
 def validate_fic_contract(task: str, env_cfg, agent_cfg) -> dict[str, object]:
     """Fail closed unless a loaded config is exactly one calibrated FIC arm."""
     if task not in TASKS:
@@ -347,16 +443,19 @@ def validate_fic_contract(task: str, env_cfg, agent_cfg) -> dict[str, object]:
     )
     if tuple(rewards) != expected_rewards:
         raise ValueError("FIC pilot direct-reference reward or waypoint behavior drift")
-    action_rate = _cfg_value(rewards, "action_rate")
-    if (
-        getattr(action_rate, "func", None) is not action_rate_penalty
-        or _finite_number(
-            getattr(action_rate, "weight", None), name="action_rate weight"
-        )
-        != -0.01
-        or getattr(action_rate, "params", None) != {}
+    for name, (expected_func, expected_weight, expected_params) in (
+        _BASELINE_REWARD_CONTRACT.items()
     ):
-        raise ValueError("FIC pilot action_rate contract drift")
+        term = _cfg_value(rewards, name)
+        if (
+            getattr(term, "func", None) is not expected_func
+            or _finite_number(
+                getattr(term, "weight", None), name=f"{name} weight"
+            )
+            != expected_weight
+            or _contract_value(getattr(term, "params", None)) != expected_params
+        ):
+            raise ValueError(f"FIC pilot {name} contract drift")
     delivered = _cfg_value(rewards, "delivered_impulse")
     if _finite_number(getattr(delivered, "weight", None), name="D4 weight") != 4.0:
         raise ValueError("FIC pilot requires D4 weight 4.0")

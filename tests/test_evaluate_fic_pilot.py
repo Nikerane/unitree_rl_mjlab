@@ -136,6 +136,32 @@ def test_contract_rejects_action_rate_scientific_drift(mutation):
 
 
 @pytest.mark.parametrize(
+    "reward_name",
+    (
+        "approach",
+        "nail_driven",
+        "nail_depth_delta",
+        "impact_progress",
+        "completion",
+        "joint_pos_limits",
+    ),
+)
+@pytest.mark.parametrize("mutation", ("function", "weight", "params"))
+def test_contract_rejects_baseline_reward_scientific_drift(reward_name, mutation):
+    env_cfg, agent_cfg = _live_configs()
+    reward = env_cfg.rewards[reward_name]
+    if mutation == "function":
+        reward.func = object
+    elif mutation == "weight":
+        reward.weight += 0.001
+    else:
+        reward.params["unexpected"] = 1.0
+
+    with pytest.raises(ValueError, match=f"{reward_name} contract"):
+        pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent_cfg)
+
+
+@pytest.mark.parametrize(
     "mutation",
     (
         "extra_non_timeout",
