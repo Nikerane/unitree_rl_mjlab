@@ -24,7 +24,9 @@ import numpy as np
 import torch
 from tensordict import TensorDict
 
+from mjlab.actuator.actuator import TransmissionType
 from mjlab.envs import ManagerBasedRlEnv
+from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 
@@ -65,14 +67,55 @@ _JOINT_POSITION_CONTRACT_PATH = (
 _FIXED_ACTUATOR_SIGNATURE = (
     (
         "BuiltinPositionActuatorCfg",
+        "TransmissionType",
+        TransmissionType.JOINT,
         1000.0,
         100.0,
         30.0,
         0.01,
+        None,
+        None,
+        0,
+        0,
+        0.0,
+        0,
+        True,
         ("joint1", "joint3", "joint4", "joint5", "joint6"),
     ),
-    ("BuiltinPositionActuatorCfg", 1500.0, 150.0, 60.0, 0.02, ("joint2",)),
-    ("BuiltinPositionActuatorCfg", 100.0, 20.0, 30.0, 0.005, ("jointGripper",)),
+    (
+        "BuiltinPositionActuatorCfg",
+        "TransmissionType",
+        TransmissionType.JOINT,
+        1500.0,
+        150.0,
+        60.0,
+        0.02,
+        None,
+        None,
+        0,
+        0,
+        0.0,
+        0,
+        True,
+        ("joint2",),
+    ),
+    (
+        "BuiltinPositionActuatorCfg",
+        "TransmissionType",
+        TransmissionType.JOINT,
+        100.0,
+        20.0,
+        30.0,
+        0.005,
+        None,
+        None,
+        0,
+        0,
+        0.0,
+        0,
+        True,
+        ("jointGripper",),
+    ),
 )
 
 
@@ -133,10 +176,19 @@ def _fixed_actuator_signature(env_cfg) -> tuple[tuple[object, ...], ...]:
     return tuple(
         (
             type(actuator).__name__,
+            type(getattr(actuator, "transmission_type", None)).__name__,
+            getattr(actuator, "transmission_type", None),
             getattr(actuator, "stiffness", None),
             getattr(actuator, "damping", None),
             getattr(actuator, "effort_limit", None),
             getattr(actuator, "armature", None),
+            getattr(actuator, "frictionloss", None),
+            getattr(actuator, "viscous_damping", None),
+            getattr(actuator, "delay_min_lag", None),
+            getattr(actuator, "delay_max_lag", None),
+            getattr(actuator, "delay_hold_prob", None),
+            getattr(actuator, "delay_update_period", None),
+            getattr(actuator, "delay_per_env_phase", None),
             tuple(getattr(actuator, "target_names_expr", ())),
         )
         for actuator in actuators
@@ -168,7 +220,9 @@ def validate_fic_contract(task: str, env_cfg, agent_cfg) -> dict[str, object]:
     }
     action_offset = getattr(action, "offset", None)
     if (
-        getattr(action, "entity_name", None) != "robot"
+        type(action) is not JointPositionActionCfg
+        or getattr(action, "transmission_type", None) is not TransmissionType.JOINT
+        or getattr(action, "entity_name", None) != "robot"
         or tuple(getattr(action, "actuator_names", ())) != JOINT_NAMES
         or tuple(getattr(action, "scale", ())) != JOINT_NAMES
         or getattr(action, "scale", None) != qualified_scale
@@ -211,7 +265,15 @@ def validate_fic_contract(task: str, env_cfg, agent_cfg) -> dict[str, object]:
 
     metrics = getattr(env_cfg, "metrics", {})
     cat = _cfg_value(metrics, "cat_soft")
+    cat_reduce = getattr(cat, "reduce", None)
+    if (
+        getattr(cat, "per_substep", None) is not False
+        or type(cat_reduce) is not str
+        or cat_reduce != "mean"
+    ):
+        raise ValueError("FIC pilot CaT scheduling drift")
     cat_params = getattr(cat, "params", {})
+    cat_robot_cfg = cat_params.get("robot_cfg")
     if (
         getattr(cat, "func", None) is not CatSoftHook
         or set(cat_params)
@@ -230,6 +292,9 @@ def validate_fic_contract(task: str, env_cfg, agent_cfg) -> dict[str, object]:
         }
         or cat_params.get("use_vel") is not True
         or cat_params.get("use_impulse") is not True
+        or getattr(cat_robot_cfg, "name", None) != "robot"
+        or tuple(getattr(cat_robot_cfg, "joint_names", ())) != JOINT_NAMES
+        or getattr(cat_robot_cfg, "preserve_order", None) is not False
         or cat_params.get("vel_detection") != "substep"
         or _finite_number(cat_params.get("limit"), name="velocity limit") != 3.1415
         or _finite_number(cat_params.get("max_p"), name="velocity max_p") != 0.5

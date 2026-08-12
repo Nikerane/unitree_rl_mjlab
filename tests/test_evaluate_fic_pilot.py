@@ -146,6 +146,24 @@ def test_contract_rejects_fixed_actuator_signature_drift():
         pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent_cfg)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("delay_min_lag", 1),
+        ("frictionloss", 0.01),
+        ("viscous_damping", 0.01),
+        ("transmission_type", "joint"),
+    ),
+)
+def test_contract_rejects_actuator_delay_and_transmission_drift(field, value):
+    env_cfg, agent_cfg = _live_configs()
+    actuator = env_cfg.scene.entities["robot"].articulation.actuators[0]
+    setattr(actuator, field, value)
+
+    with pytest.raises(ValueError, match="actuator"):
+        pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent_cfg)
+
+
 @pytest.mark.parametrize("field", ("offset", "entity"))
 def test_contract_rejects_default_offset_action_semantics_drift(field):
     env_cfg, agent_cfg = _live_configs()
@@ -154,6 +172,19 @@ def test_contract_rejects_default_offset_action_semantics_drift(field):
         action.offset = 0.1
     else:
         action.entity_name = "nail_block"
+
+    with pytest.raises(ValueError, match="joint action"):
+        pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent_cfg)
+
+
+@pytest.mark.parametrize("mutation", ("cfg_class", "transmission"))
+def test_contract_rejects_joint_action_type_drift(mutation):
+    env_cfg, agent_cfg = _live_configs()
+    action = env_cfg.actions["joint_position"]
+    if mutation == "cfg_class":
+        env_cfg.actions["joint_position"] = SimpleNamespace(**vars(action))
+    else:
+        action.transmission_type = "joint"
 
     with pytest.raises(ValueError, match="joint action"):
         pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent_cfg)
@@ -181,6 +212,39 @@ def test_contract_rejects_velocity_cat_hook_parameter_drift(key, value):
 def test_contract_rejects_velocity_cat_hook_function_drift():
     env_cfg, agent_cfg = _live_configs()
     env_cfg.metrics["cat_soft"].func = lambda *args, **kwargs: torch.zeros(1)
+
+    with pytest.raises(ValueError, match="CaT contract"):
+        pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent_cfg)
+
+
+@pytest.mark.parametrize("mutation", ("per_substep", "reduce_value", "reduce_type"))
+def test_contract_rejects_cat_soft_scheduling_drift(mutation):
+    env_cfg, agent_cfg = _live_configs()
+    cat = env_cfg.metrics["cat_soft"]
+    if mutation == "per_substep":
+        cat.per_substep = True
+    elif mutation == "reduce_value":
+        cat.reduce = "last"
+    else:
+        class MeanString(str):
+            pass
+
+        cat.reduce = MeanString("mean")
+
+    with pytest.raises(ValueError, match="CaT scheduling"):
+        pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent_cfg)
+
+
+@pytest.mark.parametrize("mutation", ("name", "joints", "preserve_order"))
+def test_contract_rejects_cat_soft_robot_selection_drift(mutation):
+    env_cfg, agent_cfg = _live_configs()
+    robot_cfg = env_cfg.metrics["cat_soft"].params["robot_cfg"]
+    if mutation == "name":
+        robot_cfg.name = "nail_block"
+    elif mutation == "joints":
+        robot_cfg.joint_names = pilot.JOINT_NAMES[:-1]
+    else:
+        robot_cfg.preserve_order = True
 
     with pytest.raises(ValueError, match="CaT contract"):
         pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent_cfg)
