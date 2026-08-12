@@ -9,6 +9,38 @@ from tensordict import TensorDict
 from evaluation.joint_position import evaluate_fic_pilot as pilot
 
 
+DIRECT_FIC0_TASK = (
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-"
+    "JointPosition-Fixed"
+)
+DIRECT_FICTT_TASK = f"{DIRECT_FIC0_TASK}-TT"
+BANKED_FIC0_TASK = (
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel-"
+    "Delivered4-JointPosition-Fixed"
+)
+DIRECT_OBSERVATIONS = (
+    "joint_pos",
+    "joint_vel",
+    "ee_pos",
+    "ee_vel",
+    "head_pos",
+    "head_vel",
+    "nail_top_pos",
+    "nail_depth",
+    "strike_phase",
+    "strike_ref_error",
+    "actions",
+)
+IMITATION_STAGES = [
+    {"step": 0, "weight": 0.10},
+    {"step": 1200, "weight": 0.08},
+    {"step": 2400, "weight": 0.06},
+    {"step": 3600, "weight": 0.04},
+    {"step": 4800, "weight": 0.02},
+    {"step": 6000, "weight": 0.00},
+]
+
+
 def _live_configs(task=pilot.FIC0_TASK):
     return pilot.load_env_cfg(task, play=False), pilot.load_rl_cfg(task)
 
@@ -18,11 +50,23 @@ def test_public_evaluator_seams_are_exposed() -> None:
     assert callable(pilot.evaluate_checkpoint)
 
 
+def test_evaluator_targets_only_direct_reference_fic_treatments() -> None:
+    assert pilot.TASKS == (DIRECT_FIC0_TASK, DIRECT_FICTT_TASK)
+    assert pilot.FIC0_TASK == DIRECT_FIC0_TASK
+    assert pilot.FICTT_TASK == DIRECT_FICTT_TASK
+    assert BANKED_FIC0_TASK not in pilot.TASKS
+
+
 @pytest.mark.parametrize("task", pilot.TASKS)
 def test_contract_admits_only_exact_fic_treatments(task):
     env_cfg, agent_cfg = _live_configs(task)
     contract = pilot.validate_fic_contract(task, env_cfg, agent_cfg)
     assert contract["delivered_impulse_i_ref_n_s"] == pilot.I_REF_N_S
+    assert contract["observation_names"] == list(DIRECT_OBSERVATIONS)
+    assert contract["observation_width"] == 40
+    assert contract["r_imit_weight"] == 0.10
+    assert contract["r_imit_sigma_m"] == 0.05
+    assert contract["r_imit_curriculum"] == IMITATION_STAGES
     assert contract["r_tt_enabled"] is (task == pilot.FICTT_TASK)
 
 
@@ -30,6 +74,8 @@ def test_contract_rejects_cartesian_task_and_treatment_drift():
     env_cfg, agent_cfg = _live_configs()
     with pytest.raises(ValueError, match="unsupported"):
         pilot.validate_fic_contract("cartesian", env_cfg, agent_cfg)
+    with pytest.raises(ValueError, match="unsupported"):
+        pilot.validate_fic_contract(BANKED_FIC0_TASK, env_cfg, agent_cfg)
     drifted, agent_cfg = _live_configs()
     drifted.rewards["delivered_impulse"].params["i_ref"] = 0.3088
     with pytest.raises(ValueError, match="i_ref drift"):
@@ -49,6 +95,100 @@ def test_contract_rejects_action_order_and_normalizer_drift():
     agent.actor.obs_normalization = False
     with pytest.raises(ValueError, match="normalization"):
         pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent)
+    env_cfg, agent = _live_configs()
+    agent.critic.obs_normalization = False
+    with pytest.raises(ValueError, match="normalization"):
+        pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent)
+
+
+@pytest.mark.parametrize("group", ("actor", "critic"))
+def test_contract_rejects_direct_observation_name_or_order_drift(group):
+    env_cfg, agent_cfg = _live_configs()
+    moved = env_cfg.observations[group].terms.pop("actions")
+    env_cfg.observations[group].terms = {
+        "actions": moved,
+        **env_cfg.observations[group].terms,
+    }
+
+    with pytest.raises(ValueError, match="observation"):
+        pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent_cfg)
+
+
+def test_contract_rejects_observation_group_and_waypoint_behavior_drift():
+    env_cfg, agent_cfg = _live_configs()
+    env_cfg.observations["privileged"] = env_cfg.observations["critic"]
+    with pytest.raises(ValueError, match="observation"):
+        pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent_cfg)
+
+    env_cfg, agent_cfg = _live_configs()
+    env_cfg.metrics["waypoint_progress"] = env_cfg.metrics["first_strike"]
+    with pytest.raises(ValueError, match="waypoint"):
+        pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent_cfg)
+
+    env_cfg, agent_cfg = _live_configs()
+    env_cfg.rewards["r_gate"] = env_cfg.rewards["approach"]
+    with pytest.raises(ValueError, match="waypoint"):
+        pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent_cfg)
+
+
+def test_contract_rejects_fixed_joint_reset_drift():
+    env_cfg, agent_cfg = _live_configs()
+    env_cfg.events["reset_robot_joints"].params["velocity_range"] = (-0.1, 0.1)
+
+    with pytest.raises(ValueError, match="reset"):
+        pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent_cfg)
+
+
+@pytest.mark.parametrize("mutation", ("function", "weight", "sigma", "sensor", "head", "nail"))
+def test_contract_rejects_imitation_prior_drift(mutation):
+    env_cfg, agent_cfg = _live_configs()
+    term = env_cfg.rewards["r_imit"]
+    if mutation == "function":
+        term.func = object
+    elif mutation == "weight":
+        term.weight = 0.1000001
+    elif mutation == "sigma":
+        term.params["sigma"] = 0.0500001
+    elif mutation == "sensor":
+        term.params["sensor_name"] = "other_contact"
+    elif mutation == "head":
+        term.params["robot_cfg"].site_names = ("other_head",)
+    else:
+        term.params["nail_cfg"].site_names = ("other_nail",)
+
+    with pytest.raises(ValueError, match="r_imit"):
+        pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent_cfg)
+
+
+@pytest.mark.parametrize("mutation", ("function", "name", "stages", "extra"))
+def test_contract_rejects_imitation_curriculum_drift(mutation):
+    env_cfg, agent_cfg = _live_configs()
+    term = env_cfg.curriculum["r_imit_anneal"]
+    if mutation == "function":
+        term.func = object
+    elif mutation == "name":
+        term.params["reward_name"] = "other"
+    elif mutation == "stages":
+        term.params["stages"][1]["weight"] = 0.0800001
+    else:
+        env_cfg.curriculum["extra"] = term
+
+    with pytest.raises(ValueError, match="curriculum"):
+        pilot.validate_fic_contract(pilot.FIC0_TASK, env_cfg, agent_cfg)
+
+
+def test_live_observation_contract_requires_exact_width_40() -> None:
+    manager = SimpleNamespace(
+        active_terms={
+            "actor": list(DIRECT_OBSERVATIONS),
+            "critic": list(DIRECT_OBSERVATIONS),
+        },
+        group_obs_dim={"actor": (40,), "critic": (40,)},
+    )
+    pilot._validate_live_observation_contract(SimpleNamespace(observation_manager=manager))
+    manager.group_obs_dim["critic"] = (41,)
+    with pytest.raises(RuntimeError, match="width"):
+        pilot._validate_live_observation_contract(SimpleNamespace(observation_manager=manager))
 
 
 def test_contract_rejects_qualified_joint_scale_value_drift():
@@ -271,15 +411,40 @@ def test_cli_requires_exact_positional_treatment_and_launch_shape(tmp_path):
         [
             pilot.FIC0_TASK,
             "--checkpoint",
-            str(tmp_path / "model.pt"),
+            str(tmp_path / "model_499.pt"),
             "--output",
             str(tmp_path / "result.json"),
             "--device",
             "cuda:0",
+            "--training-seed",
+            "3",
         ]
     )
     assert args.task == pilot.FIC0_TASK
     assert args.device == "cuda:0"
+    assert args.training_seed == 3
+    with pytest.raises(SystemExit):
+        pilot._parse_args(
+            [
+                pilot.FIC0_TASK,
+                "--checkpoint",
+                str(tmp_path / "model_499.pt"),
+                "--output",
+                str(tmp_path / "result.json"),
+            ]
+        )
+    with pytest.raises(SystemExit):
+        pilot._parse_args(
+            [
+                pilot.FIC0_TASK,
+                "--checkpoint",
+                str(tmp_path / "model_499.pt"),
+                "--output",
+                str(tmp_path / "result.json"),
+                "--training-seed",
+                "1",
+            ]
+        )
     with pytest.raises(SystemExit):
         pilot._parse_args(["--task", pilot.FIC0_TASK])
 
@@ -288,6 +453,144 @@ def test_evaluator_protocol_constants_are_frozen():
     assert pilot.SEED == 2026081202
     assert pilot.NUM_ENVS == 64
     assert pilot.EPISODE_LENGTH_S == 4.0
+
+
+def _accumulate(
+    acc,
+    qvel_peak,
+    target_error,
+    reference_error,
+    reference_eligible,
+):
+    pilot._accumulate_episode_measurements(
+        acc,
+        qvel_peak=torch.tensor(qvel_peak),
+        target_error=torch.tensor(target_error),
+        reference_error=torch.tensor(reference_error),
+        reference_eligible=torch.tensor(reference_eligible),
+    )
+
+
+def test_episode_measurements_hold_500hz_per_joint_peaks_and_legality_boundary():
+    acc = pilot._new_episode_accumulators(2, torch.device("cpu"))
+    _accumulate(
+        acc,
+        [[3.1415, 0.2, 0.3, 0.4, 0.5, 0.6], [0.1] * 6],
+        [[0.0] * 6, [0.0] * 6],
+        [0.01, 0.02],
+        [True, True],
+    )
+    above = torch.nextafter(torch.tensor(3.1415), torch.tensor(float("inf"))).item()
+    _accumulate(
+        acc,
+        [[0.1, 2.0, 0.2, 1.0, 0.1, 0.2], [above, 0.2, 0.3, 0.4, 0.5, 0.6]],
+        [[0.0] * 6, [0.0] * 6],
+        [0.03, 0.04],
+        [True, True],
+    )
+
+    legal = pilot._finalize_episode_measurements(acc, 0, 2)
+    illegal = pilot._finalize_episode_measurements(acc, 1, 2)
+    assert legal["joint_velocity_peak_rad_s"] == pytest.approx(
+        [3.1415, 2.0, 0.3, 1.0, 0.5, 0.6]
+    )
+    assert legal["joint_velocity_legal"] is True
+    assert illegal["joint_velocity_legal"] is False
+
+
+@pytest.mark.parametrize("task", (DIRECT_FIC0_TASK, DIRECT_FICTT_TASK))
+def test_target_error_reduces_over_time_and_six_joint_axes_for_both_arms(task):
+    assert task in pilot.TASKS
+    acc = pilot._new_episode_accumulators(2, torch.device("cpu"))
+    _accumulate(
+        acc,
+        [[0.0] * 6, [0.0] * 6],
+        [[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], [2.0] * 6],
+        [0.01, 0.02],
+        [True, True],
+    )
+    _accumulate(
+        acc,
+        [[0.0] * 6, [0.0] * 6],
+        [[6.0, 5.0, 4.0, 3.0, 2.0, 1.0], [2.0, 2.0, 2.0, 2.0, 2.0, 8.0]],
+        [0.03, 0.04],
+        [True, True],
+    )
+
+    first = pilot._finalize_episode_measurements(acc, 0, 2)
+    second = pilot._finalize_episode_measurements(acc, 1, 2)
+    assert first["joint_target_rmse_rad"] == pytest.approx((182.0 / 12.0) ** 0.5)
+    assert first["joint_target_error_max_rad"] == 6.0
+    assert second["joint_target_rmse_rad"] == pytest.approx((108.0 / 12.0) ** 0.5)
+    assert second["joint_target_error_max_rad"] == 8.0
+
+
+def test_reference_samples_follow_live_imitation_contact_latch() -> None:
+    num_envs = 2
+    robot = SimpleNamespace(
+        data=SimpleNamespace(site_pos_w=torch.zeros(num_envs, 1, 3))
+    )
+    nail = SimpleNamespace(
+        data=SimpleNamespace(site_pos_w=torch.zeros(num_envs, 1, 3))
+    )
+    sensor = SimpleNamespace(
+        data=SimpleNamespace(
+            found=torch.tensor([[1.0], [0.0]]),
+            current_contact_time=torch.zeros(num_envs, 1),
+            last_contact_time=torch.tensor([[0.0], [0.004]]),
+        )
+    )
+    env = SimpleNamespace(
+        num_envs=num_envs,
+        device="cpu",
+        scene={
+            "robot": robot,
+            "nail_block": nail,
+            "hammer_nail_contact": sensor,
+        },
+        episode_length_buf=torch.zeros(num_envs, dtype=torch.long),
+    )
+    term = pilot.ImitationPriorTerm(cfg=None, env=env)
+    term(
+        env,
+        sensor_name="hammer_nail_contact",
+        robot_cfg=SimpleNamespace(name="robot", site_ids=[0]),
+        nail_cfg=SimpleNamespace(name="nail_block", site_ids=[0]),
+        sigma=0.05,
+    )
+    assert term._contacted.tolist() == [True, True]
+
+    acc = pilot._new_episode_accumulators(num_envs, torch.device("cpu"))
+    _accumulate(
+        acc,
+        [[0.0] * 6, [0.0] * 6],
+        [[0.0] * 6, [0.0] * 6],
+        [0.25, 0.5],
+        (~term._contacted).tolist(),
+    )
+    assert acc.reference_sum.tolist() == [0.0, 0.0]
+    assert acc.reference_max.tolist() == [0.0, 0.0]
+    assert acc.reference_samples.tolist() == [0, 0]
+    with pytest.raises(RuntimeError, match="reference samples"):
+        pilot._finalize_episode_measurements(acc, 0, 1)
+
+
+def test_reset_episode_accumulators_clears_only_done_local_slices():
+    acc = pilot._new_episode_accumulators(2, torch.device("cpu"))
+    _accumulate(
+        acc,
+        [[1.0] * 6, [2.0] * 6],
+        [[3.0] * 6, [4.0] * 6],
+        [0.1, 0.2],
+        [True, True],
+    )
+
+    pilot._reset_episode_accumulators(acc, torch.tensor([0]))
+
+    assert acc.qvel_peak[0].tolist() == [0.0] * 6
+    assert acc.target_samples.tolist() == [0, 1]
+    assert acc.reference_samples.tolist() == [0, 1]
+    assert acc.qvel_peak[1].tolist() == [2.0] * 6
 
 
 def test_capture_records_each_first_terminal_before_tracker_mutation():
@@ -301,6 +604,14 @@ def test_capture_records_each_first_terminal_before_tracker_mutation():
     )
     records = {}
     done = torch.tensor([True, True])
+    measurements = pilot._new_episode_accumulators(2, torch.device("cpu"))
+    measurements.qvel_peak[:] = torch.tensor([[1.0] * 6, [2.0] * 6])
+    measurements.target_sq_sum[:] = torch.tensor([54.0, 240.0])
+    measurements.target_abs_max[:] = torch.tensor([0.5, 0.75])
+    measurements.target_samples[:] = torch.tensor([9, 10])
+    measurements.reference_sum[:] = torch.tensor([0.9, 2.0])
+    measurements.reference_max[:] = torch.tensor([0.2, 0.4])
+    measurements.reference_samples[:] = torch.tensor([9, 10])
     ids = pilot.capture_first_terminals(
         records=records,
         done=done,
@@ -310,6 +621,7 @@ def test_capture_records_each_first_terminal_before_tracker_mutation():
         tracker=tracker,
         nail_depth=torch.tensor([0.032, 0.01]),
         joint_impulse_peak=torch.ones(2, 6),
+        episode_accumulators=measurements,
     )
     tracker.delivered.zero_()
     pilot.capture_first_terminals(
@@ -321,10 +633,17 @@ def test_capture_records_each_first_terminal_before_tracker_mutation():
         tracker=tracker,
         nail_depth=torch.zeros(2),
         joint_impulse_peak=torch.zeros(2, 6),
+        episode_accumulators=measurements,
     )
     assert ids == (0, 1)
     assert [records[index]["first_event_impulse_n_s"] for index in (0, 1)] == [0.25, 0.5]
     assert [records[index]["episode_steps"] for index in (0, 1)] == [9, 10]
+    assert records[0]["joint_velocity_peak_rad_s"] == [1.0] * 6
+    assert records[1]["joint_target_rmse_rad"] == pytest.approx(2.0)
+    assert records[0]["reference_error_mean_m"] == pytest.approx(0.1)
+    assert records[0]["joint_impulse_utilization"] == pytest.approx(
+        [1.0 / 1.64, 1.0 / 3.28, 1.0 / 1.64, 1.0 / 1.64, 1.0 / 1.64, 1.0 / 1.64]
+    )
 
 
 def test_partial_reset_preserves_unfinished_inputs_and_torch_rng(monkeypatch):
@@ -383,6 +702,94 @@ def test_new_json_writer_refuses_existing_output_and_never_writes_partial(tmp_pa
         pilot._publish_new_json(output, {"ok": False})
 
 
+def _summary_row(*, qvel, target_rmse, target_max, reference_mean, reference_max, impulse):
+    caps = pilot.JOINT_IMPULSE_CAP_N_M_S
+    return {
+        "success": True,
+        "first_strike_productive": True,
+        "first_event_impulse_n_s": 0.25,
+        "joint_impulse_peak_n_m_s": list(impulse),
+        "joint_impulse_utilization": [
+            value / cap for value, cap in zip(impulse, caps, strict=True)
+        ],
+        "joint_velocity_peak_rad_s": list(qvel),
+        "joint_velocity_legal": all(
+            value <= pilot.JOINT_VELOCITY_LIMIT_RAD_S for value in qvel
+        ),
+        "joint_target_rmse_rad": target_rmse,
+        "joint_target_error_max_rad": target_max,
+        "reference_error_mean_m": reference_mean,
+        "reference_error_max_m": reference_max,
+    }
+
+
+def test_schema2_summary_reports_exact_axes_quantiles_and_inclusive_caps():
+    caps = pilot.JOINT_IMPULSE_CAP_N_M_S
+    rows = [
+        _summary_row(
+            qvel=[3.1415, 1.0, 1.0, 1.0, 1.0, 1.0],
+            target_rmse=0.1,
+            target_max=0.2,
+            reference_mean=0.01,
+            reference_max=0.02,
+            impulse=caps,
+        ),
+        _summary_row(
+            qvel=[3.1416, 2.0, 2.0, 2.0, 2.0, 2.0],
+            target_rmse=0.3,
+            target_max=0.5,
+            reference_mean=0.03,
+            reference_max=0.05,
+            impulse=(*caps[:-1], 1.65),
+        ),
+    ]
+
+    summary = pilot._summary(rows)
+
+    assert summary["joint_velocity_peak_rad_s"]["p95"] == pytest.approx(
+        [3.141595, 1.95, 1.95, 1.95, 1.95, 1.95]
+    )
+    assert summary["joint_velocity_peak_rad_s"]["max"] == pytest.approx(
+        [3.1416, 2.0, 2.0, 2.0, 2.0, 2.0]
+    )
+    assert summary["joint_velocity_peak_rad_s"]["all_joints_legal_n"] == 1
+    assert summary["joint_velocity_peak_rad_s"]["all_joints_legal_rate"] == 0.5
+    assert summary["joint_target_rmse_rad"] == pytest.approx(
+        {"mean": 0.2, "p95": 0.29, "max": 0.3}
+    )
+    assert summary["joint_target_error_max_rad"] == pytest.approx(
+        {"mean": 0.35, "p95": 0.485, "max": 0.5}
+    )
+    assert summary["reference_error_mean_m"] == pytest.approx(
+        {"mean": 0.02, "p95": 0.029, "max": 0.03}
+    )
+    assert summary["reference_error_max_m"] == pytest.approx(
+        {"mean": 0.035, "p95": 0.0485, "max": 0.05}
+    )
+    assert summary["joint_impulse_utilization"]["p95"][-1] == pytest.approx(
+        0.95 * (1.65 / 1.64) + 0.05
+    )
+    assert summary["joint_impulse_utilization"]["max"][-1] == pytest.approx(
+        1.65 / 1.64
+    )
+    assert summary["joint_impulse_utilization"]["all_joints_at_or_below_cap_n"] == 1
+    assert summary["joint_impulse_utilization"]["all_joints_at_or_below_cap_rate"] == 0.5
+
+
+def test_schema2_summary_rejects_nonfinite_endpoint_values():
+    row = _summary_row(
+        qvel=[float("nan"), 1.0, 1.0, 1.0, 1.0, 1.0],
+        target_rmse=0.1,
+        target_max=0.2,
+        reference_mean=0.01,
+        reference_max=0.02,
+        impulse=pilot.JOINT_IMPULSE_CAP_N_M_S,
+    )
+
+    with pytest.raises(RuntimeError, match="finite"):
+        pilot._summary([row])
+
+
 def test_incomplete_population_is_rejected_before_json_can_be_published():
     with pytest.raises(RuntimeError, match="incomplete"):
         pilot._ordered_complete_records({0: {"env_id": 0}})
@@ -390,13 +797,46 @@ def test_incomplete_population_is_rejected_before_json_can_be_published():
 
 def test_missing_checkpoint_fails_before_loading_any_live_configuration(tmp_path):
     with pytest.raises(FileNotFoundError, match="checkpoint does not exist"):
-        pilot.evaluate_checkpoint(pilot.FIC0_TASK, tmp_path / "missing.pt", tmp_path / "out.json")
+        pilot.evaluate_checkpoint(
+            pilot.FIC0_TASK,
+            tmp_path / "model_499.pt",
+            tmp_path / "out.json",
+            training_seed=2,
+        )
+
+
+@pytest.mark.parametrize("training_seed", (True, 1, 4.0, 5))
+def test_callable_rejects_nonqualified_training_seed_before_live_config(
+    tmp_path, training_seed
+):
+    with pytest.raises(ValueError, match="training seed"):
+        pilot.evaluate_checkpoint(
+            pilot.FIC0_TASK,
+            tmp_path / "model_499.pt",
+            tmp_path / "out.json",
+            training_seed=training_seed,
+        )
+
+
+def test_callable_rejects_nonfinal_checkpoint_basename_before_live_config(tmp_path):
+    checkpoint = tmp_path / "model_498.pt"
+    checkpoint.write_bytes(b"not loaded")
+
+    with pytest.raises(ValueError, match="model_499.pt"):
+        pilot.evaluate_checkpoint(
+            pilot.FIC0_TASK,
+            checkpoint,
+            tmp_path / "out.json",
+            training_seed=2,
+        )
 
 
 def test_existing_output_is_refused_before_loading_any_live_configuration(tmp_path):
-    checkpoint = tmp_path / "model.pt"
+    checkpoint = tmp_path / "model_499.pt"
     checkpoint.write_bytes(b"not loaded")
     output = tmp_path / "out.json"
     output.write_text("already present")
     with pytest.raises(FileExistsError, match="refusing to overwrite"):
-        pilot.evaluate_checkpoint(pilot.FIC0_TASK, checkpoint, output)
+        pilot.evaluate_checkpoint(
+            pilot.FIC0_TASK, checkpoint, output, training_seed=2
+        )
