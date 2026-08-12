@@ -45,6 +45,16 @@ from .trackability import (  # noqa: F401
   joint_target_squared_error,
   joint_trackability_cost,
 )
+from .variable_impedance import (  # noqa: F401
+  VARIABLE_IMPEDANCE_MAPPING_FAMILY,
+  VARIABLE_IMPEDANCE_P_BOUNDS,
+  JointStiffnessAction,
+  JointStiffnessActionCfg,
+  JointStiffnessTelemetry,
+  VariableImpedanceGains,
+  expand_variable_impedance_model_fields,
+  variable_impedance_gains,
+)
 from .velocity_bound import (  # noqa: F401
   CaTJointVelConstraint,
   SubstepPeakJointVel,
