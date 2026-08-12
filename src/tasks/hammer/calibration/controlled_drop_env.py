@@ -22,7 +22,7 @@ from src.tasks.hammer.nail_block import get_nail_block_entity_cfg
 PRIMARY_DROP_H0_M: float = 0.150
 PRIMARY_DROP_MASS_KG: float = 0.200
 PRIMARY_DROP_RADIUS_M: float = 0.012
-PRIMARY_DROP_HALF_HEIGHT_M: float = 0.004
+PRIMARY_DROP_HALF_HEIGHT_M: float = 0.00875
 PRIMARY_DROP_FRICTION: tuple[float, float, float] = (1.5, 0.02, 0.002)
 PRIMARY_AXIS: tuple[float, float, float] = (0.0, 0.0, -1.0)
 PRIMARY_PHYSICS_DT_S: float = 0.002

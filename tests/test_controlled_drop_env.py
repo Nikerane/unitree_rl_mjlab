@@ -174,7 +174,7 @@ def test_primary_fixture_compiles_exact_protocol() -> None:
     assert calibration.PRIMARY_DROP_H0_M == 0.150
     assert calibration.PRIMARY_DROP_MASS_KG == 0.200
     assert calibration.PRIMARY_DROP_RADIUS_M == 0.012
-    assert calibration.PRIMARY_DROP_HALF_HEIGHT_M == 0.004
+    assert calibration.PRIMARY_DROP_HALF_HEIGHT_M == 0.00875
     assert calibration.PRIMARY_DROP_FRICTION == (1.5, 0.02, 0.002)
     assert calibration.PRIMARY_AXIS == (0.0, 0.0, -1.0)
     assert calibration.PRIMARY_PHYSICS_DT_S == 0.002
@@ -361,7 +361,7 @@ def test_one_primary_drop_contacts_and_finalizes_with_finite_positive_measuremen
     assert trial.contacted is True
     assert trial.finalized is True
     assert trial.productive is True
-    assert trial.reason in {"success", "window"}
+    assert trial.reason == "success"
     assert math.isfinite(trial.precontact_velocity_m_s)
     assert trial.precontact_velocity_m_s > 0.0
     assert math.isfinite(trial.impulse_n_s)
