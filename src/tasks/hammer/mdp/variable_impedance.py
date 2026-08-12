@@ -20,6 +20,14 @@ if TYPE_CHECKING:
 VARIABLE_IMPEDANCE_MAPPING_FAMILY = "author_v1_exponential"
 VARIABLE_IMPEDANCE_P_BOUNDS = (-1.0, 1.0)
 _NATIVE_GAIN_FIELDS = ("actuator_gainprm", "actuator_biasprm")
+_Z1_CANONICAL_ARM_JOINT_NAMES = (
+  "joint1",
+  "joint2",
+  "joint3",
+  "joint4",
+  "joint5",
+  "joint6",
+)
 
 
 @dataclass(frozen=True)
@@ -158,10 +166,11 @@ class JointStiffnessAction(ActionTerm):
     super().__init__(cfg=cfg, env=env)
 
     self._joint_names = tuple(cfg.joint_names)
-    if not self._joint_names or len(set(self._joint_names)) != len(
-      self._joint_names
-    ):
-      raise ValueError("joint_names must contain unique exact joint names")
+    if self._joint_names != _Z1_CANONICAL_ARM_JOINT_NAMES:
+      raise ValueError(
+        "joint stiffness requires canonical Z1 arm joint_names "
+        f"{_Z1_CANONICAL_ARM_JOINT_NAMES}; got {self._joint_names}"
+      )
 
     control_id_by_joint: dict[str, int] = {}
     wrong_type: dict[str, str] = {}

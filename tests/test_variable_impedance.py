@@ -305,17 +305,32 @@ def test_live_action_fails_closed_without_independent_model_fields(
 
 
 @pytest.mark.integration
-def test_live_action_rejects_unknown_joint_and_invalid_policy_sample(
-    live_stiffness_env,
+@pytest.mark.parametrize(
+    "joint_names",
+    (
+        tuple(reversed(JOINT_NAMES)),
+        JOINT_NAMES[:-1],
+        ("jointGripper",),
+        (*JOINT_NAMES, "jointGripper"),
+        (*JOINT_NAMES[:-1], "missing_joint"),
+    ),
+    ids=("reversed", "subset", "gripper", "superset", "unknown"),
+)
+def test_live_action_rejects_every_noncanonical_z1_joint_contract(
+    live_stiffness_env, joint_names: tuple[str, ...]
 ) -> None:
     env = live_stiffness_env
-    with pytest.raises(ValueError, match="missing_joint"):
+    with pytest.raises(ValueError, match="canonical Z1 arm"):
         JointStiffnessActionCfg(
             entity_name="robot",
-            joint_names=(*JOINT_NAMES[:-1], "missing_joint"),
+            joint_names=joint_names,
             C=1.25,
         ).build(env)
 
+
+@pytest.mark.integration
+def test_live_action_rejects_invalid_policy_sample(live_stiffness_env) -> None:
+    env = live_stiffness_env
     term = env.action_manager.get_term("joint_stiffness")
     with pytest.raises(ValueError, match="shape"):
         term.process_actions(torch.zeros((env.num_envs, 5), device=env.device))
