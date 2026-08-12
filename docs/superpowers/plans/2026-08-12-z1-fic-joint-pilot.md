@@ -178,7 +178,16 @@
 
 - [ ] **Step 1: Run implementation verification and reviews**
 
-  Run the focused suite and both genuine one-iteration CatPPO smokes. Run the full CPU suite once on the final implementation revision. Review the immutable package with Opus, Gemini, DeepSeek, and repository Standards/Spec lanes; document provider unavailability truthfully and use explicitly labeled fresh ultra substitutes where necessary. Apply at most one bounded test-first fix wave and re-review it once.
+  Run the focused suite and both genuine one-iteration CatPPO smokes. On the same
+  final implementation revision, require all phases A--M of
+  `docs/research/reward-design/validate_rewards.py`, then require
+  `docs/research/reward-design/verify_contact_sensor.py` and
+  `docs/research/reward-design/verify_reward_setup.py` to pass before any GPU
+  training submission. Run the full CPU suite once on the final implementation
+  revision. Review the immutable package with Opus, Gemini, DeepSeek, and
+  repository Standards/Spec lanes; document provider unavailability truthfully
+  and use explicitly labeled fresh ultra substitutes where necessary. Apply at
+  most one bounded test-first code-fix wave and re-review it once.
 
 - [ ] **Step 2: Push and deploy the exact clean implementation**
 
