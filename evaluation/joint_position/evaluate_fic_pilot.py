@@ -30,13 +30,18 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 
 import mjlab.tasks  # noqa: F401
 import src.tasks  # noqa: F401
-from src.tasks.hammer.config.z1.joint_position_contract import JOINT_NAMES
+from src.tasks.hammer.cat.hook import CatSoftHook, _NEG_TERMS
+from src.tasks.hammer.config.z1.joint_position_contract import (
+    JOINT_NAMES,
+    load_joint_position_contract,
+)
 from src.tasks.hammer.mdp.first_strike import (
     REASON_SUCCESS,
     REASON_WINDOW,
     _ENV_FIRST_STRIKE_ATTR,
 )
 from src.tasks.hammer.mdp.impulse_bound import _ENV_SUBSTEP_IMPULSE_ATTR
+from src.tasks.hammer.mdp.trackability import joint_trackability_cost
 from src.tasks.hammer.nail_block import NAIL_GOAL_DEPTH
 
 
@@ -53,6 +58,22 @@ NUM_ENVS = 64
 EPISODE_LENGTH_S = 4.0
 I_REF_N_S = 0.2799950838088989
 _REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
+_JOINT_POSITION_CONTRACT_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "src/tasks/hammer/config/z1/data/z1_joint_position_stage1.json"
+)
+_FIXED_ACTUATOR_SIGNATURE = (
+    (
+        "BuiltinPositionActuatorCfg",
+        1000.0,
+        100.0,
+        30.0,
+        0.01,
+        ("joint1", "joint3", "joint4", "joint5", "joint6"),
+    ),
+    ("BuiltinPositionActuatorCfg", 1500.0, 150.0, 60.0, 0.02, ("joint2",)),
+    ("BuiltinPositionActuatorCfg", 100.0, 20.0, 30.0, 0.005, ("jointGripper",)),
+)
 
 
 def _finite_number(value: object, *, name: str) -> float:
@@ -104,6 +125,24 @@ def _cfg_value(mapping: Mapping[str, Any], name: str) -> Any:
         raise ValueError(f"missing required {name}") from exc
 
 
+def _fixed_actuator_signature(env_cfg) -> tuple[tuple[object, ...], ...]:
+    try:
+        actuators = env_cfg.scene.entities["robot"].articulation.actuators
+    except (AttributeError, KeyError, TypeError):
+        return ()
+    return tuple(
+        (
+            type(actuator).__name__,
+            getattr(actuator, "stiffness", None),
+            getattr(actuator, "damping", None),
+            getattr(actuator, "effort_limit", None),
+            getattr(actuator, "armature", None),
+            tuple(getattr(actuator, "target_names_expr", ())),
+        )
+        for actuator in actuators
+    )
+
+
 def validate_fic_contract(task: str, env_cfg, agent_cfg) -> dict[str, object]:
     """Fail closed unless a loaded config is exactly one calibrated FIC arm."""
     if task not in TASKS:
@@ -117,13 +156,43 @@ def validate_fic_contract(task: str, env_cfg, agent_cfg) -> dict[str, object]:
     if tuple(actions) != ("joint_position",):
         raise ValueError("FIC pilot requires exactly the joint_position action")
     action = actions["joint_position"]
+    qualified = load_joint_position_contract(_JOINT_POSITION_CONTRACT_PATH)
+    qualified_scale = dict(
+        zip(JOINT_NAMES, qualified.scale_rad.tolist(), strict=True)
+    )
+    qualified_clip = {
+        name: tuple(bounds)
+        for name, bounds in zip(
+            JOINT_NAMES, qualified.physical_clip_rad.tolist(), strict=True
+        )
+    }
+    action_offset = getattr(action, "offset", None)
     if (
-        tuple(getattr(action, "actuator_names", ())) != JOINT_NAMES
+        getattr(action, "entity_name", None) != "robot"
+        or tuple(getattr(action, "actuator_names", ())) != JOINT_NAMES
         or tuple(getattr(action, "scale", ())) != JOINT_NAMES
+        or getattr(action, "scale", None) != qualified_scale
         or tuple(getattr(action, "clip", ())) != JOINT_NAMES
+        or getattr(action, "clip", None) != qualified_clip
         or getattr(action, "use_default_offset", None) is not True
+        or getattr(action, "preserve_order", None) is not True
+        or isinstance(action_offset, bool)
+        or action_offset != 0.0
     ):
         raise ValueError("FIC pilot joint action contract drift")
+    physics_dt = _finite_number(
+        getattr(getattr(getattr(env_cfg, "sim", None), "mujoco", None), "timestep", None),
+        name="physics timestep",
+    )
+    decimation = getattr(env_cfg, "decimation", None)
+    if (
+        physics_dt != qualified.physics_dt_s
+        or type(decimation) is not int
+        or decimation != qualified.control_decimation
+    ):
+        raise ValueError("FIC pilot control timing drift")
+    if _fixed_actuator_signature(env_cfg) != _FIXED_ACTUATOR_SIGNATURE:
+        raise ValueError("FIC pilot fixed actuator signature drift")
 
     rewards = getattr(env_cfg, "rewards", {})
     delivered = _cfg_value(rewards, "delivered_impulse")
@@ -144,10 +213,32 @@ def validate_fic_contract(task: str, env_cfg, agent_cfg) -> dict[str, object]:
     cat = _cfg_value(metrics, "cat_soft")
     cat_params = getattr(cat, "params", {})
     if (
-        cat_params.get("use_vel") is not True
+        getattr(cat, "func", None) is not CatSoftHook
+        or set(cat_params)
+        != {
+            "use_vel",
+            "use_impulse",
+            "imp_limit",
+            "imp_max_p",
+            "imp_seed",
+            "robot_cfg",
+            "limit",
+            "max_p",
+            "min_p",
+            "tau",
+            "vel_detection",
+        }
+        or cat_params.get("use_vel") is not True
         or cat_params.get("use_impulse") is not True
         or cat_params.get("vel_detection") != "substep"
+        or _finite_number(cat_params.get("limit"), name="velocity limit") != 3.1415
+        or _finite_number(cat_params.get("max_p"), name="velocity max_p") != 0.5
+        or _finite_number(cat_params.get("min_p"), name="CaT min_p") != 0.0
+        or _finite_number(cat_params.get("tau"), name="CaT tau") != 0.95
+        or tuple(cat_params.get("imp_limit", ()))
+        != (1.64, 3.28, 1.64, 1.64, 1.64, 1.64)
         or _finite_number(cat_params.get("imp_max_p"), name="imp_max_p") != 0.0
+        or _finite_number(cat_params.get("imp_seed"), name="imp_seed") != 0.001
     ):
         raise ValueError("FIC pilot CaT contract drift")
     if getattr(_cfg_value(metrics, "substep_impulse_rows"), "params", {}).get("enabled") is not False:
@@ -157,12 +248,36 @@ def validate_fic_contract(task: str, env_cfg, agent_cfg) -> dict[str, object]:
     if task == FIC0_TASK:
         if r_tt is not None:
             raise ValueError("FIC-0 must not contain r_tt")
-    elif (
-        r_tt is None
-        or _finite_number(getattr(r_tt, "weight", None), name="r_tt weight") != -1.0
-        or _finite_number(getattr(r_tt, "params", {}).get("k_tt"), name="r_tt k_tt") != 1.0
+    else:
+        rtt_params = getattr(r_tt, "params", {}) if r_tt is not None else {}
+        rtt_robot_cfg = rtt_params.get("robot_cfg")
+        if (
+            r_tt is None
+            or getattr(r_tt, "func", None) is not joint_trackability_cost
+            or _finite_number(getattr(r_tt, "weight", None), name="r_tt weight") != -1.0
+            or set(rtt_params) != {"robot_cfg", "k_tt"}
+            or _finite_number(rtt_params.get("k_tt"), name="r_tt k_tt") != 1.0
+            or getattr(rtt_robot_cfg, "name", None) != "robot"
+            or tuple(getattr(rtt_robot_cfg, "joint_names", ())) != JOINT_NAMES
+            or getattr(rtt_robot_cfg, "preserve_order", None) is not True
+        ):
+            raise ValueError("FIC-TT r_tt contract drift")
+
+    expected_negative_terms = (
+        ("action_rate", "joint_pos_limits", "r_tt")
+        if task == FICTT_TASK
+        else ("action_rate", "joint_pos_limits")
+    )
+    live_negative_terms = tuple(
+        name
+        for name, term in rewards.items()
+        if _finite_number(getattr(term, "weight", None), name=f"{name} weight") < 0.0
+    )
+    if (
+        _NEG_TERMS != ("action_rate", "joint_pos_limits", "r_tt")
+        or live_negative_terms != expected_negative_terms
     ):
-        raise ValueError("FIC-TT r_tt contract drift")
+        raise ValueError("FIC pilot CaT negative-term split drift")
 
     return {
         "task": task,
@@ -235,6 +350,28 @@ def capture_first_terminals(
     return tuple(int(env_id) for env_id in ids)
 
 
+def reset_done_envs_preserving_unfinished(
+    env, observations: TensorDict, done_ids: torch.Tensor
+) -> TensorDict:
+    """Reset terminal worlds without perturbing unfinished inputs or Torch RNG."""
+    device = torch.device(env.device)
+    cpu_rng_state = torch.get_rng_state()
+    cuda_rng_state = (
+        torch.cuda.get_rng_state(device) if device.type == "cuda" else None
+    )
+    try:
+        reset_obs_dict, _ = env.reset(env_ids=done_ids)
+    finally:
+        torch.set_rng_state(cpu_rng_state)
+        if cuda_rng_state is not None:
+            torch.cuda.set_rng_state(cuda_rng_state, device)
+
+    reset_observations = TensorDict(reset_obs_dict, batch_size=[env.num_envs])
+    merged = observations.clone()
+    merged[done_ids] = reset_observations[done_ids]
+    return merged
+
+
 def _population_hash(env) -> str:
     robot = env.scene["robot"].data
     nail = env.scene["nail_block"].data
@@ -251,7 +388,7 @@ def _publish_new_json(output: Path, payload: Mapping[str, object]) -> None:
     if output.exists() or output.is_symlink():
         raise FileExistsError(f"refusing to overwrite evaluator output: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
-    encoded = json.dumps(payload, sort_keys=True, indent=2, allow_nan=False).encode() + b"\n"
+    encoded = _json_bytes(payload) + b"\n"
     fd, temporary_name = tempfile.mkstemp(prefix=f".{output.name}.", dir=output.parent)
     temporary = Path(temporary_name)
     try:
@@ -368,8 +505,9 @@ def evaluate_checkpoint(
                 break
             if done_ids:
                 ids = torch.tensor(done_ids, device=env.device, dtype=torch.long)
-                obs_dict, _ = env.reset(env_ids=ids)
-                observations = TensorDict(obs_dict, batch_size=[env.num_envs])
+                observations = reset_done_envs_preserving_unfinished(
+                    env, observations, ids
+                )
                 steps[ids] = 0
         ordered = _ordered_complete_records(records)
         payload: dict[str, object] = {
