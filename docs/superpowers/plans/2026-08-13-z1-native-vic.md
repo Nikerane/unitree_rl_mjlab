@@ -16,6 +16,8 @@
 - Preserve the direct-reference FIC-TT reward, reset, plant, reference, `k_tt=1`, negative-term split, velocity-CaT, log-only impulse-CaT, D4, and corrected `I_ref` exactly.
 - Add only VIC-TT. No VIC-0, evaluator expansion, active impulse pressure, gain penalty/observation/filter, DR, curriculum, controlled-drop work, or training before qualification.
 
+**Learner-comparison caveat:** In the installed RSL-RL learner, entropy, log probability, and KL are summed across action dimensions. Unchanged PPO settings are therefore not dimension-normalized between 6D FIC and 12D VIC. The one-update gate proves execution and finiteness only; any formal comparison must predeclare how this dimensionality effect is controlled or explicitly accepted.
+
 ---
 
 ### Task 0: Bank the approved design and execution plan

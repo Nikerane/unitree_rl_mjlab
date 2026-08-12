@@ -138,10 +138,24 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
     route = next(
         line for line in text.splitlines() if line.startswith("**Current GPU route:**")
     )
-    assert "direct-reference FIC-0/FIC-TT campaign" in route
+    assert "clean detached worktree" in route
+    assert "VIC-TT qualification" in route
+    assert "same nominal arm twice" in route
+    assert "A100" in route
+    assert "direct-reference FIC-0/FIC-TT campaign" not in route
     assert (
-        "fixed-reset C0/C-Gate and waypoint-guided FIC campaigns are banked prior work"
+        "direct-reference FIC launchers are banked baseline/reproducibility routes"
         in route
+    )
+    assert (
+        "`scripts/slurm/vega_fic_direct_reference_smoke.sbatch` "
+        "(banked direct-reference FIC CUDA baseline/reproducibility)"
+        in text
+    )
+    assert (
+        "`scripts/slurm/vega_fic_direct_reference.sbatch` "
+        "(banked direct-reference FIC training reproducibility)"
+        in text
     )
     prototype = next(
         line
@@ -151,6 +165,19 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
     assert "implementation and qualification only" in prototype
     assert "no VIC training or result claim" in prototype
     assert "training is deferred" in prototype
+
+
+def test_vic_docs_disclose_action_dimension_learner_comparison_caveat():
+    for relative_path in (
+        "docs/superpowers/specs/2026-08-13-z1-native-vic-design.md",
+        "docs/superpowers/plans/2026-08-13-z1-native-vic.md",
+    ):
+        text = (REPO / relative_path).read_text(encoding="utf-8")
+        assert "entropy, log probability, and KL" in text
+        assert "summed across action dimensions" in text
+        assert "6D FIC" in text
+        assert "12D VIC" in text
+        assert "formal comparison" in text
 
 
 def test_claude_md_preserves_direction_quote_and_clarifies_native_vic_path():

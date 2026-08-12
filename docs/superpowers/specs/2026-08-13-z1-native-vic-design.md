@@ -102,7 +102,9 @@ Run focused tests, repository reward/contact/reference gates, the full CPU suite
 
 ## Training boundary
 
-Do not launch VIC training until G0-G4 pass. Then run only a seed-2 VIC-TT engineering canary at the same direct-reference FIC protocol (`4096` environments, `500` PPO iterations). This prototype may report a finite checkpoint and existing training telemetry, but it does not add an evaluator or claim comparative task performance. Further seeds and a formal FIC-TT comparison require a separately approved evaluation plan.
+The installed RSL-RL Gaussian/PPO learner leaves entropy, log probability, and KL summed across action dimensions. Unchanged PPO settings are therefore not dimension-normalized between 6D FIC and 12D VIC. G4 proves only that the learning seam executes and remains finite; a formal comparison must predeclare how this dimensionality effect is controlled or explicitly accepted, and cannot treat the prototype smoke as performance evidence.
+
+Do not launch VIC training from this prototype. After G0-G4 pass, a separately approved plan may run only a seed-2 VIC-TT engineering canary at the same direct-reference FIC protocol (`4096` environments, `500` PPO iterations). Such a canary may report a finite checkpoint and existing training telemetry, but it does not add an evaluator or claim comparative task performance. Further seeds and a formal FIC-TT comparison require a separately approved evaluation plan.
 
 ## Out of scope
 

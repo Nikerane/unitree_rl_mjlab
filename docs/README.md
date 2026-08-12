@@ -90,11 +90,11 @@ Dated research records kept in place (bannered, bodies frozen):
 `docs/research/reward-design/derive_impulse_thresholds.py` (impulse quantity gate; re-run after any EE change) ·
 `docs/research/reward-design/playback_reference.py` (strike feasibility gate; the crude `test_single_strike.py` probe was retired 2026-07-10 — the script remains but is not a gate).
 
-**Current GPU route:** EuroHPC Vega direct-reference FIC-0/FIC-TT campaign. Qualify the reviewed revision with `scripts/slurm/vega_fic_direct_reference_smoke.sbatch`, then run `scripts/slurm/vega_fic_direct_reference.sbatch`; the fixed-reset C0/C-Gate and waypoint-guided FIC campaigns are banked prior work. `scripts/lightning_pair.sh` is retained as a legacy Lightning.ai launcher, not the current route.
+**Current GPU route:** Clean Vega A100 VIC-TT qualification from the exact pushed SHA in a clean detached worktree: run the same nominal arm twice to freeze per-tensor parity tolerances, then run VIC authority, `p=0` FIC–VIC parity, and a genuine one-iteration CatPPO smoke. The direct-reference FIC launchers are banked baseline/reproducibility routes, not the current VIC qualification route; the fixed-reset C0/C-Gate and waypoint-guided FIC campaigns are also banked prior work. `scripts/lightning_pair.sh` is retained as a legacy Lightning.ai launcher, not the current route.
 **Current VIC prototype route:** Native Z1 VIC-TT implementation and qualification only, governed by `docs/superpowers/specs/2026-08-13-z1-native-vic-design.md` and `docs/superpowers/plans/2026-08-13-z1-native-vic.md`; there is no VIC training or result claim, and training is deferred to a separately approved plan.
 **Entry scripts:** `scripts/train.py` · `scripts/play.py` ·
-`scripts/slurm/vega_fic_direct_reference_smoke.sbatch` (direct-reference CUDA qualification) ·
-`scripts/slurm/vega_fic_direct_reference.sbatch` (direct-reference matched training) ·
+`scripts/slurm/vega_fic_direct_reference_smoke.sbatch` (banked direct-reference FIC CUDA baseline/reproducibility) ·
+`scripts/slurm/vega_fic_direct_reference.sbatch` (banked direct-reference FIC training reproducibility) ·
 `evaluation/joint_position/evaluate_fic_pilot.py` (compact direct-reference FIC evaluator) ·
 `scripts/lightning_pair.sh` (legacy Lightning.ai prior-vs-none launcher) ·
 `scripts/diag_policy_trace.py` (strike-vs-press classifier + peak-|q̇| eval) ·
