@@ -6,6 +6,8 @@ This repo is the development platform for a Master's thesis at TU Munich (ATARI 
 
 > **DIRECTION UPDATE (2026-06-17, user):** The **Z1 is now the primary platform** — build and validate the *full* thesis machinery here first: soft `γ(1−δ)` CaT, the substep-accumulated impulse constraint, and **variable impedance** (the policy commanding per-joint stiffness via `set_gains`). **The G1 is optional future replication, not the current focus** — do not hyperfixate on it. Sequencing: get the **fixed-impedance** results complete first (with real soft CaT), **then** add variable impedance at the end. This supersedes the earlier "Z1 is a fixed diagnostic; do variable impedance fresh on the G1; don't retrofit VIC into the Z1" framing.
 
+> **IMPLEMENTATION CLARIFICATION (2026-08-13):** `BuiltinPositionActuator` has no literal `set_gains()` API. The approved native Z1 VIC prototype commands per-joint stiffness and coupled damping through independently expanded MuJoCo `actuator_gainprm` and `actuator_biasprm` fields. This records prototype implementation and qualification only, not a training or results claim; see `docs/superpowers/specs/2026-08-13-z1-native-vic-design.md`.
+
 **Authority contract:** Current truth = code > `docs/README.md` index > the living docs it lists.
 `docs/archive/**` and dated records are historical evidence — never act on them without checking
 the index.

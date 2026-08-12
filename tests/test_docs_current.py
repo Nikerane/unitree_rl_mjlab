@@ -118,21 +118,22 @@ def test_index_and_claude_md_paths_exist():
     assert not missing, "Dangling doc references:\n" + "\n".join(missing)
 
 
-def test_index_points_to_current_direct_reference_fic_route():
+def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
     text = (REPO / "docs/README.md").read_text(encoding="utf-8")
     required_refs = (
         "docs/superpowers/specs/2026-08-12-z1-direct-reference-fic-design.md",
         "docs/superpowers/plans/2026-08-12-z1-direct-reference-fic.md",
+        "docs/superpowers/specs/2026-08-13-z1-native-vic-design.md",
+        "docs/superpowers/plans/2026-08-13-z1-native-vic.md",
+        "src/tasks/hammer/mdp/variable_impedance.py",
         "scripts/slurm/vega_fic_direct_reference_smoke.sbatch",
         "scripts/slurm/vega_fic_direct_reference.sbatch",
         "evaluation/joint_position/evaluate_fic_pilot.py",
     )
     missing = [ref for ref in required_refs if f"`{ref}`" not in text]
-    assert not missing, "Current direct-reference FIC paths missing from index:\n" + "\n".join(
-        missing
-    )
+    assert not missing, "Current FIC/VIC paths missing from index:\n" + "\n".join(missing)
 
-    assert "# Docs index — current truth map (2026-08-12)" in text
+    assert "# Docs index — current truth map (2026-08-13)" in text
     assert "the checked-out code wins" in text
     route = next(
         line for line in text.splitlines() if line.startswith("**Current GPU route:**")
@@ -142,6 +143,30 @@ def test_index_points_to_current_direct_reference_fic_route():
         "fixed-reset C0/C-Gate and waypoint-guided FIC campaigns are banked prior work"
         in route
     )
+    prototype = next(
+        line
+        for line in text.splitlines()
+        if line.startswith("**Current VIC prototype route:**")
+    )
+    assert "implementation and qualification only" in prototype
+    assert "no VIC training or result claim" in prototype
+    assert "training is deferred" in prototype
+
+
+def test_claude_md_preserves_direction_quote_and_clarifies_native_vic_path():
+    text = (REPO / "CLAUDE.md").read_text(encoding="utf-8")
+
+    assert "policy commanding per-joint stiffness via `set_gains`" in text
+    clarification = next(
+        line
+        for line in text.splitlines()
+        if line.startswith("> **IMPLEMENTATION CLARIFICATION (2026-08-13):**")
+    )
+    assert "`BuiltinPositionActuator` has no literal `set_gains()` API" in clarification
+    assert "`actuator_gainprm`" in clarification
+    assert "`actuator_biasprm`" in clarification
+    assert "prototype implementation and qualification" in clarification
+    assert "not a training or results claim" in clarification
 
 
 def test_claude_md_records_the_live_nail_driven_weight():

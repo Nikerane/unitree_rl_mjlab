@@ -1,4 +1,4 @@
-# Docs index — current truth map (2026-08-12)
+# Docs index — current truth map (2026-08-13)
 
 **Authority rule: code > this index > the living docs it lists.** `docs/archive/**` and dated
 records are historical evidence — never act on them without checking here first. When a doc and
@@ -12,6 +12,8 @@ the code disagree, the checked-out code wins; fix the doc.
 | `docs/thesis/README.md` | Curated thesis digest: confirmed contributions, decisions, defense points, citations |
 | `docs/superpowers/specs/2026-08-12-z1-direct-reference-fic-design.md` | Approved direct-reference fixed-impedance FIC-0/FIC-TT task and treatment contract |
 | `docs/superpowers/plans/2026-08-12-z1-direct-reference-fic.md` | Executable implementation, Vega qualification/training, and result-banking plan for that campaign |
+| `docs/superpowers/specs/2026-08-13-z1-native-vic-design.md` | Approved native Z1 VIC-TT prototype contract; implementation and qualification only |
+| `docs/superpowers/plans/2026-08-13-z1-native-vic.md` | Executable VIC-TT prototype qualification plan; training is explicitly deferred |
 | `docs/research/reward-design/IMPULSE_CAT_IMPL_PLAN.md` | The impulse-CaT arm (the thesis headline): quantity Λ_j, substep accumulator, staged plan C0–C5, current status |
 | `docs/research/reward-design/FAITHFUL_SOFT_CAT_IMPL_PLAN.md` | Faithful soft `γ(1−δ)` CaT: design, Decisions 1–7, file map, phases + the CaT conceptual deep-dive appendix |
 | `docs/research/reward-design/CONSTRAINED_RL_LANDSCAPE.md` | Why soft-CaT over Lagrangian/CMDP (constraint-TYPE argument) + the joint-velocity-bound research appendix |
@@ -66,6 +68,7 @@ Dated research records kept in place (bannered, bodies frozen):
 | # | File | Role |
 |---|---|---|
 | 1 | `src/tasks/hammer/config/z1/env_cfgs.py` | Arm wiring: flags (`cat_soft`, `cat_impulse`, …) → env config; where the impulse metrics/hook are attached |
+| — | `src/tasks/hammer/mdp/variable_impedance.py` | VIC-TT native gain map and ordered six-joint stiffness action; writes expanded MuJoCo gain/bias fields without changing force limits |
 | 2 | `src/tasks/hammer/hammer_env_cfg.py` | Base task: scene, DiffIK action space, the 7-term reward, terminations, live weights |
 | 3 | `src/tasks/hammer/nail_block.py` | Nail asset loader + goal-depth / success-threshold constants (the physics XML incl. frictionloss lives in the sibling-repo scene it loads) |
 | 4 | `src/tasks/hammer/mdp/rewards.py` | Reward terms incl. `ImpactProgressTerm`, `DeliveredImpulseTerm`, imitation prior |
@@ -88,6 +91,7 @@ Dated research records kept in place (bannered, bodies frozen):
 `docs/research/reward-design/playback_reference.py` (strike feasibility gate; the crude `test_single_strike.py` probe was retired 2026-07-10 — the script remains but is not a gate).
 
 **Current GPU route:** EuroHPC Vega direct-reference FIC-0/FIC-TT campaign. Qualify the reviewed revision with `scripts/slurm/vega_fic_direct_reference_smoke.sbatch`, then run `scripts/slurm/vega_fic_direct_reference.sbatch`; the fixed-reset C0/C-Gate and waypoint-guided FIC campaigns are banked prior work. `scripts/lightning_pair.sh` is retained as a legacy Lightning.ai launcher, not the current route.
+**Current VIC prototype route:** Native Z1 VIC-TT implementation and qualification only, governed by `docs/superpowers/specs/2026-08-13-z1-native-vic-design.md` and `docs/superpowers/plans/2026-08-13-z1-native-vic.md`; there is no VIC training or result claim, and training is deferred to a separately approved plan.
 **Entry scripts:** `scripts/train.py` · `scripts/play.py` ·
 `scripts/slurm/vega_fic_direct_reference_smoke.sbatch` (direct-reference CUDA qualification) ·
 `scripts/slurm/vega_fic_direct_reference.sbatch` (direct-reference matched training) ·
