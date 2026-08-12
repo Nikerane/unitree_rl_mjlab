@@ -143,6 +143,14 @@ TASK_BY_CAMPAIGN_ARM = {
         "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
         "CProgress-Vel-Delivered4"
     ),
+    ("fic-direct-reference", "FIC-0"): (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-"
+        "JointPosition-Fixed"
+    ),
+    ("fic-direct-reference", "FIC-TT"): (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-"
+        "JointPosition-Fixed-TT"
+    ),
 }
 
 # --- Treatment-faithful plot semantics ----------------------------------------------------------
@@ -156,9 +164,12 @@ TASK_BY_CAMPAIGN_ARM = {
 #   waypoints entry->nail line + six ordered point markers: r_waypoint_progress pays shaped credit
 #             for APPROACHING ordered target points; there is no radius in its payout, so drawing
 #             disks would invent a tolerance the reward never had.
+#   reference direct SingleStrikeReference segment only: r_imit paid ante-impact path proximity;
+#             no gate or waypoint geometry belongs to this treatment.
 GEOMETRY_NONE = "none"
 GEOMETRY_GATES = "gates"
 GEOMETRY_WAYPOINTS = "waypoints"
+GEOMETRY_REFERENCE = "reference"
 GUIDELINE_GATE_COUNT = 6
 QVEL_LIMIT_RAD_S = 3.1415
 _GEOMETRY_CAPTION = {
@@ -167,6 +178,7 @@ _GEOMETRY_CAPTION = {
     GEOMETRY_WAYPOINTS: (
         "dashed black = tracker entry->nail · numbered diamonds = ordered waypoints"
     ),
+    GEOMETRY_REFERENCE: "dashed black = direct SingleStrikeReference",
 }
 
 
@@ -246,6 +258,26 @@ TREATMENT_BY_TASK: dict[str, Treatment] = {
         velocity=_VELOCITY_SOFT_CAT,
         impulse=_IMPULSE_LOG_ONLY,
         geometry=GEOMETRY_WAYPOINTS,
+    ),
+    (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-"
+        "JointPosition-Fixed"
+    ): Treatment(
+        headline="direct-reference fixed-impedance strike",
+        guidance="direct-reference reward prior 0.10→0 by iteration 250",
+        velocity=_VELOCITY_SOFT_CAT,
+        impulse=_IMPULSE_LOG_ONLY,
+        geometry=GEOMETRY_REFERENCE,
+    ),
+    (
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-"
+        "JointPosition-Fixed-TT"
+    ): Treatment(
+        headline="direct-reference fixed-impedance strike",
+        guidance="direct-reference reward prior 0.10→0 by iteration 250",
+        velocity=_VELOCITY_SOFT_CAT,
+        impulse=_IMPULSE_LOG_ONLY,
+        geometry=GEOMETRY_REFERENCE,
     ),
     "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear": _NO_GUIDELINE,
     "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-F0": _NO_GUIDELINE,
@@ -398,6 +430,8 @@ def _draw_trajectory(
     reference: np.ndarray,
     nail_top: np.ndarray,
     ordinate: int,
+    *,
+    reference_legend: str,
 ) -> None:
     """Draw one view; the reference is contextual evidence, never a reward claim."""
     axis.plot(
@@ -406,7 +440,7 @@ def _draw_trajectory(
         color="black",
         linestyle="--",
         linewidth=0.8,
-        label="SingleStrikeReference (observation only)",
+        label=reference_legend,
         zorder=1,
     )
     if len(positions) > 1:
@@ -436,13 +470,29 @@ def _draw_trajectory(
         axis.scatter(nail_top[0], nail_top[1], c="#8c564b", marker="+", s=40, zorder=3)
 
 
-def write_trajectory_png(trace: Mapping[str, Any], path: str | Path) -> None:
+def write_trajectory_png(
+    trace: Mapping[str, Any],
+    path: str | Path,
+    *,
+    reference_legend: str = "SingleStrikeReference (observation only)",
+    reference_footer: str = (
+        "SingleStrikeReference (observation only) · black dashed · not rewarded"
+    ),
+) -> None:
     """Write x-z and x-y diagnostics with the anchored reference as context only."""
     positions, contact, reference, nail_top = _trace_geometry(trace)
 
     fig, axes = plt.subplots(1, 2, figsize=(10, 4.8), sharex=True, sharey=False)
     for axis, ordinate, label in ((axes[0], 2, "z (m)"), (axes[1], 1, "y (m)")):
-        _draw_trajectory(axis, positions, contact, reference, nail_top, ordinate)
+        _draw_trajectory(
+            axis,
+            positions,
+            contact,
+            reference,
+            nail_top,
+            ordinate,
+            reference_legend=reference_legend,
+        )
         axis.set_xlabel("x (m)")
         axis.set_ylabel(label)
         axis.set_aspect("auto")
@@ -458,7 +508,7 @@ def write_trajectory_png(trace: Mapping[str, Any], path: str | Path) -> None:
     fig.text(
         0.5,
         0.035,
-        "SingleStrikeReference (observation only) · black dashed · not rewarded",
+        reference_footer,
         ha="center",
         fontsize=8,
     )
@@ -534,7 +584,15 @@ def write_campaign_trajectory_grid(
             axis = axes[row, column]
             trace = next(value for panel_arm, panel_seed, value in panels if (panel_arm, panel_seed) == (arm, seed))
             positions, contact, reference, nail_top = _trace_geometry(trace)
-            _draw_trajectory(axis, positions, contact, reference, nail_top, 2)
+            _draw_trajectory(
+                axis,
+                positions,
+                contact,
+                reference,
+                nail_top,
+                2,
+                reference_legend="SingleStrikeReference (observation only)",
+            )
             axis.set_xlim(xlim)
             axis.set_ylim(zlim)
             panel_limits.append((tuple(axis.get_xlim()), tuple(axis.get_ylim())))

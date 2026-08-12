@@ -1232,6 +1232,48 @@ def test_trajectory_plot_draws_the_reference_as_a_dashed_observation_line(tmp_pa
     )
 
 
+def test_trajectory_plot_accepts_truthful_direct_reference_legend_and_footer(
+    tmp_path, monkeypatch
+):
+    from matplotlib.axes import Axes
+
+    from evaluation.analysis import fixed_reset_video_library as video_contract
+
+    observed: list[dict] = []
+    original_plot = Axes.plot
+    original_close = video_contract.plt.close
+
+    def capture_plot(self, *args, **kwargs):
+        observed.append(kwargs)
+        return original_plot(self, *args, **kwargs)
+
+    monkeypatch.setattr(Axes, "plot", capture_plot)
+    monkeypatch.setattr(video_contract.plt, "close", lambda _figure: None)
+    before = set(video_contract.plt.get_fignums())
+    legend = "SingleStrikeReference (reward prior 0.10→0 by iteration 250)"
+    footer = f"{legend} · black dashed · ante-impact reward only"
+
+    write_trajectory_png(
+        {
+            "head_position_m": np.array([[0.0, 0.0, 0.0], [0.1, 0.0, -0.1]]),
+            "contact": np.array([False, True]),
+            "reference_polyline_m": np.array(
+                [[0.0, 0.0, 0.0], [0.0, 0.0, -0.1]]
+            ),
+            "nail_top_m": np.array([0.0, 0.0, 0.0]),
+        },
+        tmp_path / "direct.png",
+        reference_legend=legend,
+        reference_footer=footer,
+    )
+
+    figure_number = (set(video_contract.plt.get_fignums()) - before).pop()
+    figure = video_contract.plt.figure(figure_number)
+    assert sum(call.get("label") == legend for call in observed) == 2
+    assert footer in {text.get_text() for text in figure.texts}
+    original_close(figure)
+
+
 def test_trajectory_plot_uses_readable_figure_level_layout(tmp_path, monkeypatch):
     """Near-vertical traces must fill both panels without data-overlay annotations."""
     from evaluation.analysis import fixed_reset_video_library as video_contract
@@ -2102,6 +2144,11 @@ _PV_TASK = "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-CProgress-Vel"
 _PD4_TASK = f"{_P_TASK}-Delivered4"
 _PVD0_TASK = f"{_PV_TASK}-Delivered0"
 _PVD4_TASK = f"{_PV_TASK}-Delivered4"
+_DIRECT_FIC0_TASK = (
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-"
+    "JointPosition-Fixed"
+)
+_DIRECT_FICTT_TASK = f"{_DIRECT_FIC0_TASK}-TT"
 
 
 def test_treatment_geometry_follows_the_reward_the_arm_actually_received():
@@ -2111,6 +2158,59 @@ def test_treatment_geometry_follows_the_reward_the_arm_actually_received():
     assert treatment_for_task(_G_TASK).geometry == "gates"
     assert treatment_for_task(_P_TASK).geometry == "waypoints"
     assert treatment_for_task(_PV_TASK).geometry == "waypoints"
+
+
+def test_direct_reference_campaign_is_qualitative_only_and_maps_both_fic_arms():
+    from evaluation.analysis.fixed_reset_video_library import (
+        expected_task,
+        treatment_for_task,
+    )
+
+    assert expected_task("fic-direct-reference", "FIC-0") == _DIRECT_FIC0_TASK
+    assert expected_task("fic-direct-reference", "FIC-TT") == _DIRECT_FICTT_TASK
+    assert "fic-direct-reference" not in EXPECTED
+    assert sum(len(tuple(seeds)) for arms in EXPECTED.values() for seeds in arms.values()) == 56
+
+    for task in (_DIRECT_FIC0_TASK, _DIRECT_FICTT_TASK):
+        treatment = treatment_for_task(task)
+        assert treatment.guidance == "direct-reference reward prior 0.10→0 by iteration 250"
+        assert treatment.velocity == "velocity max_p 0.5 (500 Hz substep peak)"
+        assert treatment.impulse == "impulse log-only"
+        assert treatment.geometry == "reference"
+
+
+def test_direct_reference_treatment_labels_match_the_registered_tasks():
+    from mjlab.tasks.registry import load_env_cfg
+
+    from evaluation.analysis.fixed_reset_video_library import treatment_for_task
+    import src.tasks.hammer.config.z1  # noqa: F401
+
+    for task in (_DIRECT_FIC0_TASK, _DIRECT_FICTT_TASK):
+        cfg = load_env_cfg(task)
+        treatment = treatment_for_task(task)
+        rewards = set(cfg.rewards)
+        observations = set(cfg.observations["actor"].terms)
+        cat = cfg.metrics["cat_soft"].params
+
+        assert "r_imit" in rewards
+        assert {"r_gate", "r_waypoint_progress"}.isdisjoint(rewards)
+        assert {
+            "next_gate_vector",
+            "completed_gate_fraction",
+            "guideline_perpendicular_error",
+            "waypoint_progress_state",
+        }.isdisjoint(observations)
+        assert cfg.rewards["r_imit"].weight == 0.10
+        assert cfg.curriculum["r_imit_anneal"].params["stages"][-1] == {
+            "step": 6000,
+            "weight": 0.0,
+        }
+        assert cat["use_vel"] is True
+        assert cat["vel_detection"] == "substep"
+        assert cat["max_p"] == 0.5
+        assert cat["imp_max_p"] == 0.0
+        assert treatment.guidance == "direct-reference reward prior 0.10→0 by iteration 250"
+        assert treatment.geometry == "reference"
 
 
 def test_c0_treatment_states_the_state_is_observed_but_not_rewarded():
@@ -2348,6 +2448,24 @@ def test_frozen_campaigns_keep_the_legacy_substep_plot_call():
             _render_cfg(campaign, arm), _wave1_trace(), terminal_reason="terminated"
         )
         assert kwargs == {"title": f"wave1 / {arm} / seed 4"}
+
+
+def test_non_substep_plot_dispatch_labels_only_the_direct_reference_campaign():
+    expected = {
+        "reference_legend": "SingleStrikeReference (reward prior 0.10→0 by iteration 250)",
+        "reference_footer": (
+            "SingleStrikeReference (reward prior 0.10→0 by iteration 250)"
+            " · black dashed · ante-impact reward only"
+        ),
+    }
+
+    assert render_policy.trajectory_plot_kwargs(
+        _render_cfg("fic-direct-reference", "FIC-0")
+    ) == expected
+    assert render_policy.trajectory_plot_kwargs(
+        _render_cfg("fic-direct-reference", "FIC-TT")
+    ) == expected
+    assert render_policy.trajectory_plot_kwargs(_render_cfg("wave3", "P+V")) == {}
 
 
 def test_new_campaigns_get_treatment_faithful_geometry_and_a_full_title():

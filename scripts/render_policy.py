@@ -106,6 +106,23 @@ class Cfg:
 # campaign gets treatment-faithful geometry and a full title.
 FROZEN_RENDER_CAMPAIGNS = frozenset({"wave1", "wave2", "fq4x8", "fq3x8"})
 
+DIRECT_REFERENCE_LEGEND = (
+  "SingleStrikeReference (reward prior 0.10→0 by iteration 250)"
+)
+DIRECT_REFERENCE_FOOTER = (
+  f"{DIRECT_REFERENCE_LEGEND} · black dashed · ante-impact reward only"
+)
+
+
+def trajectory_plot_kwargs(cfg: "Cfg") -> dict[str, str]:
+  """Return truthful control-rate trajectory labels for the direct-reference campaign."""
+  if cfg.campaign != "fic-direct-reference":
+    return {}
+  return {
+    "reference_legend": DIRECT_REFERENCE_LEGEND,
+    "reference_footer": DIRECT_REFERENCE_FOOTER,
+  }
+
 
 def substep_plot_kwargs(cfg: "Cfg", trace: dict, *, terminal_reason: str) -> dict:
   """Plot arguments for one substep leaf, derived from the VALIDATED task, not the directory.
@@ -745,7 +762,11 @@ def main(cfg: Cfg) -> None:
     "nail_top_m": nail_top_m,
   }
   np.savez(out / "trace.npz", **trace)
-  write_trajectory_png(trace, out / "trajectory.png")
+  write_trajectory_png(
+    trace,
+    out / "trajectory.png",
+    **trajectory_plot_kwargs(cfg),
+  )
   # Same gating as the substep branch: the validator requires a device block for
   # every non-exempt campaign, so BOTH metadata sites must emit one or a default
   # render of a wave2 policy would fail validation it should pass.
