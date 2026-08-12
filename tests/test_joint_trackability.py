@@ -16,7 +16,11 @@ from src.tasks.hammer.mdp.trackability import (
 )
 
 
-def _reader_env(*, terminal: bool = False, action_name: str = "joint_position"):
+def _reader_env(
+    *,
+    terminal: bool = False,
+    active_terms: tuple[str, ...] = ("joint_position",),
+):
     q_des = torch.tensor(
         [[0.2, 0.0, -0.1, 0.3, 0.1, 0.0, 99.0]], dtype=torch.float32
     )
@@ -30,7 +34,7 @@ def _reader_env(*, terminal: bool = False, action_name: str = "joint_position"):
         target_ids=torch.arange(6), target_names=list(JOINT_NAMES)
     )
     action_manager = SimpleNamespace(
-        active_terms=[action_name], get_term=lambda name: action_term
+        active_terms=list(active_terms), get_term=lambda name: action_term
     )
     env = SimpleNamespace(
         scene={"robot": robot},
@@ -74,6 +78,38 @@ def test_reward_manager_dt_is_external_to_raw_trackability_cost() -> None:
     torch.testing.assert_close(raw * env.step_dt, torch.tensor([0.0024]))
 
 
+def test_reader_accepts_exact_ordered_variable_impedance_action_signature() -> None:
+    """Adding stiffness coordinates must not change the six-joint RTT value."""
+    env, arm_cfg = _reader_env(
+        active_terms=("joint_position", "joint_stiffness")
+    )
+
+    torch.testing.assert_close(
+        joint_target_squared_error(env, arm_cfg), torch.tensor([0.06])
+    )
+    torch.testing.assert_close(
+        joint_trackability_cost(env, arm_cfg, 1.0), torch.tensor([0.06])
+    )
+
+
+@pytest.mark.parametrize(
+    "active_terms",
+    (
+        ("joint_stiffness", "joint_position"),
+        ("joint_position", "renamed_stiffness"),
+        ("joint_position", "joint_stiffness", "extra"),
+    ),
+    ids=("reversed", "renamed", "extra"),
+)
+def test_reader_rejects_every_other_multi_action_signature(
+    active_terms: tuple[str, ...],
+) -> None:
+    env, arm_cfg = _reader_env(active_terms=active_terms)
+
+    with pytest.raises(ValueError, match="requires exactly"):
+        joint_target_squared_error(env, arm_cfg)
+
+
 @pytest.mark.parametrize("k_tt", [0.0, -1.0, math.inf, -math.inf, math.nan])
 def test_trackability_cost_rejects_nonpositive_or_nonfinite_gain(k_tt: float) -> None:
     env, arm_cfg = _reader_env()
@@ -87,6 +123,6 @@ def test_reader_rejects_shape_mismatch_and_non_joint_action_task() -> None:
     with pytest.raises(ValueError, match="shape"):
         joint_target_squared_error(env, arm_cfg)
 
-    env, arm_cfg = _reader_env(action_name="ik_hammer_head")
-    with pytest.raises(ValueError, match="joint-position"):
+    env, arm_cfg = _reader_env(active_terms=("ik_hammer_head",))
+    with pytest.raises(ValueError, match="requires exactly"):
         joint_target_squared_error(env, arm_cfg)

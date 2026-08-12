@@ -72,12 +72,43 @@ def hammer_approach_reward(
   return torch.exp(-dist_sq / std**2)
 
 
-def action_rate_penalty(env: ManagerBasedRlEnv) -> torch.Tensor:
+def action_rate_penalty(
+  env: ManagerBasedRlEnv, action_name: str | None = None
+) -> torch.Tensor:
   """L2 penalty on the change in actions between consecutive steps.
 
-  Penalises jerky motions. Shape: (B,).
+  ``action_name=None`` preserves the legacy full-policy penalty.  A named term
+  selects its slice from the action manager's current and previous raw-policy
+  buffers. Shape: (B,).
   """
-  return torch.sum(torch.square(env.action_manager.action - env.action_manager.prev_action), dim=-1)
+  manager = env.action_manager
+  if action_name is None:
+    return torch.sum(torch.square(manager.action - manager.prev_action), dim=-1)
+
+  current = manager.action
+  previous = manager.prev_action
+  if current.ndim != 2 or previous.ndim != 2:
+    raise ValueError("action history tensors must be two-dimensional")
+  if current.shape != previous.shape:
+    raise ValueError("current and previous action histories must have matching shapes")
+
+  active_terms = tuple(manager.active_terms)
+  action_dims = tuple(manager.action_term_dim)
+  if (
+    len(active_terms) != len(action_dims)
+    or any(not isinstance(dim, int) or isinstance(dim, bool) or dim <= 0 for dim in action_dims)
+    or sum(action_dims) != current.shape[1]
+  ):
+    raise ValueError("action-manager term dimensions do not match action history width")
+  if action_name not in active_terms:
+    raise ValueError(f"unknown action term {action_name!r}")
+
+  term_index = active_terms.index(action_name)
+  start = sum(action_dims[:term_index])
+  stop = start + action_dims[term_index]
+  return torch.sum(
+    torch.square(current[:, start:stop] - previous[:, start:stop]), dim=-1
+  )
 
 
 def completion_bonus(

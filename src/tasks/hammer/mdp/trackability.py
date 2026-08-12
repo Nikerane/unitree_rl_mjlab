@@ -13,6 +13,10 @@ if TYPE_CHECKING:
 
 
 _ARM_JOINT_NAMES = ("joint1", "joint2", "joint3", "joint4", "joint5", "joint6")
+_QUALIFIED_ACTION_SIGNATURES = (
+  ("joint_position",),
+  ("joint_position", "joint_stiffness"),
+)
 
 
 def _id_tuple(value: Any) -> tuple[int, ...]:
@@ -37,9 +41,10 @@ def _validated_joint_state(
     )
 
   active_terms = tuple(env.action_manager.active_terms)
-  if active_terms != ("joint_position",):
+  if active_terms not in _QUALIFIED_ACTION_SIGNATURES:
     raise ValueError(
-      "joint trackability requires the single qualified joint-position action task"
+      "joint trackability requires exactly ('joint_position',) or "
+      "('joint_position', 'joint_stiffness') in that order"
     )
   action_term = env.action_manager.get_term("joint_position")
   if tuple(action_term.target_names) != _ARM_JOINT_NAMES:
