@@ -30,7 +30,18 @@ PARENT_TASK = (
 )
 FIC0_TASK = f"{PARENT_TASK}-JointPosition-Fixed"
 FICTT_TASK = f"{FIC0_TASK}-TT"
-TASKS = (FIC0_TASK, FICTT_TASK)
+DIRECT_FIC0_TASK = (
+  "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-"
+  "JointPosition-Fixed"
+)
+DIRECT_FICTT_TASK = f"{DIRECT_FIC0_TASK}-TT"
+TASK_CONTRACTS = {
+  FIC0_TASK: {"width": 47, "guidance": "waypoint_progress", "tt": False},
+  FICTT_TASK: {"width": 47, "guidance": "waypoint_progress", "tt": True},
+  DIRECT_FIC0_TASK: {"width": 40, "guidance": "direct_reference", "tt": False},
+  DIRECT_FICTT_TASK: {"width": 40, "guidance": "direct_reference", "tt": True},
+}
+TASKS = tuple(TASK_CONTRACTS)
 
 _DEFAULT_OFFSETS = (
   0.0,
@@ -85,12 +96,16 @@ def run_checks(
   steps: int = 3,
 ) -> list[tuple[str, bool, str]]:
   """Return ``(name, passed, detail)`` checks from one real registered environment."""
-  if task not in TASKS:
+  if task not in TASK_CONTRACTS:
     raise ValueError(f"unsupported fixed joint-position smoke task: {task}")
   if isinstance(num_envs, bool) or not isinstance(num_envs, int) or num_envs <= 0:
     raise ValueError("num_envs must be a positive integer")
   if isinstance(steps, bool) or not isinstance(steps, int) or steps <= 0:
     raise ValueError("steps must be a positive integer")
+  contract = TASK_CONTRACTS[task]
+  observation_width = contract["width"]
+  guidance = contract["guidance"]
+  tt_enabled = contract["tt"]
   results: list[tuple[str, bool, str]] = []
 
   def check(name: str, ok: bool, detail: str = "") -> None:
@@ -120,7 +135,8 @@ def run_checks(
       (tuple(value.shape), str(value.device)) for value in observation_tensors
     ]
     observations_are_finite = all(
-      tuple(value.shape) == (num_envs, 47) and bool(torch.isfinite(value).all())
+      tuple(value.shape) == (num_envs, observation_width)
+      and bool(torch.isfinite(value).all())
       for value in observation_tensors
     )
     step_outputs_are_finite = True
@@ -132,7 +148,8 @@ def run_checks(
         (tuple(value.shape), str(value.device)) for value in step_observations
       )
       observations_are_finite = observations_are_finite and all(
-        tuple(value.shape) == (num_envs, 47) and bool(torch.isfinite(value).all())
+        tuple(value.shape) == (num_envs, observation_width)
+        and bool(torch.isfinite(value).all())
         for value in step_observations
       )
       step_outputs_are_finite = step_outputs_are_finite and (
@@ -146,7 +163,7 @@ def run_checks(
       )
 
     check(
-      "reset and stepped observations are finite (N,47)",
+      f"reset and stepped observations are finite (N,{observation_width})",
       observations_are_finite,
       str(observation_records),
     )
@@ -192,11 +209,47 @@ def run_checks(
       name: env.reward_manager.get_term_cfg(name).weight
       for name in env.reward_manager.active_terms
     }
-    check(
-      "P is exactly 8",
-      reward_weights.get("r_waypoint_progress") == 8.0,
-      str(reward_weights.get("r_waypoint_progress")),
-    )
+    if guidance == "waypoint_progress":
+      check(
+        "P is exactly 8",
+        reward_weights.get("r_waypoint_progress") == 8.0,
+        str(reward_weights.get("r_waypoint_progress")),
+      )
+    else:
+      imitation_cfg = env.reward_manager.get_term_cfg("r_imit")
+      check(
+        "direct-reference reward is exactly r_imit=0.1 with sigma=0.05",
+        reward_weights.get("r_imit") == 0.1
+        and imitation_cfg.params["sigma"] == 0.05,
+        f"weight={reward_weights.get('r_imit')}; "
+        f"sigma={imitation_cfg.params.get('sigma')}",
+      )
+      observation_terms = {
+        name
+        for terms in env.observation_manager.active_terms.values()
+        for name in terms
+      }
+      check(
+        "direct-reference arm has no waypoint state, reward, or tracker",
+        not {
+          "next_gate_vector",
+          "completed_gate_fraction",
+          "guideline_perpendicular_error",
+          "waypoint_progress_state",
+        }
+        & observation_terms
+        and not {"r_gate", "r_waypoint_progress"} & set(reward_weights)
+        and "waypoint_progress" not in env.metrics_manager.active_terms,
+        f"observations={sorted(observation_terms)}; "
+        f"rewards={tuple(reward_weights)}; metrics={tuple(env.metrics_manager.active_terms)}",
+      )
+      reset_cfg = env.cfg.events["reset_robot_joints"].params
+      check(
+        "direct-reference reset position and velocity are fixed",
+        reset_cfg["position_range"] == (0.0, 0.0)
+        and reset_cfg["velocity_range"] == (0.0, 0.0),
+        f"position={reset_cfg['position_range']}; velocity={reset_cfg['velocity_range']}",
+      )
     check(
       "D4 is exactly 4",
       reward_weights.get("delivered_impulse") == 4.0,
@@ -263,7 +316,7 @@ def run_checks(
     reward_manager = env.reward_manager
     expected_negative_terms = (
       ("action_rate", "joint_pos_limits")
-      if task == FIC0_TASK
+      if not tt_enabled
       else ("action_rate", "joint_pos_limits", "r_tt")
     )
     live_negative_terms = tuple(
@@ -289,7 +342,7 @@ def run_checks(
       and bool(torch.allclose(env.extras[CAT_R_POS_KEY], expected_r_pos)),
     )
 
-    if task == FIC0_TASK:
+    if not tt_enabled:
       check(
         "FIC-0 has no trackability cost",
         "r_tt" not in reward_manager.active_terms,
@@ -326,13 +379,21 @@ def run_checks(
       and metadata["raw_policy_clip"] == raw_policy_clip == 1.0
       and metadata["delivered_impulse_i_ref_n_s"]
       == _FIC_CONTROLLED_DROP_I_REF_N_S
-      and metadata["r_tt_enabled"] is (task == FICTT_TASK)
-      and metadata["r_tt_k_tt"] == (1.0 if task == FICTT_TASK else "not_applicable"),
+      and metadata["observation_widths"]
+      == {"actor": observation_width, "critic": observation_width}
+      and metadata["guidance_type"] == guidance
+      and metadata["guidance_reward_key"]
+      == ("r_imit" if guidance == "direct_reference" else "r_waypoint_progress")
+      and metadata["r_tt_enabled"] is tt_enabled
+      and metadata["r_tt_k_tt"] == (1.0 if tt_enabled else "not_applicable"),
       str({
         key: metadata[key]
         for key in (
           "action_dim",
           "delivered_impulse_i_ref_n_s",
+          "observation_widths",
+          "guidance_type",
+          "guidance_reward_key",
           "r_tt_enabled",
           "r_tt_k_tt",
         )

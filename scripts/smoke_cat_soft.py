@@ -32,7 +32,18 @@ FIC0_TASK = (
   "CProgress-Vel-Delivered4-JointPosition-Fixed"
 )
 FICTT_TASK = f"{FIC0_TASK}-TT"
-TASKS = (TASK, FIC0_TASK, FICTT_TASK)
+DIRECT_FIC0_TASK = (
+  "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-"
+  "JointPosition-Fixed"
+)
+DIRECT_FICTT_TASK = f"{DIRECT_FIC0_TASK}-TT"
+JOINT_TASK_OBSERVATION_WIDTHS = {
+  FIC0_TASK: 47,
+  FICTT_TASK: 47,
+  DIRECT_FIC0_TASK: 40,
+  DIRECT_FICTT_TASK: 40,
+}
+TASKS = (TASK, *JOINT_TASK_OBSERVATION_WIDTHS)
 
 
 def _tensors(value: object) -> Iterator[torch.Tensor]:
@@ -98,10 +109,11 @@ def run_smoke(
     assert actual_devices == {requested_device}, (
       f"requested device {requested_device}, got tensors on {sorted(map(str, actual_devices))}"
     )
-    if task in (FIC0_TASK, FICTT_TASK):
+    if task in JOINT_TASK_OBSERVATION_WIDTHS:
+      observation_width = JOINT_TASK_OBSERVATION_WIDTHS[task]
       assert env.num_actions == 6, f"joint task has {env.num_actions} actions, expected 6"
-      assert tuple(observations["actor"].shape) == (num_envs, 47)
-      assert tuple(observations["critic"].shape) == (num_envs, 47)
+      assert tuple(observations["actor"].shape) == (num_envs, observation_width)
+      assert tuple(observations["critic"].shape) == (num_envs, observation_width)
 
     print(
       f"[smoke] {task}: CatPPO + CatRolloutStorage wired; "

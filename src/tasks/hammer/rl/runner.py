@@ -23,6 +23,49 @@ _JOINT_POSITION_CONTRACT_PATH = (
     / "config/z1/data/z1_joint_position_stage1.json"
 )
 
+_DIRECT_JOINT_OBSERVATIONS = (
+    "joint_pos",
+    "joint_vel",
+    "ee_pos",
+    "ee_vel",
+    "head_pos",
+    "head_vel",
+    "nail_top_pos",
+    "nail_depth",
+    "strike_phase",
+    "strike_ref_error",
+    "actions",
+)
+_WAYPOINT_JOINT_OBSERVATIONS = (
+    *_DIRECT_JOINT_OBSERVATIONS,
+    "next_gate_vector",
+    "completed_gate_fraction",
+    "guideline_perpendicular_error",
+    "waypoint_progress_state",
+)
+_WAYPOINT_OBSERVATION_TERMS = frozenset(
+    _WAYPOINT_JOINT_OBSERVATIONS[len(_DIRECT_JOINT_OBSERVATIONS) :]
+)
+_GUIDANCE_REWARD_KEYS = frozenset(("r_imit", "r_gate", "r_waypoint_progress"))
+_GUIDANCE_SCHEMAS = {
+    _DIRECT_JOINT_OBSERVATIONS: {
+        "width": 40,
+        "guidance_type": "direct_reference",
+        "reward_key": "r_imit",
+        "reward_impl": "src.tasks.hammer.mdp.rewards.ImitationPriorTerm",
+        "waypoint_tracker": False,
+    },
+    _WAYPOINT_JOINT_OBSERVATIONS: {
+        "width": 47,
+        "guidance_type": "waypoint_progress",
+        "reward_key": "r_waypoint_progress",
+        "reward_impl": (
+            "src.tasks.hammer.mdp.guideline.ordered_waypoint_progress_reward"
+        ),
+        "waypoint_tracker": True,
+    },
+}
+
 
 def _finite_row(value: torch.Tensor | float, *, name: str) -> list[float]:
     """Return the first resolved action row after checking the full live tensor."""
@@ -58,6 +101,82 @@ def _fixed_actuator_signature(env) -> list[dict[str, object]]:
             }
         )
     return signature
+
+
+def _callable_identity(value: object) -> str:
+    module = getattr(value, "__module__", type(value).__module__)
+    qualname = getattr(value, "__qualname__", type(value).__qualname__)
+    return f"{module}.{qualname}"
+
+
+def _joint_observation_metadata(env) -> dict[str, object]:
+    """Resolve one of the two qualified joint-policy schemas from live managers."""
+    observation_manager = env.observation_manager
+    active_terms = observation_manager.active_terms
+    if set(active_terms) != {"actor", "critic"}:
+        raise ValueError("joint metadata requires exactly actor and critic observations")
+    actor_terms = tuple(active_terms["actor"])
+    critic_terms = tuple(active_terms["critic"])
+    if actor_terms != critic_terms:
+        raise ValueError("joint metadata requires identical actor and critic observation terms")
+
+    group_obs_dim = observation_manager.group_obs_dim
+    if set(group_obs_dim) != {"actor", "critic"}:
+        raise ValueError("joint metadata requires exactly actor and critic observation widths")
+    actor_dim = tuple(group_obs_dim["actor"])
+    critic_dim = tuple(group_obs_dim["critic"])
+    if actor_dim != critic_dim:
+        raise ValueError("joint metadata requires identical actor and critic observation widths")
+    if len(actor_dim) != 1:
+        raise ValueError("joint metadata requires flat actor and critic observations")
+
+    schema = _GUIDANCE_SCHEMAS.get(actor_terms)
+    if schema is None:
+        raise ValueError("unsupported joint observation schema")
+    expected_width = schema["width"]
+    if actor_dim != (expected_width,):
+        raise ValueError(
+            f"joint metadata requires observation width {expected_width} for "
+            f"{schema['guidance_type']}"
+        )
+
+    reward_terms = set(env.reward_manager.active_terms)
+    guidance_reward_key = schema["reward_key"]
+    if reward_terms & _GUIDANCE_REWARD_KEYS != {guidance_reward_key}:
+        raise ValueError(
+            f"joint metadata guidance reward identity must be {guidance_reward_key}"
+        )
+
+    metrics_terms = set(env.metrics_manager.active_terms)
+    has_waypoint_tracker = "waypoint_progress" in metrics_terms
+    if has_waypoint_tracker is not schema["waypoint_tracker"]:
+        expectation = "require" if schema["waypoint_tracker"] else "forbid"
+        raise ValueError(
+            f"joint metadata {expectation}s the waypoint tracker for "
+            f"{schema['guidance_type']}"
+        )
+    if schema["guidance_type"] == "direct_reference" and (
+        set(actor_terms) & _WAYPOINT_OBSERVATION_TERMS
+    ):
+        raise ValueError("direct-reference metadata forbids waypoint observations")
+
+    reward_impl = _callable_identity(
+        env.reward_manager.get_term_cfg(guidance_reward_key).func
+    )
+    if reward_impl != schema["reward_impl"]:
+        raise ValueError(
+            f"joint metadata guidance reward implementation must be {schema['reward_impl']}"
+        )
+    return {
+        "observation_names": list(actor_terms),
+        "observation_widths": {
+            "actor": actor_dim[0],
+            "critic": critic_dim[0],
+        },
+        "guidance_type": schema["guidance_type"],
+        "guidance_reward_key": guidance_reward_key,
+        "guidance_reward_impl": reward_impl,
+    }
 
 
 def _get_hammer_metadata(env, run_path: str, *, raw_policy_clip: float) -> dict:
@@ -129,6 +248,7 @@ def _get_hammer_metadata(env, run_path: str, *, raw_policy_clip: float) -> dict:
     if not torch.isfinite(clips).all() or not torch.all(clips[:, :, 0] < clips[:, :, 1]):
         raise ValueError("joint physical clips must be finite increasing intervals")
     contract = load_joint_position_contract(_JOINT_POSITION_CONTRACT_PATH)
+    observation_metadata = _joint_observation_metadata(env)
 
     delivered_i_ref = env.reward_manager.get_term_cfg(
         "delivered_impulse"
@@ -166,6 +286,7 @@ def _get_hammer_metadata(env, run_path: str, *, raw_policy_clip: float) -> dict:
         "fixed_actuator_signature": _fixed_actuator_signature(env),
         "joint_action_qualification_payload_sha256": contract.payload_sha256,
         "delivered_impulse_i_ref_n_s": float(delivered_i_ref),
+        **observation_metadata,
         "r_tt_enabled": r_tt_enabled,
         "r_tt_k_tt": r_tt_k_tt,
     }

@@ -36,7 +36,32 @@ PARENT_TASK = (
 )
 FIC0_TASK = f"{PARENT_TASK}-JointPosition-Fixed"
 FICTT_TASK = f"{FIC0_TASK}-TT"
+DIRECT_FIC0_TASK = (
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-"
+    "JointPosition-Fixed"
+)
+DIRECT_FICTT_TASK = f"{DIRECT_FIC0_TASK}-TT"
 RAW_POLICY_CLIP = 1.0
+DIRECT_OBSERVATION_NAMES = (
+    "joint_pos",
+    "joint_vel",
+    "ee_pos",
+    "ee_vel",
+    "head_pos",
+    "head_vel",
+    "nail_top_pos",
+    "nail_depth",
+    "strike_phase",
+    "strike_ref_error",
+    "actions",
+)
+WAYPOINT_OBSERVATION_NAMES = (
+    *DIRECT_OBSERVATION_NAMES,
+    "next_gate_vector",
+    "completed_gate_fraction",
+    "guideline_perpendicular_error",
+    "waypoint_progress_state",
+)
 _CONTRACT_PATH = (
     Path(__file__).resolve().parents[1]
     / "src/tasks/hammer/config/z1/data/z1_joint_position_stage1.json"
@@ -111,9 +136,13 @@ def test_catppo_smoke_rejects_invalid_sizes_before_environment_creation(
         smoke_cat_soft.run_smoke(task=FIC0_TASK, **kwargs)
 
 
-@pytest.mark.parametrize("task_id", (FIC0_TASK, FICTT_TASK), ids=("fic0", "fictt"))
+@pytest.mark.parametrize(
+    "task_id",
+    (FIC0_TASK, FICTT_TASK, DIRECT_FIC0_TASK, DIRECT_FICTT_TASK),
+    ids=("waypoint-fic0", "waypoint-fictt", "direct-fic0", "direct-fictt"),
+)
 def test_live_joint_position_smoke_passes_every_check(task_id: str) -> None:
-    """Both registered fixed-impedance arms must pass the live manager gate."""
+    """All four registered fixed-impedance arms must pass the live manager gate."""
     results = run_checks(task=task_id, device="cpu", num_envs=4, steps=2)
 
     assert results
@@ -213,12 +242,18 @@ def test_catppo_smoke_closes_raw_env_when_setup_fails(
 
 @pytest.fixture(scope="module")
 def metadata_envs():
-    """Construct the Cartesian parent and both fixed-impedance live environments."""
+    """Construct the Cartesian parent and all four fixed-impedance environments."""
     import src.tasks  # noqa: F401  # populate the isolated task registry
 
     envs = {}
     try:
-        for task_id in (PARENT_TASK, FIC0_TASK, FICTT_TASK):
+        for task_id in (
+            PARENT_TASK,
+            FIC0_TASK,
+            FICTT_TASK,
+            DIRECT_FIC0_TASK,
+            DIRECT_FICTT_TASK,
+        ):
             cfg = load_env_cfg(task_id, play=True)
             cfg.scene.num_envs = 1
             envs[task_id] = ManagerBasedRlEnv(cfg, device="cpu")
@@ -337,12 +372,70 @@ def test_metadata_rejects_cartesian_action_registered_as_joint_position() -> Non
 
 
 @pytest.mark.parametrize(
-    ("task_id", "r_tt_enabled", "r_tt_k_tt"),
-    ((FIC0_TASK, False, "not_applicable"), (FICTT_TASK, True, 1.0)),
-    ids=("fic0", "fictt"),
+    (
+        "task_id",
+        "observation_names",
+        "observation_width",
+        "guidance_type",
+        "guidance_reward_key",
+        "guidance_reward_impl",
+        "r_tt_enabled",
+        "r_tt_k_tt",
+    ),
+    (
+        (
+            FIC0_TASK,
+            WAYPOINT_OBSERVATION_NAMES,
+            47,
+            "waypoint_progress",
+            "r_waypoint_progress",
+            "src.tasks.hammer.mdp.guideline.ordered_waypoint_progress_reward",
+            False,
+            "not_applicable",
+        ),
+        (
+            FICTT_TASK,
+            WAYPOINT_OBSERVATION_NAMES,
+            47,
+            "waypoint_progress",
+            "r_waypoint_progress",
+            "src.tasks.hammer.mdp.guideline.ordered_waypoint_progress_reward",
+            True,
+            1.0,
+        ),
+        (
+            DIRECT_FIC0_TASK,
+            DIRECT_OBSERVATION_NAMES,
+            40,
+            "direct_reference",
+            "r_imit",
+            "src.tasks.hammer.mdp.rewards.ImitationPriorTerm",
+            False,
+            "not_applicable",
+        ),
+        (
+            DIRECT_FICTT_TASK,
+            DIRECT_OBSERVATION_NAMES,
+            40,
+            "direct_reference",
+            "r_imit",
+            "src.tasks.hammer.mdp.rewards.ImitationPriorTerm",
+            True,
+            1.0,
+        ),
+    ),
+    ids=("waypoint-fic0", "waypoint-fictt", "direct-fic0", "direct-fictt"),
 )
 def test_joint_metadata_is_resolved_from_the_live_action_and_robot(
-    metadata_envs, task_id: str, r_tt_enabled: bool, r_tt_k_tt: float | str
+    metadata_envs,
+    task_id: str,
+    observation_names: tuple[str, ...],
+    observation_width: int,
+    guidance_type: str,
+    guidance_reward_key: str,
+    guidance_reward_impl: str,
+    r_tt_enabled: bool,
+    r_tt_k_tt: float | str,
 ) -> None:
     """A stale config, payload hash, or fixed-plant signature must not reach ONNX."""
     env = metadata_envs[task_id]
@@ -371,10 +464,64 @@ def test_joint_metadata_is_resolved_from_the_live_action_and_robot(
         "fixed_actuator_signature": _fixed_actuator_signature(env),
         "joint_action_qualification_payload_sha256": contract.payload_sha256,
         "delivered_impulse_i_ref_n_s": 0.2799950838088989,
+        "observation_names": list(observation_names),
+        "observation_widths": {
+            "actor": observation_width,
+            "critic": observation_width,
+        },
+        "guidance_type": guidance_type,
+        "guidance_reward_key": guidance_reward_key,
+        "guidance_reward_impl": guidance_reward_impl,
         "r_tt_enabled": r_tt_enabled,
         "r_tt_k_tt": r_tt_k_tt,
     }
     json.dumps(metadata, allow_nan=False)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "match"),
+    (
+        ("critic_terms", "actor and critic observation terms"),
+        ("critic_width", "actor and critic observation widths"),
+        ("reward_identity", "guidance reward identity"),
+        ("waypoint_tracker", "waypoint tracker"),
+    ),
+)
+def test_joint_metadata_rejects_mismatched_live_schema_or_guidance_identity(
+    metadata_envs, mutation: str, match: str
+) -> None:
+    """Metadata must fail closed when the live manager graph is not a literal arm."""
+    env = metadata_envs[DIRECT_FIC0_TASK]
+    observation_manager = env.observation_manager
+    reward_manager = env.reward_manager
+    metrics_manager = env.metrics_manager
+    original_critic_terms = observation_manager.active_terms["critic"]
+    original_critic_width = observation_manager.group_obs_dim["critic"]
+    original_reward_terms = list(reward_manager.active_terms)
+    original_metric_terms = list(metrics_manager.active_terms)
+    try:
+        if mutation == "critic_terms":
+            observation_manager.active_terms["critic"] = [
+                *original_critic_terms,
+                "waypoint_progress_state",
+            ]
+        elif mutation == "critic_width":
+            observation_manager.group_obs_dim["critic"] = (47,)
+        elif mutation == "reward_identity":
+            reward_manager._term_names[:] = [
+                "r_waypoint_progress" if name == "r_imit" else name
+                for name in original_reward_terms
+            ]
+        else:
+            metrics_manager._term_names.append("waypoint_progress")
+
+        with pytest.raises(ValueError, match=match):
+            _get_hammer_metadata(env, "test-run", raw_policy_clip=RAW_POLICY_CLIP)
+    finally:
+        observation_manager.active_terms["critic"] = original_critic_terms
+        observation_manager.group_obs_dim["critic"] = original_critic_width
+        reward_manager._term_names[:] = original_reward_terms
+        metrics_manager._term_names[:] = original_metric_terms
 
 
 @pytest.mark.parametrize("invalid_timestep", (float("nan"), 0.001))
@@ -445,9 +592,45 @@ def test_save_attaches_joint_metadata_with_the_wrapper_owned_clip(joint_runner) 
     assert metadata["physics_dt_s"] == "0.002"
     assert metadata["control_decimation"] == "10"
     assert metadata["delivered_impulse_i_ref_n_s"] == "0.2799950838088989"
+    assert metadata["guidance_type"] == "waypoint_progress"
+    assert metadata["guidance_reward_key"] == "r_waypoint_progress"
+    assert metadata["guidance_reward_impl"] == (
+        "src.tasks.hammer.mdp.guideline.ordered_waypoint_progress_reward"
+    )
     for key, live_value in live_metadata.items():
         if isinstance(live_value, (list, dict)):
             assert json.loads(metadata[key]) == live_value
+
+
+def test_real_waypoint_checkpoint_strictly_rejects_direct_runner_width(
+    joint_runner,
+) -> None:
+    """The real learner boundary must reject a 47-column policy as 40-column input."""
+    waypoint_runner, run_root = joint_runner
+    export_dir = run_root / "waypoint-width-boundary"
+    export_dir.mkdir()
+    checkpoint = export_dir / "model_0.pt"
+    waypoint_runner.save(str(checkpoint))
+
+    cfg = load_env_cfg(DIRECT_FIC0_TASK, play=True)
+    direct_env = _make_env(cfg)
+    wrapper = RslRlVecEnvWrapper(direct_env, clip_actions=RAW_POLICY_CLIP)
+    runner_cfg = asdict(load_rl_cfg(DIRECT_FIC0_TASK))
+    runner_cfg["logger"] = "tensorboard"
+    runner_cfg["upload_model"] = False
+    runner_cls = load_runner_cls(DIRECT_FIC0_TASK)
+    assert runner_cls is not None
+    direct_runner = runner_cls(
+        wrapper,
+        runner_cfg,
+        log_dir=str(run_root / "direct-width-boundary"),
+        device="cpu",
+    )
+    try:
+        with pytest.raises(RuntimeError, match="size mismatch"):
+            direct_runner.load(str(checkpoint), strict=True, map_location="cpu")
+    finally:
+        direct_env.close()
 
 
 def test_save_propagates_metadata_contract_errors_before_onnx_export(
