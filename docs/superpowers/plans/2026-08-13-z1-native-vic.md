@@ -46,7 +46,7 @@
 
 **Files:**
 - Modify: `tests/test_joint_trackability.py`
-- Modify the narrow existing action-rate tests
+- Create: `tests/test_action_rate_penalty.py`
 - Modify: `src/tasks/hammer/mdp/trackability.py`
 - Modify: `src/tasks/hammer/mdp/rewards.py`
 
@@ -85,10 +85,10 @@
 ### Task 5: Qualify isolation, nominal parity, and bounded authority
 
 **Files:**
-- Create: `scripts/qualify_variable_impedance.py`
-- Create: `tests/test_qualify_variable_impedance.py`
+- Modify: `scripts/smoke_joint_position_fixed.py`
+- Modify: `tests/test_smoke_joint_position_fixed.py`
 
-- [ ] RED/GREEN: implement deterministic two-world opposite-corner, selected-reset, nominal-`p=0`, and alternating-command tapes in the existing live smoke or one narrow qualification script; no campaign framework or result JSON layer.
+- [ ] RED/GREEN: extend the existing joint-position live smoke with deterministic two-world opposite-corner, selected-reset, nominal-`p=0`, and alternating-command tapes; no separate qualification script, campaign framework, or result JSON layer.
 - [ ] Compare FIC-TT with VIC-TT at `p=0`: exact equality for applied targets/native gains and CPU trace `atol=rtol=1e-6` for qpos/qvel, RTT, contact, and CaT tensors. Instrument all ten substeps to prove q targets and gains remain paired.
 - [ ] Run only the frozen `C=1.25` authority tape with a declared nonsaturated position error; prove expected force ordering, finiteness, force-limit compliance, and reset isolation. Defer any larger `C` to a separate approved study.
 - [ ] Verify script tests and a live CPU qualification; commit Task 5 paths.
@@ -103,11 +103,10 @@
 - [ ] Request Opus, Gemini, DeepSeek, and repository Standards/Spec reviews plus an adversarial runtime/scientific review. Apply concrete Critical/Important fixes test-first, then bounded rereview.
 - [ ] Run the full CPU suite exactly once on the reviewed final CPU candidate.
 - [ ] Commit and push that reviewed candidate SHA to `z1-vic-prototype` so Vega can fetch it.
-- [ ] On Vega, fetch the pushed SHA into a clean detached worktree and run the live VIC smoke, deterministic qualification, two repeated nominal CUDA runs to establish repeatability, and genuine one-iteration CatPPO smoke on an A100. Record exact code/asset revisions and Slurm outcome.
-- [ ] If CUDA requires a code fix, test/review/push a new SHA and rerun the complete CUDA gate. Add only a final evidence/docs commit afterward if needed.
+- [ ] On Vega, fetch the pushed SHA into a clean detached worktree. First run the same nominal CUDA arm twice and set each tensor's parity tolerance to `max(1e-6, 2 * max_abs_same_arm_repeat_delta)`; freeze those values before running any FIC-VIC comparison. Then run the live VIC authority smoke, FIC-VIC nominal comparison, and genuine one-iteration CatPPO smoke on an A100. Record exact code/asset revisions, derived repeatability bounds, and Slurm outcome.
+- [ ] If CUDA requires a production-code fix, test and review the new SHA, rerun the full CPU suite on that new reviewed SHA, push it, and rerun the complete CUDA gate. Add only a final evidence/docs commit afterward if needed.
 
-### Task 7: Optional overnight engineering canary
+### Task 7: Deferred overnight engineering canary
 
-- [ ] Only after Tasks 1-6 pass, launch one seed-2 VIC-TT run at 4096 environments and 500 iterations using a minimal fail-closed VIC launcher and the unchanged direct-reference training protocol.
-- [ ] Require clean pinned revisions, the exact task/action/gain contract, finite training telemetry, and a finite `model_499.pt`. Do not promise productive-strike or comparative performance validation because evaluator expansion is outside this prototype.
-- [ ] Do not launch seeds 3 or 4 in this session. Stop before evaluator expansion, active impulse-CaT, or any new treatment design. Report the canary as engineering evidence only, with decisions, tests, job/checkpoint hashes, and remaining scientific questions.
+- [ ] Do not launch training from this prototype plan. A subsequent approved plan must name and test a minimal fail-closed VIC launcher, pin clean revisions and the exact task/action/gain contract, and define the permitted telemetry boundary.
+- [ ] Stop after the verified CPU/CUDA prototype and one-iteration learning smoke. Report decisions, tests, jobs, hashes, and remaining scientific questions for the separate overnight canary plan.
