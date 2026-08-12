@@ -394,19 +394,22 @@ def test_production_launcher_has_collision_safe_scheduler_contract() -> None:
     assert "#SBATCH --no-requeue" in source
     assert "#SBATCH --time=01:30:00" in source
     assert (
-        "#SBATCH --output=/ceph/hpc/home/eunikhilr/"
+        "#SBATCH --output=/ceph/hpc/home/eunikhilr/campaigns/"
+        "z1-fic-direct-reference/slurm/"
         "z1-fic-direct-reference-%A_%a.out"
     ) in source
     assert (
-        "#SBATCH --error=/ceph/hpc/home/eunikhilr/"
+        "#SBATCH --error=/ceph/hpc/home/eunikhilr/campaigns/"
+        "z1-fic-direct-reference/slurm/"
         "z1-fic-direct-reference-%A_%a.err"
     ) in source
     assert "set -euo pipefail" in source
     assert '^[0-9a-f]{40}$' in source
     assert (
-        'z1-fic-direct-reference-500/$EXPECTED_CODE_REVISION/'
+        'campaigns/z1-fic-direct-reference/runs/$EXPECTED_CODE_REVISION/'
         '$EXPECTED_ASSET_REVISION'
     ) in source
+    assert "$HOME/z1-fic-direct-reference-500" not in source
     assert '"NVIDIA A100-SXM4-40GB"' in source
     assert "device_count = torch.cuda.device_count()" in source
     assert (
@@ -455,12 +458,21 @@ def test_smoke_launcher_has_single_attempt_scheduler_contract() -> None:
     assert "#SBATCH --gres=gpu:1" in source
     assert "#SBATCH --no-requeue" in source
     assert "#SBATCH --time=00:30:00" in source
+    assert (
+        "#SBATCH --output=/ceph/hpc/home/eunikhilr/campaigns/"
+        "z1-fic-direct-reference/slurm/z1-fic-direct-smoke-%j.out"
+    ) in source
+    assert (
+        "#SBATCH --error=/ceph/hpc/home/eunikhilr/campaigns/"
+        "z1-fic-direct-reference/slurm/z1-fic-direct-smoke-%j.err"
+    ) in source
     assert "set -euo pipefail" in source
     assert '^[0-9a-f]{40}$' in source
     assert (
-        'z1-fic-direct-reference-smoke/$EXPECTED_CODE_REVISION/'
+        'campaigns/z1-fic-direct-reference/smoke/$EXPECTED_CODE_REVISION/'
         '$EXPECTED_ASSET_REVISION'
     ) in source
+    assert "$HOME/z1-fic-direct-reference-smoke" not in source
     assert '"NVIDIA A100-SXM4-40GB"' in source
     assert "device_count = torch.cuda.device_count()" in source
     assert (
@@ -501,7 +513,7 @@ def test_launcher_runs_exact_frozen_map_and_publishes_hashed_results(
     assert result.returncode == 0, result.stdout + result.stderr
     attempt = (
         Path(env["HOME"])
-        / "z1-fic-direct-reference-500"
+        / "campaigns/z1-fic-direct-reference/runs"
         / env["EXPECTED_CODE_REVISION"]
         / env["EXPECTED_ASSET_REVISION"]
         / f"12345_{array_index}_{short}_seed{seed}"
@@ -610,7 +622,7 @@ def test_smoke_launcher_runs_all_live_smokes_and_both_real_catppo_updates(
     ]
     attempt = (
         Path(env["HOME"])
-        / "z1-fic-direct-reference-smoke"
+        / "campaigns/z1-fic-direct-reference/smoke"
         / env["EXPECTED_CODE_REVISION"]
         / env["EXPECTED_ASSET_REVISION"]
         / "789_smoke"
@@ -840,13 +852,13 @@ def test_launchers_never_reuse_an_attempt_directory(
     if launcher == SMOKE_LAUNCHER:
         env["SLURM_JOB_ID"] = "789"
         leaf = "789_smoke"
-        root_name = "z1-fic-direct-reference-smoke"
+        relative_root = Path("campaigns/z1-fic-direct-reference/smoke")
     else:
         leaf = "12345_0_fic0_seed2"
-        root_name = "z1-fic-direct-reference-500"
+        relative_root = Path("campaigns/z1-fic-direct-reference/runs")
     attempt = (
         Path(env["HOME"])
-        / root_name
+        / relative_root
         / env["EXPECTED_CODE_REVISION"]
         / env["EXPECTED_ASSET_REVISION"]
         / leaf

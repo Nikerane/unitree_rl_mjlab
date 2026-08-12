@@ -223,7 +223,7 @@
 
 - [ ] **Step 2: GREEN — implement the guarded six-index launcher.**
 
-  Use `$HOME/z1-fic-direct-reference-500/$EXPECTED_CODE_REVISION/$EXPECTED_ASSET_REVISION/${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}_${SHORT}_seed${SEED}`. Train with:
+  Use `$HOME/campaigns/z1-fic-direct-reference/runs/$EXPECTED_CODE_REVISION/$EXPECTED_ASSET_REVISION/${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}_${SHORT}_seed${SEED}`. Keep production and smoke attempts beneath the campaign root, and write Slurm stdout/stderr beneath its pre-created `slurm/` directory. Train with:
 
   ```bash
   "$PY" "$RUN_ROOT/scripts/train.py" "$TASK" \
@@ -327,6 +327,7 @@
 
   ```bash
   Z1_DIRECT_REMOTE_HOME="$(ssh vega 'printf %s "$HOME"')"
+  Z1_DIRECT_CAMPAIGN_ROOT="$Z1_DIRECT_REMOTE_HOME/campaigns/z1-fic-direct-reference"
   Z1_DIRECT_BASE_REPO="$Z1_DIRECT_REMOTE_HOME/repos/unitree_rl_mjlab"
   ssh vega "git -C '$Z1_DIRECT_BASE_REPO' fetch origin codex/z1-fic-pilot"
   Z1_DIRECT_CODE_REV="$(ssh vega "git -C '$Z1_DIRECT_BASE_REPO' rev-parse origin/codex/z1-fic-pilot")"
@@ -334,13 +335,14 @@
   Z1_DIRECT_ASSET_REPO="$Z1_DIRECT_REMOTE_HOME/repos/safe_impact_manipulation"
   Z1_DIRECT_ASSET_REV="$(ssh vega "git -C '$Z1_DIRECT_ASSET_REPO' rev-parse HEAD")"
   ssh vega "test ! -e '$Z1_DIRECT_RUN_ROOT' && git -C '$Z1_DIRECT_BASE_REPO' worktree add --detach '$Z1_DIRECT_RUN_ROOT' '$Z1_DIRECT_CODE_REV'"
+  ssh vega "mkdir -p '$Z1_DIRECT_REMOTE_HOME/campaigns/z1-fic-direct-reference/slurm'"
   Z1_DIRECT_CUDA_JOB="$(ssh vega "sbatch --parsable \
     --export=ALL,RUN_ROOT='$Z1_DIRECT_RUN_ROOT',ASSET_REPO='$Z1_DIRECT_ASSET_REPO',EXPECTED_CODE_REVISION='$Z1_DIRECT_CODE_REV',EXPECTED_ASSET_REVISION='$Z1_DIRECT_ASSET_REV' \
     '$Z1_DIRECT_RUN_ROOT/scripts/slurm/vega_fic_direct_reference_smoke.sbatch'")"
   ssh vega "sacct -j '$Z1_DIRECT_CUDA_JOB' --format=JobID,State,ExitCode,Elapsed,NodeList -P"
   ```
 
-  Require `COMPLETED/0:0`, `Z1_DIRECT_CUDA_GPU=NVIDIA A100-SXM4-40GB` in the log, exact printed code/asset revisions, four passing live-manager task summaries, two completed real CatPPO updates, and finite checkpoints. Using `apply_patch`, create `<this plan's SDD workspace>/vega.env` with single-quoted assignments for `Z1_DIRECT_REMOTE_HOME`, `Z1_DIRECT_BASE_REPO`, `Z1_DIRECT_CODE_REV`, `Z1_DIRECT_RUN_ROOT`, `Z1_DIRECT_ASSET_REPO`, `Z1_DIRECT_ASSET_REV`, and `Z1_DIRECT_CUDA_JOB`; append the same evidence to the SDD ledger. Task 7 sources that git-ignored state file and must never re-resolve branch or asset HEAD.
+  Slurm opens output files before the launcher starts, so the controller must create exactly `$Z1_DIRECT_REMOTE_HOME/campaigns/z1-fic-direct-reference/slurm` before either submission; the launchers cannot create that directory for their own logs. Require `COMPLETED/0:0`, `Z1_DIRECT_CUDA_GPU=NVIDIA A100-SXM4-40GB` in the log, exact printed code/asset revisions, four passing live-manager task summaries, two completed real CatPPO updates, and finite checkpoints. Using `apply_patch`, create `<this plan's SDD workspace>/vega.env` with single-quoted assignments for `Z1_DIRECT_REMOTE_HOME`, `Z1_DIRECT_CAMPAIGN_ROOT`, `Z1_DIRECT_BASE_REPO`, `Z1_DIRECT_CODE_REV`, `Z1_DIRECT_RUN_ROOT`, `Z1_DIRECT_ASSET_REPO`, `Z1_DIRECT_ASSET_REV`, and `Z1_DIRECT_CUDA_JOB`; append the same evidence to the SDD ledger. Task 7 sources that git-ignored state file and must never re-resolve branch or asset HEAD.
 
 ---
 
@@ -387,7 +389,7 @@
   Z1_DIRECT_CANARY_DIR="$(mktemp -d /private/tmp/z1-direct-reference-canary.XXXXXX)"
   for Z1_DIRECT_NAME in fic0_seed2.json fictt_seed2.json fic0_seed2_curriculum.json fictt_seed2_curriculum.json
   do
-    Z1_DIRECT_MATCHES="$(ssh vega "find '$Z1_DIRECT_REMOTE_HOME/z1-fic-direct-reference-500/$Z1_DIRECT_CODE_REV/$Z1_DIRECT_ASSET_REV' -type f -name '$Z1_DIRECT_NAME' -print")"
+    Z1_DIRECT_MATCHES="$(ssh vega "find '$Z1_DIRECT_CAMPAIGN_ROOT/runs/$Z1_DIRECT_CODE_REV/$Z1_DIRECT_ASSET_REV' -type f -name '$Z1_DIRECT_NAME' -print")"
     test "$(printf '%s\n' "$Z1_DIRECT_MATCHES" | sed '/^$/d' | wc -l | tr -d ' ')" -eq 1
     rsync -av "vega:$Z1_DIRECT_MATCHES" "$Z1_DIRECT_CANARY_DIR/$Z1_DIRECT_NAME"
   done
@@ -441,7 +443,7 @@ PY
     fictt_seed2_curriculum.json fic0_seed3_curriculum.json \
     fictt_seed3_curriculum.json fic0_seed4_curriculum.json fictt_seed4_curriculum.json
   do
-    Z1_DIRECT_MATCHES="$(ssh vega "find \$HOME/z1-fic-direct-reference-500/$Z1_DIRECT_CODE_REV/$Z1_DIRECT_ASSET_REV -type f -name '$Z1_DIRECT_NAME' -print")"
+    Z1_DIRECT_MATCHES="$(ssh vega "find '$Z1_DIRECT_CAMPAIGN_ROOT/runs/$Z1_DIRECT_CODE_REV/$Z1_DIRECT_ASSET_REV' -type f -name '$Z1_DIRECT_NAME' -print")"
     test "$(printf '%s\n' "$Z1_DIRECT_MATCHES" | sed '/^$/d' | wc -l | tr -d ' ')" -eq 1
     rsync -av "vega:$Z1_DIRECT_MATCHES" "$Z1_DIRECT_LOCAL_RESULTS/$Z1_DIRECT_NAME"
   done
@@ -455,11 +457,10 @@ PY
   On the local controller, read each seed-2 checkpoint path/hash from the copied evaluation JSON, then invoke the exact detached renderer remotely. FIC-0:
 
   ```bash
-  Z1_DIRECT_REMOTE_HOME="$(ssh vega 'printf %s "$HOME"')"
   Z1_DIRECT_FIC0_JSON="$Z1_DIRECT_LOCAL_RESULTS/fic0_seed2.json"
   Z1_DIRECT_FIC0_CKPT="$(/Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -c 'import json,sys; print(json.load(open(sys.argv[1]))["checkpoint"]["path"])' "$Z1_DIRECT_FIC0_JSON")"
   Z1_DIRECT_FIC0_SHA="$(/Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -c 'import json,sys; print(json.load(open(sys.argv[1]))["checkpoint"]["sha256"])' "$Z1_DIRECT_FIC0_JSON")"
-  Z1_DIRECT_FIC0_RENDER="$Z1_DIRECT_REMOTE_HOME/z1-fic-direct-reference-renders/$Z1_DIRECT_CODE_REV/$Z1_DIRECT_ASSET_REV/fic0_seed2_$Z1_DIRECT_FIC0_SHA"
+  Z1_DIRECT_FIC0_RENDER="$Z1_DIRECT_CAMPAIGN_ROOT/renders/$Z1_DIRECT_CODE_REV/$Z1_DIRECT_ASSET_REV/fic0_seed2_$Z1_DIRECT_FIC0_SHA"
   ssh vega "test ! -e '$Z1_DIRECT_FIC0_RENDER' && \
     test \"\$(sha256sum '$Z1_DIRECT_FIC0_CKPT' | cut -d' ' -f1)\" = '$Z1_DIRECT_FIC0_SHA' && \
     srun --account=d2026d06-166-users --partition=gpu --gres=gpu:1 --cpus-per-task=4 --mem=20G --time=00:15:00 \

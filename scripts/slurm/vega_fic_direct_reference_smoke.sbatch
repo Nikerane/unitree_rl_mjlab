@@ -8,8 +8,8 @@
 #SBATCH --time=00:30:00
 #SBATCH --exclude=gn03,gn34
 #SBATCH --no-requeue
-#SBATCH --output=/ceph/hpc/home/eunikhilr/z1-fic-direct-smoke-%j.out
-#SBATCH --error=/ceph/hpc/home/eunikhilr/z1-fic-direct-smoke-%j.err
+#SBATCH --output=/ceph/hpc/home/eunikhilr/campaigns/z1-fic-direct-reference/slurm/z1-fic-direct-smoke-%j.out
+#SBATCH --error=/ceph/hpc/home/eunikhilr/campaigns/z1-fic-direct-reference/slurm/z1-fic-direct-smoke-%j.err
 
 set -euo pipefail
 module load git 2>/dev/null || true
@@ -65,7 +65,7 @@ ASSET_STATUS=$(git -C "$ASSET_REPO" status --porcelain=v1 --untracked-files=all)
 PY="$HOME/repos/unitree_rl_mjlab/.venv/bin/python"
 [[ -x "$PY" ]] || fail "Vega Python environment is unavailable"
 
-RESULT_ROOT="$HOME/z1-fic-direct-reference-smoke/$EXPECTED_CODE_REVISION/$EXPECTED_ASSET_REVISION"
+RESULT_ROOT="$HOME/campaigns/z1-fic-direct-reference/smoke/$EXPECTED_CODE_REVISION/$EXPECTED_ASSET_REVISION"
 ATTEMPT_DIR="$RESULT_ROOT/${SLURM_JOB_ID}_smoke"
 mkdir -p "$RESULT_ROOT"
 mkdir "$ATTEMPT_DIR" 2>/dev/null \
