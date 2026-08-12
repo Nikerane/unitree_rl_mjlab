@@ -6,6 +6,7 @@ import copy
 from dataclasses import asdict
 import json
 from pathlib import Path
+import re
 from typing import NoReturn
 
 import onnx
@@ -98,11 +99,11 @@ def _rtt_alias(env, robot_cfg, k_tt: float) -> torch.Tensor:
 
 def _synthetic_nominal_trace() -> dict[str, torch.Tensor]:
     """Small deterministic trace for exercising CUDA qualification routing without a GPU."""
-    substep_joint = torch.zeros(10, 2, 6)
-    control_joint = torch.zeros(1, 2, 6)
-    substep_env = torch.zeros(10, 2)
-    control_env = torch.zeros(1, 2)
-    contact = torch.zeros(10, 2, dtype=torch.bool)
+    substep_joint = torch.zeros(80, 2, 6)
+    control_joint = torch.zeros(8, 2, 6)
+    substep_env = torch.zeros(80, 2)
+    control_env = torch.zeros(8, 2)
+    contact = torch.zeros(80, 2, dtype=torch.bool)
     contact[0] = True
     return {
         "qpos": substep_joint.clone(),
@@ -248,6 +249,40 @@ def test_vic_nominal_parity_and_authority_qualification_passes_every_check() -> 
 
     assert results
     assert all(passed for _, passed, _ in results), results
+
+
+def test_nominal_trace_rejects_early_termination_instead_of_certifying_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A done flag before the eighth banked target must invalidate the trace."""
+    original_step = ManagerBasedRlEnv.step
+
+    def terminate_after_first_target(self, action):
+        observations, reward, terminated, truncated, extras = original_step(
+            self, action
+        )
+        return (
+            observations,
+            reward,
+            torch.ones_like(terminated, dtype=torch.bool),
+            truncated,
+            extras,
+        )
+
+    monkeypatch.setattr(ManagerBasedRlEnv, "step", terminate_after_first_target)
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            rf"{re.escape(DIRECT_FICTT_TASK)}.*1/8 control steps.*"
+            r"10/80 physics substeps"
+        ),
+    ):
+        smoke_joint_position_fixed._capture_nominal_trace(
+            DIRECT_FICTT_TASK,
+            "cpu",
+            num_envs=2,
+        )
 
 
 def test_cuda_qualification_calibrates_repeatability_before_vic_comparison(

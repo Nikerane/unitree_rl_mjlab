@@ -126,6 +126,28 @@ def _stack_trace(rows: dict[str, list[torch.Tensor]]) -> dict[str, torch.Tensor]
   return {name: torch.stack(values) for name, values in rows.items()}
 
 
+def _require_complete_nominal_trace(
+  task: str,
+  trace: dict[str, torch.Tensor],
+  *,
+  expected_controls: int,
+  decimation: int,
+) -> None:
+  """Reject a terminated prefix before it can serve as parity evidence."""
+  captured_controls = int(trace["r_tt"].shape[0])
+  captured_substeps = int(trace["qpos"].shape[0])
+  expected_substeps = expected_controls * decimation
+  if (
+    captured_controls != expected_controls
+    or captured_substeps != expected_substeps
+  ):
+    raise RuntimeError(
+      f"{task} nominal trace is incomplete: captured "
+      f"{captured_controls}/{expected_controls} control steps and "
+      f"{captured_substeps}/{expected_substeps} physics substeps"
+    )
+
+
 def _capture_nominal_trace(
   task: str,
   device: str,
@@ -234,9 +256,16 @@ def _capture_nominal_trace(
       if bool((terminated | truncated).any()):
         break
 
+    trace = _stack_trace(substep_rows) | _stack_trace(control_rows)
+    _require_complete_nominal_trace(
+      task,
+      trace,
+      expected_controls=len(target_tape),
+      decimation=int(cfg.decimation),
+    )
     if torch.device(env.device).type == "cuda":
       torch.cuda.synchronize(env.device)
-    return _stack_trace(substep_rows) | _stack_trace(control_rows)
+    return trace
   finally:
     if original_compute_substep is not None:
       env.metrics_manager.compute_substep = original_compute_substep
@@ -599,11 +628,21 @@ def run_vic_qualification_checks(
       for name in tolerance_names
     }
   vic = _capture_nominal_trace(VIC_TT_TASK, device, num_envs=num_envs)
-  decimation = 10
+  contract = load_joint_position_contract(_JOINT_POSITION_CONTRACT_PATH)
+  expected_steps = len(contract.source_target_tape_rad)
+  fic_decimation = int(load_env_cfg(DIRECT_FICTT_TASK, play=True).decimation)
+  vic_decimation = int(load_env_cfg(VIC_TT_TASK, play=True).decimation)
+  if fic_decimation != vic_decimation:
+    raise RuntimeError(
+      "FIC-TT and VIC-TT must use the same control decimation for parity: "
+      f"{fic_decimation} != {vic_decimation}"
+    )
+  decimation = fic_decimation
   fic_steps = fic["r_tt"].shape[0]
   vic_steps = vic["r_tt"].shape[0]
   substep_count_ok = (
-    fic_steps == vic_steps
+    fic_steps == expected_steps
+    and vic_steps == expected_steps
     and fic["qpos"].shape[0] == fic_steps * decimation
     and vic["qpos"].shape[0] == vic_steps * decimation
   )
@@ -616,8 +655,9 @@ def run_vic_qualification_checks(
     and torch.allclose(vic["qtarget"], vic_expected, rtol=0.0, atol=1.0e-7)
   )
   check(
-    "nominal tape captures exactly ten paired physics substeps per target",
+    "nominal tape captures every target and its configured physics substeps",
     substep_count_ok and targets_are_paired,
+    f"targets={expected_steps}; decimation={decimation}; "
     f"fic_steps={fic_steps}; vic_steps={vic_steps}; "
     f"fic_substeps={fic['qpos'].shape[0]}; vic_substeps={vic['qpos'].shape[0]}",
   )
