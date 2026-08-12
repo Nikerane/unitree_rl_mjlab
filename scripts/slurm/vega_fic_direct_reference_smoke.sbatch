@@ -22,6 +22,7 @@ fail() {
 }
 
 [[ "$#" -eq 0 ]] || fail "launcher accepts no arguments"
+[[ -z "${PYTHONOPTIMIZE:-}" ]] || fail "PYTHONOPTIMIZE must be empty"
 
 for REVISION_NAME in EXPECTED_CODE_REVISION EXPECTED_ASSET_REVISION; do
   REVISION_VALUE="${!REVISION_NAME:-}"
@@ -46,15 +47,17 @@ CODE_REVISION=$(git -C "$RUN_ROOT" rev-parse HEAD 2>/dev/null) \
   || fail "code repository is unavailable"
 [[ "$CODE_REVISION" = "$EXPECTED_CODE_REVISION" ]] \
   || fail "code revision mismatch"
-[[ -z "$(git -C "$RUN_ROOT" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ]] \
-  || fail "code repository must be clean"
+CODE_STATUS=$(git -C "$RUN_ROOT" status --porcelain=v1 --untracked-files=all) \
+  || fail "code repository status check failed"
+[[ -z "$CODE_STATUS" ]] || fail "code repository must be clean"
 
 ASSET_REVISION=$(git -C "$ASSET_REPO" rev-parse HEAD 2>/dev/null) \
   || fail "asset repository is unavailable"
 [[ "$ASSET_REVISION" = "$EXPECTED_ASSET_REVISION" ]] \
   || fail "asset revision mismatch"
-[[ -z "$(git -C "$ASSET_REPO" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ]] \
-  || fail "asset repository must be clean"
+ASSET_STATUS=$(git -C "$ASSET_REPO" status --porcelain=v1 --untracked-files=all) \
+  || fail "asset repository status check failed"
+[[ -z "$ASSET_STATUS" ]] || fail "asset repository must be clean"
 
 [[ "${SLURM_JOB_ID:-}" =~ ^[0-9]+$ ]] \
   || fail "SLURM_JOB_ID must be numeric"
@@ -80,11 +83,19 @@ import torch
 
 expected = {"mjlab": "1.4.0", "mujoco": "3.8.1", "mujoco-warp": "3.8.1"}
 actual = {package: version(package) for package in expected}
-assert torch.cuda.is_available(), "CUDA unavailable"
-assert torch.cuda.device_count() == 1, torch.cuda.device_count()
+
+
+def require(condition, message):
+    if not condition:
+        raise RuntimeError(message)
+
+
+require(torch.cuda.is_available(), "CUDA unavailable")
+device_count = torch.cuda.device_count()
+require(device_count == 1, f"CUDA device count mismatch: {device_count}")
 gpu_name = torch.cuda.get_device_name(0)
-assert gpu_name == "NVIDIA A100-SXM4-40GB", gpu_name
-assert actual == expected, actual
+require(gpu_name == "NVIDIA A100-SXM4-40GB", f"unexpected GPU: {gpu_name}")
+require(actual == expected, f"runtime package versions do not match: {actual!r}")
 print(f"Z1_DIRECT_CUDA_GPU={gpu_name}")
 print("Z1_DIRECT_RUNTIME=" + " ".join(f"{key}={value}" for key, value in actual.items()))
 PY

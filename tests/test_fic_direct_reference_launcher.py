@@ -6,6 +6,8 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
+import shutil
 import subprocess
 import sys
 
@@ -184,6 +186,30 @@ def _install_fake_python(env: dict[str, str]) -> None:
     py.chmod(0o755)
 
 
+def _install_failing_git_status(
+    tmp_path: Path, env: dict[str, str], *, repository: Path
+) -> None:
+    real_git = shutil.which("git")
+    assert real_git is not None
+    fake_bin = tmp_path / "fake-git-bin"
+    fake_bin.mkdir()
+    git = fake_bin / "git"
+    git.write_text(
+        "#!/bin/sh\n"
+        "if [ \"${1:-}\" = -C ] "
+        "&& [ \"${2:-}\" = \"$FAKE_GIT_STATUS_FAIL_PATH\" ] "
+        "&& [ \"${3:-}\" = status ]; then\n"
+        "  printf 'simulated git status failure for %s\\n' \"$2\" >&2\n"
+        "  exit 42\n"
+        "fi\n"
+        "exec \"$REAL_GIT\" \"$@\"\n"
+    )
+    git.chmod(0o755)
+    env["REAL_GIT"] = real_git
+    env["FAKE_GIT_STATUS_FAIL_PATH"] = str(repository.resolve())
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+
+
 def _prepared_fake_env(
     tmp_path: Path,
     *,
@@ -212,15 +238,84 @@ def _calls(env: dict[str, str]) -> list[list[str]]:
     ]
 
 
+def _embedded_python_source(launcher: Path, invocation: str) -> str:
+    source = launcher.read_text()
+    start = source.index(invocation) + len(invocation)
+    end = source.index("\nPY\n", start)
+    return source[start:end] + "\n"
+
+
+def _runtime_guard_source(launcher: Path) -> str:
+    return _embedded_python_source(
+        launcher,
+        '"$PY" - <<\'PY\' || fail '
+        '"CUDA identity or runtime package versions do not match"\n',
+    )
+
+
+def _checkpoint_guard_source() -> str:
+    return _embedded_python_source(
+        LAUNCHER,
+        '"$PY" - "$CHECKPOINT" <<\'PY\' \\\n'
+        '  || fail "model_499.pt contains no finite checkpoint state"\n',
+    )
+
+
 def _curriculum_extractor_source() -> str:
-    source = LAUNCHER.read_text()
     invocation = (
         '"$PY" - "$RUN_DIR" "$CURRICULUM_JSON" "$TASK" "$SHORT" "$SEED" '
         "<<'PY' \\\n  || fail \"curriculum telemetry validation failed\"\n"
     )
-    start = source.index(invocation) + len(invocation)
-    end = source.index('\nPY\n[[ -s "$CURRICULUM_JSON" ]]', start)
-    return source[start:end] + "\n"
+    return _embedded_python_source(LAUNCHER, invocation)
+
+
+def _install_runtime_stubs(
+    tmp_path: Path,
+    *,
+    cuda_available: bool = True,
+    device_count: int = 1,
+    gpu_name: str = "NVIDIA A100-SXM4-40GB",
+    mjlab_version: str = "1.4.0",
+) -> Path:
+    root = tmp_path / "runtime-stubs"
+    root.mkdir()
+    (root / "torch.py").write_text(
+        "class Cuda:\n"
+        f"    @staticmethod\n    def is_available(): return {cuda_available!r}\n"
+        f"    @staticmethod\n    def device_count(): return {device_count!r}\n"
+        f"    @staticmethod\n    def get_device_name(index): return {gpu_name!r}\n"
+        "cuda = Cuda()\n"
+    )
+    for package, version in (
+        ("mjlab", mjlab_version),
+        ("mujoco", "3.8.1"),
+        ("mujoco-warp", "3.8.1"),
+    ):
+        normalized = package.replace("-", "_")
+        metadata = root / f"{normalized}-{version}.dist-info"
+        metadata.mkdir()
+        (metadata / "METADATA").write_text(
+            f"Metadata-Version: 2.1\nName: {package}\nVersion: {version}\n"
+        )
+    return root
+
+
+def _install_checkpoint_torch_stub(tmp_path: Path) -> Path:
+    root = tmp_path / "checkpoint-stubs"
+    root.mkdir()
+    (root / "torch.py").write_text(
+        "import os\n"
+        "class Tensor:\n"
+        "    def __init__(self, finite): self.finite = finite\n"
+        "class FiniteResult:\n"
+        "    def __init__(self, finite): self.finite = finite\n"
+        "    def all(self): return self.finite\n"
+        "def load(path, map_location, weights_only):\n"
+        "    if os.environ['FAKE_CHECKPOINT_MODE'] == 'tensorless': return {}\n"
+        "    return {'state': Tensor(False)}\n"
+        "def isfinite(value): return FiniteResult(value.finite)\n"
+    )
+    return root
 
 
 def _install_fake_tensorboard(tmp_path: Path) -> Path:
@@ -264,6 +359,7 @@ def _run_curriculum_extractor(
     *,
     mode: str = "success",
     preexisting: bool = False,
+    optimize: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     output = tmp_path / "curriculum.json"
     if preexisting:
@@ -274,8 +370,12 @@ def _run_curriculum_extractor(
     env["PYTHONPATH"] = str(_install_fake_tensorboard(tmp_path))
     env["FAKE_EVENTS"] = json.dumps(rows)
     env["FAKE_EVENT_MODE"] = mode
+    command = [sys.executable]
+    if optimize:
+        command.append("-O")
+    command.extend(["-", str(run_dir), str(output), FIC0_TASK, "fic0", "2"])
     result = subprocess.run(
-        [sys.executable, "-", str(run_dir), str(output), FIC0_TASK, "fic0", "2"],
+        command,
         input=_curriculum_extractor_source(),
         env=env,
         capture_output=True,
@@ -308,7 +408,11 @@ def test_production_launcher_has_collision_safe_scheduler_contract() -> None:
         '$EXPECTED_ASSET_REVISION'
     ) in source
     assert '"NVIDIA A100-SXM4-40GB"' in source
-    assert "torch.cuda.device_count() == 1" in source
+    assert "device_count = torch.cuda.device_count()" in source
+    assert (
+        'require(device_count == 1, f"CUDA device count mismatch: {device_count}")'
+        in source
+    )
     assert (
         'expected = {"mjlab": "1.4.0", "mujoco": "3.8.1", '
         '"mujoco-warp": "3.8.1"}'
@@ -358,7 +462,11 @@ def test_smoke_launcher_has_single_attempt_scheduler_contract() -> None:
         '$EXPECTED_ASSET_REVISION'
     ) in source
     assert '"NVIDIA A100-SXM4-40GB"' in source
-    assert "torch.cuda.device_count() == 1" in source
+    assert "device_count = torch.cuda.device_count()" in source
+    assert (
+        'require(device_count == 1, f"CUDA device count mismatch: {device_count}")'
+        in source
+    )
     assert (
         'expected = {"mjlab": "1.4.0", "mujoco": "3.8.1", '
         '"mujoco-warp": "3.8.1"}'
@@ -529,6 +637,23 @@ def test_launchers_reject_all_cli_overrides(
     assert not (Path(env["HOME"]) / "python_calls.log").exists()
 
 
+@pytest.mark.parametrize("launcher", (LAUNCHER, SMOKE_LAUNCHER))
+@pytest.mark.parametrize("optimization", ("1", "0", " "))
+def test_launchers_reject_inherited_python_optimization_before_python(
+    tmp_path: Path, launcher: Path, optimization: str
+) -> None:
+    env = _prepared_fake_env(tmp_path)
+    env["PYTHONOPTIMIZE"] = optimization
+    if launcher == SMOKE_LAUNCHER:
+        env["SLURM_JOB_ID"] = "789"
+
+    result = _run(env, launcher)
+
+    assert result.returncode == 2
+    assert "PYTHONOPTIMIZE must be empty" in result.stdout
+    assert not (Path(env["HOME"]) / "python_calls.log").exists()
+
+
 @pytest.mark.parametrize(
     ("name", "value"),
     (
@@ -615,6 +740,28 @@ def test_launchers_reject_dirty_repositories_before_python(
 
     assert result.returncode == 2
     assert message in result.stdout
+    assert not (Path(env["HOME"]) / "python_calls.log").exists()
+
+
+@pytest.mark.parametrize("launcher", (LAUNCHER, SMOKE_LAUNCHER))
+@pytest.mark.parametrize(
+    ("repo_var", "repository_label"),
+    (("RUN_ROOT", "code"), ("ASSET_REPO", "asset")),
+)
+def test_launchers_reject_git_status_command_failure_before_python(
+    tmp_path: Path, launcher: Path, repo_var: str, repository_label: str
+) -> None:
+    env = _prepared_fake_env(tmp_path)
+    if launcher == SMOKE_LAUNCHER:
+        env["SLURM_JOB_ID"] = "789"
+    repository = Path(env[repo_var]).resolve()
+    _install_failing_git_status(tmp_path, env, repository=repository)
+
+    result = _run(env, launcher)
+
+    assert result.returncode == 2
+    assert f"{repository_label} repository status check failed" in result.stdout
+    assert f"simulated git status failure for {repository}" in result.stderr
     assert not (Path(env["HOME"]) / "python_calls.log").exists()
 
 
@@ -791,6 +938,78 @@ def test_launcher_requires_fresh_successful_evaluator_and_curriculum_outputs(
     assert "FIC_DIRECT_REFERENCE_DONE" not in result.stdout
 
 
+@pytest.mark.parametrize("launcher", (LAUNCHER, SMOKE_LAUNCHER))
+@pytest.mark.parametrize(
+    ("stub_kwargs", "message"),
+    (
+        ({"cuda_available": False}, "CUDA unavailable"),
+        ({"device_count": 2}, "CUDA device count mismatch"),
+        ({"gpu_name": "NVIDIA H100 80GB HBM3"}, "unexpected GPU"),
+        ({"mjlab_version": "1.4.1"}, "runtime package versions do not match"),
+    ),
+)
+def test_embedded_runtime_guards_reject_invalid_inputs_under_optimization(
+    tmp_path: Path,
+    launcher: Path,
+    stub_kwargs: dict[str, object],
+    message: str,
+) -> None:
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(_install_runtime_stubs(tmp_path, **stub_kwargs))
+
+    result = subprocess.run(
+        [sys.executable, "-O", "-"],
+        input=_runtime_guard_source(launcher),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode != 0
+    assert message in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("mode", "message"),
+    (
+        ("tensorless", "checkpoint contains no tensors"),
+        ("nonfinite", "non-finite checkpoint tensor"),
+    ),
+)
+def test_embedded_checkpoint_guard_rejects_invalid_state_under_optimization(
+    tmp_path: Path, mode: str, message: str
+) -> None:
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(_install_checkpoint_torch_stub(tmp_path))
+    env["FAKE_CHECKPOINT_MODE"] = mode
+    checkpoint = tmp_path / "model_499.pt"
+    checkpoint.write_text("fixture")
+
+    result = subprocess.run(
+        [sys.executable, "-O", "-", str(checkpoint)],
+        input=_checkpoint_guard_source(),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode != 0
+    assert message in result.stderr
+
+
+def test_embedded_python_guards_do_not_use_optimization_sensitive_asserts() -> None:
+    sources = (
+        _runtime_guard_source(LAUNCHER),
+        _runtime_guard_source(SMOKE_LAUNCHER),
+        _checkpoint_guard_source(),
+        _curriculum_extractor_source(),
+    )
+
+    assert all(re.search(r"(?m)^\s*assert\b", source) is None for source in sources)
+
+
 def test_curriculum_extractor_accepts_convex_averages_and_preserves_raw_samples(
     tmp_path: Path,
 ) -> None:
@@ -800,7 +1019,7 @@ def test_curriculum_extractor_accepts_convex_averages_and_preserves_raw_samples(
         for index, weight in enumerate(weights)
     ]
 
-    result, output = _run_curriculum_extractor(tmp_path, rows)
+    result, output = _run_curriculum_extractor(tmp_path, rows, optimize=True)
 
     assert result.returncode == 0, result.stdout + result.stderr
     payload = json.loads(output.read_text())
@@ -891,6 +1110,30 @@ def test_curriculum_extractor_accepts_convex_averages_and_preserves_raw_samples(
         ),
         (
             [
+                {"step": step, "value": value}
+                for step, value in zip(
+                    [0, 1, 2.5, 3, 4, 5],
+                    [0.1, 0.08, 0.06, 0.04, 0.02, 0.0],
+                    strict=True,
+                )
+            ],
+            "success",
+            "curriculum event step is not an integer",
+        ),
+        (
+            [
+                {"step": step, "value": value}
+                for step, value in zip(
+                    [-1, 0, 1, 2, 3, 4],
+                    [0.1, 0.08, 0.06, 0.04, 0.02, 0.0],
+                    strict=True,
+                )
+            ],
+            "success",
+            "curriculum event step is negative",
+        ),
+        (
+            [
                 {"step": index, "value": value}
                 for index, value in enumerate([0.1, 0.08, 0.06, 0.04, 0.02, 0.0])
             ],
@@ -900,13 +1143,15 @@ def test_curriculum_extractor_accepts_convex_averages_and_preserves_raw_samples(
         ([], "success", "empty curriculum scalar stream"),
     ),
 )
-def test_curriculum_extractor_rejects_invalid_or_incomplete_telemetry(
+def test_curriculum_extractor_rejects_invalid_telemetry_under_optimization(
     tmp_path: Path,
     rows: list[dict[str, object]],
     mode: str,
     message: str,
 ) -> None:
-    result, output = _run_curriculum_extractor(tmp_path, rows, mode=mode)
+    result, output = _run_curriculum_extractor(
+        tmp_path, rows, mode=mode, optimize=True
+    )
 
     assert result.returncode != 0
     assert message in result.stderr

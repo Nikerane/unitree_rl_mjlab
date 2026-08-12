@@ -23,6 +23,7 @@ fail() {
 }
 
 [[ "$#" -eq 0 ]] || fail "launcher accepts no arguments"
+[[ -z "${PYTHONOPTIMIZE:-}" ]] || fail "PYTHONOPTIMIZE must be empty"
 
 if [[ "${SLURM_ARRAY_TASK_COUNT:-}" = "2" \
   && "${SLURM_ARRAY_TASK_MIN:-}" = "0" \
@@ -100,15 +101,17 @@ CODE_REVISION=$(git -C "$RUN_ROOT" rev-parse HEAD 2>/dev/null) \
   || fail "code repository is unavailable"
 [[ "$CODE_REVISION" = "$EXPECTED_CODE_REVISION" ]] \
   || fail "code revision mismatch"
-[[ -z "$(git -C "$RUN_ROOT" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ]] \
-  || fail "code repository must be clean"
+CODE_STATUS=$(git -C "$RUN_ROOT" status --porcelain=v1 --untracked-files=all) \
+  || fail "code repository status check failed"
+[[ -z "$CODE_STATUS" ]] || fail "code repository must be clean"
 
 ASSET_REVISION=$(git -C "$ASSET_REPO" rev-parse HEAD 2>/dev/null) \
   || fail "asset repository is unavailable"
 [[ "$ASSET_REVISION" = "$EXPECTED_ASSET_REVISION" ]] \
   || fail "asset revision mismatch"
-[[ -z "$(git -C "$ASSET_REPO" status --porcelain=v1 --untracked-files=all 2>/dev/null)" ]] \
-  || fail "asset repository must be clean"
+ASSET_STATUS=$(git -C "$ASSET_REPO" status --porcelain=v1 --untracked-files=all) \
+  || fail "asset repository status check failed"
+[[ -z "$ASSET_STATUS" ]] || fail "asset repository must be clean"
 
 [[ "${SLURM_ARRAY_JOB_ID:-}" =~ ^[0-9]+$ ]] \
   || fail "SLURM_ARRAY_JOB_ID must be numeric"
@@ -139,11 +142,19 @@ import torch
 
 expected = {"mjlab": "1.4.0", "mujoco": "3.8.1", "mujoco-warp": "3.8.1"}
 actual = {package: version(package) for package in expected}
-assert torch.cuda.is_available(), "CUDA unavailable"
-assert torch.cuda.device_count() == 1, torch.cuda.device_count()
+
+
+def require(condition, message):
+    if not condition:
+        raise RuntimeError(message)
+
+
+require(torch.cuda.is_available(), "CUDA unavailable")
+device_count = torch.cuda.device_count()
+require(device_count == 1, f"CUDA device count mismatch: {device_count}")
 gpu_name = torch.cuda.get_device_name(0)
-assert gpu_name == "NVIDIA A100-SXM4-40GB", gpu_name
-assert actual == expected, actual
+require(gpu_name == "NVIDIA A100-SXM4-40GB", f"unexpected GPU: {gpu_name}")
+require(actual == expected, f"runtime package versions do not match: {actual!r}")
 print(f"Z1_DIRECT_CUDA_GPU={gpu_name}")
 print("Z1_DIRECT_RUNTIME=" + " ".join(f"{key}={value}" for key, value in actual.items()))
 PY
@@ -188,9 +199,17 @@ def tensors(value):
 checkpoint = Path(sys.argv[1])
 state = torch.load(checkpoint, map_location="cpu", weights_only=False)
 values = list(tensors(state))
-assert values, "checkpoint contains no tensors"
-assert all(bool(torch.isfinite(value).all()) for value in values), (
-    "non-finite checkpoint tensor"
+
+
+def require(condition, message):
+    if not condition:
+        raise RuntimeError(message)
+
+
+require(values, "checkpoint contains no tensors")
+require(
+    all(bool(torch.isfinite(value).all()) for value in values),
+    "non-finite checkpoint tensor",
 )
 PY
 
@@ -226,40 +245,56 @@ scalar = "Curriculum/r_imit_anneal/weight"
 stages = (0.10, 0.08, 0.06, 0.04, 0.02, 0.00)
 tolerance = 1e-6
 
+
+def require(condition, message):
+    if not condition:
+        raise RuntimeError(message)
+
 accumulator = EventAccumulator(str(run_dir), size_guidance={"scalars": 0})
 accumulator.Reload()
-assert scalar in accumulator.Tags().get("scalars", ()), (
-    f"missing TensorBoard scalar: {scalar}"
+require(
+    scalar in accumulator.Tags().get("scalars", ()),
+    f"missing TensorBoard scalar: {scalar}",
 )
 events = accumulator.Scalars(scalar)
-assert events, "empty curriculum scalar stream"
+require(events, "empty curriculum scalar stream")
 
 observed = []
 previous_step = -1
 previous_weight = math.inf
 for event in events:
-    assert isinstance(event.step, Integral), "curriculum event step is not an integer"
-    iteration = int(event.step)
-    assert iteration >= 0, "curriculum event step is negative"
-    assert iteration > previous_step, "curriculum event steps are not strictly increasing"
-    weight = float(event.value)
-    assert math.isfinite(weight), "non-finite curriculum weight"
-    assert -tolerance <= weight <= 0.1 + tolerance, (
-        f"curriculum weight outside [0,0.1]: {weight}"
+    require(
+        isinstance(event.step, Integral),
+        "curriculum event step is not an integer",
     )
-    assert previous_weight >= weight - tolerance, (
-        f"curriculum weights increase: {previous_weight} -> {weight}"
+    iteration = int(event.step)
+    require(iteration >= 0, "curriculum event step is negative")
+    require(
+        iteration > previous_step,
+        "curriculum event steps are not strictly increasing",
+    )
+    weight = float(event.value)
+    require(math.isfinite(weight), "non-finite curriculum weight")
+    require(
+        -tolerance <= weight <= 0.1 + tolerance,
+        f"curriculum weight outside [0,0.1]: {weight}",
+    )
+    require(
+        previous_weight >= weight - tolerance,
+        f"curriculum weights increase: {previous_weight} -> {weight}",
     )
     observed.append({"iteration": iteration, "weight": weight})
     previous_step = iteration
     previous_weight = weight
 
 for stage in stages:
-    assert any(abs(row["weight"] - stage) <= tolerance for row in observed), (
-        f"canonical curriculum plateau was not observed: {stage}"
+    require(
+        any(abs(row["weight"] - stage) <= tolerance for row in observed),
+        f"canonical curriculum plateau was not observed: {stage}",
     )
-assert abs(observed[-1]["weight"]) <= tolerance, (
-    "final curriculum sample is not zero"
+require(
+    abs(observed[-1]["weight"]) <= tolerance,
+    "final curriculum sample is not zero",
 )
 
 payload = {
