@@ -232,7 +232,7 @@
     --env.scene.num-envs 4096
   ```
 
-  Evaluate `model_499.pt` with the matching training seed. Inspect the TensorBoard scalar `Curriculum/r_imit_anneal/weight`; require finite and nonincreasing values. Match every raw float32 sample to exactly one of `{0.10,0.08,0.06,0.04,0.02,0.00}` with absolute tolerance `1e-6`, require all six plateaus, and require the final sample within `1e-6` of zero. Retain raw samples in `observed`; canonicalize the separately reported `final_weight` only after validation. Publish one canonical compact `${SHORT}_seed${SEED}_curriculum.json` beside the evaluation JSON:
+  Evaluate `model_499.pt` with the matching training seed. Inspect the TensorBoard scalar `Curriculum/r_imit_anneal/weight`; require finite and nonincreasing values within tolerance `1e-6`. TensorBoard emits PPO-iteration aggregates of reset extras, so a threshold-crossing iteration may contain a convex average between two adjacent stage weights; retain every raw sample in `observed` and do not mistake its event step for the curriculum's control-step clock. Require every value within `[0,0.1]`, each of the six canonical plateaus `{0.10,0.08,0.06,0.04,0.02,0.00}` observed within `1e-6`, and the final sample within `1e-6` of zero. Canonicalize the separately reported `final_weight` only after validation. Publish one canonical compact `${SHORT}_seed${SEED}_curriculum.json` beside the evaluation JSON:
 
   ```json
   {"schema_version":1,"task":"Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-JointPosition-Fixed","arm":"fic0","training_seed":2,"scalar":"Curriculum/r_imit_anneal/weight","expected_control_step_stages":[[0,0.1],[1200,0.08],[2400,0.06],[3600,0.04],[4800,0.02],[6000,0.0]],"observed":[{"iteration":0,"weight":0.1}],"final_weight":0.0}
@@ -406,7 +406,7 @@ for name in ("fic0_seed2_curriculum.json", "fictt_seed2_curriculum.json"):
     raw = [float(row["weight"]) for row in curriculum["observed"]]
     assert raw and all(math.isfinite(value) for value in raw)
     assert all(raw[index] >= raw[index + 1] - 1e-6 for index in range(len(raw) - 1))
-    assert all(any(abs(value - stage) <= 1e-6 for stage in stages) for value in raw)
+    assert all(-1e-6 <= value <= 0.1 + 1e-6 for value in raw)
     assert all(any(abs(value - stage) <= 1e-6 for value in raw) for stage in stages)
     assert abs(float(curriculum["final_weight"])) <= 1e-6
 PY
