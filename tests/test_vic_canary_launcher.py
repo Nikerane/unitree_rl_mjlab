@@ -343,7 +343,7 @@ def _install_runtime_stubs(
     return root
 
 
-def _install_strict_reload_stubs(tmp_path: Path) -> Path:
+def _install_strict_reload_stubs(tmp_path: Path, *, mode: str) -> Path:
     root = tmp_path / "reload-stubs"
     for package in (
         "mjlab", "mjlab/envs", "mjlab/rl", "mjlab/tasks", "src", "src/tasks",
@@ -362,6 +362,7 @@ def _install_strict_reload_stubs(tmp_path: Path) -> Path:
         "    def close(self): pass\n"
     )
     (root / "mjlab/tasks/registry.py").write_text(
+        "import os\n"
         "from dataclasses import dataclass\n"
         "from types import SimpleNamespace\n"
         "def load_env_cfg(task, play=False): return SimpleNamespace(scene=SimpleNamespace(num_envs=0))\n"
@@ -372,7 +373,11 @@ def _install_strict_reload_stubs(tmp_path: Path) -> Path:
         "    return C()\n"
         "class Runner:\n"
         "    def __init__(self, *args, **kwargs): pass\n"
-        "    def load(self, *args, **kwargs): raise RuntimeError('strict reload failed')\n"
+        "    def load(self, checkpoint, load_cfg, strict, map_location):\n"
+        "        if load_cfg is not None: raise RuntimeError('checkpoint reload was not full')\n"
+        "        if strict is not True or map_location != 'cuda:0': raise RuntimeError('strict reload arguments drifted')\n"
+        "        if os.environ['FAKE_RELOAD_MODE'] == 'malformed-critic': raise RuntimeError('critic state mismatch')\n"
+        "        if os.environ['FAKE_RELOAD_MODE'] == 'malformed-optimizer': raise RuntimeError('optimizer state mismatch')\n"
         "def load_runner_cls(task): return Runner\n"
     )
     return root
@@ -894,9 +899,16 @@ def test_postflight_rejects_bad_tensorboard_semantics_under_optimization(
     assert not output.exists()
 
 
-def test_strict_reload_guard_is_not_disabled_by_optimization(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("mode", "message"),
+    (("malformed-critic", "critic state mismatch"), ("malformed-optimizer", "optimizer state mismatch")),
+)
+def test_full_strict_reload_rejects_malformed_training_state_under_optimization(
+    tmp_path: Path, mode: str, message: str
+) -> None:
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(_install_strict_reload_stubs(tmp_path))
+    env["PYTHONPATH"] = str(_install_strict_reload_stubs(tmp_path, mode=mode))
+    env["FAKE_RELOAD_MODE"] = mode
     checkpoint = tmp_path / "model_499.pt"
     checkpoint.write_text("fixture")
     result = subprocess.run(
@@ -905,7 +917,15 @@ def test_strict_reload_guard_is_not_disabled_by_optimization(tmp_path: Path) -> 
         cwd=tmp_path, capture_output=True, text=True, timeout=30,
     )
     assert result.returncode != 0
-    assert "strict reload failed" in result.stderr
+    assert message in result.stderr
+
+
+def test_strict_reload_uses_full_checkpoint_contract() -> None:
+    source = _strict_reload_source()
+    assert (
+        'runner.load(checkpoint, load_cfg=None, strict=True, map_location="cuda:0")'
+        in source
+    )
 
 
 def test_embedded_production_guards_never_use_assert() -> None:

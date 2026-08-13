@@ -413,7 +413,7 @@ try:
     runner_cls = load_runner_cls(task)
     require(runner_cls is not None, "VIC task has no registered runner")
     runner = runner_cls(wrapped, asdict(agent_cfg), device="cuda:0")
-    runner.load(checkpoint, load_cfg={"actor": True}, strict=True, map_location="cuda:0")
+    runner.load(checkpoint, load_cfg=None, strict=True, map_location="cuda:0")
 finally:
     wrapped.close()
 PY
