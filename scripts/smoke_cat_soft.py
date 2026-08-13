@@ -95,7 +95,9 @@ def _assert_checkpoint_rollout_telemetry(
     "joint_names",
     "gain_action_indices",
     "raw_action_clip",
+    "rollout_steps_per_env",
     "sample_count",
+    "temporal_provenance",
     "deterministic_gaussian_mean",
     "sampled_action",
     "gaussian_exploration_std",
@@ -109,7 +111,14 @@ def _assert_checkpoint_rollout_telemetry(
     "VIC checkpoint gain action indices drifted"
   )
   assert telemetry["raw_action_clip"] == 1.0
+  assert telemetry["rollout_steps_per_env"] == 24, (
+    "VIC checkpoint rollout steps drifted"
+  )
   assert telemetry["sample_count"] == expected_sample_count
+  assert telemetry["temporal_provenance"] == {
+    "rollout_generated_by": "pre_update_behavior_policy",
+    "checkpoint_weights": "post_update",
+  }, "VIC checkpoint temporal provenance drifted"
   summary_keys = {
     "mean",
     "std",

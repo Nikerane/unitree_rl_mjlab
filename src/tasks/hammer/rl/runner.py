@@ -664,7 +664,12 @@ def _summarize_vic_rollout_telemetry(
         "joint_names": list(JOINT_NAMES),
         "gain_action_indices": list(range(len(JOINT_NAMES), 2 * len(JOINT_NAMES))),
         "raw_action_clip": float(raw_action_clip),
+        "rollout_steps_per_env": int(storage.num_transitions_per_env),
         "sample_count": int(sampled_raw.shape[0]),
+        "temporal_provenance": {
+            "rollout_generated_by": "pre_update_behavior_policy",
+            "checkpoint_weights": "post_update",
+        },
         "deterministic_gaussian_mean": {
             "raw": _vic_per_joint_summary(
                 mean_raw, raw_action_clip=float(raw_action_clip)
@@ -697,8 +702,25 @@ class HammerOnPolicyRunner(MjlabOnPolicyRunner):
   def save(self, path: str, infos=None):
     action_terms = tuple(self.env.unwrapped.action_manager.active_terms)
     if action_terms == ("joint_position", "joint_stiffness"):
+      storage = self.alg.storage
+      configured_steps = self.cfg.get("num_steps_per_env")
+      storage_steps = getattr(storage, "num_transitions_per_env", None)
+      if (
+        isinstance(configured_steps, bool)
+        or isinstance(storage_steps, bool)
+        or configured_steps != 24
+        or storage_steps != 24
+      ):
+        raise ValueError(
+          "VIC checkpoint telemetry requires configured and storage 24-step rollout"
+        )
+      storage_step = getattr(storage, "step", None)
+      if isinstance(storage_step, bool) or storage_step != 0:
+        raise ValueError(
+          "VIC checkpoint telemetry requires post-update storage cursor 0"
+        )
       telemetry = _summarize_vic_rollout_telemetry(
-        self.alg.storage,
+        storage,
         action_terms=action_terms,
         raw_action_clip=self.env.clip_actions,
       )

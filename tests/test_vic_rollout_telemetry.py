@@ -55,7 +55,20 @@ def _literal_storage() -> SimpleNamespace:
         distribution_params=(means, std),
         num_transitions_per_env=2,
         num_envs=2,
+        step=0,
     )
+
+
+def _checkpoint_storage(*, populated: bool = True) -> SimpleNamespace:
+    storage = _literal_storage()
+    storage.actions = storage.actions.repeat(12, 1, 1)
+    storage.distribution_params = tuple(
+        value.repeat(12, 1, 1) for value in storage.distribution_params
+    )
+    storage.num_transitions_per_env = 24
+    if not populated:
+        storage.distribution_params = None
+    return storage
 
 
 def test_summarizer_reports_independently_worked_gain_statistics() -> None:
@@ -73,7 +86,12 @@ def test_summarizer_reports_independently_worked_gain_statistics() -> None:
     assert telemetry["joint_names"] == list(JOINT_NAMES)
     assert telemetry["gain_action_indices"] == [6, 7, 8, 9, 10, 11]
     assert telemetry["raw_action_clip"] == 1.0
+    assert telemetry["rollout_steps_per_env"] == 2
     assert telemetry["sample_count"] == 4
+    assert telemetry["temporal_provenance"] == {
+        "rollout_generated_by": "pre_update_behavior_policy",
+        "checkpoint_weights": "post_update",
+    }
 
     sampled_raw = telemetry["sampled_action"]["raw"]
     assert sampled_raw["mean"] == pytest.approx([0.0, 0.5, 0.25, 0.0, -0.25, 0.0])
@@ -103,6 +121,47 @@ def test_summarizer_reports_independently_worked_gain_statistics() -> None:
     assert mean_raw["mean"] == pytest.approx([0.0, 0.25, 0.75, 0.5, 0.25, 0.25])
     assert mean_raw["lower_bound_occupancy"] == [0.25, 0.0, 0.0, 0.25, 0.25, 0.25]
     assert mean_raw["upper_bound_occupancy"] == [0.25, 0.25, 0.5, 0.5, 0.5, 0.25]
+    mean_clipped = telemetry["deterministic_gaussian_mean"]["clipped"]
+    assert mean_clipped["mean"] == pytest.approx(
+        [0.0, 0.25, 0.625, 0.375, 0.125, 0.125]
+    )
+    assert mean_clipped["std"] == pytest.approx(
+        [
+            math.sqrt(0.625),
+            math.sqrt(0.3125),
+            math.sqrt(0.171875),
+            math.sqrt(0.671875),
+            math.sqrt(0.796875),
+            math.sqrt(0.546875),
+        ]
+    )
+    assert mean_clipped["minimum"] == [-1.0, -0.5, 0.0, -1.0, -1.0, -1.0]
+    assert mean_clipped["p05"] == pytest.approx(
+        [-0.925, -0.425, 0.075, -0.775, -0.925, -0.85]
+    )
+    assert mean_clipped["median"] == pytest.approx(
+        [0.0, 0.25, 0.75, 0.75, 0.25, 0.25]
+    )
+    assert mean_clipped["p95"] == pytest.approx(
+        [0.925, 0.925, 1.0, 1.0, 1.0, 0.925]
+    )
+    assert mean_clipped["maximum"] == [1.0] * 6
+    assert mean_clipped["lower_bound_occupancy"] == [
+        0.25,
+        0.0,
+        0.0,
+        0.25,
+        0.25,
+        0.25,
+    ]
+    assert mean_clipped["upper_bound_occupancy"] == [
+        0.25,
+        0.25,
+        0.5,
+        0.5,
+        0.5,
+        0.25,
+    ]
     assert telemetry["gaussian_exploration_std"] == pytest.approx(
         [0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
     )
@@ -142,7 +201,7 @@ def _fake_runner(
     )
     runner.alg = SimpleNamespace(storage=storage)
     runner.logger = SimpleNamespace(logger_type="tensorboard")
-    runner.cfg = {"upload_model": False}
+    runner.cfg = {"upload_model": False, "num_steps_per_env": 24}
     runner._get_export_paths = lambda path: (
         tmp_path,
         "policy.onnx",
@@ -184,8 +243,7 @@ def test_manual_empty_vic_save_preserves_none_infos(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A valid pre-rollout VIC save must not invent an empty telemetry record."""
-    storage = _literal_storage()
-    storage.distribution_params = None
+    storage = _checkpoint_storage(populated=False)
     runner = _fake_runner(
         tmp_path,
         monkeypatch,
@@ -203,7 +261,7 @@ def test_malformed_populated_vic_storage_fails_before_checkpoint_write(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A populated VIC rollout with misaligned Gaussian storage must fail closed."""
-    storage = _literal_storage()
+    storage = _checkpoint_storage()
     storage.distribution_params = (
         storage.distribution_params[0][..., :-1],
         storage.distribution_params[1],
@@ -222,6 +280,71 @@ def test_malformed_populated_vic_storage_fails_before_checkpoint_write(
     assert not checkpoint.exists()
 
 
+@pytest.mark.parametrize("length_owner", ("configured", "storage"))
+def test_vic_save_rejects_wrong_rollout_length_before_checkpoint_write(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, length_owner: str
+) -> None:
+    """Neither runner config nor storage may drift from the qualified 24 steps."""
+    storage = _checkpoint_storage()
+    runner = _fake_runner(
+        tmp_path,
+        monkeypatch,
+        action_terms=VIC_ACTION_TERMS,
+        storage=storage,
+    )
+    if length_owner == "configured":
+        runner.cfg["num_steps_per_env"] = 23
+    else:
+        storage.num_transitions_per_env = 23
+    checkpoint = tmp_path / f"vic-{length_owner}-length.pt"
+
+    with pytest.raises(ValueError, match="24-step rollout"):
+        runner.save(str(checkpoint))
+
+    assert not checkpoint.exists()
+
+
+@pytest.mark.parametrize("cursor", (1, 24))
+def test_vic_save_rejects_partial_or_stale_populated_cursor(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, cursor: int
+) -> None:
+    """Only a post-update cleared cursor may label retained data pre-update."""
+    storage = _checkpoint_storage()
+    storage.step = cursor
+    runner = _fake_runner(
+        tmp_path,
+        monkeypatch,
+        action_terms=VIC_ACTION_TERMS,
+        storage=storage,
+    )
+    checkpoint = tmp_path / f"vic-cursor-{cursor}.pt"
+
+    with pytest.raises(ValueError, match="post-update storage cursor"):
+        runner.save(str(checkpoint))
+
+    assert not checkpoint.exists()
+
+
+def test_vic_save_rejects_malformed_empty_lifecycle_before_omitting_telemetry(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Missing Gaussian data is empty only at the exact pre-rollout cursor."""
+    storage = _checkpoint_storage(populated=False)
+    storage.step = 1
+    runner = _fake_runner(
+        tmp_path,
+        monkeypatch,
+        action_terms=VIC_ACTION_TERMS,
+        storage=storage,
+    )
+    checkpoint = tmp_path / "vic-malformed-empty.pt"
+
+    with pytest.raises(ValueError, match="post-update storage cursor"):
+        runner.save(str(checkpoint))
+
+    assert not checkpoint.exists()
+
+
 def test_one_iteration_vic_catppo_checkpoint_contains_rollout_telemetry() -> None:
     """The real rollout/update/save path must persist the latest VIC gain record."""
     checkpoint = run_smoke(task=VIC_TT_TASK, device="cpu", num_envs=1, iters=1)
@@ -234,6 +357,11 @@ def test_one_iteration_vic_catppo_checkpoint_contains_rollout_telemetry() -> Non
     assert telemetry["gain_action_indices"] == [6, 7, 8, 9, 10, 11]
     assert telemetry["joint_names"] == list(JOINT_NAMES)
     assert telemetry["raw_action_clip"] == 1.0
+    assert telemetry["rollout_steps_per_env"] == 24
+    assert telemetry["temporal_provenance"] == {
+        "rollout_generated_by": "pre_update_behavior_policy",
+        "checkpoint_weights": "post_update",
+    }
     json.dumps(telemetry, allow_nan=False)
 
 
@@ -249,7 +377,7 @@ def test_smoke_requires_exact_telemetry_only_for_vic() -> None:
         )
 
     valid = _summarize_vic_rollout_telemetry(
-        _literal_storage(),
+        _checkpoint_storage(),
         action_terms=VIC_ACTION_TERMS,
         raw_action_clip=1.0,
     )
@@ -257,8 +385,39 @@ def test_smoke_requires_exact_telemetry_only_for_vic() -> None:
     _assert_checkpoint_rollout_telemetry(
         VIC_TT_TASK,
         {"infos": {"vic_rollout_telemetry": valid}},
-        expected_sample_count=4,
+        expected_sample_count=48,
     )
+
+    missing_temporal_contract = dict(valid)
+    missing_temporal_contract.pop("rollout_steps_per_env", None)
+    missing_temporal_contract.pop("temporal_provenance", None)
+    with pytest.raises(AssertionError, match="schema drifted"):
+        _assert_checkpoint_rollout_telemetry(
+            VIC_TT_TASK,
+            {"infos": {"vic_rollout_telemetry": missing_temporal_contract}},
+            expected_sample_count=48,
+        )
+
+    invalid_steps = dict(valid)
+    invalid_steps["rollout_steps_per_env"] = 23
+    with pytest.raises(AssertionError, match="rollout steps"):
+        _assert_checkpoint_rollout_telemetry(
+            VIC_TT_TASK,
+            {"infos": {"vic_rollout_telemetry": invalid_steps}},
+            expected_sample_count=48,
+        )
+
+    invalid_temporal = dict(valid)
+    invalid_temporal["temporal_provenance"] = {
+        "rollout_generated_by": "post_update_policy",
+        "checkpoint_weights": "post_update",
+    }
+    with pytest.raises(AssertionError, match="temporal provenance"):
+        _assert_checkpoint_rollout_telemetry(
+            VIC_TT_TASK,
+            {"infos": {"vic_rollout_telemetry": invalid_temporal}},
+            expected_sample_count=48,
+        )
 
     invalid = dict(valid)
     invalid["gain_action_indices"] = [0, 1, 2, 3, 4, 5]
@@ -266,5 +425,5 @@ def test_smoke_requires_exact_telemetry_only_for_vic() -> None:
         _assert_checkpoint_rollout_telemetry(
             VIC_TT_TASK,
             {"infos": {"vic_rollout_telemetry": invalid}},
-            expected_sample_count=4,
+            expected_sample_count=48,
         )
