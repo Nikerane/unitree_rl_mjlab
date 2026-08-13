@@ -106,37 +106,67 @@ Review the fixed commit against the constraints above. Any Critical/Important fi
 
 Record the full candidate SHA and the exact test outputs. Push only after all review findings are closed and the worktree is clean.
 
-### Task 3: Re-run and bank corrected Task 9 without retraining
+### Task 3: Add a tracked, atomic Task-9 CLI
 
 **Files:**
-- Create on Vega: a new immutable Task-9 result directory under `/ceph/hpc/home/eunikhilr/unitree_rl_mjlab_eval/fq4x8/`.
-- Create locally after verification: one dated result record under `docs/results/` and its exact artifacts under `docs/results/assets/`.
-- Modify: `docs/results/README.md` and the stale Task-9 status in `docs/results/2026-07-28_CODEX_HANDOVER_fq4x8.md`.
+- Create: `evaluation/analysis/fq4x8_task9.py`
+- Create: `tests/test_fq4x8_task9.py`
 
 **Interfaces:**
-- Consumes: reviewed candidate SHA; immutable accepted-training manifest SHA `fb55f214d6e0cb2da308e6580ef535d4823038bc8ab842a05ca4085ab346ec14`; immutable accepted-evaluation manifest SHA `8679604440712d276996b8768842fa2358b8119c798ab94208c7a504a4f34136`.
-- Produces: a new canonical `analysis.json`, exactly two preregistered PNGs, sorted SHA-256 manifest, invocation/log provenance, and a conservative result record.
+- Consumes: immutable accepted-training manifest SHA `fb55f214d6e0cb2da308e6580ef535d4823038bc8ab842a05ca4085ab346ec14`; immutable accepted-evaluation manifest SHA `8679604440712d276996b8768842fa2358b8119c798ab94208c7a504a4f34136`; immutable attempt-2 summary SHA `3e2469627ed0daa94c98a94eced580ca87d581d2a721bca97893d9ea03eeaa3a`.
+- Produces: `load_frozen_inputs(...)`, `run_task9(...)`, and `main(argv=None)`, plus a canonical result directory with `analysis.json`, exactly two PNGs, and a sorted three-entry SHA-256 manifest.
 
 - [ ] **Step 1: Add and test a tracked Task-9 CLI**
 
-Create a narrow tracked CLI which accepts only the accepted-training manifest, accepted-evaluation manifest, frozen summary, and new absent output directory; validates all three input hashes before analysis; loads the complete campaign through the existing fail-closed readers; runs `analyze_quality_campaign` and `render_quality_figures`; writes canonical `analysis.json`, exactly two PNGs, and a sorted hash manifest atomically. Test help/argument validation, input hash drift, preexisting-output rejection, invalid analysis rejection, and a small real fixture success. Do not copy analysis logic into the CLI.
+Create a narrow tracked CLI which accepts only `--accepted-training-manifest`, `--accepted-evaluation-manifest`, `--summary`, and `--output-dir`. Read each input once as bytes and verify all three hard-coded hashes before decoding. Reuse `fq4x8_manifests` parsers/validators and `render_quality_figures`; do not copy analysis logic or run the analyzer twice.
 
-- [ ] **Step 2: Show the exact command before submission**
+Reject any existing output inode with `os.path.lexists`, including dangling symlinks. Create a unique sibling staging directory, serialize sorted two-space JSON with a final newline and `allow_nan=False`, require exactly the two registered PNGs, write a lexicographically sorted three-entry basename-only checksum manifest, then publish the complete directory with same-filesystem `os.rename`. Remove only the owned staging directory after pre-publication failure. Emit runtime/input/output provenance as one JSON object on stdout, outside the canonical bundle.
+
+Test first: exact four-argument CLI; one-byte drift in each input; cross-inconsistent hash-correct manifests; preexisting file/directory/dangling symlink; invalid analysis/unexpected renderer outputs; serialization/publication failure cleanup; exact successful four-file inventory and independently verified manifest; runtime provenance excluded from the bundle; one real full-shape fixture integration.
+
+- [ ] **Step 2: Review and commit the CLI**
+
+Run the new CLI tests plus the quality/manifests suites. Perform independent Spec and Standards reviews. Fix Critical/Important findings test-first, then commit only the module and test.
+
+### Task 4: Re-run corrected Task 9 once on Vega
+
+**Files:**
+- Create on Vega: one new immutable Task-9 result directory under `/ceph/hpc/home/eunikhilr/unitree_rl_mjlab_eval/fq4x8/`.
+- Create on Vega: separate Slurm stdout/stderr and command/runtime provenance outside the canonical result directory.
+
+**Interfaces:**
+- Consumes: reviewed Task-1 + Task-3 candidate SHA and the three immutable frozen inputs.
+- Produces: one verified corrected Task-9 bundle; no training or policy evaluation.
+
+- [ ] **Step 1: Show the exact command before submission**
 
 Resolve and print the clean detached checkout, immutable manifest paths/hashes, new collision-safe output directory, analysis invocation, timeout, and monitored stdout/stderr paths. Do not run until those exact values have been surfaced in the active conversation.
 
-- [ ] **Step 3: Run CPU-only Task 9 once**
+- [ ] **Step 2: Run CPU-only Task 9 once**
 
-Use the existing analysis entry point and immutable attempt-2 artifacts. Monitor process-alive and the declared timeout. Do not auto-retry a crash.
+Use the new tracked CLI and immutable attempt-2 artifacts. Monitor process-alive and the declared timeout. Do not auto-retry a crash.
 
-- [ ] **Step 4: Verify the new bundle independently**
+- [ ] **Step 3: Verify the new bundle independently**
 
 Require all manifest hashes, 32 seed aggregates, 16,384 sampled episodes, all sentinels zero, corrected ratio values/gates, unchanged primary Holm/sign-flip conclusions, and exactly two preregistered figures. Compare old and corrected decoded `analysis.json` after replacing only the three ratio records and their dependent gate booleans: every primary contrast, seed aggregate, valid-contact coordinate, nail geometry, and all unrelated fields must be exactly equal. Verify that the analysis dependency closure under `evaluation/analysis/` is unchanged between `0fba76bca7a10e46a618f0715db15da3f520a7b9` and the candidate except for the reviewed ratio helper and tracked CLI. Record Python, NumPy, and Matplotlib versions. Require the contact-map bytes to remain unchanged under the matched runtime and require the paired-effects figure to change because the two formerly unavailable ratio bars become visible.
 
-- [ ] **Step 5: Bank the corrected result test-first**
+### Task 5: Bank the corrected result and update current truth
+
+**Files:**
+- Create: one dated result record under `docs/results/`.
+- Create: a compact result package under `docs/results/assets/`.
+- Create: one compact integrity test.
+- Modify: `docs/results/README.md`.
+- Modify: `docs/results/2026-07-28_CODEX_HANDOVER_fq4x8.md` by appending a dated completion/correction addendum only.
+
+**Interfaces:**
+- Consumes: independently verified Task-4 remote bundle and provenance.
+- Produces: a conservative, hash-bound local result record; no reward-stack change.
+
+- [ ] **Step 1: Bank the corrected result test-first**
 
 Add a compact integrity test that independently loads the banked JSON, recomputes the corrected ratios/decisions, verifies every local artifact hash, and checks the dated record/index link. The canonical remote core inventory is exactly `analysis.json`, `paired_seed_effects.png`, and `aggregate_nail_plane_contact_map.png`, with a sorted three-entry checksum manifest; command, Slurm log, runtime versions, and input hashes are separate provenance artifacts. Locally bank deterministic `analysis.json.gz` plus the decompressed JSON SHA rather than an uncompressed 11.13 MB duplicate, unless an explicit size audit supports the raw copy. Write the result record with the unit of inference (`n=8` training seeds), null-is-not-equivalence caveat, old Cartesian/fixed-impedance applicability boundary, and outcome-stable bug correction. Add a dated completion/correction addendum to the historical 2026-07-28 handover; do not rewrite statements that were true at handover time.
 
-- [ ] **Step 6: Commit and final-review the bank**
+- [ ] **Step 2: Commit and final-review the bank**
 
 Run the result test, docs-current tests, bounded analysis suites, and `git diff --check`; then perform final Spec/Standards review before pushing the bank commit.
