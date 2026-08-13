@@ -125,9 +125,12 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
         "docs/superpowers/plans/2026-08-12-z1-direct-reference-fic.md",
         "docs/superpowers/specs/2026-08-13-z1-native-vic-design.md",
         "docs/superpowers/plans/2026-08-13-z1-native-vic.md",
+        "docs/superpowers/specs/2026-08-13-z1-vic-canary-design.md",
+        "docs/superpowers/plans/2026-08-13-z1-vic-canary.md",
         "src/tasks/hammer/mdp/variable_impedance.py",
         "scripts/slurm/vega_fic_direct_reference_smoke.sbatch",
         "scripts/slurm/vega_fic_direct_reference.sbatch",
+        "scripts/slurm/vega_vic_canary.sbatch",
         "evaluation/joint_position/evaluate_fic_pilot.py",
     )
     missing = [ref for ref in required_refs if f"`{ref}`" not in text]
@@ -139,9 +142,11 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
         line for line in text.splitlines() if line.startswith("**Current GPU route:**")
     )
     assert "clean detached worktree" in route
-    assert "VIC-TT qualification" in route
+    assert "VIC-TT qualification is banked and complete" in route
     assert "same nominal arm twice" in route
     assert "A100" in route
+    assert "seed-2 engineering canary is approved but not yet run" in route
+    assert "no VIC training result exists yet" in route
     assert "direct-reference FIC-0/FIC-TT campaign" not in route
     assert (
         "direct-reference FIC launchers are banked baseline/reproducibility routes"
@@ -162,9 +167,17 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
         for line in text.splitlines()
         if line.startswith("**Current VIC prototype route:**")
     )
-    assert "implementation and qualification only" in prototype
-    assert "no VIC training or result claim" in prototype
-    assert "training is deferred" in prototype
+    assert "implementation and qualification are banked" in prototype
+    assert "exactly one seed-2 engineering canary" in prototype
+    assert "approved for launch" in prototype
+    assert "no more seeds or formal FIC–VIC comparison" in prototype
+    assert "training is deferred" not in text
+    assert "training is explicitly deferred" not in text
+    assert (
+        "`scripts/slurm/vega_vic_canary.sbatch` "
+        "(approved one-seed VIC-TT engineering canary; not yet run)"
+        in text
+    )
 
 
 def test_vic_docs_disclose_action_dimension_learner_comparison_caveat():
