@@ -567,10 +567,144 @@ def _metadata_for_onnx(metadata: dict) -> dict:
     }
 
 
+def _vic_per_joint_summary(
+    values: torch.Tensor, *, raw_action_clip: float
+) -> dict[str, list[float]]:
+    """Summarize one flattened population of six ordered gain coordinates."""
+    quantiles = torch.quantile(
+        values,
+        values.new_tensor((0.05, 0.5, 0.95)),
+        dim=0,
+    )
+
+    def _list(tensor: torch.Tensor) -> list[float]:
+        return [float(item) for item in tensor.tolist()]
+
+    return {
+        "mean": _list(values.mean(dim=0)),
+        "std": _list(values.std(dim=0, correction=0)),
+        "minimum": _list(values.amin(dim=0)),
+        "p05": _list(quantiles[0]),
+        "median": _list(quantiles[1]),
+        "p95": _list(quantiles[2]),
+        "maximum": _list(values.amax(dim=0)),
+        "lower_bound_occupancy": _list(
+            (values <= -raw_action_clip).to(dtype=values.dtype).mean(dim=0)
+        ),
+        "upper_bound_occupancy": _list(
+            (values >= raw_action_clip).to(dtype=values.dtype).mean(dim=0)
+        ),
+    }
+
+
+def _summarize_vic_rollout_telemetry(
+    storage,
+    *,
+    action_terms: tuple[str, ...],
+    raw_action_clip: float,
+) -> dict[str, object] | None:
+    """Return JSON-safe gain telemetry from the latest qualified VIC rollout."""
+    if action_terms != ("joint_position", "joint_stiffness"):
+        raise ValueError("VIC rollout telemetry requires the exact ordered action pair")
+    if (
+        isinstance(raw_action_clip, bool)
+        or not isinstance(raw_action_clip, (int, float))
+        or not math.isfinite(float(raw_action_clip))
+        or raw_action_clip != 1.0
+    ):
+        raise ValueError("VIC rollout telemetry requires raw action clip 1.0")
+
+    distribution_params = storage.distribution_params
+    if distribution_params is None:
+        return None
+    if not isinstance(distribution_params, tuple) or len(distribution_params) != 2:
+        raise ValueError("VIC rollout telemetry requires Gaussian mean and std")
+
+    actions = storage.actions
+    means, exploration_std = distribution_params
+    expected_shape = (
+        storage.num_transitions_per_env,
+        storage.num_envs,
+        2 * len(JOINT_NAMES),
+    )
+    if (
+        not isinstance(actions, torch.Tensor)
+        or not isinstance(means, torch.Tensor)
+        or not isinstance(exploration_std, torch.Tensor)
+        or tuple(actions.shape) != expected_shape
+        or tuple(means.shape) != expected_shape
+        or tuple(exploration_std.shape) != expected_shape
+        or expected_shape[0] <= 0
+        or expected_shape[1] <= 0
+    ):
+        raise ValueError("VIC rollout telemetry requires aligned nonempty 12D storage")
+    if not (
+        torch.isfinite(actions).all()
+        and torch.isfinite(means).all()
+        and torch.isfinite(exploration_std).all()
+    ):
+        raise ValueError("VIC rollout telemetry requires finite storage")
+    if not torch.all(exploration_std > 0.0):
+        raise ValueError("VIC rollout telemetry requires positive Gaussian std")
+
+    gain_slice = slice(len(JOINT_NAMES), 2 * len(JOINT_NAMES))
+
+    def _gain_population(tensor: torch.Tensor) -> torch.Tensor:
+        return tensor[..., gain_slice].reshape(-1, len(JOINT_NAMES)).detach().to(
+            device="cpu", dtype=torch.float64
+        )
+
+    sampled_raw = _gain_population(actions)
+    mean_raw = _gain_population(means)
+    std_raw = _gain_population(exploration_std)
+    telemetry: dict[str, object] = {
+        "schema_version": 1,
+        "source": "cat_rollout_storage",
+        "action_terms": list(action_terms),
+        "joint_names": list(JOINT_NAMES),
+        "gain_action_indices": list(range(len(JOINT_NAMES), 2 * len(JOINT_NAMES))),
+        "raw_action_clip": float(raw_action_clip),
+        "sample_count": int(sampled_raw.shape[0]),
+        "deterministic_gaussian_mean": {
+            "raw": _vic_per_joint_summary(
+                mean_raw, raw_action_clip=float(raw_action_clip)
+            ),
+            "clipped": _vic_per_joint_summary(
+                mean_raw.clamp(-raw_action_clip, raw_action_clip),
+                raw_action_clip=float(raw_action_clip),
+            ),
+        },
+        "sampled_action": {
+            "raw": _vic_per_joint_summary(
+                sampled_raw, raw_action_clip=float(raw_action_clip)
+            ),
+            "clipped": _vic_per_joint_summary(
+                sampled_raw.clamp(-raw_action_clip, raw_action_clip),
+                raw_action_clip=float(raw_action_clip),
+            ),
+        },
+        "gaussian_exploration_std": [
+            float(item) for item in std_raw.mean(dim=0).tolist()
+        ],
+    }
+    json.dumps(telemetry, allow_nan=False)
+    return telemetry
+
+
 class HammerOnPolicyRunner(MjlabOnPolicyRunner):
   env: RslRlVecEnvWrapper
 
   def save(self, path: str, infos=None):
+    action_terms = tuple(self.env.unwrapped.action_manager.active_terms)
+    if action_terms == ("joint_position", "joint_stiffness"):
+      telemetry = _summarize_vic_rollout_telemetry(
+        self.alg.storage,
+        action_terms=action_terms,
+        raw_action_clip=self.env.clip_actions,
+      )
+      if telemetry is not None:
+        infos = {} if infos is None else dict(infos)
+        infos["vic_rollout_telemetry"] = telemetry
     super().save(path, infos)
     policy_dir, filename, onnx_path = self._get_export_paths(path)
     is_wandb = self.logger.logger_type == "wandb"

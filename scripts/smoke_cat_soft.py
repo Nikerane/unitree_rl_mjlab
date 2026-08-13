@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Iterator, Mapping
+import json
 from pathlib import Path
 import tempfile
 from dataclasses import asdict
@@ -25,6 +26,7 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 import src.tasks.hammer.config.z1  # noqa: F401  (registers tasks)
 from src.tasks.hammer.rl.cat_ppo import CatPPO
 from src.tasks.hammer.rl.cat_storage import CatRolloutStorage
+from src.tasks.hammer.config.z1.joint_position_contract import JOINT_NAMES
 
 TASK = "Unitree-Z1-Hammer-CaT-Soft"
 FIC0_TASK = (
@@ -71,6 +73,68 @@ def _assert_finite_tensors(value: object, *, state_name: str) -> None:
   assert tensors, f"{state_name} contains no tensors"
   nonfinite = [tuple(tensor.shape) for tensor in tensors if not torch.isfinite(tensor).all()]
   assert not nonfinite, f"{state_name} contains non-finite tensors with shapes {nonfinite}"
+
+
+def _assert_checkpoint_rollout_telemetry(
+  task: str,
+  checkpoint_state: Mapping[str, object],
+  *,
+  expected_sample_count: int,
+) -> None:
+  """Require the compact qualified rollout record for the VIC smoke only."""
+  if task != VIC_TT_TASK:
+    return
+  infos = checkpoint_state.get("infos")
+  assert isinstance(infos, Mapping), "VIC checkpoint telemetry infos are missing"
+  telemetry = infos.get("vic_rollout_telemetry")
+  assert isinstance(telemetry, Mapping), "VIC checkpoint telemetry record is missing"
+  expected_keys = {
+    "schema_version",
+    "source",
+    "action_terms",
+    "joint_names",
+    "gain_action_indices",
+    "raw_action_clip",
+    "sample_count",
+    "deterministic_gaussian_mean",
+    "sampled_action",
+    "gaussian_exploration_std",
+  }
+  assert set(telemetry) == expected_keys, "VIC checkpoint telemetry schema drifted"
+  assert telemetry["schema_version"] == 1
+  assert telemetry["source"] == "cat_rollout_storage"
+  assert telemetry["action_terms"] == ["joint_position", "joint_stiffness"]
+  assert telemetry["joint_names"] == list(JOINT_NAMES)
+  assert telemetry["gain_action_indices"] == [6, 7, 8, 9, 10, 11], (
+    "VIC checkpoint gain action indices drifted"
+  )
+  assert telemetry["raw_action_clip"] == 1.0
+  assert telemetry["sample_count"] == expected_sample_count
+  summary_keys = {
+    "mean",
+    "std",
+    "minimum",
+    "p05",
+    "median",
+    "p95",
+    "maximum",
+    "lower_bound_occupancy",
+    "upper_bound_occupancy",
+  }
+  for source_name in ("deterministic_gaussian_mean", "sampled_action"):
+    source = telemetry[source_name]
+    assert isinstance(source, Mapping) and set(source) == {"raw", "clipped"}
+    for form in ("raw", "clipped"):
+      summary = source[form]
+      assert isinstance(summary, Mapping) and set(summary) == summary_keys
+      assert all(
+        isinstance(summary[key], list) and len(summary[key]) == len(JOINT_NAMES)
+        for key in summary_keys
+      )
+  exploration_std = telemetry["gaussian_exploration_std"]
+  assert isinstance(exploration_std, list) and len(exploration_std) == len(JOINT_NAMES)
+  assert all(value > 0.0 for value in exploration_std)
+  json.dumps(telemetry, allow_nan=False, sort_keys=True)
 
 
 def run_smoke(
@@ -143,6 +207,11 @@ def run_smoke(
     checkpoint = checkpoints[-1]
     checkpoint_state = torch.load(checkpoint, map_location="cpu", weights_only=False)
     _assert_finite_tensors(checkpoint_state, state_name=f"checkpoint {checkpoint}")
+    _assert_checkpoint_rollout_telemetry(
+      task,
+      checkpoint_state,
+      expected_sample_count=runner_cfg["num_steps_per_env"] * num_envs,
+    )
   finally:
     raw_env.close()
 
