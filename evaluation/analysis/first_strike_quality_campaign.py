@@ -214,15 +214,21 @@ def paired_bootstrap_ratio(
     control = _finite_vector(control, name="control")
     if treatment.shape != control.shape:
         raise ValueError("paired samples must have matching shapes")
-    if np.any(control <= 0.0):
-        raise ValueError("ratio bootstrap requires a positive denominator")
     if samples <= 0:
         raise ValueError("samples must be positive")
+    treatment_mean = float(treatment.mean())
+    control_mean = float(control.mean())
+    if not np.isfinite(control_mean) or control_mean <= 0.0:
+        raise ValueError("ratio bootstrap requires a positive denominator")
     rng = np.random.Generator(np.random.PCG64(seed))
     indices = rng.integers(0, treatment.size, size=(samples, treatment.size))
-    ratios = treatment[indices].mean(axis=1) / control[indices].mean(axis=1)
+    treatment_means = treatment[indices].mean(axis=1)
+    control_means = control[indices].mean(axis=1)
+    if not np.isfinite(control_means).all() or np.any(control_means <= 0.0):
+        raise ValueError("ratio bootstrap requires a positive denominator")
+    ratios = treatment_means / control_means
     return {
-        "estimate": float(treatment.mean() / control.mean()),
+        "estimate": treatment_mean / control_mean,
         "one_sided_95_lower": float(np.quantile(ratios, 0.05)),
         "two_sided_95_interval": [
             float(np.quantile(ratios, 0.025)),
