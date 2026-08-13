@@ -75,15 +75,23 @@ PY="$HOME/repos/unitree_rl_mjlab/.venv/bin/python"
 RESULT_ROOT="$HOME/campaigns/z1-vic-prototype/runs/$EXPECTED_CODE_REVISION/$EXPECTED_ASSET_REVISION"
 ATTEMPT_DIR="$RESULT_ROOT/${SLURM_JOB_ID}_victt_seed2"
 RUN_NAME="victt_seed2_job${SLURM_JOB_ID}"
+readonly NODE_TMPDIR="/tmp/z1-vic-canary-${SLURM_JOB_ID}"
+mkdir -m 700 -- "$NODE_TMPDIR" 2>/dev/null \
+  || fail "node-local temporary directory already exists or could not be created"
+cleanup_node_tmpdir() {
+  rm -rf -- "$NODE_TMPDIR"
+}
+trap cleanup_node_tmpdir EXIT
 mkdir -p "$RESULT_ROOT"
 mkdir "$ATTEMPT_DIR" 2>/dev/null || fail "attempt directory already exists"
 
 export PYTHONPATH="$RUN_ROOT"
 export WARP_CACHE_PATH="$ATTEMPT_DIR/warp-cache"
-export TMPDIR="$ATTEMPT_DIR/scratch"
 export RUN_NAME
 mkdir "$WARP_CACHE_PATH"
-mkdir "$TMPDIR"
+export TMPDIR="$NODE_TMPDIR"
+export TEMP="$NODE_TMPDIR"
+export TMP="$NODE_TMPDIR"
 
 "$PY" - <<'PY' || fail "CUDA identity or runtime package versions do not match"
 from importlib.metadata import version
@@ -448,8 +456,6 @@ FINAL_ASSET_REVISION=$(git -C "$ASSET_REPO" rev-parse HEAD 2>/dev/null) \
 FINAL_ASSET_STATUS=$(git -C "$ASSET_REPO" status --porcelain=v1 --untracked-files=all) \
   || fail "postflight asset repository status check failed"
 [[ -z "$FINAL_ASSET_STATUS" ]] || fail "postflight asset repository must be clean"
-
-rm -rf -- "$TMPDIR"
 
 printf 'Z1_VIC_CANARY_CODE_REVISION=%s\n' "$CODE_REVISION"
 printf 'Z1_VIC_CANARY_ASSET_REVISION=%s\n' "$ASSET_REVISION"

@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import subprocess
 import sys
 
@@ -50,12 +51,14 @@ def _git_repo(path: Path, marker: str) -> str:
 
 
 def _base_env(tmp_path: Path) -> dict[str, str]:
+    job_id = int(hashlib.sha256(str(tmp_path).encode()).hexdigest()[:16], 16)
+    job_id = job_id % 900_000_000 + 100_000_000
     env = {
         "PATH": os.environ.get("PATH", ""),
         "HOME": str(tmp_path / "home"),
         "RUN_ROOT": str(tmp_path / "repos/code"),
         "ASSET_REPO": str(tmp_path / "repos/safe_impact_manipulation"),
-        "SLURM_JOB_ID": "12345",
+        "SLURM_JOB_ID": str(job_id),
     }
     env["EXPECTED_CODE_REVISION"] = _git_repo(Path(env["RUN_ROOT"]), "code")
     env["EXPECTED_ASSET_REVISION"] = _git_repo(Path(env["ASSET_REPO"]), "assets")
@@ -68,6 +71,8 @@ def _install_fake_python(env: dict[str, str], *, mode: str = "success") -> None:
     py.write_text(
         "#!/bin/sh\n"
         "{ printf 'CALL'; for arg in \"$@\"; do printf '\\t%s' \"$arg\"; done; printf '\\n'; } >> \"$HOME/python_calls.log\"\n"
+        "if stat -f '%Lp' \"$TMPDIR\" >/dev/null 2>&1; then tmp_mode=$(stat -f '%Lp' \"$TMPDIR\"); else tmp_mode=$(stat -c '%a' \"$TMPDIR\"); fi\n"
+        "printf '%s\\t%s\\t%s\\t%s\\t%s\\n' \"${TMPDIR:-}\" \"${TEMP:-}\" \"${TMP:-}\" \"${WARP_CACHE_PATH:-}\" \"$tmp_mode\" >> \"$HOME/python_env.log\"\n"
         "mode=${FAKE_PY_MODE:-success}\n"
         "if [ \"${1:-}\" = - ]; then\n"
         "  case \"$#\" in\n"
@@ -84,8 +89,15 @@ def _install_fake_python(env: dict[str, str], *, mode: str = "success") -> None:
         "  exit 0\n"
         "fi\n"
         "case \"${1:-}\" in\n"
-        "  *smoke_joint_position_fixed.py) [ \"$mode\" != live-smoke-fail ] || exit 11 ;;\n"
-        "  *smoke_cat_soft.py) [ \"$mode\" != cat-smoke-fail ] || exit 12 ;;\n"
+        "  *smoke_joint_position_fixed.py)\n"
+        "    printf 'compiler output\\n' > \"$WARP_CACHE_PATH/compiler-output.log\"\n"
+        "    printf 'smoke output\\n' > \"$PWD/smoke-output.log\"\n"
+        "    [ \"$mode\" != live-smoke-fail ] || exit 11\n"
+        "    ;;\n"
+        "  *smoke_cat_soft.py)\n"
+        "    [ \"$mode\" != term-during-cat-smoke ] || { kill -TERM \"$PPID\"; exit 0; }\n"
+        "    [ \"$mode\" != cat-smoke-fail ] || exit 12\n"
+        "    ;;\n"
         "  *scripts/train.py)\n"
         "    [ \"$mode\" != train-fail ] || exit 13\n"
         "    case \"$mode\" in\n"
@@ -135,13 +147,26 @@ def _calls(env: dict[str, str]) -> list[list[str]]:
     return [line.split("\t")[1:] for line in path.read_text().splitlines()]
 
 
+def _python_environments(
+    env: dict[str, str],
+) -> list[tuple[str, str, str, str, str]]:
+    path = Path(env["HOME"]) / "python_env.log"
+    if not path.exists():
+        return []
+    return [tuple(line.split("\t")) for line in path.read_text().splitlines()]
+
+
+def _node_tmp(env: dict[str, str]) -> Path:
+    return Path("/tmp") / f"z1-vic-canary-{env['SLURM_JOB_ID']}"
+
+
 def _attempt(env: dict[str, str]) -> Path:
     return (
         Path(env["HOME"])
         / "campaigns/z1-vic-prototype/runs"
         / env["EXPECTED_CODE_REVISION"]
         / env["EXPECTED_ASSET_REVISION"]
-        / "12345_victt_seed2"
+        / f"{env['SLURM_JOB_ID']}_victt_seed2"
     )
 
 
@@ -411,7 +436,7 @@ def test_launcher_runs_exact_smokes_training_and_hashed_postflight(
 
     assert result.returncode == 0, result.stdout + result.stderr
     attempt = _attempt(env)
-    run_name = "victt_seed2_job12345"
+    run_name = f"victt_seed2_job{env['SLURM_JOB_ID']}"
     run_dir = attempt / "logs/rsl_rl/z1_hammer" / f"fixture_{run_name}"
     telemetry = attempt / "victt_seed2_telemetry.json"
     calls = _calls(env)
@@ -747,18 +772,93 @@ def test_launcher_rejects_distributed_context_before_python(
     assert _calls(env) == []
 
 
-def test_launcher_owns_temporary_files_and_cleans_scratch_only_on_success(
+def test_launcher_uses_short_node_local_tmpdir_and_keeps_outputs_durable(
     tmp_path: Path,
 ) -> None:
-    success = _prepared_env(tmp_path / "success")
-    result = _run(success)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert not (_attempt(success) / "scratch").exists()
+    env = _prepared_env(tmp_path)
+    inherited_tmp = tmp_path / "inherited-tmp"
+    env.update(
+        TMPDIR=str(inherited_tmp),
+        TEMP=str(inherited_tmp),
+        TMP=str(inherited_tmp),
+        SLURM_TMPDIR=str(inherited_tmp),
+    )
+    result = _run(env)
 
-    failed = _prepared_env(tmp_path / "failed", mode="cat-smoke-fail")
-    result = _run(failed)
+    assert result.returncode == 0, result.stdout + result.stderr
+    node_tmp = _node_tmp(env)
+    warp_cache = _attempt(env) / "warp-cache"
+    assert _python_environments(env)
+    assert all(
+        tmpdir == temp == tmp == str(node_tmp)
+        and warp == str(warp_cache)
+        and mode == "700"
+        for tmpdir, temp, tmp, warp, mode in _python_environments(env)
+    )
+    assert not node_tmp.exists()
+    assert not (_attempt(env) / "scratch").exists()
+    assert (warp_cache / "compiler-output.log").read_text() == "compiler output\n"
+    assert (_attempt(env) / "smoke-output.log").read_text() == "smoke output\n"
+
+
+@pytest.mark.parametrize("mode", ("cat-smoke-fail", "postflight-fail"))
+def test_launcher_cleans_node_local_tmpdir_on_failure_and_preserves_outputs(
+    tmp_path: Path, mode: str
+) -> None:
+    env = _prepared_env(tmp_path, mode=mode)
+    result = _run(env)
+
     assert result.returncode != 0
-    assert (_attempt(failed) / "scratch").is_dir()
+    node_tmp = _node_tmp(env)
+    warp_cache = _attempt(env) / "warp-cache"
+    assert _python_environments(env)
+    assert all(
+        tmpdir == temp == tmp == str(node_tmp)
+        and warp == str(warp_cache)
+        and mode == "700"
+        for tmpdir, temp, tmp, warp, mode in _python_environments(env)
+    )
+    assert not node_tmp.exists()
+    assert not (_attempt(env) / "scratch").exists()
+    assert (warp_cache / "compiler-output.log").read_text() == "compiler output\n"
+    assert (_attempt(env) / "smoke-output.log").read_text() == "smoke output\n"
+
+
+def test_launcher_refuses_preexisting_node_tmp_without_altering_it(
+    tmp_path: Path,
+) -> None:
+    env = _prepared_env(tmp_path)
+    node_tmp = _node_tmp(env)
+    node_tmp.mkdir()
+    sentinel = node_tmp / "owner-data"
+    sentinel.write_text("preserve")
+    try:
+        result = _run(env)
+
+        assert result.returncode == 2
+        assert "node-local temporary directory already exists" in result.stdout
+        assert sentinel.read_text() == "preserve"
+        assert _calls(env) == []
+    finally:
+        if sentinel.exists():
+            sentinel.unlink()
+        if node_tmp.exists():
+            node_tmp.rmdir()
+
+
+def test_launcher_term_trap_cleans_tmp_preserves_outputs_and_signal_status(
+    tmp_path: Path,
+) -> None:
+    env = _prepared_env(tmp_path, mode="term-during-cat-smoke")
+    result = _run(env)
+
+    assert result.returncode in (-signal.SIGTERM, 128 + signal.SIGTERM)
+    node_tmp = _node_tmp(env)
+    warp_cache = _attempt(env) / "warp-cache"
+    assert not node_tmp.exists()
+    assert (warp_cache / "compiler-output.log").read_text() == "compiler output\n"
+    assert (_attempt(env) / "smoke-output.log").read_text() == "smoke output\n"
+    assert "VIC_CANARY_DONE" not in result.stdout
 
 
 @pytest.mark.parametrize(
