@@ -273,7 +273,8 @@ def _install_postflight_stubs(tmp_path: Path) -> Path:
         "    state = {'iter': iteration, 'model_state_dict': {'weight': Tensor(mode != 'nonfinite')}}\n"
         "    if mode == 'tensorless': state = {'iter': iteration}\n"
         "    if mode == 'bad-iteration' and iteration == 499: state['iter'] = 498\n"
-        "    if iteration in (0, 499) and mode != 'missing-telemetry':\n"
+        "    missing = ((mode == 'missing-telemetry-0' and iteration == 0) or (mode == 'missing-telemetry-499' and iteration == 499))\n"
+        "    if iteration in (0, 499) and not missing:\n"
         "        state['infos'] = {'vic_rollout_telemetry': json.loads(os.environ['FAKE_TELEMETRY'])}\n"
         "    return state\n"
     )
@@ -437,6 +438,8 @@ def test_launcher_runs_exact_smokes_training_and_hashed_postflight(
             f"Z1_VIC_CANARY_CHECKPOINT_SHA256 basename=model_{iteration}.pt "
             f"sha256={digest}"
         ) in result.stdout
+    final_digest = hashlib.sha256((run_dir / "model_499.pt").read_bytes()).hexdigest()
+    assert f"Z1_VIC_CANARY_FINAL_CHECKPOINT_SHA256={final_digest}" in result.stdout
     assert f"Z1_VIC_CANARY_CODE_REVISION={env['EXPECTED_CODE_REVISION']}" in result.stdout
     assert f"Z1_VIC_CANARY_ASSET_REVISION={env['EXPECTED_ASSET_REVISION']}" in result.stdout
     assert f"Z1_VIC_CANARY_TELEMETRY={telemetry}" in result.stdout
@@ -701,7 +704,10 @@ def test_launcher_hashes_every_checkpoint_and_checks_every_digest() -> None:
     assert source.index("VIC_CANARY_DONE") > source.index("FINAL_ASSET_STATUS=")
 
 
-def test_launcher_rejects_invalid_hash_output_before_done(tmp_path: Path) -> None:
+@pytest.mark.parametrize("basename", ("model_250.pt", "model_499.pt"))
+def test_launcher_rejects_invalid_hash_output_before_done(
+    tmp_path: Path, basename: str
+) -> None:
     env = _prepared_env(tmp_path)
     real_sha = shutil.which("sha256sum")
     assert real_sha is not None
@@ -710,15 +716,17 @@ def test_launcher_rejects_invalid_hash_output_before_done(tmp_path: Path) -> Non
     fake_sha = fake_bin / "sha256sum"
     fake_sha.write_text(
         "#!/bin/sh\n"
-        "case \"${1:-}\" in *model_250.pt) printf 'invalid  %s\\n' \"$1\" ;; "
+        "case \"${1:-}\" in *\"$INVALID_HASH_BASENAME\") printf 'invalid  %s\\n' \"$1\" ;; "
         "*) exec \"$REAL_SHA256SUM\" \"$@\" ;; esac\n"
     )
     fake_sha.chmod(0o755)
     env["REAL_SHA256SUM"] = real_sha
+    env["INVALID_HASH_BASENAME"] = basename
     env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
     result = _run(env)
     assert result.returncode == 2
     assert "invalid checkpoint SHA-256 result" in result.stdout
+    assert "Z1_VIC_CANARY_FINAL_CHECKPOINT_SHA256=" not in result.stdout
     assert "VIC_CANARY_DONE" not in result.stdout
 
 
@@ -793,7 +801,8 @@ def test_postflight_accepts_exact_24_step_4096_world_record_under_optimization(
         ("tensorless", "contains no tensors"),
         ("nonfinite", "contains a non-finite tensor"),
         ("bad-iteration", "iteration identity drifted"),
-        ("missing-telemetry", "infos are missing"),
+        ("missing-telemetry-0", "model_0.pt infos are missing"),
+        ("missing-telemetry-499", "model_499.pt infos are missing"),
         ("corrupt-events", "corrupt events"),
     ),
 )

@@ -420,13 +420,19 @@ PY
 
 TELEMETRY_SHA256=$(sha256sum "$TELEMETRY_JSON" | cut -d ' ' -f 1)
 [[ "$TELEMETRY_SHA256" =~ ^[0-9a-f]{64}$ ]] || fail "invalid telemetry SHA-256 result"
+FINAL_CHECKPOINT_SHA256=""
 for CHECKPOINT in "${EXPECTED_CHECKPOINTS[@]}"; do
   CHECKPOINT_SHA256=$(sha256sum "$CHECKPOINT" | cut -d ' ' -f 1)
   [[ "$CHECKPOINT_SHA256" =~ ^[0-9a-f]{64}$ ]] \
     || fail "invalid checkpoint SHA-256 result"
+  if [[ "$CHECKPOINT" = "$FINAL_CHECKPOINT" ]]; then
+    FINAL_CHECKPOINT_SHA256="$CHECKPOINT_SHA256"
+  fi
   printf 'Z1_VIC_CANARY_CHECKPOINT_SHA256 basename=%s sha256=%s\n' \
     "$(basename "$CHECKPOINT")" "$CHECKPOINT_SHA256"
 done
+[[ "$FINAL_CHECKPOINT_SHA256" =~ ^[0-9a-f]{64}$ ]] \
+  || fail "final checkpoint SHA-256 identity is missing"
 
 FINAL_CODE_REVISION=$(git -C "$RUN_ROOT" rev-parse HEAD 2>/dev/null) \
   || fail "postflight code repository is unavailable"
@@ -448,6 +454,7 @@ rm -rf -- "$TMPDIR"
 printf 'Z1_VIC_CANARY_CODE_REVISION=%s\n' "$CODE_REVISION"
 printf 'Z1_VIC_CANARY_ASSET_REVISION=%s\n' "$ASSET_REVISION"
 printf 'Z1_VIC_CANARY_FINAL_CHECKPOINT=%s\n' "$FINAL_CHECKPOINT"
+printf 'Z1_VIC_CANARY_FINAL_CHECKPOINT_SHA256=%s\n' "$FINAL_CHECKPOINT_SHA256"
 printf 'Z1_VIC_CANARY_TELEMETRY=%s\n' "$TELEMETRY_JSON"
 printf 'Z1_VIC_CANARY_TELEMETRY_SHA256=%s\n' "$TELEMETRY_SHA256"
 printf 'VIC_CANARY_DONE seed=2 task=%s\n' "$TASK"
