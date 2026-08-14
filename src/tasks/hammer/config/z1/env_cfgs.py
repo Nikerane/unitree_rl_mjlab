@@ -35,15 +35,17 @@ from src.tasks.hammer.nail_block import (
   get_nail_block_entity_cfg,
 )
 
-# Fixture-era per-joint impulse caps, MEASURED by derive_impulse_thresholds.py on 2026-07-06 (windup
-# NEAR_NAIL reset, oblique contact; committed record: docs/results/2026-07-10_c2_enforcement_record.md).
-# J_limit_j = tau_rated_j x 2 (HD Repeated-Peak) x Delta_t_impact at the 2026-07-06 measured
-# Delta_t ~= 27.3 ms — NOTE the shipped sliding window integrates 50 ms and the post-reference-fix
-# impact window measures ~44 ms; whether to re-derive at a different Delta_t is the window/cap
-# pairing inside Khadiv decision (e). Values stay FIXED until that decision. Module-level (not
-# function-local) so downstream tooling (e.g. scripts/eval_impulse.py) IMPORTS this instead of
-# hardcoding a second copy that could drift.
-IMP_J_LIMIT: list[float] = [1.640, 3.280, 1.640, 1.640, 1.640, 1.640]  # N·m·s
+# Historical fixture-era boundary retained for registered-task and banked-checkpoint identity. It is
+# a project calibration, not a manufacturer damage limit; its provenance belongs to the dated result
+# record. Keep this exact vector stable anywhere old evidence/config hashes depend on ``IMP_J_LIMIT``.
+BANKED_IMP_J_LIMIT: list[float] = [1.640, 3.280, 1.640, 1.640, 1.640, 1.640]  # N·m·s
+IMP_J_LIMIT = BANKED_IMP_J_LIMIT  # compatibility alias: registered tasks remain banked
+
+# Provisional no-multiplier boundary for the Step-1 measurement survey only. It combines the Z1
+# simulator effort values (30 N·m, with J2 at 60 N·m) with the same historical contact-duration
+# premise. The J2 2:1 relation comes from those simulator effort values; it is not an extra factor.
+# This is neither a manufacturer damage limit nor a selected training treatment.
+PROVISIONAL_IMP_J_LIMIT: list[float] = [0.820, 1.640, 0.820, 0.820, 0.820, 0.820]  # N·m·s
 
 # Delivered-impulse reward normalizer (2026-07-19 audit F11): the reference strike's delivered axial
 # impulse, MEASURED via the C0 gate (derive_impulse_thresholds.py section [3] mean). PROVENANCE-BOUND:
@@ -498,7 +500,7 @@ def z1_hammer_env_cfg(
       params={
         "use_vel": bool(cat_soft),
         "use_impulse": True,
-        "imp_limit": IMP_J_LIMIT,  # measured fixture-era per-joint caps (see above)
+        "imp_limit": IMP_J_LIMIT,  # historical compatibility boundary (see above)
         "imp_max_p": 0.0,  # log-only default; C2/C3 raise it per-run via
         #   --env.metrics.cat-soft.params.imp-max-p (verified tyro flag)
         "imp_seed": 1e-3,  # normalizer DECAY FLOOR only — never a p95/excess statistic (hook.py)
@@ -510,8 +512,8 @@ def z1_hammer_env_cfg(
       },
     )
     # Per-joint episode-peak Λ (TB: Episode_Metrics/imp_peak_joint1..6) — the authoritative peaks;
-    # J_limit differs 2× across joints (joint2 τ_rated=60), so worst-joint alone can't be compared
-    # to the cap vector. cat_delta_peak: peak binding pressure (episode-mean δ dilutes strikes).
+    # J_limit follows the simulator's 60 N·m J2 effort versus 30 N·m elsewhere, so worst-joint
+    # alone cannot be compared to the cap vector. cat_delta_peak: peak binding pressure.
     for _j, _jn in enumerate(ARM_JOINT_NAMES):  # single-sourced; positional order pinned by tests
       cfg.metrics[f"imp_peak_{_jn}"] = MetricsTermCfg(
         func=hammer_mdp.joint_impulse_peak, per_substep=False, reduce="last", params={"joint": _j},

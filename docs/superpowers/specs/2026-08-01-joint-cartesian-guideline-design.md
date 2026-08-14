@@ -1,5 +1,10 @@
 # Joint-Position and Cartesian Guideline Experiment Design
 
+> **Impulse-threshold provenance correction (2026-08-14):** “Manufacturer
+> `IMP_J_LIMIT`” wording below refers only to the historical registered-task boundary,
+> not a validated Z1 reaction-impulse or damage limit. The design body remains frozen;
+> see `../../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 **Date:** 2026-08-01
 **Status:** APPROVED by owner (2026-08-01) after two independent design reviews
 **Branch for shared design and geometry:** `waypoint-guideline` at baseline `83b050b`

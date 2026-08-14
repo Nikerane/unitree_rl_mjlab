@@ -1,5 +1,10 @@
 # Wave 1: Waypoint-Guidance Isolation
 
+> **Impulse-threshold provenance correction (2026-08-14):** “Manufacturer
+> `IMP_J_LIMIT`” wording below refers only to the historical registered-task boundary,
+> not a validated Z1 reaction-impulse or damage limit. The design body remains frozen;
+> see `../../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 **Date:** 2026-08-02  
 **Status:** owner-approved for implementation; final external review fixes incorporated
 **Scope:** fixed-impedance Cartesian DiffIK trajectory shaping only

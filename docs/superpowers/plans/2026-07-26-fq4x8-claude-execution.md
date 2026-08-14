@@ -1,5 +1,10 @@
 # FQ4x8 Training and Result Execution Plan
 
+> **Impulse-threshold provenance correction (2026-08-14):** `[1.64, 3.28, ...]`
+> below records the historical registered-task boundary, not a validated Z1
+> reaction-impulse or damage limit. The plan body remains frozen; see
+> `../../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
 > `superpowers:subagent-driven-development` (recommended) or
 > `superpowers:executing-plans` to implement this plan task-by-task. Steps use

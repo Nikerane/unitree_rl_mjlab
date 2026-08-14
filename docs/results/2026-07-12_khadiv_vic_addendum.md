@@ -1,5 +1,7 @@
 # Addendum to the one-pager — what should the impulse constraint bound, and what can VIC do about it?
 
+> **Impulse-threshold provenance correction (2026-08-14):** Threshold/cap interpretations below use the historical `[1.64, 3.28, ...]` project vector. It is not a manufacturer-certified Z1 reaction-impulse or damage limit; the `kappa=2` and `27.3 ms` calibration interpretation is retired. The historical body and numbers remain frozen; see `../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 > Companion to `2026-07-12_khadiv_onepager.md`. **Revised 2026-07-13** after a Codex adversarial
 > review + an empirical verification pass falsified two claims in the first version (git history
 > has v1; corrections marked inline). Adds the pivotal **decision (e)** — the Λ-quantity choice —

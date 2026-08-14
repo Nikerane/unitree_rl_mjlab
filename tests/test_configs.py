@@ -38,9 +38,11 @@ from src.tasks.hammer.nail_block import (
     get_nail_block_entity_cfg,
 )
 from src.tasks.hammer.config.z1.env_cfgs import (
+    BANKED_IMP_J_LIMIT,
     IMP_J_LIMIT,
     I_REF_DELIVERED,
     I_REF_FIRST_STRIKE_SUCCESS,
+    PROVISIONAL_IMP_J_LIMIT,
     _guideline_observation,
     z1_hammer_env_cfg,
 )
@@ -165,7 +167,8 @@ class TestNamedConstants:
     def test_arm_joint_names_single_source_no_drift(self):
         # ORDER-sensitive: IMP_J_LIMIT (and every per-joint metric/cap) keys on this tuple's
         # POSITION, so a silent divergence between the two physical definitions would misassign
-        # joint2's 2x cap. velocity_bound._ARM_CFG feeds the accumulators/hook/contact-row;
+        # joint2's 2:1 boundary (matching the simulator's 60 vs 30 N.m effort values).
+        # velocity_bound._ARM_CFG feeds the accumulators/hook/contact-row;
         # z1_constants.ARM_JOINT_NAMES feeds env_cfgs. Pin them equal (ORDER, not just set) so a
         # rename/reorder in one cannot drift from the other. (2026-07-14 dedup: contact_row and the
         # env_cfgs imp_peak loop now derive from these instead of hardcoding their own copies.)
@@ -1353,14 +1356,18 @@ class TestProgressPlusVelocityArm:
         assert params["min_p"] == pytest.approx(0.0)
         assert params["tau"] == pytest.approx(0.95)
 
-    def test_pv_leaves_the_impulse_constraint_log_only_with_unchanged_caps(self):
+    def test_pv_preserves_the_historical_log_only_impulse_boundary(self):
         params = load_env_cfg(self._PV).metrics["cat_soft"].params
         assert params["use_impulse"] is True
         assert params["imp_max_p"] == 0.0
         assert isinstance(params["imp_max_p"], float)
         assert tuple(params["imp_limit"]) == (1.640, 3.280, 1.640, 1.640, 1.640, 1.640)
-        # ... and that literal is still the single-sourced module constant, not a drifted copy.
+        # Registered tasks retain the banked boundary so old checkpoints/config identities do not
+        # drift. The no-2x vector is explicit and survey-only until it is scientifically selected.
+        assert list(BANKED_IMP_J_LIMIT) == [1.640, 3.280, 1.640, 1.640, 1.640, 1.640]
         assert list(params["imp_limit"]) == list(IMP_J_LIMIT)
+        assert list(IMP_J_LIMIT) == list(BANKED_IMP_J_LIMIT)
+        assert list(PROVISIONAL_IMP_J_LIMIT) == [0.820, 1.640, 0.820, 0.820, 0.820, 0.820]
 
     @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
     def test_pv_has_no_deterministic_velocity_termination_or_action_clipping(self, play):

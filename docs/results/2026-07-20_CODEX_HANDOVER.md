@@ -1,5 +1,7 @@
 # CODEX HANDOVER — fixed-impedance phase, Z1 hammer impact-safe RL (2026-07-20)
 
+> **Impulse-threshold provenance correction (2026-08-14):** The historical `[1.64, 3.28, ...]` vector, `kappa=2`, `27.3 ms`, and “manufacturer/hardware cap” language below no longer describe a validated Z1 limit. Keep the numbers only as the banked experiment identity; see `../research/reward-design/IMPULSE_CAP_PROVENANCE.md` for current interpretation. The historical body is otherwise unchanged.
+
 **Audience:** Codex, an AI coding agent that will independently read code, run CPU probes on this
 Mac, and launch/evaluate GPU training on Vega. **Repo:** `/Users/nikerane/repos/unitree_rl_mjlab`,
 branch `soft-cat` (HEAD at writing: `5dac687`). **Authority contract:** code > `docs/README.md`

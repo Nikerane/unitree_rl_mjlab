@@ -1,5 +1,10 @@
 # Wave-1 waypoint-guidance pilot result (2026-08-03)
 
+> **Impulse-threshold provenance correction (2026-08-14):** “Manufacturer cap/limit”
+> wording and `[1.64, 3.28, ...]` below record the historical registered-task boundary,
+> not a validated Z1 reaction-impulse or damage limit. The result body remains frozen;
+> see `../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 Six policies, three arms, two seeds each, one identical fixed physical reset.
 
 **Backend disclosure — read before any number below.**

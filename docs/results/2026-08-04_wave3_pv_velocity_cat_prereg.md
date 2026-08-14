@@ -1,5 +1,10 @@
 # Wave-3 P+V — soft velocity-CaT on the progress-guided arm — preregistration (2026-08-04)
 
+> **Impulse-threshold provenance correction (2026-08-14):** “Manufacturer impulse
+> cap” wording and `[1.64, 3.28, ...]` below record the historical registered-task
+> boundary, not a validated Z1 reaction-impulse or damage limit. The numeric
+> preregistration remains frozen; see `../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 > **STATUS: FROZEN, NOT YET LAUNCHED.** Endpoints, thresholds, decision rules, the launch
 > ledger and the pinned provenance below are fixed before any Wave-3 outcome is inspected.
 > Nothing in this document may be edited after training is submitted; a correction requires

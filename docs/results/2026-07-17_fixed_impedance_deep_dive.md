@@ -1,5 +1,10 @@
 # Fixed-impedance deep dive — system model + experimental agenda (2026-07-17)
 
+> **Impulse-threshold provenance correction (2026-08-14):** The `27.3 ms` basis and
+> `[1.64, 3.28, ...]` vector below are historical project inputs, not a validated Z1
+> reaction-impulse or damage limit; the unsupported `kappa=2` interpretation is retired.
+> The numeric body remains frozen; see `../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 **Status:** living plan of record for the *fixed-impedance* phase. VIC is deferred (user, 2026-07-17:
 "keep VIC for later, not now at all"). Built from a 5-map salvage of the `fixed-impedance-deep-dive`
 workflow (`wf_33142d62-c2d`; web-research + parameter-inventory legs lost to a session limit) plus the

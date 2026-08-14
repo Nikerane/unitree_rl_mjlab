@@ -1,5 +1,10 @@
 # Wave 1 Waypoint Guidance Implementation Plan
 
+> **Impulse-threshold provenance correction (2026-08-14):** “Manufacturer
+> `IMP_J_LIMIT`” wording below refers only to the historical registered-task boundary,
+> not a validated Z1 reaction-impulse or damage limit. The plan body remains frozen;
+> see `../../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Train a minimal matched six-policy C0/G/P screen that determines whether sparse ordered-gate payout or dense non-farmable waypoint progress improves a direct fixed-reset hammer descent.
@@ -219,4 +224,3 @@ Produce one MP4, montage, x-z/x-y plot, trace, metadata, and metrics row per pol
 - [ ] **Step 5: Apply the frozen exploratory decision rule and stop**
 
 Compare both seeds per arm against fresh C0 using success, treatment dose, speed, q90 error, 5 mm occupancy, path-length ratio, backward travel, contact timing, delivered impulse, Lambda/cap, qvel, and human video inspection. Do not launch GP, constraints, or 500-iteration continuation until the owner reviews this result.
-

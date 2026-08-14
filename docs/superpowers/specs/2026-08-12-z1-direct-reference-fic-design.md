@@ -70,7 +70,7 @@ Both new tasks preserve the currently qualified joint-FIC machinery:
 - `delivered_impulse` weight `4.0` (D4);
 - corrected controlled-drop normalizer `I_ref=0.2799950838088989 N s`;
 - substep velocity CaT active with the existing 500 Hz peak reader, limits, probability, sign, and positive-return scaling;
-- per-joint impulse CaT measured and logged only (`imp_max_p=0`), with existing manufacturer caps and no active impulse pressure;
+- per-joint impulse CaT measured and logged only (`imp_max_p=0`), with the existing banked project-threshold vector and no active impulse pressure;
 - diagnostic contact-row decomposition disabled at production scale;
 - `strike_phase` and `strike_ref_error` observations retained because they own and expose the shared reference lifecycle;
 - no variable impedance.
@@ -136,7 +136,7 @@ Evaluate each final checkpoint on the same compact 64-environment first-episode 
 - task and productive-strike success;
 - first-event delivered impulse;
 - peak joint velocity and legality;
-- per-joint impulse and manufacturer-cap utilization;
+- per-joint impulse and banked project-threshold utilization;
 - direct-reference deviation;
 - reference curriculum telemetry;
 - one fixed-reset trajectory render/video per treatment;
@@ -152,7 +152,7 @@ This slice does not add or run:
 - a waypoint-vs-reference statistical comparison;
 - reference-weight or bandwidth sweeps;
 - new reference/reward formulas, post-contact reference credit, curriculum variants, or domain randomization;
-- active impulse-CaT pressure or altered manufacturer caps;
+- active impulse-CaT pressure or altered registered-task impulse thresholds;
 - variable impedance, gain actions, VIC training, or a VIC comparison;
 - controlled-drop variants or recalibration;
 - provenance/evaluator infrastructure beyond the compact existing contract.

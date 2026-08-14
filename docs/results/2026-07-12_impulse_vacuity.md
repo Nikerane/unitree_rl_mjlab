@@ -1,5 +1,7 @@
 # 2026-07-12 — Is the per-joint impulse soft-CaT constraint vacuous on the fixed-impedance Z1?
 
+> **Impulse-threshold provenance correction (2026-08-14):** All binding/vacuity ratios below are relative to the historical `[1.64, 3.28, ...]` project vector used by this investigation. That vector is not a manufacturer-certified reaction-impulse or damage limit, and its `kappa=2` interpretation is retired. The historical body and numbers remain frozen; see `../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 > **Provenance:** CPU-only investigation, run 2026-07-12 on branch `soft-cat`, HEAD `481a26f`
 > (repo untouched during the runs — all probes are standalone scripts in
 > `assets/2026-07-12_impulse_vacuity/probes/` that apply spec overrides to **in-memory /

@@ -11,7 +11,14 @@ import torch
 
 from tests.helpers import stub
 from src.tasks.hammer.cat import CaT
-from src.tasks.hammer.cat.hook import CatSoftHook, _NEG_TERMS
+from src.tasks.hammer.cat.hook import (
+  WINNER_IMPULSE,
+  WINNER_NONE,
+  WINNER_TIE,
+  WINNER_VELOCITY,
+  CatSoftHook,
+  _NEG_TERMS,
+)
 from src.tasks.hammer.cat.keys import CAT_DELTA_KEY, CAT_R_POS_KEY
 from src.tasks.hammer.mdp.impulse_bound import _ENV_SUBSTEP_IMPULSE_ATTR
 from src.tasks.hammer.mdp.velocity_bound import _ENV_SUBSTEP_ATTR, Z1_JOINT_VEL_LIMIT
@@ -45,6 +52,7 @@ def _hook(max_p=0.5, tau=0.95, min_p=0.0, vel_detection="control_rate"):
     _imp_seed=1e-3,
     _imp_cmax=torch.full((1, 6), 1e-3),
     _imp_seeded=torch.zeros(1, 6, dtype=torch.bool),
+    _last_impulse=None,
   )
 
 
@@ -66,6 +74,7 @@ def _ihook(imp_max_p=0.0, imp_seed=0.2, imp_limit=0.1, use_vel=False, tau=0.95, 
     _imp_seed=imp_seed,
     _imp_cmax=torch.full((1, J), imp_seed),
     _imp_seeded=torch.zeros(1, J, dtype=torch.bool),
+    _last_impulse=None,
   )
 
 
@@ -76,12 +85,16 @@ def _term_cfg(n):
 
 
 def _env(qv, step_reward, step_dt=0.02, impulse=None):
-  robot = SimpleNamespace(data=SimpleNamespace(joint_vel=qv))
+  robot = SimpleNamespace(data=SimpleNamespace(joint_vel=qv, joint_pos=torch.zeros_like(qv)))
   rm = SimpleNamespace(_step_reward=step_reward, active_terms=list(ACTIVE),
                        get_term_cfg=_term_cfg, _scale_by_dt=True)
   env = SimpleNamespace(scene={"robot": robot}, reward_manager=rm, step_dt=step_dt, extras={})
   if impulse is not None:
-    setattr(env, _ENV_SUBSTEP_IMPULSE_ATTR, SimpleNamespace(impulse=impulse))
+    setattr(
+      env,
+      _ENV_SUBSTEP_IMPULSE_ATTR,
+      SimpleNamespace(impulse=impulse, _joint_ids=list(range(impulse.shape[1]))),
+    )
   return env
 
 
@@ -230,6 +243,153 @@ def test_impulse_log_only_delta_is_zero_even_over_limit():
   assert torch.allclose(env.extras[CAT_DELTA_KEY], torch.zeros(B))
 
 
+def test_constraint_telemetry_log_only_preserves_exact_soft_or_and_shapes():
+  """Pull-only telemetry exposes both arms without changing the log-only impulse invariant."""
+  B, J = 3, 6
+  caps = torch.tensor([0.82, 1.64, 0.82, 0.82, 0.82, 0.82])
+  impulse = caps.unsqueeze(0).repeat(B, 1)
+  impulse[:, 2] += 0.10
+  env = _env(
+    torch.full((B, J), 5.0),
+    torch.zeros(B, len(ACTIVE)),
+    impulse=impulse,
+  )
+  hook = _ihook(imp_max_p=0.0, imp_limit=caps, use_vel=True)
+  returned = hook(env)
+  telemetry = hook.constraint_telemetry()
+
+  per_joint = (
+    "delta_velocity_per_joint",
+    "delta_impulse_per_joint",
+    "lambda_per_joint",
+    "cap_utilization_per_joint",
+    "raw_margin_per_joint",
+    "positive_margin_per_joint",
+  )
+  for name in per_joint:
+    assert telemetry[name].shape == (B, J)
+    assert torch.isfinite(telemetry[name]).all(), name
+    assert telemetry[name].requires_grad is False
+  for name in ("delta_velocity", "delta_impulse", "delta", "winner_constraint", "winner_joint"):
+    assert telemetry[name].shape == (B,)
+    assert torch.isfinite(telemetry[name]).all(), name
+
+  assert torch.equal(telemetry["delta_impulse_per_joint"], torch.zeros(B, J))
+  assert torch.equal(telemetry["delta_impulse"], torch.zeros(B))
+  assert torch.equal(
+    telemetry["delta"],
+    torch.maximum(telemetry["delta_velocity"], telemetry["delta_impulse"]),
+  )
+  assert torch.equal(telemetry["delta"], returned)
+  assert torch.equal(telemetry["winner_constraint"], torch.full((B,), WINNER_VELOCITY))
+  assert torch.equal(telemetry["lambda_per_joint"], impulse)
+  assert telemetry["active_limit_per_joint"].shape == (J,)
+  assert torch.equal(telemetry["active_limit_per_joint"], caps)
+  assert telemetry["active_limit_per_joint"].requires_grad is False
+  torch.testing.assert_close(telemetry["raw_margin_per_joint"], impulse - caps)
+  torch.testing.assert_close(
+    telemetry["positive_margin_per_joint"], (impulse - caps).clamp_min(0.0)
+  )
+  torch.testing.assert_close(telemetry["cap_utilization_per_joint"], impulse / caps)
+
+  # Every field is a detached clone: mutating a consumer's snapshot cannot corrupt the hook.
+  telemetry["lambda_per_joint"].fill_(float("nan"))
+  assert torch.isfinite(hook.constraint_telemetry()["lambda_per_joint"]).all()
+
+
+def test_constraint_telemetry_returns_authoritative_nonroundtripping_lambda():
+  """Lambda must come from the accumulator, not lossy (Lambda-cap)+cap reconstruction."""
+  caps = torch.tensor([0.82, 1.64, 0.82, 0.82, 0.82, 0.82])
+  impulse = torch.zeros(1, 6)
+  impulse[0, 0] = 1.82
+  reconstructed = (impulse - caps) + caps
+  assert not torch.equal(reconstructed, impulse)
+  env = _env(torch.zeros(1, 6), torch.zeros(1, len(ACTIVE)), impulse=impulse)
+  hook = _ihook(imp_max_p=0.0, imp_limit=caps)
+
+  hook(env)
+  telemetry = hook.constraint_telemetry()
+
+  assert torch.equal(telemetry["lambda_per_joint"], impulse)
+  assert torch.equal(telemetry["raw_margin_per_joint"], impulse - caps)
+
+
+def test_impulse_hook_rejects_same_width_permuted_accumulator_joint_ids():
+  """A six-column Lambda tensor is unsafe unless its joint order exactly matches the hook."""
+  import pytest
+
+  impulse = torch.zeros(1, 6)
+  env = _env(torch.zeros(1, 6), torch.zeros(1, len(ACTIVE)), impulse=impulse)
+  getattr(env, _ENV_SUBSTEP_IMPULSE_ATTR)._joint_ids = [1, 0, 2, 3, 4, 5]
+
+  with pytest.raises(RuntimeError, match="joint ids"):
+    _ihook(imp_max_p=0.0, imp_limit=torch.ones(6))(env)
+
+
+def test_constraint_telemetry_attributes_active_impulse_to_j3():
+  B, J = 2, 6
+  caps = torch.tensor([0.82, 1.64, 0.82, 0.82, 0.82, 0.82])
+  impulse = torch.zeros(B, J)
+  impulse[:, 2] = 1.02  # J3 exceeds its cap by 0.20 N.m.s.
+  env = _env(torch.zeros(B, J), torch.zeros(B, len(ACTIVE)), impulse=impulse)
+  hook = _ihook(imp_max_p=0.5, imp_seed=0.2, imp_limit=caps)
+  hook(env)
+  telemetry = hook.constraint_telemetry()
+
+  assert torch.equal(telemetry["delta_velocity"], torch.zeros(B))
+  assert torch.equal(telemetry["delta"], telemetry["delta_impulse"])
+  assert torch.equal(telemetry["winner_constraint"], torch.full((B,), WINNER_IMPULSE))
+  assert torch.equal(telemetry["winner_joint"], torch.full((B,), 2))
+  torch.testing.assert_close(
+    telemetry["positive_margin_per_joint"][:, 2], torch.full((B,), 0.20)
+  )
+  assert (telemetry["delta_impulse_per_joint"][:, 2] > 0.0).all()
+  assert torch.equal(
+    telemetry["delta_impulse_per_joint"][:, [0, 1, 3, 4, 5]],
+    torch.zeros(B, J - 1),
+  )
+
+
+def test_constraint_telemetry_attributes_simultaneous_velocity_impulse_and_tie():
+  """The soft-OR winner must remain attributable when both constraint arms are active."""
+  B, J = 3, 6
+  caps = torch.ones(J)
+  qv = torch.zeros(B, J)
+  qv[:, 0] = torch.tensor([1.0, 0.25, 0.5])
+  impulse = torch.zeros(B, J)
+  impulse[:, 0] = torch.tensor([1.25, 2.0, 1.5])
+  env = _env(qv, torch.zeros(B, len(ACTIVE)), impulse=impulse)
+  hook = _ihook(imp_max_p=0.5, imp_seed=0.1, imp_limit=caps, use_vel=True, tau=0.0)
+  hook._limit = 0.0
+
+  returned = hook(env)
+  telemetry = hook.constraint_telemetry()
+
+  assert torch.equal(
+    telemetry["winner_constraint"],
+    torch.tensor([WINNER_VELOCITY, WINNER_IMPULSE, WINNER_TIE]),
+  )
+  assert torch.equal(telemetry["winner_joint"], torch.tensor([0, 0, -1]))
+  assert torch.equal(
+    telemetry["delta"],
+    torch.maximum(telemetry["delta_velocity"], telemetry["delta_impulse"]),
+  )
+  assert torch.equal(returned, telemetry["delta"])
+  torch.testing.assert_close(telemetry["delta_velocity"], torch.tensor([0.5, 0.125, 0.25]))
+  torch.testing.assert_close(telemetry["delta_impulse"], torch.tensor([0.125, 0.5, 0.25]))
+
+
+def test_constraint_telemetry_reports_none_when_neither_constraint_activates():
+  B, J = 2, 6
+  caps = torch.tensor([0.82, 1.64, 0.82, 0.82, 0.82, 0.82])
+  env = _env(torch.zeros(B, J), torch.zeros(B, len(ACTIVE)), impulse=torch.zeros(B, J))
+  hook = _ihook(imp_max_p=0.5, imp_limit=caps)
+  hook(env)
+  telemetry = hook.constraint_telemetry()
+  assert torch.equal(telemetry["winner_constraint"], torch.full((B,), WINNER_NONE))
+  assert torch.equal(telemetry["winner_joint"], torch.full((B,), -1))
+
+
 def test_impulse_raw_margin_logged_for_histogram():
   # Even log-only, the RAW per-joint margin must be stored (the C0 histogram / binding-ness gate).
   B = 4
@@ -329,8 +489,8 @@ def test_validate_params_guards():
     CatSoftHook._validate_params(
       {"use_vel": False, "use_impulse": True, "imp_limit": 0.1, "imp_max_p": 0.5}
     )
-  # …including the per-joint LIST and TENSOR forms (2026-07-14 audit: the original isinstance
-  # (int, float) check let [0.1]*6 through to ~23-69x-too-tight enforcement silently).
+  # …including the per-joint LIST and TENSOR forms (the original scalar-only type check let an
+  # all-placeholder vector through silently).
   with pytest.raises(RuntimeError, match="placeholder"):
     CatSoftHook._validate_params(
       {"use_vel": False, "use_impulse": True, "imp_limit": [0.1] * 6, "imp_max_p": 0.5}

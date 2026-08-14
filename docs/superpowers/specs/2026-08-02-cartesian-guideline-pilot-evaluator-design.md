@@ -1,5 +1,10 @@
 # Cartesian guideline pilot evaluator design
 
+> **Impulse-threshold provenance correction (2026-08-14):** “Manufacturer impulse
+> cap” wording below refers only to the historical registered-task boundary, not a
+> validated Z1 reaction-impulse or damage limit. The design body remains frozen; see
+> `../../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 **Status:** owner-approved for implementation on 2026-08-02. Training remains a
 separate approval gate.
 
@@ -86,4 +91,3 @@ Modify only:
 Do not modify task dynamics, rewards, tracker logic, task registration, training
 launcher, smoke script, action space, gains, caps, or enforcement. Do not add a
 manifest builder, database, dashboard, renderer, or confirmatory statistics.
-

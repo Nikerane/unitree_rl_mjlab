@@ -189,7 +189,7 @@
   - qvel: per-joint p95/max plus all-joints-legal count/rate;
   - target: mean/p95/max of per-episode RMSE and mean/p95/max of per-episode maximum absolute error;
   - reference: mean/p95/max of per-episode means and mean/p95/max of per-episode maxima;
-  - impulse utilization: each row's six-vector `joint_impulse_peak_n_m_s / [1.64,3.28,1.64,1.64,1.64,1.64]`, per-joint p95/max, and all-joints-at-or-below-cap count/rate.
+  - impulse utilization: each row's six-vector `joint_impulse_peak_n_m_s / [1.64,3.28,1.64,1.64,1.64,1.64]`, using the banked registered-task project boundary (not a manufacturer damage limit), plus per-joint p95/max and all-joints-at-or-below-boundary count/rate.
 
   Record the separate training seed and exact curriculum schedule. Do not add traces, saturation, or another evaluator layer.
 

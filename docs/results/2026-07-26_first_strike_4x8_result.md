@@ -1,5 +1,10 @@
 # First-strike reward semantics: 4×8 fixed-impedance result
 
+> **Impulse-threshold provenance correction (2026-08-14):** “Manufacturer-derived cap”
+> wording below refers only to the historical registered-task boundary, not a validated
+> Z1 reaction-impulse or damage limit. The result body remains frozen; see
+> `../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 **Date:** 2026-07-26
 **Scope:** Unitree Z1 simulation, fixed impedance, log-only impulse characterization
 **Status:** Complete — training, strict sampled evaluation, corrected

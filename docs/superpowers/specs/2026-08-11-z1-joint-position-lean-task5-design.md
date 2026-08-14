@@ -1,5 +1,10 @@
 # Z1 joint-position fixed-impedance: lean Task-5 design
 
+> **Impulse-threshold provenance correction (2026-08-14):** The `0.3 * [1.64,
+> 3.28, ...]` diagnostic below is a superseded historical proposal, not a hardware limit
+> or the current Step-1 diagnostic threshold. The design body remains frozen; see
+> `../../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 **Status:** Approved by the owner on 2026-08-11.
 
 ## Objective

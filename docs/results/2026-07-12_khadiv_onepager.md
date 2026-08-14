@@ -1,5 +1,7 @@
 # One-pager for Prof. Khadiv — is the impulse constraint doing anything on the fixed-impedance Z1?
 
+> **Impulse-threshold provenance correction (2026-08-14):** The “cap” and utilization claims below are relative to the historical `[1.64, 3.28, ...]` project vector, not a manufacturer-certified Z1 damage limit. The unsupported `kappa=2` interpretation is retired. The historical body and numbers remain frozen; see `../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 > Branch `soft-cat`, HEAD `481a26f`, CPU-only investigation (2026-07-12). Full record:
 > [`2026-07-12_impulse_vacuity.md`](2026-07-12_impulse_vacuity.md).
 

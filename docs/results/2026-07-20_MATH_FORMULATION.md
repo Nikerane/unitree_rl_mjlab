@@ -1,5 +1,7 @@
 # Fixed-Impedance Z1 Hammering: Exact Mathematical Formulation
 
+> **Impulse-threshold provenance correction (2026-08-14):** The `kappa=2`, `27.3 ms`, and `[1.64, 3.28, ...]` formulation below exactly records the historical task, but it is not a manufacturer-certified Z1 reaction-impulse or damage limit. The arithmetic is retained for reproducibility while its hardware interpretation is retired; see `../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 **Progress-report formulation, 2026-07-20.** This transcribes branch `soft-cat` at commit
 `9191709`. Code is authoritative. Equations labelled **thesis objective** state the intended
 constrained problem; equations labelled **shipped** reproduce the implementation. Sources use

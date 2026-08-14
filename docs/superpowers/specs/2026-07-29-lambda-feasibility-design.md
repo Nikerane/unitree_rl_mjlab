@@ -1,5 +1,7 @@
 # Fixed-impedance Lambda feasibility sweep — frozen design
 
+> **Impulse-threshold provenance correction (2026-08-14):** This frozen design's `[1.64, 3.28, ...]`, `kappa=2`, `27.3 ms`, and “manufacturer” interpretations are historical inputs, not a validated Z1 reaction-impulse or damage limit. Preserve the body and outcomes; see `../../research/reward-design/IMPULSE_CAP_PROVENANCE.md` for the current banked/provisional/diagnostic distinction.
+
 **Date:** 2026-07-29  
 **Status:** design frozen before new trajectory outcomes  
 **Scope:** evaluation-only characterization in the current Z1 hammer simulator  

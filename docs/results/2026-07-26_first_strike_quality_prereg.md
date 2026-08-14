@@ -1,5 +1,10 @@
 # Preregistration — FQ4x8 first-contact-quality campaign (fixed impedance)
 
+> **Impulse-threshold provenance correction (2026-08-14):** “Manufacturer cap” wording
+> and `[1.64, 3.28, ...]` below record the historical registered-task boundary, not a
+> validated Z1 reaction-impulse or damage limit. The numeric preregistration remains frozen;
+> see `../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 **Status: FROZEN 2026-07-26, before any `fq4x8` training job was submitted.**
 
 > **Amendment 2026-07-27 (pre-training, disclosure-only).** Amended after independent review and

@@ -1,5 +1,10 @@
 # No-Windup Fixed-Reset Strike Implementation Plan
 
+> **Impulse-threshold provenance correction (2026-08-14):** “Manufacturer cap”
+> wording below refers only to the historical registered-task boundary, not a validated
+> Z1 reaction-impulse or damage limit. The plan body remains frozen; see
+> `../../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the active lift-then-strike reference with one fixed-reset direct Cartesian strike and qualify the matched C0/C-Gate experiment before GPU training.

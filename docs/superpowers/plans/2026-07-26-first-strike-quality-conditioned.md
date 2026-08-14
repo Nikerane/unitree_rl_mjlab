@@ -1,5 +1,10 @@
 # Lean First-Strike Quality Reward Implementation Plan
 
+> **Impulse-threshold provenance correction (2026-08-14):** `[1.64, 3.28, ...]`
+> below records the historical registered-task boundary, not a validated Z1
+> reaction-impulse or damage limit. The plan body remains frozen; see
+> `../../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: use
 > superpowers:subagent-driven-development or superpowers:executing-plans.
 > Execute only the active sequence below. The deferred appendix is

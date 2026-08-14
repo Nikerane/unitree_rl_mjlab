@@ -1,5 +1,10 @@
 # Lean first-strike quality-conditioned reward experiment
 
+> **Impulse-threshold provenance correction (2026-08-14):** `[1.64, 3.28, ...]`
+> below records the historical registered-task boundary, not a validated Z1
+> reaction-impulse or damage limit. The design body remains frozen; see
+> `../../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 **Date:** 2026-07-26
 **Status:** approved lean design; Tasks 1–4 are complete, the FQ-min wiring
 amendment and all launch gates remain open

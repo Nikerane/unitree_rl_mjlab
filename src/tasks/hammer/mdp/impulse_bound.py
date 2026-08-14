@@ -51,10 +51,10 @@ from src.tasks.hammer.nail_block import NAIL_GOAL_DEPTH, NAIL_SUCCESS_THRESHOLD
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
 
-# Per-joint contact-reaction impulse limit (N·m·s). C0 PLACEHOLDER — enforcement must pass the
-# REAL per-joint caps from a fresh derive_impulse_thresholds.py run (τ_rated × 2 Harmonic-Drive
-# Repeated-Peak × measured contact window) explicitly via cfg. This constant is NEVER a silent
-# default: joint_impulse_excess requires ``limit`` and CatSoftHook requires ``imp_limit``.
+# Per-joint contact-reaction impulse limit (N·m·s). C0 PLACEHOLDER — enforcement must pass an
+# explicit, project-defined per-joint boundary via cfg. This value is neither a manufacturer damage
+# limit nor an active treatment and is NEVER a silent default: joint_impulse_excess requires
+# ``limit`` and CatSoftHook requires ``imp_limit``.
 Z1_JOINT_IMPULSE_LIMIT: float = 0.1
 
 # Where the accumulators stash themselves on the env so full-step consumers (joint_impulse_excess,
@@ -141,9 +141,9 @@ class SubstepImpulseAccumulator(ManagerTermBase):
     # be able to observe learned Λ against J_limit; a substep-mean of the transient pulse dilutes
     # it ~100× and is phase-dependent.
     self._episode_peak = torch.zeros(env.num_envs, device=env.device)
-    # Per-JOINT episode-peak Λ (Task 6 observability): J_limit differs 2× across joints (joint2
-    # τ_rated=60 vs 30 elsewhere), so the worst-joint scalar above can't be compared per-column to
-    # the cap vector. Read by the module-level joint_impulse_peak reader below (one TB key/joint).
+    # Per-JOINT episode-peak Λ (Task 6 observability): the project boundary follows the simulator's
+    # 60 N·m J2 effort versus 30 N·m elsewhere, so the worst-joint scalar above cannot be compared
+    # per-column to the cap vector. Read by the module-level reader below (one TB key/joint).
     self._episode_peak_perjoint = torch.zeros(env.num_envs, J, device=env.device)
     setattr(env, _ENV_SUBSTEP_IMPULSE_ATTR, self)
 

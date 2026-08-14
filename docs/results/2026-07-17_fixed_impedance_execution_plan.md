@@ -1,5 +1,10 @@
 # Fixed-impedance experiment campaign — execution plan (2026-07-17)
 
+> **Impulse-threshold provenance correction (2026-08-14):** The `27.3 ms` basis and
+> `[1.64, 3.28, ...]` vector below are historical project inputs, not a validated Z1
+> reaction-impulse or damage limit; the unsupported `kappa=2` interpretation is retired.
+> The numeric body remains frozen; see `../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 **For approval before execution.** Companion to `2026-07-17_fixed_impedance_deep_dive.md` (the *why* — system
 model + findings). This is the *how* — sequenced, with exact scripts/diffs/commands from a 5-agent dig
 (Codex probe-runbook + 4 Claude digs + external research). VIC stays parked (user, 2026-07-17). Nothing here

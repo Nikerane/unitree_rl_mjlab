@@ -1,5 +1,7 @@
 > ⚠️ **DATED RESEARCH RECORD** (2026-06-10 design research) — kept for provenance.
 > Facts below reflect their date and may contradict the current code; check `docs/README.md`.
+>
+> **Impulse-threshold provenance correction (2026-08-14):** The generic Harmonic Drive `2x` repeated-peak argument below is dated research rationale, not a validated Z1 limit. Unitree's published actuator maximum/URDF effort values do not establish allowable external reaction impulse or damage. The historical body is preserved; see `reward-design/IMPULSE_CAP_PROVENANCE.md`.
 
 # Design Research — Track a Reference, Maximize Impact, Bound Joint Impulse
 

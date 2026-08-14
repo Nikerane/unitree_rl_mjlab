@@ -1,5 +1,10 @@
 # Cartesian Guideline Pilot Evaluator Implementation Plan
 
+> **Impulse-threshold provenance correction (2026-08-14):** “Manufacturer
+> `IMP_J_LIMIT`” wording below refers only to the historical registered-task boundary,
+> not a validated Z1 reaction-impulse or damage limit. The plan body remains frozen;
+> see `../../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Extend the existing sampled checkpoint evaluator just enough to evaluate the excluded fixed-reset C0/C-Gate pilot with an episode-first straightness endpoint and actual gate-payout evidence.
@@ -188,4 +193,3 @@ drift, and exact implementation of the four-row pilot contract.
 
 Report the reviewed revision and exact four planned training identities. Ask the
 owner again before pushing/deploying that revision and launching PPO.
-

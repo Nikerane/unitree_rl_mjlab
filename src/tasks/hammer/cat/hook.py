@@ -24,7 +24,11 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from src.tasks.hammer.cat.constraint_manager import CaT
 from src.tasks.hammer.cat.constraints import joint_impulse_excess, joint_velocity_excess
 from src.tasks.hammer.cat.keys import CAT_DELTA_KEY, CAT_R_POS_KEY
-from src.tasks.hammer.mdp.impulse_bound import Z1_JOINT_IMPULSE_LIMIT, _joint_count
+from src.tasks.hammer.mdp.impulse_bound import (
+  Z1_JOINT_IMPULSE_LIMIT,
+  _ENV_SUBSTEP_IMPULSE_ATTR,
+  _joint_count,
+)
 from src.tasks.hammer.mdp.velocity_bound import (
   _ARM_CFG,
   _ENV_SUBSTEP_ATTR,
@@ -47,6 +51,13 @@ _NEG_TERMS: tuple[str, ...] = ("action_rate", "joint_pos_limits", "r_tt")
 # the configured one, indistinguishably.
 _VEL_DETECTION_MODES: tuple[str, ...] = ("control_rate", "substep")
 
+# ``winner_constraint`` values returned by ``constraint_telemetry``. Integers keep the live survey
+# compact and device-local while making NONE and a positive-probability TIE unambiguous.
+WINNER_NONE = 0
+WINNER_VELOCITY = 1
+WINNER_IMPULSE = 2
+WINNER_TIE = 3
+
 
 class CatSoftHook(ManagerTermBase):
   """Full-step MetricsTerm: computes soft-CaT δ + r_pos and writes them to ``env.extras``."""
@@ -66,9 +77,10 @@ class CatSoftHook(ManagerTermBase):
       )
     if use_impulse and "imp_limit" not in p:
       raise RuntimeError(
-        "CatSoftHook: use_impulse=True requires an explicit imp_limit (the derived per-joint caps "
+        "CatSoftHook: use_impulse=True requires an explicit imp_limit (the project-defined "
+        "per-joint boundary "
         "from derive_impulse_thresholds.py). The Z1_JOINT_IMPULSE_LIMIT placeholder must never be "
-        "a silent fallback — enforcing against it would be ~23–69x tighter than the real caps."
+        "a silent fallback."
       )
     imp_max_p = float(p.get("imp_max_p", 0.0))
     min_p = float(p.get("min_p", 0.0))
@@ -131,9 +143,8 @@ class CatSoftHook(ManagerTermBase):
       if bool((il_t == Z1_JOINT_IMPULSE_LIMIT).all()):
         raise RuntimeError(
           "CatSoftHook: enforcement (imp_max_p > 0) against the Z1_JOINT_IMPULSE_LIMIT placeholder "
-          "(0.1, ~23-69x tighter than the real caps) — env_cfgs passes the placeholder explicitly at "
-          "C0, so flipping imp_max_p alone is the exact mistake this guard exists for. Pass the "
-          "derived per-joint tensor from derive_impulse_thresholds.py as imp_limit."
+          "(0.1) — flipping imp_max_p alone is the exact mistake this guard exists for. Pass the "
+          "explicit project-defined per-joint tensor as imp_limit."
         )
 
   def __init__(self, cfg: ManagerTermBaseCfg, env: "ManagerBasedRlEnv"):
@@ -162,7 +173,7 @@ class CatSoftHook(ManagerTermBase):
     # manager constructs terms in dict order.
     self._vel_detection: str = str(p.get("vel_detection", "control_rate"))
     if self._use_vel and self._vel_detection == "substep":
-      self._assert_joint_sets_match(self._substep_tracker(env))
+      self._assert_joint_sets_match(self._substep_tracker(env), env, "substep velocity tracker")
     # Normalize the limit to a device-resident tensor: the C2 per-joint caps arrive as a (6,)
     # tensor or list from cfg params — a CPU tensor on a CUDA env or a plain list would only
     # detonate at the first constraint eval on GPU.
@@ -179,6 +190,7 @@ class CatSoftHook(ManagerTermBase):
     J = _joint_count(robot.data.joint_pos, self._robot_cfg.joint_ids)
     self._imp_cmax = torch.full((1, J), self._imp_seed, device=env.device)
     self._imp_seeded = torch.zeros(1, J, dtype=torch.bool, device=env.device)
+    self._last_impulse: torch.Tensor | None = None
     # Negative-term column indices into reward_manager._step_reward. Resolved LAZILY on first __call__
     # (manager build order is not guaranteed, so the reward manager may not be fully built in __init__).
     self._neg_idx: list[int] | None = None
@@ -187,6 +199,7 @@ class CatSoftHook(ManagerTermBase):
     # Clears the per-step probs/raw buffers; running_maxes (the EMA normalizer) intentionally persists
     # (population statistic — see CaT.reset()).
     self._cat.reset()
+    self._last_impulse = None
     return None
 
   def _neg_indices(self, env: "ManagerBasedRlEnv") -> list[int]:
@@ -235,10 +248,21 @@ class CatSoftHook(ManagerTermBase):
     if self._vel_detection != "substep":
       return joint_velocity_excess(env, limit=self._limit, robot_cfg=self._robot_cfg)
     tracker = self._substep_tracker(env)
-    self._assert_joint_sets_match(tracker)
+    self._assert_joint_sets_match(tracker, env, "substep velocity tracker")
     return tracker.peak_qv_joint - self._limit  # (B, J) 500 Hz peak-held over the window
 
-  def _assert_joint_sets_match(self, tracker) -> None:
+  @staticmethod
+  def _normalized_joint_ids(joint_ids, total_joints: int) -> list[int]:
+    """Expand SceneEntityCfg's slice optimization into a comparable ordered ID list."""
+    if isinstance(joint_ids, slice):
+      return list(range(total_joints))[joint_ids]
+    if isinstance(joint_ids, torch.Tensor):
+      return [int(value) for value in joint_ids.flatten().tolist()]
+    if isinstance(joint_ids, int):
+      return [joint_ids]
+    return [int(value) for value in joint_ids]
+
+  def _assert_joint_sets_match(self, tracker, env: "ManagerBasedRlEnv", source: str) -> None:
     """Compare joint IDENTITY, not merely column count (2026-08 review).
 
     The tracker fixes its joint set from the module-global ``_ARM_CFG``; this hook takes
@@ -246,10 +270,15 @@ class CatSoftHook(ManagerTermBase):
     different six-joint set passes a shape check while every margin column is normalized by
     (and attributed to) the wrong joint's EMA — silently, and forever.
     """
-    theirs, ours = list(tracker._joint_ids), list(self._robot_cfg.joint_ids)
+    tracker_ids = getattr(tracker, "_joint_ids", None)
+    if tracker_ids is None:
+      raise RuntimeError(f"CatSoftHook: {source} does not expose its joint ids.")
+    total_joints = int(env.scene[self._robot_cfg.name].data.joint_pos.shape[1])
+    theirs = self._normalized_joint_ids(tracker_ids, total_joints)
+    ours = self._normalized_joint_ids(self._robot_cfg.joint_ids, total_joints)
     if theirs != ours:
       raise RuntimeError(
-        f"CatSoftHook: the substep tracker peak-holds joint ids {theirs} but this hook's "
+        f"CatSoftHook: the {source} uses joint ids {theirs} but this hook's "
         f"robot_cfg selects {ours} — the joint sets must match exactly (same joints, same "
         "order), or each margin column would be attributed to the wrong joint."
       )
@@ -285,6 +314,15 @@ class CatSoftHook(ManagerTermBase):
     δ formula's min_p floor would otherwise leak min_p·(1−normalized) > 0 — 2026-07 review), the
     normalizer stays untouched, and only the RAW margin is recorded for the gate / histogram.
     """
+    accumulator = getattr(env, _ENV_SUBSTEP_IMPULSE_ATTR, None)
+    if accumulator is None:
+      raise RuntimeError(
+        "CatSoftHook impulse telemetry requires the SubstepImpulseAccumulator metric."
+      )
+    self._assert_joint_sets_match(accumulator, env, "substep impulse accumulator")
+    # Keep the authoritative accumulator value. Reconstructing Lambda as (Lambda-cap)+cap is not
+    # generally reversible in float32 and can shift a near-boundary sample by one representable bit.
+    self._last_impulse = accumulator.impulse.detach().clone()
     c = joint_impulse_excess(env, limit=self._imp_limit)  # (B,J) raw margin
     self._cat.raw_constraints["joint_impulse_excess"] = c
     if c.shape[1] != self._imp_cmax.shape[1]:
@@ -326,3 +364,99 @@ class CatSoftHook(ManagerTermBase):
     env.extras[CAT_DELTA_KEY] = delta
     env.extras[CAT_R_POS_KEY] = self._compute_r_pos(env)
     return delta                                    # logged as Episode_Metrics/cat_soft mean
+
+  def constraint_telemetry(self) -> dict[str, torch.Tensor]:
+    """Return a detached snapshot attributing the most recently computed soft-OR.
+
+    This is deliberately a pull-only view over the existing ``CaT`` buffers: it does not call a
+    constraint, update an EMA, or write to the environment. Consequently, reading it cannot alter
+    physics, actions, rewards, PPO data, or the aggregate CaT result.
+    """
+    impulse_margin = self._cat.raw_constraints.get("joint_impulse_excess")
+    impulse_per_joint = self._cat.probs.get("joint_impulse_excess")
+    if impulse_margin is None or impulse_per_joint is None:
+      raise RuntimeError(
+        "CatSoftHook.constraint_telemetry requires use_impulse=True and one completed hook call."
+      )
+    if impulse_margin.ndim != 2 or impulse_per_joint.shape != impulse_margin.shape:
+      raise RuntimeError(
+        "CatSoftHook.constraint_telemetry expected impulse margin/probability shape (B, J), got "
+        f"{tuple(impulse_margin.shape)} and {tuple(impulse_per_joint.shape)}."
+      )
+
+    velocity_per_joint = self._cat.probs.get("joint_velocity_excess")
+    if velocity_per_joint is None:
+      velocity_per_joint = torch.zeros_like(impulse_per_joint)
+    elif velocity_per_joint.shape != impulse_per_joint.shape:
+      raise RuntimeError(
+        "CatSoftHook.constraint_telemetry requires velocity and impulse joint shapes to match, got "
+        f"{tuple(velocity_per_joint.shape)} and {tuple(impulse_per_joint.shape)}."
+      )
+
+    active_limit = torch.as_tensor(
+      self._imp_limit, dtype=impulse_margin.dtype, device=impulse_margin.device
+    )
+    if active_limit.ndim == 0:
+      active_limit = active_limit.expand(impulse_margin.shape[1])
+    if active_limit.shape != (impulse_margin.shape[1],):
+      raise RuntimeError(
+        "CatSoftHook.constraint_telemetry expected one cap per joint, got imp_limit "
+        f"shape {tuple(active_limit.shape)} for {impulse_margin.shape[1]} joints."
+      )
+    if not bool(torch.isfinite(active_limit).all() and (active_limit > 0.0).all()):
+      raise RuntimeError("CatSoftHook.constraint_telemetry requires finite positive active limits.")
+
+    if self._last_impulse is None or self._last_impulse.shape != impulse_margin.shape:
+      raise RuntimeError(
+        "CatSoftHook.constraint_telemetry has no authoritative impulse snapshot for this hook call."
+      )
+    lambda_per_joint = self._last_impulse
+    delta_velocity = velocity_per_joint.max(dim=1).values
+    delta_impulse = impulse_per_joint.max(dim=1).values
+    delta = torch.maximum(delta_velocity, delta_impulse)
+
+    winner_constraint = torch.full_like(delta_velocity, WINNER_NONE, dtype=torch.long)
+    active = delta > 0.0
+    velocity_wins = active & (delta_velocity > delta_impulse)
+    impulse_wins = active & (delta_impulse > delta_velocity)
+    ties = active & (delta_velocity == delta_impulse)
+    winner_constraint = torch.where(
+      velocity_wins,
+      torch.full_like(winner_constraint, WINNER_VELOCITY),
+      winner_constraint,
+    )
+    winner_constraint = torch.where(
+      impulse_wins,
+      torch.full_like(winner_constraint, WINNER_IMPULSE),
+      winner_constraint,
+    )
+    winner_constraint = torch.where(
+      ties, torch.full_like(winner_constraint, WINNER_TIE), winner_constraint
+    )
+
+    velocity_joint = velocity_per_joint.argmax(dim=1)
+    impulse_joint = impulse_per_joint.argmax(dim=1)
+    winner_joint = torch.full_like(velocity_joint, -1)
+    winner_joint = torch.where(velocity_wins, velocity_joint, winner_joint)
+    winner_joint = torch.where(impulse_wins, impulse_joint, winner_joint)
+
+    telemetry = {
+      "delta_velocity_per_joint": velocity_per_joint,
+      "delta_impulse_per_joint": impulse_per_joint,
+      "delta_velocity": delta_velocity,
+      "delta_impulse": delta_impulse,
+      "delta": delta,
+      "winner_constraint": winner_constraint,
+      "winner_joint": winner_joint,
+      "lambda_per_joint": lambda_per_joint,
+      "active_limit_per_joint": active_limit,
+      "cap_utilization_per_joint": lambda_per_joint / active_limit,
+      "raw_margin_per_joint": impulse_margin,
+      "positive_margin_per_joint": impulse_margin.clamp_min(0.0),
+    }
+    snapshot: dict[str, torch.Tensor] = {}
+    for name, value in telemetry.items():
+      if not bool(torch.isfinite(value).all()):
+        raise RuntimeError(f"CatSoftHook.constraint_telemetry field {name!r} is not finite.")
+      snapshot[name] = value.detach().clone()
+    return snapshot

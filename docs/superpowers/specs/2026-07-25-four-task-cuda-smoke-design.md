@@ -1,5 +1,10 @@
 # Four-task CUDA instrumentation smoke — design
 
+> **Impulse-threshold provenance correction (2026-08-14):** “Manufacturer cap”
+> wording and `[1.64, 3.28, ...]` below record the historical registered-task boundary,
+> not a validated Z1 reaction-impulse or damage limit. The design body remains frozen;
+> see `../../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 **Status:** Revised after two independent design reviews; user review pending.
 No commit, push, SSH, Slurm submission, GPU execution, training or policy
 evaluation is authorized by this document.

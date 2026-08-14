@@ -1,5 +1,10 @@
 # 56-Policy Fixed-Reset 500 Hz Companion Implementation Plan
 
+> **Impulse-threshold provenance correction (2026-08-14):** “Manufacturer impulse
+> cap” wording below refers only to the historical registered-task boundary, not a
+> validated Z1 reaction-impulse or damage limit. The plan body remains frozen; see
+> `../../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Re-evaluate the frozen 56-policy library from its one approved reset at the native 2 ms physics rate, then bank exact-onset trajectory, joint-speed, and running per-joint impulse evidence without changing training or task semantics.

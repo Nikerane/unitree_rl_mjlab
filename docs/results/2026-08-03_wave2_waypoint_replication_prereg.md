@@ -1,5 +1,10 @@
 # Wave-2 waypoint-guidance replication — preregistration (2026-08-03)
 
+> **Impulse-threshold provenance correction (2026-08-14):** “Manufacturer impulse
+> cap” wording and `[1.64, 3.28, ...]` below record the historical registered-task
+> boundary, not a validated Z1 reaction-impulse or damage limit. The numeric
+> preregistration remains frozen; see `../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 **Status: LAUNCHED AND COMPLETE (2026-08-03).** Registered, and the training revision
 pinned, *before* any Wave-2 job was submitted, so the endpoints and thresholds below
 could not be chosen after seeing the data. All 12 runs have since completed; the ledger

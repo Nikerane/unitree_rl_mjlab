@@ -1,5 +1,10 @@
 # No-Windup Fixed-Reset Cartesian Strike Design
 
+> **Impulse-threshold provenance correction (2026-08-14):** “Manufacturer impulse
+> cap/limit” wording below refers only to the historical registered-task boundary, not a
+> validated Z1 reaction-impulse or damage limit. The design body remains frozen; see
+> `../../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 **Date:** 2026-08-02
 **Status:** owner-approved
 **Branch:** `cartesian-guideline-fic`

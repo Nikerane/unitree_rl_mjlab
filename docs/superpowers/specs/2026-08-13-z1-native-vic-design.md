@@ -108,4 +108,4 @@ Do not launch VIC training from this prototype. After G0-G4 pass, a separately a
 
 ## Out of scope
 
-This prototype does not add VIC-0, active impulse-CaT, altered manufacturer caps, evaluator expansion, parameter-sweep infrastructure, gain filters, gain observations, gain rewards, domain randomization, curriculum changes, Cartesian tasks, controlled-drop changes, hardware claims, or G1 work.
+This prototype does not add VIC-0, active impulse-CaT, altered registered-task impulse thresholds, evaluator expansion, parameter-sweep infrastructure, gain filters, gain observations, gain rewards, domain randomization, curriculum changes, Cartesian tasks, controlled-drop changes, hardware claims, or G1 work.

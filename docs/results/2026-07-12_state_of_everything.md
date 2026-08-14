@@ -1,5 +1,7 @@
 # State of Everything — impact-safe manipulation thesis (snapshot 2026-07-12)
 
+> **Impulse-threshold provenance correction (2026-08-14):** Any “real,” “hardware,” or manufacturer-cap reading of the historical `[1.64, 3.28, ...]` project vector below is superseded. Its `kappa=2` interpretation is retired; banked ratios remain historical evidence only. The body and numbers remain frozen; see `../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 > Consolidation snapshot fusing (a) a full internal repo survey (code / docs / tests / findings),
 > (b) this session's new CPU results, and (c) an external scientific-literature deep-research pass
 > (24 sources adversarially verified, 1 refuted). Purpose: know exactly where the project stands

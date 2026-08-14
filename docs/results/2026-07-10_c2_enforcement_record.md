@@ -1,5 +1,7 @@
 # C2 enforcement gate — durable provenance record (2026-07-10)
 
+> **Impulse-threshold provenance correction (2026-08-14):** This record's “real caps,” `kappa=2` basis, and `[1.64, 3.28, ...]` vector are historical experiment inputs, not manufacturer-certified Z1 damage limits. Its body and numbers remain frozen for reproducibility; see `../research/reward-design/IMPULSE_CAP_PROVENANCE.md` for the current banked/provisional/diagnostic identities.
+
 > **Dated result record** — facts frozen as of the C2 gate run (2026-07-10). Written retroactively
 > on 2026-07-14 to discharge adversarial-review finding **I9** (the C2 rationale previously lived
 > only in the gitignored SDD ledger and now-deleted `/tmp` transcripts). Where a number has since

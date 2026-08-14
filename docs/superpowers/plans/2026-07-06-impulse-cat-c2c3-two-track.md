@@ -1,5 +1,7 @@
 # Impulse-CaT C2→C3 Two-Track Enablement — Implementation Plan
 
+> **Impulse-threshold provenance correction (2026-08-14):** This dated plan's “real/manufacturer cap,” `kappa=2`, `27.3 ms`, and `[1.64, 3.28, ...]` interpretations are superseded. Its vector and probe scales remain historical experiment inputs only, not validated Z1 damage limits. The body/numbers are preserved; see `../../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Enable the impulse soft-CaT constraint (`imp_max_p > 0`) on the baseline-subtracted Λ_j with fixture-era measured caps, run the C3 four-arm results campaign on Vega with full observability (per-joint force-propagation + cross-run comparison), and in parallel build the rigorous contact-row impulse isolation as a logged validator (never enforced, never gating Track 1).

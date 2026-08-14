@@ -1,5 +1,10 @@
 # Wave-1 waypoint-guidance campaign ledger (2026-08-02)
 
+> **Impulse-threshold provenance correction (2026-08-14):** The table label
+> “Manufacturer caps” and `[1.64, 3.28, ...]` below record the historical
+> registered-task boundary, not a validated Z1 reaction-impulse or damage limit. The
+> campaign ledger remains frozen; see `../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 Launch record for Task 4 of `docs/superpowers/plans/2026-08-02-wave1-waypoint-guidance.md`.
 This file records what was launched and how it qualified. **No analysis** — that is Task 5.
 

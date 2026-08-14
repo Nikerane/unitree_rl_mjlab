@@ -1,5 +1,7 @@
 # Progress presentation content — Prof. Khadiv, 2026-07-20
 
+> **Impulse-threshold provenance correction (2026-08-14):** Slides below that call `[1.64, 3.28, ...]`, `kappa=2`, or the `27.3 ms` conversion manufacturer/hardware limits are historical and superseded. The vector remains the banked experiment boundary, not a validated Z1 damage limit. Preserve the slide record; use `../research/reward-design/IMPULSE_CAP_PROVENANCE.md` for current claims.
+
 **Purpose of this file:** slide-by-slide CONTENT for the student to build into actual slides (not a
 finished deck). Every number is quoted from banked eval CSVs / diagnostic docs; sources are cited per
 slide. Claims are tagged **PROVEN** / **OPEN** / **CORRECTED THIS WEEK** — keep those tags visible in

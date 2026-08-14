@@ -1,5 +1,10 @@
 # Reward + constraint code fault audit (2026-07-19)
 
+> **Impulse-threshold provenance correction (2026-08-14):** The `27.3 ms` cap
+> derivation discussed below is historical; its unsupported `kappa=2` interpretation is
+> retired and it is not a validated Z1 reaction-impulse or damage limit. The audit body
+> remains frozen; see `../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 Two independent reviewers (Fable 5 + Codex) audited the Z1 hammer reward/constraint machinery for latent
 faults — bugs, reward-hacking surfaces, and enforcement-day landmines. **CONSENSUS** = both flagged
 independently (high confidence). Findings I verified against code are marked ✅. **None of these actively

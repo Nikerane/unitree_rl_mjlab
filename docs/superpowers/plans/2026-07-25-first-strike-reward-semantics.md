@@ -1,5 +1,10 @@
 # First-Strike Reward Semantics Implementation Plan
 
+> **Impulse-threshold provenance correction (2026-08-14):** “Manufacturer cap”
+> wording below refers only to the historical registered-task boundary, not a validated
+> Z1 reaction-impulse or damage limit. The plan body remains frozen; see
+> `../../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 > **Comparator amendment:** The original dose-matched D design in Task 3 was
 > falsified by its frozen validation bank. D/`alpha_D`/`alpha_F` instructions
 > below are historical and must not be executed. The approved equal-weight

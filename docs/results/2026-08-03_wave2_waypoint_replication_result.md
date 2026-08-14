@@ -1,5 +1,10 @@
 # Wave-2 waypoint-guidance replication — result (2026-08-03)
 
+> **Impulse-threshold provenance correction (2026-08-14):** “Manufacturer cap”
+> wording below refers only to the historical registered-task boundary, not a validated
+> Z1 reaction-impulse or damage limit. The result body remains frozen; see
+> `../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 Preregistration: `docs/results/2026-08-03_wave2_waypoint_replication_prereg.md`
 (registered, and the training revision pinned, **before** Wave 2 trained).
 Pooled population: **18 policies, 6 seeds per arm** — Wave-1 seeds 2–3 (frozen) plus

@@ -1,5 +1,10 @@
 # First-strike reward experiment preregistration
 
+> **Impulse-threshold provenance correction (2026-08-14):** “Manufacturer-derived cap”
+> wording and `[1.64, 3.28, ...]` below record the historical registered-task boundary,
+> not a validated Z1 reaction-impulse or damage limit. The numeric preregistration remains
+> frozen; see `../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 **Date:** 2026-07-25
 **Scope:** Unitree Z1, fixed impedance, log-only impulse characterization
 **Status:** Local implementation and CPU integration verified; no CUDA

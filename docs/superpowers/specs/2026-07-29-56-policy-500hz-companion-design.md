@@ -1,5 +1,10 @@
 # 56-policy fixed-reset 500 Hz companion pass — design
 
+> **Impulse-threshold provenance correction (2026-08-14):** “Manufacturer cap”
+> wording below refers only to the historical registered-task boundary, not a validated
+> Z1 reaction-impulse or damage limit. The design body remains frozen; see
+> `../../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 **Date:** 2026-07-29  
 **Status:** owner-approved design  
 **Purpose:** obtain the exact substep evidence that the completed 50 Hz visual

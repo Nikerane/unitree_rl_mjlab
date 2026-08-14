@@ -1,5 +1,7 @@
 > ⚠️ **ARCHIVED 2026-07-05** — superseded by `docs/research/reward-design/IMPULSE_CAT_IMPL_PLAN.md` + `FAITHFUL_SOFT_CAT_IMPL_PLAN.md`.
 > Facts below may contradict the current code. Do not act on them; check `docs/README.md`.
+>
+> **Impulse-threshold provenance correction (2026-08-14):** The generic Harmonic Drive `2x` repeated-peak conversion described below is retired for the Z1. No exact Z1 reducer rating or manufacturer reaction-impulse damage limit supports it. The historical body is preserved; see `../research/reward-design/IMPULSE_CAP_PROVENANCE.md` for current interpretation.
 
 # Tracking + Impact + Impulse — Staged Implementation Plan (Z1 Phase-0 → G1)
 

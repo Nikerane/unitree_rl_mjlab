@@ -1,5 +1,10 @@
 # Cartesian guideline pilot evaluator qualification
 
+> **Impulse-threshold provenance correction (2026-08-14):** “Manufacturer cap” wording
+> and `[1.64, 3.28, ...]` below record the historical registered-task boundary, not a
+> validated Z1 reaction-impulse or damage limit. The qualification body remains frozen;
+> see `../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 **Date:** 2026-08-02
 
 **Reviewed code revision:** `d389d4ca3b91975243a09ea06e48e630c7deb0dd`

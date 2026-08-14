@@ -1,5 +1,10 @@
 # Phase 0 — fixed-impedance local diagnostic battery (2026-07-17)
 
+> **Impulse-threshold provenance correction (2026-08-14):** The `27.3 ms` basis and
+> `[1.64, 3.28, ...]` vector below are historical project inputs, not a validated Z1
+> reaction-impulse or damage limit; the unsupported `kappa=2` interpretation is retired.
+> The numeric body remains frozen; see `../research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
+
 **Result: the enforced Λ and the deliverable impulse are decisively PRESS integrals, not ballistic
 momentum; the ballistic quantity is structurally vacuous across the entire reachable envelope; and the
 enforced Λ "binds" only at the intersection of three artifacts (rigid target + sustained press + the
