@@ -1,4 +1,4 @@
-# Docs index — current truth map (2026-08-13)
+# Docs index — current truth map (2026-08-14)
 
 **Authority rule: code > this index > the living docs it lists.** `docs/archive/**` and dated
 records are historical evidence — never act on them without checking here first. When a doc and
@@ -14,8 +14,10 @@ the code disagree, the checked-out code wins; fix the doc.
 | `docs/superpowers/plans/2026-08-12-z1-direct-reference-fic.md` | Executable implementation, Vega qualification/training, and result-banking plan for that campaign |
 | `docs/superpowers/specs/2026-08-13-z1-native-vic-design.md` | Approved native Z1 VIC-TT prototype contract; implementation and qualification are banked |
 | `docs/superpowers/plans/2026-08-13-z1-native-vic.md` | Executed native VIC-TT prototype qualification plan |
-| `docs/superpowers/specs/2026-08-13-z1-vic-canary-design.md` | Approved exact seed-2 VIC-TT engineering-canary contract; not yet run |
-| `docs/superpowers/plans/2026-08-13-z1-vic-canary.md` | Executable telemetry, guarded-launch, and one-canary assessment plan |
+| `docs/superpowers/specs/2026-08-13-z1-vic-canary-design.md` | Approved exact seed-2 VIC-TT engineering-canary contract; the one authorized run is complete |
+| `docs/superpowers/plans/2026-08-13-z1-vic-canary.md` | Executed telemetry, guarded-launch, and one-canary assessment plan |
+| `docs/results/2026-08-14_z1_vic_seed2_canary.md` | Banked one-seed native VIC-TT engineering result, gain evidence, video, checkpoint, and claim boundary |
+| `docs/thesis/decisions/2026-08-13_vic_impulse_cat_and_trajectory_direction.md` | Supervisor direction: compare velocity+active-impulse CaT against the log-only control, then consider trajectory-source families |
 | `docs/research/reward-design/IMPULSE_CAT_IMPL_PLAN.md` | The impulse-CaT arm (the thesis headline): quantity Λ_j, substep accumulator, staged plan C0–C5, current status |
 | `docs/research/reward-design/FAITHFUL_SOFT_CAT_IMPL_PLAN.md` | Faithful soft `γ(1−δ)` CaT: design, Decisions 1–7, file map, phases + the CaT conceptual deep-dive appendix |
 | `docs/research/reward-design/CONSTRAINED_RL_LANDSCAPE.md` | Why soft-CaT over Lagrangian/CMDP (constraint-TYPE argument) + the joint-velocity-bound research appendix |
@@ -64,6 +66,9 @@ Dated research records kept in place (bannered, bodies frozen):
   (`docs/results/2026-07-10_c2_enforcement_record.md`); feasibility gate re-greened
   via `playback_reference.py` (`test_single_strike.py` probe retired)
 - 2026-07-12/13 — **vacuity finding**: the impulse constraint is vacuous for reachable ballistic impacts on fixed impedance (velocity effort-clamped); the *windowed press-through* reaction is what binds, conditional on the window/cap pairing → the Λ-quantity is Khadiv decision (e) (`docs/results/2026-07-12_impulse_vacuity.md`, `2026-07-12_state_of_everything.md`, `2026-07-12_khadiv_vic_addendum.md`). Λ re-semanticized as a time-based **sliding window** after an adversarial review falsified the prefix cap (masking bypass). Reference prior fixed (follow-through strike, `i_ref` 0.0811→0.6094)
+- 2026-08-12 — direct-reference fixed-impedance FIC-0/FIC-TT campaign completed at three matched seeds; FIC-TT reduced target RMSE in all three but did not establish safety (`docs/results/2026-08-12_z1_fic_direct_reference.md`)
+- 2026-08-13/14 — native 12-output VIC-TT qualified and its one authorized seed-2 engineering canary completed; 64/64 deterministic evaluation worlds succeeded with joint-specific gains and impulse CaT log-only (`docs/results/2026-08-14_z1_vic_seed2_canary.md`)
+- 2026-08-13 — supervisor direction records active per-joint impulse soft-CaT plus velocity soft-CaT as the target treatment, paired against the impulse-log-only control; trajectory-source comparisons come later (`docs/thesis/decisions/2026-08-13_vic_impulse_cat_and_trajectory_direction.md`)
 
 ## 4. Code entry map (`src/tasks/hammer/` — suggested read order)
 
@@ -92,12 +97,12 @@ Dated research records kept in place (bannered, bodies frozen):
 `docs/research/reward-design/derive_impulse_thresholds.py` (impulse quantity gate; re-run after any EE change) ·
 `docs/research/reward-design/playback_reference.py` (strike feasibility gate; the crude `test_single_strike.py` probe was retired 2026-07-10 — the script remains but is not a gate).
 
-**Current GPU route:** Clean Vega A100 VIC-TT qualification is banked and complete from the exact pushed SHA in a clean detached worktree: it ran the same nominal arm twice to freeze per-tensor parity tolerances, then ran VIC authority, `p=0` FIC–VIC parity, and a genuine one-iteration CatPPO smoke. The exact seed-2 engineering canary is approved but not yet run, and no VIC training result exists yet. The direct-reference FIC launchers are banked baseline/reproducibility routes; the fixed-reset C0/C-Gate and waypoint-guided FIC campaigns are also banked prior work. `scripts/lightning_pair.sh` is retained as a legacy Lightning.ai launcher, not the current route.
-**Current VIC prototype route:** Native Z1 VIC-TT implementation and qualification are banked under `docs/superpowers/specs/2026-08-13-z1-native-vic-design.md` and `docs/superpowers/plans/2026-08-13-z1-native-vic.md`, and exactly one seed-2 engineering canary is approved for launch under `docs/superpowers/specs/2026-08-13-z1-vic-canary-design.md` and `docs/superpowers/plans/2026-08-13-z1-vic-canary.md`; no more seeds or formal FIC–VIC comparison are authorized by that plan.
+**Current GPU route:** Clean Vega A100 VIC-TT qualification is banked and complete, and the exact seed-2 engineering canary is also banked and complete from an exact pushed SHA in a clean detached worktree. Qualification ran the same nominal arm twice to freeze per-tensor parity tolerances, then VIC authority, `p=0` FIC–VIC parity, and a genuine one-iteration CatPPO smoke. Training job `41119011` completed 500 iterations and its frozen 64-world evaluation passed 64/64 success and productive-strike gates. This is a one-seed engineering result, not a VIC-superiority claim; impulse CaT was log-only. The direct-reference FIC launchers are banked baseline/reproducibility routes. The next scientific route is not yet launch-authorized: first calibrate and expose separate impulse-versus-velocity CaT activation, then preregister the paired active-impulse target and log-only control recorded in `docs/thesis/decisions/2026-08-13_vic_impulse_cat_and_trajectory_direction.md`. `scripts/lightning_pair.sh` is retained as a legacy Lightning.ai launcher, not the current route.
+**Current VIC prototype route:** Native Z1 VIC-TT implementation and qualification are banked under `docs/superpowers/specs/2026-08-13-z1-native-vic-design.md` and `docs/superpowers/plans/2026-08-13-z1-native-vic.md`. The one seed-2 engineering canary authorized by `docs/superpowers/specs/2026-08-13-z1-vic-canary-design.md` and `docs/superpowers/plans/2026-08-13-z1-vic-canary.md` is complete and banked in `docs/results/2026-08-14_z1_vic_seed2_canary.md`; that plan authorizes no additional seeds or formal FIC–VIC comparison.
 **Entry scripts:** `scripts/train.py` · `scripts/play.py` ·
 `scripts/slurm/vega_fic_direct_reference_smoke.sbatch` (banked direct-reference FIC CUDA baseline/reproducibility) ·
 `scripts/slurm/vega_fic_direct_reference.sbatch` (banked direct-reference FIC training reproducibility) ·
-`scripts/slurm/vega_vic_canary.sbatch` (approved one-seed VIC-TT engineering canary; not yet run) ·
+`scripts/slurm/vega_vic_canary.sbatch` (completed guarded one-seed VIC-TT engineering-canary route) ·
 `evaluation/joint_position/evaluate_fic_pilot.py` (compact direct-reference FIC evaluator) ·
 `scripts/lightning_pair.sh` (legacy Lightning.ai prior-vs-none launcher) ·
 `scripts/diag_policy_trace.py` (strike-vs-press classifier + peak-|q̇| eval) ·

@@ -1,0 +1,88 @@
+{
+  "correction": {
+    "changed_leaf_paths": [
+      "d0_mechanism.conditions.depth_gain_ratio_lower_gt_0_90",
+      "d0_mechanism.depth_gain_ratio.estimate",
+      "d0_mechanism.depth_gain_ratio.one_sided_95_lower",
+      "d0_mechanism.depth_gain_ratio.reason",
+      "d0_mechanism.depth_gain_ratio.samples",
+      "d0_mechanism.depth_gain_ratio.seed",
+      "d0_mechanism.depth_gain_ratio.two_sided_95_interval",
+      "d0_mechanism.depth_gain_ratio.valid",
+      "fq_min_practical_acceptance.depth_gain_ratio.estimate",
+      "fq_min_practical_acceptance.depth_gain_ratio.one_sided_95_lower",
+      "fq_min_practical_acceptance.depth_gain_ratio.reason",
+      "fq_min_practical_acceptance.depth_gain_ratio.samples",
+      "fq_min_practical_acceptance.depth_gain_ratio.seed",
+      "fq_min_practical_acceptance.depth_gain_ratio.two_sided_95_interval",
+      "fq_min_practical_acceptance.depth_gain_ratio.valid",
+      "fq_min_practical_acceptance.gates.depth_gain_ratio_lower_gt_0_90",
+      "fq_min_practical_acceptance.useful_speed_ratio.estimate",
+      "fq_min_practical_acceptance.useful_speed_ratio.one_sided_95_lower",
+      "fq_min_practical_acceptance.useful_speed_ratio.reason",
+      "fq_min_practical_acceptance.useful_speed_ratio.samples",
+      "fq_min_practical_acceptance.useful_speed_ratio.seed",
+      "fq_min_practical_acceptance.useful_speed_ratio.two_sided_95_interval",
+      "fq_min_practical_acceptance.useful_speed_ratio.valid"
+    ],
+    "changed_roots": [
+      "d0_mechanism.conditions.depth_gain_ratio_lower_gt_0_90",
+      "d0_mechanism.depth_gain_ratio",
+      "fq_min_practical_acceptance.depth_gain_ratio",
+      "fq_min_practical_acceptance.gates.depth_gain_ratio_lower_gt_0_90",
+      "fq_min_practical_acceptance.useful_speed_ratio"
+    ],
+    "code_revision": "c4ecfb6bbd42204dd92d8b2adc8af6282e94e9fe",
+    "rng": "numpy.random.PCG64",
+    "samples": 100000,
+    "seed": 20260726,
+    "uncompressed_analysis_sha256": "ada6223d9c3468a884b59b8722906bdcc6e6a79013f1f2761f7c52c79e79ccb3"
+  },
+  "correction_runtime": {
+    "matplotlib": "3.10.9",
+    "numpy": "2.2.6",
+    "python": "3.10.20"
+  },
+  "copied_historical_contact_map": {
+    "copied_byte_for_byte": true,
+    "producer_runtime": {
+      "matplotlib": "3.11.0"
+    },
+    "sha256": "40fcf66715b630f969c064e22ac8ad84ed1a095a765620357017a5b80faf7bbf",
+    "source_path": "docs/results/assets/2026-07-28_first_strike_quality_4x8/aggregate_nail_plane_contact_map.png"
+  },
+  "material_passport": {
+    "mode": "local deterministic statistical correction",
+    "origin": "SHA-pinned banked Task-9 analysis sufficient statistics",
+    "verification_status": "ANALYZED"
+  },
+  "results": {
+    "d0_mechanism_claim_allowed": false,
+    "d0_over_f8_depth_gain": {
+      "estimate": 0.9914616558752575,
+      "gate_passed": true,
+      "one_sided_95_lower": 0.9886613795645048
+    },
+    "fq_min_over_f8_depth_gain": {
+      "estimate": 1.1304631795629263,
+      "gate_passed": true,
+      "one_sided_95_lower": 1.0036288116342884
+    },
+    "fq_min_over_f8_useful_speed": {
+      "estimate": 1.0204828748706622,
+      "gate_passed": false,
+      "one_sided_95_lower": 0.9031426891189621
+    },
+    "fq_min_practical_acceptance": false,
+    "overall_conclusions_changed": false
+  },
+  "schema_version": 1,
+  "source": {
+    "analysis_compression": "gzip",
+    "analysis_path": "source_analysis.json.gz",
+    "analysis_sha256": "723b3197948338e259add4da21747982ee72445cac65c8a475185be5482e7382",
+    "compressed_analysis_sha256": "a4879b19279b469dd609a4de3612d9ac8e0a71f5c22d8a47085bc1d8c8341bf3",
+    "seed_aggregates": 32,
+    "valid_contact_coordinates": 14846
+  }
+}

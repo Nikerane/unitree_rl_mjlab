@@ -26,7 +26,7 @@ REPO = Path(__file__).resolve().parents[1]
 LIVING_SET = [
     REPO / "CLAUDE.md",
     REPO / "docs/README.md",
-    *sorted((REPO / "docs/thesis").glob("*.md")),
+    *sorted((REPO / "docs/thesis").rglob("*.md")),
     *sorted((REPO / "docs/research/reward-design").glob("*.md")),
 ]
 
@@ -127,6 +127,8 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
         "docs/superpowers/plans/2026-08-13-z1-native-vic.md",
         "docs/superpowers/specs/2026-08-13-z1-vic-canary-design.md",
         "docs/superpowers/plans/2026-08-13-z1-vic-canary.md",
+        "docs/results/2026-08-14_z1_vic_seed2_canary.md",
+        "docs/thesis/decisions/2026-08-13_vic_impulse_cat_and_trajectory_direction.md",
         "src/tasks/hammer/mdp/variable_impedance.py",
         "scripts/slurm/vega_fic_direct_reference_smoke.sbatch",
         "scripts/slurm/vega_fic_direct_reference.sbatch",
@@ -136,7 +138,7 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
     missing = [ref for ref in required_refs if f"`{ref}`" not in text]
     assert not missing, "Current FIC/VIC paths missing from index:\n" + "\n".join(missing)
 
-    assert "# Docs index — current truth map (2026-08-13)" in text
+    assert "# Docs index — current truth map (2026-08-14)" in text
     assert "the checked-out code wins" in text
     route = next(
         line for line in text.splitlines() if line.startswith("**Current GPU route:**")
@@ -145,8 +147,11 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
     assert "VIC-TT qualification is banked and complete" in route
     assert "same nominal arm twice" in route
     assert "A100" in route
-    assert "seed-2 engineering canary is approved but not yet run" in route
-    assert "no VIC training result exists yet" in route
+    assert "seed-2 engineering canary is also banked and complete" in route
+    assert "Training job `41119011` completed 500 iterations" in route
+    assert "one-seed engineering result, not a VIC-superiority claim" in route
+    assert "impulse CaT was log-only" in route
+    assert "next scientific route is not yet launch-authorized" in route
     assert "direct-reference FIC-0/FIC-TT campaign" not in route
     assert (
         "direct-reference FIC launchers are banked baseline/reproducibility routes"
@@ -168,14 +173,14 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
         if line.startswith("**Current VIC prototype route:**")
     )
     assert "implementation and qualification are banked" in prototype
-    assert "exactly one seed-2 engineering canary" in prototype
-    assert "approved for launch" in prototype
-    assert "no more seeds or formal FIC–VIC comparison" in prototype
+    assert "one seed-2 engineering canary" in prototype
+    assert "is complete and banked" in prototype
+    assert "no additional seeds or formal FIC–VIC comparison" in prototype
     assert "training is deferred" not in text
     assert "training is explicitly deferred" not in text
     assert (
         "`scripts/slurm/vega_vic_canary.sbatch` "
-        "(approved one-seed VIC-TT engineering canary; not yet run)"
+        "(completed guarded one-seed VIC-TT engineering-canary route)"
         in text
     )
 

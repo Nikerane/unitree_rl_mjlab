@@ -1,0 +1,63 @@
+{
+  "arm": "VIC-TT",
+  "artifacts": {
+    "montage.png": "a53b38e7a21a52cfa7d1fb3b45dafdedbf2aba7d74bd241c0a32e0c410f16756",
+    "policy.mp4": "cbf61beb73415f3456cfad57dff8fbc93522785b5b2abb00cce02c827f234351",
+    "trace.npz": "0e1c0b0e4ab6776ad84ebe15d33de72a85696173cf3798eb9a17de49dd2998ae",
+    "trajectory.png": "7d068de4d0653ed2df3d97dc91d1063dd81cf799da83e3becfb53a738eefccaa"
+  },
+  "asset_revision": "b58ccd2f81fd246f27c1e8d88cf86484cd888703",
+  "campaign": "vic-presentation",
+  "checkpoint_file": "/cephhome/eunikhilr/campaigns/z1-vic-prototype/runs/ca5e83bc84bc979bac857088a9330f2a2bd8034b/b58ccd2f81fd246f27c1e8d88cf86484cd888703/41119011_victt_seed2/logs/rsl_rl/z1_hammer/2026-08-13_11-22-46_victt_seed2_job41119011/model_499.pt",
+  "checkpoint_sha256": "c1544b779e78e7323bf02ce7b0f165745ee63b5aad9f930f9eea64eb6ea4ea77",
+  "code_revision": "ca5e83bc84bc979bac857088a9330f2a2bd8034b",
+  "contact_semantics": "live hammer_head_0/nail contact at control boundary",
+  "execution_device": {
+    "actual_env_device": "cpu",
+    "actual_tensor_device": "cpu",
+    "platform": "Linux-5.14.0-687.23.2.el9_8.x86_64-x86_64-with-glibc2.34",
+    "requested": "cpu"
+  },
+  "metadata_payload_sha256": "1e3ffef35f348d86cf42f922b041cd42f395fd9c0eb40fb378af1aeffebcc9d9",
+  "metadata_provenance": "Presentation-only deterministic fixed-reset replay; no retraining and no scientific treatment change.",
+  "output_dimensions_px": {
+    "frame": [
+      960,
+      720
+    ],
+    "montage": [
+      5760,
+      720
+    ]
+  },
+  "presentation_generator_revision": "ca5e83bc84bc979bac857088a9330f2a2bd8034b",
+  "renderer_contract": {
+    "camera_azimuth_deg": 135.0,
+    "camera_distance_m": 0.85,
+    "camera_elevation_deg": -25.0,
+    "fps": 10,
+    "frame_height_px": 720,
+    "frame_width_px": 960,
+    "version": 1
+  },
+  "reset_envelope": "/cephhome/eunikhilr/repos/unitree_rl_mjlab-vic-ca5e83bc84bc979bac857088a9330f2a2bd8034b/docs/results/assets/2026-07-29_lambda_feasibility_stage0/lambda_feasibility_stage0_inputs.json",
+  "reset_state_digest": "bde511ec2adc42e5365e1e46f45ff1fb43223a93c31c6fbfb4580352e445e319",
+  "rollout": {
+    "auto_reset_enabled": false,
+    "executed_control_steps": 8,
+    "frame_count": 9,
+    "requested_control_steps": 200,
+    "terminal_boundary": {
+      "detected": true,
+      "reason": "terminated",
+      "step": 8
+    }
+  },
+  "task": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-JointPosition-VariableImpedance-TT",
+  "timing": {
+    "control_decimation": 10,
+    "control_dt_s": 0.02,
+    "physics_dt_s": 0.002
+  },
+  "training_seed": 2
+}
