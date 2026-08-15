@@ -92,6 +92,13 @@ or a provisional-boundary canary. `imp_max_p=0.2` remains only an analytical sta
 complete result and required no-learning calibration revision are recorded in
 `../../results/2026-08-15_z1_impulse_cat_step1.md`.
 
+After reviewing that the active arm had run for only 50 iterations, the user explicitly authorized
+one fresh matched **500-iteration diagnostic extension** at the same uniform `0.9` boundary:
+`imp_max_p=0.0` control versus `0.5` target, seed 2, and 4,096 x 24. This tests learned response under
+longer exposure. It still does not make `0.9` a hardware/scientific threshold, make `0.5` a
+calibrated complete-event dose, or turn soft CaT into a hard clamp. Training completion must be
+followed by matched checkpoint evaluation before any confinement claim.
+
 ## What remains open
 
 - Measure completed contact-duration distributions with release observed; do

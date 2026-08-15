@@ -129,11 +129,14 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
         "docs/superpowers/plans/2026-08-13-z1-vic-canary.md",
         "docs/results/2026-08-14_z1_vic_seed2_canary.md",
         "docs/results/2026-08-15_z1_impulse_cat_step1.md",
+        "docs/superpowers/specs/2026-08-15-z1-impulse-diag90-500-design.md",
+        "docs/superpowers/plans/2026-08-15-z1-impulse-diag90-500.md",
         "docs/thesis/decisions/2026-08-13_vic_impulse_cat_and_trajectory_direction.md",
         "src/tasks/hammer/mdp/variable_impedance.py",
         "scripts/slurm/vega_fic_direct_reference_smoke.sbatch",
         "scripts/slurm/vega_fic_direct_reference.sbatch",
         "scripts/slurm/vega_vic_canary.sbatch",
+        "scripts/slurm/vega_vic_impulse_diag90_500.sbatch",
         "evaluation/joint_position/evaluate_fic_pilot.py",
     )
     missing = [ref for ref in required_refs if f"`{ref}`" not in text]
@@ -154,7 +157,7 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
     assert "impulse CaT was log-only" in route
     assert "next scientific route is not yet launch-authorized" in route
     assert "Event-dose calibration is not complete" in route
-    assert "no `imp_max_p` or provisional-boundary canary is selected" in route
+    assert "no provisional-boundary `imp_max_p` or canary is selected" in route
     assert "direct-reference FIC-0/FIC-TT campaign" not in route
     assert (
         "direct-reference FIC launchers are banked baseline/reproducibility routes"
