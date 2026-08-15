@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "purpose": "uniform-0.9 diagnostic-boundary training-plumbing canary",
+  "claim_boundary": "one-seed 50-iteration scratch engineering run; not a hardware threshold, calibrated dose, learned-safety result, or performance comparison",
+  "code_revision": "8e61caf9618aa27ff403f94ffef091ab962c6dd7",
+  "asset_revision": "b58ccd2f81fd246f27c1e8d88cf86484cd888703",
+  "runtime": {
+    "gpu": "NVIDIA A100-SXM4-40GB",
+    "mjlab": "1.4.0",
+    "mujoco": "3.8.1",
+    "mujoco_warp": "3.8.1"
+  },
+  "shared_config": {
+    "task": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-JointPosition-VariableImpedance-TT",
+    "seed": 2,
+    "num_envs": 4096,
+    "steps_per_env": 24,
+    "iterations": 50,
+    "samples_per_arm": 4915200,
+    "initialization": "matched scratch runs; RESUME_PATH forbidden",
+    "impulse_caps_n_m_s": [0.738, 1.476, 0.738, 0.738, 0.738, 0.738]
+  },
+  "arms": {
+    "control": {
+      "job": "41272362_0",
+      "imp_max_p": 0.0,
+      "state": "COMPLETED",
+      "exit_code": "0:0",
+      "elapsed": "00:03:55",
+      "stderr_empty": true,
+      "stdout_sha256": "15b1eccd59f322efb62a618abe31aab98aceb14b72aa2a13823aab049c4749de",
+      "model_0_sha256": "128bb528a5390fa2fb7b66ba5f7100484ae88262c27f7cfedf6f3c74292ae3dc",
+      "model_49_sha256": "0a06680583125ef44a8daecf905a45eed47bede6d89290ba96ef884d8216e769",
+      "metrics": {
+        "iteration_0": {"reward": 2.1, "substep_impulse": 0.1896, "joint3_impulse_peak": 0.2073, "delivered_total": 0.235, "substep_peak_qv": 2.9604, "cat_soft": 0.202, "cat_delta_peak": 0.4818},
+        "iteration_49": {"reward": 2.68, "substep_impulse": 0.2264, "joint3_impulse_peak": 0.2394, "delivered_total": 0.3734, "substep_peak_qv": 2.2669, "cat_soft": 0.0457, "cat_delta_peak": 0.2794},
+        "iterations_40_49_mean": {"reward": 2.673, "substep_impulse": 0.23186, "joint3_impulse_peak": 0.25467, "delivered_total": 0.39553, "substep_peak_qv": 2.432, "cat_soft": 0.06469, "cat_delta_peak": 0.34542}
+      }
+    },
+    "target": {
+      "job": "41272362_1",
+      "imp_max_p": 0.5,
+      "state": "COMPLETED",
+      "exit_code": "0:0",
+      "elapsed": "00:03:54",
+      "stderr_empty": true,
+      "stdout_sha256": "f843b29af00c8d92e7e3f90daf0c468355e1376106aa778a3e13cf2449bd39a3",
+      "model_0_sha256": "53373b94444a8fa12eac42e2d989bf924075bc8e4e3b9306fe3616371e2c8418",
+      "model_49_sha256": "e9864c84a7a45f29ca69a8cb746fe10b4dfbdf18e4d0dcff958232d27443e9a5",
+      "metrics": {
+        "iteration_0": {"reward": 2.1, "substep_impulse": 0.1894, "joint3_impulse_peak": 0.2076, "delivered_total": 0.2354, "substep_peak_qv": 2.9597, "cat_soft": 0.2022, "cat_delta_peak": 0.4818},
+        "iteration_49": {"reward": 2.66, "substep_impulse": 0.2192, "joint3_impulse_peak": 0.2334, "delivered_total": 0.358, "substep_peak_qv": 2.4844, "cat_soft": 0.0589, "cat_delta_peak": 0.3972},
+        "iterations_40_49_mean": {"reward": 2.66, "substep_impulse": 0.21924, "joint3_impulse_peak": 0.23402, "delivered_total": 0.36544, "substep_peak_qv": 2.53755, "cat_soft": 0.06685, "cat_delta_peak": 0.4119}
+      }
+    }
+  },
+  "raw_log_root": "/ceph/hpc/home/eunikhilr/campaigns/z1-vic-impulse-diag90-canary/slurm",
+  "separate_constraint_attribution_available_in_training_log": false
+}

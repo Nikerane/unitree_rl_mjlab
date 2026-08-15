@@ -83,6 +83,15 @@ than once by the `50 Hz` policy, the report must retain separate per-read deltas
 and event pressure rather than treating `imp_max_p` as an event-level
 probability.
 
+That diagnostic pair and the frozen-checkpoint survey completed on 2026-08-15. All 64
+deterministic mean-policy peaks remained below the provisional no-`2x` boundary, which nevertheless
+bound 593/98,304 training-like sampled controller reads, overwhelmingly at J3. This is
+mechanism/calibration evidence only. Because 585/593 violating reads occurred at task termination
+and only 9/580 unambiguous associated contacts completed, the survey does not select an event dose
+or a provisional-boundary canary. `imp_max_p=0.2` remains only an analytical starting point. The
+complete result and required no-learning calibration revision are recorded in
+`../../results/2026-08-15_z1_impulse_cat_step1.md`.
+
 ## What remains open
 
 - Measure completed contact-duration distributions with release observed; do

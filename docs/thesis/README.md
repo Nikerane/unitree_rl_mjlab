@@ -162,9 +162,14 @@ applied above and in `CONSTRAINED_RL_LANDSCAPE.md` §5.*
 - ~~soft-CaT training **results**~~ **velocity-arm GPU results DONE (2026-06-18)** — see
   `../results/2026-06-18_softcat_velocity.md`: soft-CaT learns, complies in the mean, keeps 100%
   success + the fastest strike; **but the worst-case tail (3.9–4.2 rad/s, over π) remains**. Still
-  open: tail closure (next bullet) and the **impulse-CaT enforcement run** (C0 shipped LOG-ONLY;
-  the machinery has since grown well past this bullet's earlier snapshot — current status in
-  `../research/reward-design/IMPULSE_CAT_IMPL_PLAN.md`).
+  open: tail closure (next bullet) and the scientific **impulse-CaT enforcement comparison**.
+  Step-1 mechanism qualification is **DONE (2026-08-15)**: the provisional no-`2x` boundary is
+  nonbinding in the frozen 64-world mean-policy population but binds the training-like stochastic
+  tail, almost entirely at J3; impulse pressure is separately attributable and graded per read. The
+  completed uniform-`0.9` pair is diagnostic plumbing only. Complete physical-event dose remains
+  unresolved because 585/593 violating reads were terminal and only 9/580 unambiguous associated
+  contacts completed. See `../results/2026-08-15_z1_impulse_cat_step1.md`; no
+  provisional-boundary dose or canary is selected before the no-learning censoring revision.
 - worst-case tail closure via VIC (capability layer — after fixed-impedance results).
 - ~~citation verification pass~~ **DONE** (2026-06-17): no fabricated ids; 4 minor title/year fixes
   applied. Still confirm exact published venues per the thesis house citation style.
