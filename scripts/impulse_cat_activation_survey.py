@@ -936,7 +936,7 @@ def summarize_population(
   observed_segment_peaks = _observed_segment_peaks(lam, episode_id, valid)
   observed_segment_margins = _observed_segment_peaks(margins, episode_id, valid)
   segment_utilization = observed_segment_peaks / cap_array
-  segment_violating = segment_utilization > 1.0
+  segment_violating = observed_segment_margins > 0.0
   segment_compliance = {
     "segments": int(segment_utilization.shape[0]),
     "any_joint_violating_segments": int(segment_violating.any(axis=1).sum()),

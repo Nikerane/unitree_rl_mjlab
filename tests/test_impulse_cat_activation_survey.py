@@ -330,6 +330,35 @@ def test_segment_compliance_counts_repeated_violating_reads_once_per_episode_seg
   }
 
 
+def test_segment_compliance_uses_native_margin_at_float32_cap_boundary():
+  """A native zero margin must not become a violation after float64 utilization reporting."""
+  caps = (0.1,) * 6
+  lam = np.full((1, 1, 6), np.float32(0.05), dtype=np.float32)
+  lam[0, 0, 0] = np.float32(0.1)
+  trace = {
+    "lambda_per_joint": lam,
+    "episode_id": np.zeros((1, 1), dtype=np.int64),
+    "done": np.ones((1, 1), dtype=bool),
+    "delta_velocity": np.zeros((1, 1), dtype=np.float64),
+    "delta_impulse": np.zeros((1, 1), dtype=np.float64),
+    "delta": np.zeros((1, 1), dtype=np.float64),
+    "substep_contact": np.zeros((10, 1), dtype=bool),
+    "substep_episode_id": np.zeros((10, 1), dtype=np.int64),
+    "substep_rolling_per_joint": np.zeros((10, 1, 6), dtype=np.float32),
+  }
+
+  summary = survey.summarize_population(trace, caps=caps, first_episode_only=True)
+
+  assert float(lam[0, 0, 0]) / caps[0] > 1.0
+  compliance = summary["segment_compliance"]
+  assert compliance["any_joint_violating_segments"] == 0
+  assert compliance["any_joint_violation_rate"] == 0.0
+  assert compliance["per_joint"]["joint1"]["violating_segments"] == 0
+  assert compliance["per_joint"]["joint1"]["positive_margin_n_m_s"] == {
+    "p50": None, "p95": None, "p99": None, "max": None,
+  }
+
+
 def test_registered_vic_survey_config_matches_exact_offline_replay_contract():
   from mjlab.tasks.registry import load_env_cfg
 
