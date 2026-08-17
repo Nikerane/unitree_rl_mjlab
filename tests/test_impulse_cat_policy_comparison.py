@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 import sys
@@ -14,7 +15,7 @@ from scripts import impulse_cat_activation_survey as survey
 
 CONTROL_SHA = "f4f86cfd81fdc78824b85a059735b2f605c6761c624be59e0e778ef3fbd681c3"
 CODE_REVISION = "a" * 40
-ASSET_REVISION = "b" * 40
+ASSET_REVISION = "b58ccd2f81fd246f27c1e8d88cf86484cd888703"
 STOCHASTIC_SEEDS = (2, 2026081701, 2026081702)
 
 
@@ -274,13 +275,14 @@ def test_policy_evaluation_rejects_nonzero_live_impulse_pressure(
 
 def _segment_summary(
   *,
+  caps: tuple[float, ...],
   segments: int,
   violating_segments: int,
   violating_reads: int,
   utilization: tuple[float, float, float, float],
 ) -> dict[str, object]:
   return {
-    "caps_n_m_s": list(survey.DIAGNOSTIC_LIMITS_N_M_S),
+    "caps_n_m_s": list(caps),
     "binding": {"violating_reads": violating_reads},
     "segment_compliance": {
       "segments": segments,
@@ -295,12 +297,14 @@ def _segment_summary(
 
 def test_population_comparison_uses_paired_segments_not_overlapping_reads():
   control = _segment_summary(
+    caps=survey.DIAGNOSTIC_LIMITS_N_M_S,
     segments=100,
     violating_segments=10,
     violating_reads=1,
     utilization=(0.8, 1.2, 1.4, 1.6),
   )
   target = _segment_summary(
+    caps=survey.DIAGNOSTIC_LIMITS_N_M_S,
     segments=100,
     violating_segments=5,
     violating_reads=999_999,
@@ -328,12 +332,14 @@ def test_population_comparison_uses_paired_segments_not_overlapping_reads():
 
 def test_population_comparison_fails_closed_on_unpaired_or_inconsistent_summaries():
   control = _segment_summary(
+    caps=survey.DIAGNOSTIC_LIMITS_N_M_S,
     segments=100,
     violating_segments=10,
     violating_reads=10,
     utilization=(0.8, 1.2, 1.4, 1.6),
   )
   target = _segment_summary(
+    caps=survey.DIAGNOSTIC_LIMITS_N_M_S,
     segments=101,
     violating_segments=5,
     violating_reads=5,
@@ -355,12 +361,14 @@ def test_population_comparison_fails_closed_on_unpaired_or_inconsistent_summarie
 
 def test_population_comparison_reports_undefined_ratio_for_zero_control_risk():
   control = _segment_summary(
+    caps=survey.DIAGNOSTIC_LIMITS_N_M_S,
     segments=8,
     violating_segments=0,
     violating_reads=0,
     utilization=(0.5, 0.6, 0.7, 0.8),
   )
   target = _segment_summary(
+    caps=survey.DIAGNOSTIC_LIMITS_N_M_S,
     segments=8,
     violating_segments=1,
     violating_reads=40,
@@ -376,9 +384,12 @@ def test_population_comparison_reports_undefined_ratio_for_zero_control_risk():
 
 
 def _evaluation_payload(
-  role: str, summary: dict[str, object]
+  role: str,
+  provisional_summary: dict[str, object],
+  diagnostic_summary: dict[str, object],
 ) -> dict[str, object]:
   return {
+    "task": survey.VIC_TASK,
     "checkpoint": {"role": role, "sha256": survey.EVALUATION_CHECKPOINTS[role]},
     "code_revision": CODE_REVISION,
     "asset_revision": ASSET_REVISION,
@@ -393,14 +404,14 @@ def _evaluation_payload(
     "populations": {
       "fixed_mean": {
         "protocol": _protocol(survey.FIXED_SEED, fixed=True),
-        "provisional_caps": summary,
-        "diagnostic_only": summary,
+        "provisional_caps": copy.deepcopy(provisional_summary),
+        "diagnostic_only": copy.deepcopy(diagnostic_summary),
       },
       "training_like_sampled": {
         str(seed): {
           "protocol": _protocol(seed, fixed=False),
-          "provisional_caps": summary,
-          "diagnostic_only": summary,
+          "provisional_caps": copy.deepcopy(provisional_summary),
+          "diagnostic_only": copy.deepcopy(diagnostic_summary),
         }
         for seed in STOCHASTIC_SEEDS
       },
@@ -409,21 +420,41 @@ def _evaluation_payload(
 
 
 def test_policy_comparison_pairs_roles_population_protocols_and_threshold_order():
-  control_summary = _segment_summary(
+  control_provisional = _segment_summary(
+    caps=survey.PROVISIONAL_CAPS_N_M_S,
     segments=64,
     violating_segments=8,
     violating_reads=300,
     utilization=(0.8, 1.2, 1.4, 1.6),
   )
-  target_summary = _segment_summary(
+  control_diagnostic = _segment_summary(
+    caps=survey.DIAGNOSTIC_LIMITS_N_M_S,
+    segments=64,
+    violating_segments=8,
+    violating_reads=300,
+    utilization=(0.9, 1.3, 1.5, 1.7),
+  )
+  target_provisional = _segment_summary(
+    caps=survey.PROVISIONAL_CAPS_N_M_S,
     segments=64,
     violating_segments=4,
     violating_reads=2,
     utilization=(0.7, 1.0, 1.1, 1.3),
   )
+  target_diagnostic = _segment_summary(
+    caps=survey.DIAGNOSTIC_LIMITS_N_M_S,
+    segments=64,
+    violating_segments=4,
+    violating_reads=2,
+    utilization=(0.8, 1.1, 1.2, 1.4),
+  )
 
-  control = _evaluation_payload("diag90_control", control_summary)
-  target = _evaluation_payload("diag90_target", target_summary)
+  control = _evaluation_payload(
+    "diag90_control", control_provisional, control_diagnostic
+  )
+  target = _evaluation_payload(
+    "diag90_target", target_provisional, target_diagnostic
+  )
   target["populations"]["fixed_mean"]["protocol"]["control_steps"] = 9
 
   comparison = survey.compare_policy_evaluations(control, target)
@@ -453,14 +484,22 @@ def test_policy_comparison_pairs_roles_population_protocols_and_threshold_order(
 def test_policy_comparison_fails_closed_on_identity_or_log_only_drift(
   mutation: str, message: str
 ):
-  summary = _segment_summary(
+  provisional = _segment_summary(
+    caps=survey.PROVISIONAL_CAPS_N_M_S,
     segments=64,
     violating_segments=4,
     violating_reads=4,
     utilization=(0.7, 1.0, 1.1, 1.3),
   )
-  control = _evaluation_payload("diag90_control", summary)
-  target = _evaluation_payload("diag90_target", summary)
+  diagnostic = _segment_summary(
+    caps=survey.DIAGNOSTIC_LIMITS_N_M_S,
+    segments=64,
+    violating_segments=4,
+    violating_reads=4,
+    utilization=(0.8, 1.1, 1.2, 1.4),
+  )
+  control = _evaluation_payload("diag90_control", provisional, diagnostic)
+  target = _evaluation_payload("diag90_target", provisional, diagnostic)
   if mutation == "checkpoint":
     target["checkpoint"]["sha256"] = "f" * 64
   elif mutation in ("code_revision", "asset_revision"):
@@ -470,4 +509,164 @@ def test_policy_comparison_fails_closed_on_identity_or_log_only_drift(
     target["protocol"]["live_imp_max_p"] = 0.5
 
   with pytest.raises(ValueError, match=message):
+    survey.compare_policy_evaluations(control, target)
+
+
+def _valid_policy_pair() -> tuple[dict[str, object], dict[str, object]]:
+  provisional = _segment_summary(
+    caps=survey.PROVISIONAL_CAPS_N_M_S,
+    segments=64,
+    violating_segments=4,
+    violating_reads=4,
+    utilization=(0.7, 1.0, 1.1, 1.3),
+  )
+  diagnostic = _segment_summary(
+    caps=survey.DIAGNOSTIC_LIMITS_N_M_S,
+    segments=64,
+    violating_segments=6,
+    violating_reads=8,
+    utilization=(0.8, 1.1, 1.2, 1.4),
+  )
+  return (
+    _evaluation_payload("diag90_control", provisional, diagnostic),
+    _evaluation_payload("diag90_target", provisional, diagnostic),
+  )
+
+
+@pytest.mark.parametrize(
+  ("population", "slot", "wrong_caps"),
+  (
+    ("fixed_mean", "provisional_caps", survey.DIAGNOSTIC_LIMITS_N_M_S),
+    ("fixed_mean", "diagnostic_only", survey.PROVISIONAL_CAPS_N_M_S),
+    ("2", "provisional_caps", survey.DIAGNOSTIC_LIMITS_N_M_S),
+    ("2", "diagnostic_only", survey.PROVISIONAL_CAPS_N_M_S),
+  ),
+)
+def test_policy_comparison_binds_each_threshold_slot_to_its_frozen_cap_vector(
+  population: str, slot: str, wrong_caps: tuple[float, ...]
+):
+  control, target = _valid_policy_pair()
+  for payload in (control, target):
+    selected = (
+      payload["populations"]["fixed_mean"]
+      if population == "fixed_mean"
+      else payload["populations"]["training_like_sampled"][population]
+    )
+    selected[slot]["caps_n_m_s"] = list(wrong_caps)
+
+  with pytest.raises(ValueError, match=rf"{slot}.*exact cap vector"):
+    survey.compare_policy_evaluations(control, target)
+
+
+@pytest.mark.parametrize(
+  ("mutation", "message"),
+  (
+    ("task", "exact task"),
+    ("threshold_order", "threshold summary order"),
+    ("statistical_unit", "statistical unit"),
+    ("read_independence", "controller reads"),
+    ("fixed_seed", "fixed seed"),
+    ("code_revision_missing", "code revision"),
+    ("code_revision_malformed", "code revision"),
+    ("asset_revision", "asset revision"),
+    ("top_live_p", "live imp_max_p=0"),
+    ("fixed_population_seed", "fixed population seed"),
+    ("fixed_envs", "fixed population num_envs"),
+    ("fixed_hash", "fixed population hash"),
+    ("fixed_mode", "fixed population policy mode"),
+    ("fixed_auto_reset", "fixed population auto_reset"),
+    ("sampled_seed", "sampled population seed"),
+    ("sampled_envs", "sampled population num_envs"),
+    ("sampled_steps", "sampled population control_steps"),
+    ("sampled_mode", "sampled population policy mode"),
+    ("sampled_auto_reset", "sampled population auto_reset"),
+    ("sampled_rng", "sampled population RNG streams"),
+    ("population_live_p", "live imp_max_p=0"),
+  ),
+)
+def test_policy_comparison_rejects_common_mode_protocol_drift(
+  mutation: str, message: str
+):
+  control, target = _valid_policy_pair()
+  payloads = (control, target)
+  if mutation == "task":
+    for payload in payloads:
+      payload["task"] = "wrong-task"
+  elif mutation == "threshold_order":
+    for payload in payloads:
+      payload["protocol"]["threshold_summary_order"] = [
+        "diagnostic_only", "provisional_caps"
+      ]
+  elif mutation == "statistical_unit":
+    for payload in payloads:
+      payload["protocol"]["primary_statistical_unit"] = "controller read"
+  elif mutation == "read_independence":
+    for payload in payloads:
+      payload["protocol"]["controller_reads_are_independent"] = True
+  elif mutation == "fixed_seed":
+    for payload in payloads:
+      payload["protocol"]["fixed_seed"] = 7
+  elif mutation == "code_revision_missing":
+    for payload in payloads:
+      payload.pop("code_revision")
+  elif mutation == "code_revision_malformed":
+    for payload in payloads:
+      payload["code_revision"] = "z" * 40
+  elif mutation == "asset_revision":
+    for payload in payloads:
+      payload["asset_revision"] = "c" * 40
+  elif mutation == "top_live_p":
+    for payload in payloads:
+      payload["protocol"]["live_imp_max_p"] = 0.5
+  elif mutation.startswith("fixed_"):
+    protocols = [
+      payload["populations"]["fixed_mean"]["protocol"] for payload in payloads
+    ]
+    field, value = {
+      "fixed_population_seed": ("seed", 7),
+      "fixed_envs": ("num_envs", 63),
+      "fixed_hash": ("initial_population_sha256", "c" * 64),
+      "fixed_mode": ("policy_mode", "sampled"),
+      "fixed_auto_reset": ("auto_reset", True),
+    }[mutation]
+    for protocol in protocols:
+      protocol[field] = value
+  else:
+    protocols = [
+      payload["populations"]["training_like_sampled"]["2"]["protocol"]
+      for payload in payloads
+    ]
+    if mutation == "sampled_seed":
+      for protocol in protocols:
+        protocol["seed"] = 3
+    elif mutation == "sampled_envs":
+      for protocol in protocols:
+        protocol["num_envs"] = 4095
+    elif mutation == "sampled_steps":
+      for protocol in protocols:
+        protocol["control_steps"] = 23
+    elif mutation == "sampled_mode":
+      for protocol in protocols:
+        protocol["policy_mode"] = "mean"
+    elif mutation == "sampled_auto_reset":
+      for protocol in protocols:
+        protocol["auto_reset"] = False
+    elif mutation == "sampled_rng":
+      for protocol in protocols:
+        protocol["rng_streams"]["action"] += 1
+    else:
+      for protocol in protocols:
+        protocol["cat_replay"]["imp_max_p_live"] = 0.5
+
+  with pytest.raises(ValueError, match=message):
+    survey.compare_policy_evaluations(control, target)
+
+
+def test_sampled_control_steps_must_match_even_when_one_arm_claims_twenty_four():
+  control, target = _valid_policy_pair()
+  target["populations"]["training_like_sampled"]["2"]["protocol"][
+    "control_steps"
+  ] = 23
+
+  with pytest.raises(ValueError, match="sampled population control_steps"):
     survey.compare_policy_evaluations(control, target)

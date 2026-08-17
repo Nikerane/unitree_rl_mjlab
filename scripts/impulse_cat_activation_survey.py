@@ -60,6 +60,7 @@ RESET_RNG_OFFSET = 10_000_019
 OBSERVATION_RNG_OFFSET = 20_000_033
 ACTION_RNG_OFFSET = 30_000_041
 POLICY_EVALUATION_STOCHASTIC_SEEDS = (2, 2026081701, 2026081702)
+EXPECTED_EVALUATION_ASSET_REVISION = "b58ccd2f81fd246f27c1e8d88cf86484cd888703"
 _ASSET_REPO = _REPO_ROOT.parent / "safe_impact_manipulation"
 
 
@@ -1662,6 +1663,104 @@ def _utilization_quantiles(summary: Mapping[str, object]) -> dict[str, float]:
   return result
 
 
+def _is_lower_hex(value: object, *, length: int) -> bool:
+  return (
+    isinstance(value, str)
+    and len(value) == length
+    and all(character in "0123456789abcdef" for character in value)
+  )
+
+
+def _validate_exact_measurement_protocol(
+  protocol: Mapping[str, object], *, label: str
+) -> None:
+  cat_replay = protocol.get("cat_replay")
+  if not isinstance(cat_replay, Mapping) or cat_replay.get("imp_max_p_live") != 0.0:
+    raise ValueError(f"{label} must record live imp_max_p=0")
+  if dict(cat_replay) != {
+    "tau": CAT_TAU,
+    "min_p": CAT_MIN_P,
+    "imp_seed": IMPULSE_SEED,
+    "imp_max_p_live": 0.0,
+  }:
+    raise ValueError(f"{label} impulse-CaT measurement protocol drifted")
+  if protocol.get("velocity_cat") != {
+    "limit_rad_s": VELOCITY_LIMIT_RAD_S,
+    "max_p": VELOCITY_MAX_P,
+    "detection": VELOCITY_DETECTION,
+  }:
+    raise ValueError(f"{label} velocity-CaT measurement protocol drifted")
+  expected_scalars = {
+    "physics_dt_s": PHYSICS_DT_S,
+    "control_decimation": CONTROL_DECIMATION,
+    "impulse_window_substeps": IMPULSE_WINDOW_SUBSTEPS,
+    "contact_row_diagnostic_enabled": False,
+  }
+  for name, expected in expected_scalars.items():
+    actual = protocol.get(name)
+    if type(actual) is not type(expected) or actual != expected:
+      raise ValueError(f"{label} {name} drifted from the exact protocol")
+
+
+def _validate_fixed_population_protocol_pair(
+  control: Mapping[str, object], target: Mapping[str, object]
+) -> None:
+  expected_rng = asdict(EvaluationRngSeeds.from_evaluation_seed(FIXED_SEED))
+  for protocol in (control, target):
+    if type(protocol.get("seed")) is not int or protocol.get("seed") != FIXED_SEED:
+      raise ValueError("fixed population seed drifted from the exact protocol")
+    if (
+      type(protocol.get("num_envs")) is not int
+      or protocol.get("num_envs") != FIXED_ENVS
+    ):
+      raise ValueError("fixed population num_envs drifted from the exact protocol")
+    if protocol.get("initial_population_sha256") != EXPECTED_FIXED_POPULATION_SHA256:
+      raise ValueError("fixed population hash drifted from the banked population")
+    if protocol.get("policy_mode") != "mean":
+      raise ValueError("fixed population policy mode must be mean")
+    if protocol.get("auto_reset") is not False:
+      raise ValueError("fixed population auto_reset must be false")
+    if protocol.get("rng_streams") != expected_rng:
+      raise ValueError("fixed population RNG streams drifted from the evaluation seed")
+    control_steps = protocol.get("control_steps")
+    if type(control_steps) is not int or control_steps <= 0:
+      raise ValueError("fixed population control_steps must be a positive observed outcome")
+    _validate_exact_measurement_protocol(protocol, label="fixed population")
+
+
+def _validate_sampled_population_protocol_pair(
+  control: Mapping[str, object], target: Mapping[str, object], *, seed: int
+) -> None:
+  expected_rng = asdict(EvaluationRngSeeds.from_evaluation_seed(seed))
+  for protocol in (control, target):
+    if type(protocol.get("seed")) is not int or protocol.get("seed") != seed:
+      raise ValueError("sampled population seed drifted from its seed key")
+    if (
+      type(protocol.get("num_envs")) is not int
+      or protocol.get("num_envs") != TRAINING_LIKE_ENVS
+    ):
+      raise ValueError("sampled population num_envs drifted from the exact protocol")
+    if (
+      type(protocol.get("control_steps")) is not int
+      or protocol.get("control_steps") != TRAINING_LIKE_STEPS
+    ):
+      raise ValueError("sampled population control_steps must be exactly 24")
+    if protocol.get("policy_mode") != "sampled":
+      raise ValueError("sampled population policy mode must be sampled")
+    if protocol.get("auto_reset") is not True:
+      raise ValueError("sampled population auto_reset must be true")
+    if protocol.get("rng_streams") != expected_rng:
+      raise ValueError("sampled population RNG streams drifted from the evaluation seed")
+    population_hash = protocol.get("initial_population_sha256")
+    if not _is_lower_hex(population_hash, length=64):
+      raise ValueError("sampled population hash must be full lowercase SHA-256")
+    _validate_exact_measurement_protocol(protocol, label="sampled population")
+  if control.get("initial_population_sha256") != target.get(
+    "initial_population_sha256"
+  ):
+    raise ValueError("sampled populations must use the same initial population hash")
+
+
 def compare_population_summaries(
   control: Mapping[str, object], target: Mapping[str, object]
 ) -> dict[str, object]:
@@ -1719,12 +1818,21 @@ def compare_policy_evaluations(
   ):
     if checkpoint.get("sha256") != EVALUATION_CHECKPOINTS[role]:
       raise ValueError(f"{role} checkpoint SHA does not match the frozen role")
-  for field, label in (
-    ("code_revision", "code revision"),
-    ("asset_revision", "asset revision"),
+  if control.get("task") != VIC_TASK or target.get("task") != VIC_TASK:
+    raise ValueError("paired policy summaries must record the exact task")
+  control_code_revision = control.get("code_revision")
+  target_code_revision = target.get("code_revision")
+  if not _is_lower_hex(control_code_revision, length=40) or not _is_lower_hex(
+    target_code_revision, length=40
   ):
-    if control.get(field) != target.get(field):
-      raise ValueError(f"paired policy summaries must use the same {label}")
+    raise ValueError("paired policy summaries require a full lowercase code revision")
+  if control_code_revision != target_code_revision:
+    raise ValueError("paired policy summaries must use the same code revision")
+  if (
+    control.get("asset_revision") != EXPECTED_EVALUATION_ASSET_REVISION
+    or target.get("asset_revision") != EXPECTED_EVALUATION_ASSET_REVISION
+  ):
+    raise ValueError("paired policy summaries must use the frozen asset revision")
   if control.get("protocol") != target.get("protocol"):
     raise ValueError("paired policy summaries must use the same evaluation protocol")
   protocol = control.get("protocol")
@@ -1734,6 +1842,19 @@ def compare_policy_evaluations(
     raise ValueError("paired policy summaries must use the exact stochastic seed tuple")
   if protocol.get("live_imp_max_p") != 0.0:
     raise ValueError("paired policy summaries must record live imp_max_p=0")
+  if (
+    type(protocol.get("fixed_seed")) is not int
+    or protocol.get("fixed_seed") != FIXED_SEED
+  ):
+    raise ValueError("paired policy summaries must record the exact fixed seed")
+  if protocol.get("threshold_summary_order") != [
+    "provisional_caps", "diagnostic_only"
+  ]:
+    raise ValueError("paired policy summaries have the wrong threshold summary order")
+  if protocol.get("primary_statistical_unit") != "initial episode segment":
+    raise ValueError("paired policy summaries have the wrong statistical unit")
+  if protocol.get("controller_reads_are_independent") is not False:
+    raise ValueError("paired policy summaries must declare controller reads non-independent")
 
   control_populations = control.get("populations")
   target_populations = target.get("populations")
@@ -1744,7 +1865,11 @@ def compare_policy_evaluations(
   threshold_order = ("provisional_caps", "diagnostic_only")
 
   def compare_population_pair(
-    control_population: object, target_population: object
+    control_population: object,
+    target_population: object,
+    *,
+    population_kind: str,
+    seed: int | None = None,
   ) -> dict[str, object]:
     if not isinstance(control_population, Mapping) or not isinstance(
       target_population, Mapping
@@ -1756,23 +1881,38 @@ def compare_policy_evaluations(
       target_protocol, Mapping
     ):
       raise ValueError("paired population protocol is invalid")
-    control_identity = {
-      name: value for name, value in control_protocol.items() if name != "control_steps"
-    }
-    target_identity = {
-      name: value for name, value in target_protocol.items() if name != "control_steps"
-    }
-    if control_identity != target_identity:
-      raise ValueError("paired populations must use identical protocols")
-    return {
-      threshold: compare_population_summaries(
-        control_population[threshold], target_population[threshold]
+    if population_kind == "fixed":
+      _validate_fixed_population_protocol_pair(control_protocol, target_protocol)
+    else:
+      if seed is None:
+        raise RuntimeError("sampled comparison requires its declared seed")
+      _validate_sampled_population_protocol_pair(
+        control_protocol, target_protocol, seed=seed
       )
-      for threshold in threshold_order
-    }
+    result: dict[str, object] = {}
+    for threshold, expected_caps in (
+      ("provisional_caps", PROVISIONAL_CAPS_N_M_S),
+      ("diagnostic_only", DIAGNOSTIC_LIMITS_N_M_S),
+    ):
+      control_summary = control_population.get(threshold)
+      target_summary = target_population.get(threshold)
+      if not isinstance(control_summary, Mapping) or not isinstance(
+        target_summary, Mapping
+      ):
+        raise ValueError(f"paired populations are missing {threshold}")
+      if control_summary.get("caps_n_m_s") != list(
+        expected_caps
+      ) or target_summary.get("caps_n_m_s") != list(expected_caps):
+        raise ValueError(f"{threshold} must use its exact cap vector")
+      result[threshold] = compare_population_summaries(
+        control_summary, target_summary
+      )
+    return result
 
   fixed = compare_population_pair(
-    control_populations.get("fixed_mean"), target_populations.get("fixed_mean")
+    control_populations.get("fixed_mean"),
+    target_populations.get("fixed_mean"),
+    population_kind="fixed",
   )
   control_stochastic = control_populations.get("training_like_sampled")
   target_stochastic = target_populations.get("training_like_sampled")
@@ -1787,7 +1927,12 @@ def compare_policy_evaluations(
   ):
     raise ValueError("policy summaries must contain the exact seed-keyed populations")
   stochastic = {
-    seed: compare_population_pair(control_stochastic[seed], target_stochastic[seed])
+    seed: compare_population_pair(
+      control_stochastic[seed],
+      target_stochastic[seed],
+      population_kind="sampled",
+      seed=int(seed),
+    )
     for seed in expected_seed_keys
   }
   return {
