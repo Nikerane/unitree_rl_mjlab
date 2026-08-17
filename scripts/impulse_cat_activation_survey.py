@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 import hashlib
 import json
 from pathlib import Path
@@ -55,6 +55,86 @@ EVALUATION_CHECKPOINTS: Mapping[str, str] = MappingProxyType(
     "diag90_target": "ddd7ac4c855160bff1db2af52e642d960dab2bef34e41dd2532002185eb36d15",
   }
 )
+RESET_RNG_OFFSET = 10_000_019
+OBSERVATION_RNG_OFFSET = 20_000_033
+ACTION_RNG_OFFSET = 30_000_041
+
+
+@dataclass(frozen=True)
+class EvaluationRngSeeds:
+  """Matched evaluator-only Torch RNG identities derived from one population seed."""
+
+  reset: int
+  observation: int
+  action: int
+
+  @classmethod
+  def from_evaluation_seed(cls, seed: int) -> EvaluationRngSeeds:
+    return cls(
+      reset=int(seed) + RESET_RNG_OFFSET,
+      observation=int(seed) + OBSERVATION_RNG_OFFSET,
+      action=int(seed) + ACTION_RNG_OFFSET,
+    )
+
+
+class _TorchRngStream:
+  """A frozen Torch RNG stream isolated from the ambient device stream."""
+
+  def __init__(self, seed: int, device: str):
+    import torch
+
+    self.seed = int(seed)
+    self.device = torch.device(device)
+    generator = torch.Generator(device=self.device)
+    generator.manual_seed(self.seed)
+    self._state = generator.get_state()
+
+  def run(self, function):
+    import torch
+
+    if self.device.type == "cuda":
+      ambient = torch.cuda.get_rng_state(self.device)
+      torch.cuda.set_rng_state(self._state, self.device)
+      try:
+        return function()
+      finally:
+        self._state = torch.cuda.get_rng_state(self.device)
+        torch.cuda.set_rng_state(ambient, self.device)
+    ambient = torch.random.get_rng_state()
+    torch.random.set_rng_state(self._state)
+    try:
+      return function()
+    finally:
+      self._state = torch.random.get_rng_state()
+      torch.random.set_rng_state(ambient)
+
+
+def _install_evaluator_rng_streams(
+  env: Any,
+  *,
+  reset_seed: int,
+  observation_seed: int,
+) -> tuple[_TorchRngStream, _TorchRngStream]:
+  """Isolate evaluator reset and observation randomness from policy sampling."""
+  reset_stream = _TorchRngStream(reset_seed, env.device)
+  observation_stream = _TorchRngStream(observation_seed, env.device)
+
+  original_reset_idx = env._reset_idx
+
+  def reset_idx(env_ids=None):
+    return reset_stream.run(lambda: original_reset_idx(env_ids))
+
+  env._reset_idx = reset_idx
+
+  original_observation_compute = env.observation_manager.compute
+
+  def observation_compute(*args, **kwargs):
+    return observation_stream.run(
+      lambda: original_observation_compute(*args, **kwargs)
+    )
+
+  env.observation_manager.compute = observation_compute
+  return reset_stream, observation_stream
 
 
 def validate_checkpoint_role(checkpoint: Path, role: str) -> str:
@@ -532,6 +612,7 @@ def _run_population(
   device: str,
   num_envs: int,
   seed: int,
+  rng_seeds: EvaluationRngSeeds,
   steps: int | None,
   stochastic: bool,
 ) -> tuple[dict[str, np.ndarray], dict[str, object]]:
@@ -572,11 +653,22 @@ def _run_population(
     torch.manual_seed(seed)
     observations, _ = wrapped.reset()
     population_hash = _initial_population_sha256(env)
+    _install_evaluator_rng_streams(
+      env,
+      reset_seed=rng_seeds.reset,
+      observation_seed=rng_seeds.observation,
+    )
+    action_stream = _TorchRngStream(rng_seeds.action, device)
     completed = torch.zeros(num_envs, dtype=torch.bool, device=env.device)
     control_steps = steps if steps is not None else env.max_episode_length
     for _ in range(control_steps):
       with torch.no_grad():
-        actions = policy(observations, stochastic_output=stochastic)
+        if stochastic:
+          actions = action_stream.run(
+            lambda: policy(observations, stochastic_output=True)
+          )
+        else:
+          actions = policy(observations, stochastic_output=False)
       observations, _, _, _ = wrapped.step(actions)
       if steps is not None:
         continue
@@ -611,6 +703,7 @@ def _run_population(
       "policy_mode": "sampled" if stochastic else "mean",
       "auto_reset": bool(env_cfg.auto_reset),
       "initial_population_sha256": population_hash,
+      "rng_streams": asdict(rng_seeds),
       **measurement_protocol,
     }
   finally:
@@ -1109,6 +1202,7 @@ def run_survey(*, checkpoint: Path, output_dir: Path, device: str) -> dict[str, 
     device=device,
     num_envs=FIXED_ENVS,
     seed=FIXED_SEED,
+    rng_seeds=EvaluationRngSeeds.from_evaluation_seed(FIXED_SEED),
     steps=None,
     stochastic=False,
   )
@@ -1128,6 +1222,7 @@ def run_survey(*, checkpoint: Path, output_dir: Path, device: str) -> dict[str, 
     device=device,
     num_envs=TRAINING_LIKE_ENVS,
     seed=TRAINING_LIKE_SEED,
+    rng_seeds=EvaluationRngSeeds.from_evaluation_seed(TRAINING_LIKE_SEED),
     steps=TRAINING_LIKE_STEPS,
     stochastic=True,
   )

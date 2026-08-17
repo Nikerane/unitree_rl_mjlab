@@ -43,6 +43,46 @@ def test_evaluation_checkpoint_roles_are_exact_and_fail_closed(tmp_path, monkeyp
     survey.validate_checkpoint_role(checkpoint, "diag90_target")
 
 
+def test_environment_rng_consumption_cannot_advance_policy_action_noise():
+  import torch
+
+  seeds = survey.EvaluationRngSeeds.from_evaluation_seed(101)
+  action = survey._TorchRngStream(seeds.action, "cpu")
+  reset = survey._TorchRngStream(seeds.reset, "cpu")
+  observation = survey._TorchRngStream(seeds.observation, "cpu")
+  action_reference = survey._TorchRngStream(seeds.action, "cpu")
+
+  action_first = action.run(lambda: torch.rand(4))
+  reset.run(lambda: torch.rand(100))
+  observation.run(lambda: torch.rand(200))
+  action_second = action.run(lambda: torch.rand(4))
+  reference_first = action_reference.run(lambda: torch.rand(4))
+  reference_second = action_reference.run(lambda: torch.rand(4))
+
+  torch.testing.assert_close(action_first, reference_first)
+  torch.testing.assert_close(action_second, reference_second)
+
+
+def test_evaluation_roles_derive_identical_rng_streams_from_one_base_seed():
+  seeds_by_role = {
+    role: survey.EvaluationRngSeeds.from_evaluation_seed(2)
+    for role in survey.EVALUATION_CHECKPOINTS
+  }
+
+  assert seeds_by_role == {
+    "diag90_control": survey.EvaluationRngSeeds(
+      reset=10_000_021,
+      observation=20_000_035,
+      action=30_000_043,
+    ),
+    "diag90_target": survey.EvaluationRngSeeds(
+      reset=10_000_021,
+      observation=20_000_035,
+      action=30_000_043,
+    ),
+  }
+
+
 def test_contiguous_activation_events_count_reads_pressure_and_reset_boundaries():
   active = np.array(
     [
