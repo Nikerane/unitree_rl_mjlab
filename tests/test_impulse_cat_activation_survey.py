@@ -275,6 +275,61 @@ def test_cap_margins_are_subtracted_before_float64_promotion():
   assert (lam.astype(np.float64) - np.array([0.82], dtype=np.float64)).item() != 0.0
 
 
+def test_segment_compliance_counts_repeated_violating_reads_once_per_episode_segment():
+  """A four-read cap crossing is one episode-level compliance observation, not four."""
+  lam = np.full((4, 1, 6), 0.1, dtype=np.float32)
+  lam[:, 0, 0] = 1.0
+  rolling = np.zeros((40, 1, 6), dtype=np.float32)
+  for step in range(4):
+    rolling[(step + 1) * 10 - 1, 0] = lam[step, 0]
+  trace = {
+    "lambda_per_joint": lam,
+    "episode_id": np.zeros((4, 1), dtype=np.int64),
+    "done": np.array([[False], [False], [False], [True]]),
+    "delta_velocity": np.zeros((4, 1), dtype=np.float64),
+    "delta_impulse": np.zeros((4, 1), dtype=np.float64),
+    "delta": np.zeros((4, 1), dtype=np.float64),
+    "substep_contact": np.ones((40, 1), dtype=bool),
+    "substep_episode_id": np.zeros((40, 1), dtype=np.int64),
+    "substep_rolling_per_joint": rolling,
+  }
+
+  summary = survey.summarize_population(
+    trace, caps=PROVISIONAL_CAPS_N_M_S, first_episode_only=True
+  )
+
+  compliance = summary["segment_compliance"]
+  assert compliance["segments"] == 1
+  assert compliance["any_joint_violating_segments"] == 1
+  assert compliance["any_joint_violation_rate"] == 1.0
+  assert compliance["max_joint_utilization"] == {
+    "p50": pytest.approx(1.0 / 0.82),
+    "p95": pytest.approx(1.0 / 0.82),
+    "p99": pytest.approx(1.0 / 0.82),
+    "max": pytest.approx(1.0 / 0.82),
+  }
+  assert compliance["per_joint"]["joint1"] == {
+    "violating_segments": 1,
+    "violation_rate": 1.0,
+    "utilization": {
+      "p50": pytest.approx(1.0 / 0.82),
+      "p95": pytest.approx(1.0 / 0.82),
+      "p99": pytest.approx(1.0 / 0.82),
+      "max": pytest.approx(1.0 / 0.82),
+    },
+    "positive_margin_n_m_s": {
+      "p50": pytest.approx(0.18),
+      "p95": pytest.approx(0.18),
+      "p99": pytest.approx(0.18),
+      "max": pytest.approx(0.18),
+    },
+  }
+  assert compliance["per_joint"]["joint2"]["violating_segments"] == 0
+  assert compliance["per_joint"]["joint2"]["positive_margin_n_m_s"] == {
+    "p50": None, "p95": None, "p99": None, "max": None,
+  }
+
+
 def test_registered_vic_survey_config_matches_exact_offline_replay_contract():
   from mjlab.tasks.registry import load_env_cfg
 

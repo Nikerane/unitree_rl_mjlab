@@ -629,6 +629,20 @@ def _finite_summary(values: list[float]) -> dict[str, float | None]:
   }
 
 
+def _finite_quantiles(values: np.ndarray) -> dict[str, float | None]:
+  flat = np.asarray(values, dtype=np.float64).reshape(-1)
+  if flat.size == 0:
+    return {"p50": None, "p95": None, "p99": None, "max": None}
+  if not np.isfinite(flat).all():
+    raise ValueError("quantile input must be finite")
+  return {
+    "p50": float(np.quantile(flat, 0.50)),
+    "p95": float(np.quantile(flat, 0.95)),
+    "p99": float(np.quantile(flat, 0.99)),
+    "max": float(np.max(flat)),
+  }
+
+
 def _native_cap_margins(lambda_per_joint: np.ndarray, caps: tuple[float, ...]) -> np.ndarray:
   """Subtract caps in the live trace dtype, then promote margins for stable offline replay."""
   lam = np.asarray(lambda_per_joint)
@@ -920,6 +934,26 @@ def summarize_population(
   )
 
   observed_segment_peaks = _observed_segment_peaks(lam, episode_id, valid)
+  observed_segment_margins = _observed_segment_peaks(margins, episode_id, valid)
+  segment_utilization = observed_segment_peaks / cap_array
+  segment_violating = segment_utilization > 1.0
+  segment_compliance = {
+    "segments": int(segment_utilization.shape[0]),
+    "any_joint_violating_segments": int(segment_violating.any(axis=1).sum()),
+    "any_joint_violation_rate": float(segment_violating.any(axis=1).mean()),
+    "max_joint_utilization": _finite_quantiles(segment_utilization.max(axis=1)),
+    "per_joint": {
+      name: {
+        "violating_segments": int(segment_violating[:, joint].sum()),
+        "violation_rate": float(segment_violating[:, joint].mean()),
+        "utilization": _finite_quantiles(segment_utilization[:, joint]),
+        "positive_margin_n_m_s": _finite_quantiles(
+          observed_segment_margins[segment_violating[:, joint], joint]
+        ),
+      }
+      for joint, name in enumerate(JOINT_NAMES)
+    },
+  }
   max_utilization = observed_segment_peaks.max(axis=0) / cap_array
   median_utilization = np.median(observed_segment_peaks, axis=0) / cap_array
   violating_by_joint = (margins > 0.0) & valid[:, :, None]
@@ -1053,6 +1087,7 @@ def summarize_population(
       else "24-step rollout episode segments; boundary fragments may be censored"
     ),
     "observed_peak_segments": int(observed_segment_peaks.shape[0]),
+    "segment_compliance": segment_compliance,
     "candidate_imp_max_p": candidates,
   }
 
