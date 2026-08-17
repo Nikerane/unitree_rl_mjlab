@@ -250,9 +250,9 @@ python -m pytest -q \
 - [ ] **Step 2: Run mandatory pre-experiment gates**:
 
 ```bash
-python scripts/validate_rewards.py
-python scripts/verify_contact_sensor.py
-python scripts/verify_reward_setup.py
+python docs/research/reward-design/validate_rewards.py
+python docs/research/reward-design/verify_contact_sensor.py
+python docs/research/reward-design/verify_reward_setup.py
 ```
 
 - [ ] **Step 3: Run one 2-environment x 8-step live no-learning smoke per role** and verify exact
