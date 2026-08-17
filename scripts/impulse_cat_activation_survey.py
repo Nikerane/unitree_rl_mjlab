@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import sys
 from types import MappingProxyType
 from typing import Any, Mapping
@@ -58,6 +59,8 @@ EVALUATION_CHECKPOINTS: Mapping[str, str] = MappingProxyType(
 RESET_RNG_OFFSET = 10_000_019
 OBSERVATION_RNG_OFFSET = 20_000_033
 ACTION_RNG_OFFSET = 30_000_041
+POLICY_EVALUATION_STOCHASTIC_SEEDS = (2, 2026081701, 2026081702)
+_ASSET_REPO = _REPO_ROOT.parent / "safe_impact_manipulation"
 
 
 @dataclass(frozen=True)
@@ -1562,8 +1565,340 @@ def run_survey(*, checkpoint: Path, output_dir: Path, device: str) -> dict[str, 
   return payload
 
 
+def _git_revision(repository: Path) -> str:
+  try:
+    result = subprocess.run(
+      ["git", "rev-parse", "HEAD"],
+      cwd=repository,
+      check=True,
+      capture_output=True,
+      text=True,
+    )
+  except (OSError, subprocess.CalledProcessError) as error:
+    raise RuntimeError(f"cannot read Git revision for {repository}") from error
+  revision = result.stdout.strip()
+  if len(revision) != 40 or any(
+    character not in "0123456789abcdef" for character in revision
+  ):
+    raise RuntimeError(f"Git revision for {repository} is not full lowercase hexadecimal")
+  return revision
+
+
+def _evaluation_revisions() -> dict[str, str]:
+  return {
+    "code_revision": _git_revision(_REPO_ROOT),
+    "asset_revision": _git_revision(_ASSET_REPO),
+  }
+
+
+def _require_live_impulse_log_only(protocol: Mapping[str, object]) -> None:
+  cat_replay = protocol.get("cat_replay")
+  if not isinstance(cat_replay, Mapping) or cat_replay.get("imp_max_p_live") != 0.0:
+    raise RuntimeError("post-training evaluation requires live imp_max_p=0")
+
+
+def _policy_population_payload(
+  trace: dict[str, np.ndarray],
+  protocol: dict[str, object],
+  *,
+  stochastic: bool,
+) -> dict[str, object]:
+  _require_live_impulse_log_only(protocol)
+  payload = {
+    "protocol": protocol,
+    "provisional_caps": summarize_population(
+      trace,
+      caps=PROVISIONAL_CAPS_N_M_S,
+      first_episode_only=True,
+    ),
+    "diagnostic_only": summarize_population(
+      trace,
+      caps=DIAGNOSTIC_LIMITS_N_M_S,
+      first_episode_only=True,
+    ),
+  }
+  if stochastic:
+    for threshold in ("provisional_caps", "diagnostic_only"):
+      summary = payload[threshold]
+      summary["observed_peak_scope"] = (
+        "initial 24-step rollout episode segments; unfinished segments are censored"
+      )
+      summary["utility"]["task_field_scope"] = (
+        "initial 24-step stochastic task fragments; unfinished segments are censored"
+      )
+  return payload
+
+
+def _segment_endpoint(summary: Mapping[str, object]) -> tuple[int, int, float]:
+  compliance = summary.get("segment_compliance")
+  if not isinstance(compliance, Mapping):
+    raise ValueError("summary is missing segment_compliance")
+  segments = compliance.get("segments")
+  violations = compliance.get("any_joint_violating_segments")
+  stored_rate = compliance.get("any_joint_violation_rate")
+  if type(segments) is not int or segments <= 0:
+    raise ValueError("summary segment count must be a positive integer")
+  if type(violations) is not int or not (0 <= violations <= segments):
+    raise ValueError("summary violating-segment count is invalid")
+  if not isinstance(stored_rate, (int, float)) or not np.isfinite(stored_rate):
+    raise ValueError("summary violation rate must be finite")
+  rate = violations / segments
+  if not np.isclose(float(stored_rate), rate, rtol=0.0, atol=1e-15):
+    raise ValueError("summary violation rate differs from segment counts")
+  return segments, violations, rate
+
+
+def _utilization_quantiles(summary: Mapping[str, object]) -> dict[str, float]:
+  compliance = summary["segment_compliance"]
+  quantiles = compliance.get("max_joint_utilization")
+  if not isinstance(quantiles, Mapping):
+    raise ValueError("summary is missing max-joint utilization quantiles")
+  result: dict[str, float] = {}
+  for name in ("p50", "p95", "p99", "max"):
+    value = quantiles.get(name)
+    if not isinstance(value, (int, float)) or not np.isfinite(value):
+      raise ValueError(f"summary utilization {name} must be finite")
+    result[name] = float(value)
+  return result
+
+
+def compare_population_summaries(
+  control: Mapping[str, object], target: Mapping[str, object]
+) -> dict[str, object]:
+  """Compare matched episode-segment summaries without using overlapping read counts."""
+  if control.get("caps_n_m_s") != target.get("caps_n_m_s"):
+    raise ValueError("paired summaries must use the same cap vector")
+  control_segments, control_violations, control_risk = _segment_endpoint(control)
+  target_segments, target_violations, target_risk = _segment_endpoint(target)
+  if control_segments != target_segments:
+    raise ValueError("paired summaries must contain the same number of episode segments")
+  control_utilization = _utilization_quantiles(control)
+  target_utilization = _utilization_quantiles(target)
+  return {
+    "statistical_unit": "paired episode segment",
+    "controller_reads_are_independent": False,
+    "paired_segments": control_segments,
+    "any_joint_violation": {
+      "control": {
+        "violating_segments": control_violations,
+        "risk": control_risk,
+      },
+      "target": {
+        "violating_segments": target_violations,
+        "risk": target_risk,
+      },
+      "target_minus_control_absolute_risk_difference": target_risk - control_risk,
+      "target_over_control_risk_ratio": (
+        target_risk / control_risk if control_risk > 0.0 else None
+      ),
+    },
+    "max_joint_utilization_target_minus_control": {
+      name: target_utilization[name] - control_utilization[name]
+      for name in ("p50", "p95", "p99", "max")
+    },
+  }
+
+
+def compare_policy_evaluations(
+  control: Mapping[str, object], target: Mapping[str, object]
+) -> dict[str, object]:
+  """Build pure fixed/replica comparisons from two matched role summary payloads."""
+  control_checkpoint = control.get("checkpoint")
+  target_checkpoint = target.get("checkpoint")
+  if not isinstance(control_checkpoint, Mapping) or not isinstance(
+    target_checkpoint, Mapping
+  ):
+    raise ValueError("policy summaries must record checkpoint roles")
+  if control_checkpoint.get("role") != "diag90_control" or target_checkpoint.get(
+    "role"
+  ) != "diag90_target":
+    raise ValueError("policy summaries must be ordered control then target")
+  for checkpoint, role in (
+    (control_checkpoint, "diag90_control"),
+    (target_checkpoint, "diag90_target"),
+  ):
+    if checkpoint.get("sha256") != EVALUATION_CHECKPOINTS[role]:
+      raise ValueError(f"{role} checkpoint SHA does not match the frozen role")
+  for field, label in (
+    ("code_revision", "code revision"),
+    ("asset_revision", "asset revision"),
+  ):
+    if control.get(field) != target.get(field):
+      raise ValueError(f"paired policy summaries must use the same {label}")
+  if control.get("protocol") != target.get("protocol"):
+    raise ValueError("paired policy summaries must use the same evaluation protocol")
+  protocol = control.get("protocol")
+  if not isinstance(protocol, Mapping) or protocol.get("stochastic_seeds") != list(
+    POLICY_EVALUATION_STOCHASTIC_SEEDS
+  ):
+    raise ValueError("paired policy summaries must use the exact stochastic seed tuple")
+  if protocol.get("live_imp_max_p") != 0.0:
+    raise ValueError("paired policy summaries must record live imp_max_p=0")
+
+  control_populations = control.get("populations")
+  target_populations = target.get("populations")
+  if not isinstance(control_populations, Mapping) or not isinstance(
+    target_populations, Mapping
+  ):
+    raise ValueError("policy summaries are missing populations")
+  threshold_order = ("provisional_caps", "diagnostic_only")
+
+  def compare_population_pair(
+    control_population: object, target_population: object
+  ) -> dict[str, object]:
+    if not isinstance(control_population, Mapping) or not isinstance(
+      target_population, Mapping
+    ):
+      raise ValueError("paired population payload is invalid")
+    control_protocol = control_population.get("protocol")
+    target_protocol = target_population.get("protocol")
+    if not isinstance(control_protocol, Mapping) or not isinstance(
+      target_protocol, Mapping
+    ):
+      raise ValueError("paired population protocol is invalid")
+    control_identity = {
+      name: value for name, value in control_protocol.items() if name != "control_steps"
+    }
+    target_identity = {
+      name: value for name, value in target_protocol.items() if name != "control_steps"
+    }
+    if control_identity != target_identity:
+      raise ValueError("paired populations must use identical protocols")
+    return {
+      threshold: compare_population_summaries(
+        control_population[threshold], target_population[threshold]
+      )
+      for threshold in threshold_order
+    }
+
+  fixed = compare_population_pair(
+    control_populations.get("fixed_mean"), target_populations.get("fixed_mean")
+  )
+  control_stochastic = control_populations.get("training_like_sampled")
+  target_stochastic = target_populations.get("training_like_sampled")
+  if not isinstance(control_stochastic, Mapping) or not isinstance(
+    target_stochastic, Mapping
+  ):
+    raise ValueError("policy summaries are missing stochastic populations")
+  expected_seed_keys = tuple(str(seed) for seed in POLICY_EVALUATION_STOCHASTIC_SEEDS)
+  if (
+    tuple(control_stochastic) != expected_seed_keys
+    or tuple(target_stochastic) != expected_seed_keys
+  ):
+    raise ValueError("policy summaries must contain the exact seed-keyed populations")
+  stochastic = {
+    seed: compare_population_pair(control_stochastic[seed], target_stochastic[seed])
+    for seed in expected_seed_keys
+  }
+  return {
+    "roles": {"control": "diag90_control", "target": "diag90_target"},
+    "threshold_order": list(threshold_order),
+    "statistical_unit": "paired episode segment",
+    "controller_reads_are_independent": False,
+    "fixed_mean": fixed,
+    "training_like_sampled": stochastic,
+  }
+
+
+def run_policy_evaluation(
+  checkpoint: Path,
+  role: str,
+  output_dir: Path,
+  device: str,
+  stochastic_seeds: tuple[int, ...],
+) -> dict[str, object]:
+  """Run one frozen role on the prespecified matched post-training populations."""
+  seeds = tuple(stochastic_seeds)
+  if seeds != POLICY_EVALUATION_STOCHASTIC_SEEDS:
+    raise ValueError(
+      "post-training evaluation requires the exact stochastic seed tuple "
+      f"{POLICY_EVALUATION_STOCHASTIC_SEEDS}"
+    )
+
+  checkpoint = checkpoint.resolve(strict=True)
+  output_dir = output_dir.absolute()
+  if output_dir.exists() or output_dir.is_symlink():
+    raise FileExistsError(
+      f"refusing to overwrite policy evaluation output: {output_dir}"
+    )
+  checkpoint_sha256 = validate_checkpoint_role(checkpoint, role)
+  revisions = _evaluation_revisions()
+  output_dir.mkdir(parents=True)
+
+  fixed_trace, fixed_protocol = _run_population(
+    checkpoint=checkpoint,
+    device=device,
+    num_envs=FIXED_ENVS,
+    seed=FIXED_SEED,
+    rng_seeds=EvaluationRngSeeds.from_evaluation_seed(FIXED_SEED),
+    steps=None,
+    stochastic=False,
+  )
+  _require_live_impulse_log_only(fixed_protocol)
+  if fixed_protocol["initial_population_sha256"] != EXPECTED_FIXED_POPULATION_SHA256:
+    raise RuntimeError("fixed evaluation initial population differs from the banked evaluator")
+  np.savez_compressed(output_dir / "fixed_trace.npz", **fixed_trace)
+  fixed_payload = _policy_population_payload(
+    fixed_trace, fixed_protocol, stochastic=False
+  )
+
+  stochastic_payloads: dict[str, object] = {}
+  for seed in seeds:
+    trace, population_protocol = _run_population(
+      checkpoint=checkpoint,
+      device=device,
+      num_envs=TRAINING_LIKE_ENVS,
+      seed=seed,
+      rng_seeds=EvaluationRngSeeds.from_evaluation_seed(seed),
+      steps=TRAINING_LIKE_STEPS,
+      stochastic=True,
+    )
+    _require_live_impulse_log_only(population_protocol)
+    trace_name = f"training_like_seed_{seed}_trace.npz"
+    np.savez_compressed(output_dir / trace_name, **trace)
+    stochastic_payloads[str(seed)] = {
+      "trace": trace_name,
+      **_policy_population_payload(
+        trace, population_protocol, stochastic=True
+      ),
+    }
+
+  payload: dict[str, object] = {
+    "schema_version": 2,
+    "purpose": "matched no-learning comparison of frozen diagnostic impulse-CaT policies",
+    "task": VIC_TASK,
+    "checkpoint": {
+      "role": role,
+      "path": str(checkpoint),
+      "sha256": checkpoint_sha256,
+    },
+    **revisions,
+    "protocol": {
+      "live_imp_max_p": 0.0,
+      "fixed_seed": FIXED_SEED,
+      "stochastic_seeds": list(seeds),
+      "threshold_summary_order": ["provisional_caps", "diagnostic_only"],
+      "primary_statistical_unit": "initial episode segment",
+      "controller_reads_are_independent": False,
+    },
+    "thresholds": {
+      "provisional_project_caps_n_m_s": list(PROVISIONAL_CAPS_N_M_S),
+      "diagnostic_only_caps_n_m_s": list(DIAGNOSTIC_LIMITS_N_M_S),
+      "hardware_limit_claimed": False,
+    },
+    "populations": {
+      "fixed_mean": {"trace": "fixed_trace.npz", **fixed_payload},
+      "training_like_sampled": stochastic_payloads,
+    },
+  }
+  encoded = json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n"
+  (output_dir / "summary.json").write_text(encoded)
+  return payload
+
+
 def _parse_args() -> argparse.Namespace:
   parser = argparse.ArgumentParser(description=__doc__)
+  parser.add_argument("--checkpoint-role", choices=tuple(EVALUATION_CHECKPOINTS))
   parser.add_argument("--checkpoint", required=True, type=Path)
   parser.add_argument("--output-dir", required=True, type=Path)
   parser.add_argument("--device", default="cpu")
@@ -1572,16 +1907,25 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
   args = _parse_args()
-  payload = run_survey(
-    checkpoint=args.checkpoint,
-    output_dir=args.output_dir,
-    device=args.device,
-  )
-  for name, population in payload["populations"].items():
-    provisional = population["provisional_caps"]
-    print(
-      f"{name}: provisional-cap reads={provisional['binding']['violating_reads']} "
-      f"physical_events={provisional['binding']['associated_physical_events']}"
+  if args.checkpoint_role is None:
+    payload = run_survey(
+      checkpoint=args.checkpoint,
+      output_dir=args.output_dir,
+      device=args.device,
+    )
+    for name, population in payload["populations"].items():
+      provisional = population["provisional_caps"]
+      print(
+        f"{name}: provisional-cap reads={provisional['binding']['violating_reads']} "
+        f"physical_events={provisional['binding']['associated_physical_events']}"
+      )
+  else:
+    run_policy_evaluation(
+      checkpoint=args.checkpoint,
+      role=args.checkpoint_role,
+      output_dir=args.output_dir,
+      device=args.device,
+      stochastic_seeds=POLICY_EVALUATION_STOCHASTIC_SEEDS,
     )
   print(f"wrote {args.output_dir / 'summary.json'}")
 
