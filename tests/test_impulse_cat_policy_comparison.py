@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
+import subprocess
 import sys
 
 import numpy as np
@@ -116,6 +117,12 @@ def test_policy_evaluation_runs_one_fixed_and_three_exact_seed_keyed_populations
     survey,
     "_evaluation_revisions",
     lambda: {"code_revision": CODE_REVISION, "asset_revision": ASSET_REVISION},
+    raising=False,
+  )
+  monkeypatch.setattr(
+    survey,
+    "validate_evaluation_revision",
+    lambda _repository, revision, **_kwargs: revision,
     raising=False,
   )
 
@@ -256,6 +263,12 @@ def test_policy_evaluation_rejects_nonzero_live_impulse_pressure(
   )
   monkeypatch.setattr(
     survey,
+    "validate_evaluation_revision",
+    lambda _repository, revision, **_kwargs: revision,
+    raising=False,
+  )
+  monkeypatch.setattr(
+    survey,
     "_run_population",
     lambda **_kwargs: (
       trace,
@@ -271,6 +284,43 @@ def test_policy_evaluation_rejects_nonzero_live_impulse_pressure(
       device="cpu",
       stochastic_seeds=STOCHASTIC_SEEDS,
     )
+
+
+def test_policy_evaluation_rejects_unapproved_code_lineage_before_population(
+  tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+  checkpoint = tmp_path / "model_499.pt"
+  checkpoint.write_bytes(b"checkpoint")
+  population_calls = 0
+
+  def unexpected_population(**_kwargs):
+    nonlocal population_calls
+    population_calls += 1
+    raise AssertionError("unapproved evaluator code must not construct a population")
+
+  def reject_lineage(*_args, **_kwargs):
+    raise RuntimeError("evaluation revision is not a descendant of the approved base")
+
+  monkeypatch.setattr(survey, "validate_checkpoint_role", lambda *_args: CONTROL_SHA)
+  monkeypatch.setattr(
+    survey,
+    "_evaluation_revisions",
+    lambda: {"code_revision": CODE_REVISION, "asset_revision": ASSET_REVISION},
+  )
+  monkeypatch.setattr(
+    survey, "validate_evaluation_revision", reject_lineage, raising=False
+  )
+  monkeypatch.setattr(survey, "_run_population", unexpected_population)
+
+  with pytest.raises(RuntimeError, match="not a descendant"):
+    survey.run_policy_evaluation(
+      checkpoint=checkpoint,
+      role="diag90_control",
+      output_dir=tmp_path / "evaluation",
+      device="cpu",
+      stochastic_seeds=STOCHASTIC_SEEDS,
+    )
+  assert population_calls == 0
 
 
 def _segment_summary(
@@ -457,7 +507,7 @@ def test_policy_comparison_pairs_roles_population_protocols_and_threshold_order(
   )
   target["populations"]["fixed_mean"]["protocol"]["control_steps"] = 9
 
-  comparison = survey.compare_policy_evaluations(control, target)
+  comparison = _compare(control, target)
 
   assert comparison["roles"] == {
     "control": "diag90_control",
@@ -509,7 +559,7 @@ def test_policy_comparison_fails_closed_on_identity_or_log_only_drift(
     target["protocol"]["live_imp_max_p"] = 0.5
 
   with pytest.raises(ValueError, match=message):
-    survey.compare_policy_evaluations(control, target)
+    _compare(control, target)
 
 
 def _valid_policy_pair() -> tuple[dict[str, object], dict[str, object]]:
@@ -531,6 +581,102 @@ def _valid_policy_pair() -> tuple[dict[str, object], dict[str, object]]:
     _evaluation_payload("diag90_control", provisional, diagnostic),
     _evaluation_payload("diag90_target", provisional, diagnostic),
   )
+
+
+def _compare(
+  control: dict[str, object],
+  target: dict[str, object],
+  *,
+  expected_code_revision: str = CODE_REVISION,
+) -> dict[str, object]:
+  return survey.compare_policy_evaluations(
+    control,
+    target,
+    expected_code_revision=expected_code_revision,
+  )
+
+
+def test_policy_comparison_rejects_fabricated_common_revision_not_expected():
+  control, target = _valid_policy_pair()
+
+  with pytest.raises(ValueError, match="exact expected evaluation code revision"):
+    _compare(control, target, expected_code_revision="d" * 40)
+
+
+def _git(repository: Path, *args: str, input_text: str | None = None) -> str:
+  result = subprocess.run(
+    [
+      "git",
+      "-c",
+      "user.name=Evaluation Lineage Test",
+      "-c",
+      "user.email=evaluation-lineage@example.com",
+      *args,
+    ],
+    cwd=repository,
+    check=True,
+    capture_output=True,
+    text=True,
+    input=input_text,
+  )
+  return result.stdout.strip()
+
+
+def _git_lineage(tmp_path: Path) -> tuple[Path, str, str, str]:
+  repository = tmp_path / "repository"
+  repository.mkdir()
+  _git(repository, "init", "-q")
+  marker = repository / "marker"
+  marker.write_text("base\n")
+  _git(repository, "add", "marker")
+  _git(repository, "commit", "-qm", "approved base")
+  approved_base = _git(repository, "rev-parse", "HEAD")
+  marker.write_text("descendant\n")
+  _git(repository, "commit", "-qam", "evaluator descendant")
+  descendant = _git(repository, "rev-parse", "HEAD")
+  tree = _git(repository, "write-tree")
+  unrelated = _git(
+    repository,
+    "commit-tree",
+    tree,
+    input_text="unrelated root\n",
+  )
+  return repository, approved_base, descendant, unrelated
+
+
+def test_evaluation_revision_validator_accepts_a_real_approved_descendant(
+  tmp_path: Path,
+):
+  repository, approved_base, descendant, _ = _git_lineage(tmp_path)
+  validator = getattr(survey, "validate_evaluation_revision", None)
+  assert validator is not None, "evaluation lineage validator must exist"
+
+  assert validator(
+    repository,
+    descendant,
+    approved_base_revision=approved_base,
+  ) == descendant
+
+
+def test_evaluation_revision_validator_rejects_nonexistent_or_non_descendant(
+  tmp_path: Path,
+):
+  repository, approved_base, _, unrelated = _git_lineage(tmp_path)
+  validator = getattr(survey, "validate_evaluation_revision", None)
+  assert validator is not None, "evaluation lineage validator must exist"
+
+  with pytest.raises(RuntimeError, match="does not exist"):
+    validator(
+      repository,
+      "f" * 40,
+      approved_base_revision=approved_base,
+    )
+  with pytest.raises(RuntimeError, match="not a descendant"):
+    validator(
+      repository,
+      unrelated,
+      approved_base_revision=approved_base,
+    )
 
 
 @pytest.mark.parametrize(
@@ -555,7 +701,7 @@ def test_policy_comparison_binds_each_threshold_slot_to_its_frozen_cap_vector(
     selected[slot]["caps_n_m_s"] = list(wrong_caps)
 
   with pytest.raises(ValueError, match=rf"{slot}.*exact cap vector"):
-    survey.compare_policy_evaluations(control, target)
+    _compare(control, target)
 
 
 @pytest.mark.parametrize(
@@ -659,7 +805,7 @@ def test_policy_comparison_rejects_common_mode_protocol_drift(
         protocol["cat_replay"]["imp_max_p_live"] = 0.5
 
   with pytest.raises(ValueError, match=message):
-    survey.compare_policy_evaluations(control, target)
+    _compare(control, target)
 
 
 def test_sampled_control_steps_must_match_even_when_one_arm_claims_twenty_four():
@@ -669,4 +815,4 @@ def test_sampled_control_steps_must_match_even_when_one_arm_claims_twenty_four()
   ] = 23
 
   with pytest.raises(ValueError, match="sampled population control_steps"):
-    survey.compare_policy_evaluations(control, target)
+    _compare(control, target)

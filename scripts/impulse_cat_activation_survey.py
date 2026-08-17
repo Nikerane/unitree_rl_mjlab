@@ -60,6 +60,7 @@ RESET_RNG_OFFSET = 10_000_019
 OBSERVATION_RNG_OFFSET = 20_000_033
 ACTION_RNG_OFFSET = 30_000_041
 POLICY_EVALUATION_STOCHASTIC_SEEDS = (2, 2026081701, 2026081702)
+APPROVED_EVALUATOR_BASE_REVISION = "030942f34ac4a79131c1b70206d3c4acd58da79a"
 EXPECTED_EVALUATION_ASSET_REVISION = "b58ccd2f81fd246f27c1e8d88cf86484cd888703"
 _ASSET_REPO = _REPO_ROOT.parent / "safe_impact_manipulation"
 
@@ -1671,6 +1672,47 @@ def _is_lower_hex(value: object, *, length: int) -> bool:
   )
 
 
+def validate_evaluation_revision(
+  repository: Path,
+  expected_revision: str,
+  *,
+  approved_base_revision: str = APPROVED_EVALUATOR_BASE_REVISION,
+) -> str:
+  """Require a real evaluator commit descended from the approved training-code base."""
+  if not _is_lower_hex(expected_revision, length=40):
+    raise ValueError("expected evaluation revision must be full lowercase 40-hex")
+  if not _is_lower_hex(approved_base_revision, length=40):
+    raise ValueError("approved evaluator base revision must be full lowercase 40-hex")
+  repository = repository.resolve(strict=True)
+
+  def git(*arguments: str) -> subprocess.CompletedProcess[str]:
+    try:
+      return subprocess.run(
+        ["git", *arguments],
+        cwd=repository,
+        check=False,
+        capture_output=True,
+        text=True,
+      )
+    except OSError as error:
+      raise RuntimeError("cannot execute Git evaluation-lineage validation") from error
+
+  expected_commit = git("cat-file", "-e", f"{expected_revision}^{{commit}}")
+  if expected_commit.returncode != 0:
+    raise RuntimeError("expected evaluation revision does not exist as a Git commit")
+  approved_commit = git("cat-file", "-e", f"{approved_base_revision}^{{commit}}")
+  if approved_commit.returncode != 0:
+    raise RuntimeError("approved evaluator base revision does not exist as a Git commit")
+  ancestry = git(
+    "merge-base", "--is-ancestor", approved_base_revision, expected_revision
+  )
+  if ancestry.returncode == 1:
+    raise RuntimeError("evaluation revision is not a descendant of the approved base")
+  if ancestry.returncode != 0:
+    raise RuntimeError("cannot establish evaluation revision ancestry")
+  return expected_revision
+
+
 def _validate_exact_measurement_protocol(
   protocol: Mapping[str, object], *, label: str
 ) -> None:
@@ -1799,9 +1841,12 @@ def compare_population_summaries(
 
 
 def compare_policy_evaluations(
-  control: Mapping[str, object], target: Mapping[str, object]
+  control: Mapping[str, object],
+  target: Mapping[str, object],
+  *,
+  expected_code_revision: str,
 ) -> dict[str, object]:
-  """Build pure fixed/replica comparisons from two matched role summary payloads."""
+  """Build pure comparisons bound to one explicitly approved evaluator revision."""
   control_checkpoint = control.get("checkpoint")
   target_checkpoint = target.get("checkpoint")
   if not isinstance(control_checkpoint, Mapping) or not isinstance(
@@ -1822,12 +1867,18 @@ def compare_policy_evaluations(
     raise ValueError("paired policy summaries must record the exact task")
   control_code_revision = control.get("code_revision")
   target_code_revision = target.get("code_revision")
+  if not _is_lower_hex(expected_code_revision, length=40):
+    raise ValueError("expected evaluation code revision must be full lowercase 40-hex")
   if not _is_lower_hex(control_code_revision, length=40) or not _is_lower_hex(
     target_code_revision, length=40
   ):
     raise ValueError("paired policy summaries require a full lowercase code revision")
   if control_code_revision != target_code_revision:
     raise ValueError("paired policy summaries must use the same code revision")
+  if control_code_revision != expected_code_revision:
+    raise ValueError(
+      "paired policy summaries must use the exact expected evaluation code revision"
+    )
   if (
     control.get("asset_revision") != EXPECTED_EVALUATION_ASSET_REVISION
     or target.get("asset_revision") != EXPECTED_EVALUATION_ASSET_REVISION
@@ -1968,6 +2019,9 @@ def run_policy_evaluation(
     )
   checkpoint_sha256 = validate_checkpoint_role(checkpoint, role)
   revisions = _evaluation_revisions()
+  revisions["code_revision"] = validate_evaluation_revision(
+    _REPO_ROOT, revisions["code_revision"]
+  )
   output_dir.mkdir(parents=True)
 
   fixed_trace, fixed_protocol = _run_population(
