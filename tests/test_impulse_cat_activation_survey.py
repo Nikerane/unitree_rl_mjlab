@@ -470,6 +470,16 @@ def test_segment_compliance_counts_repeated_violating_reads_once_per_episode_seg
     "lambda_per_joint": lam,
     "episode_id": np.zeros((4, 1), dtype=np.int64),
     "done": np.array([[False], [False], [False], [True]]),
+    "success": np.zeros((4, 1), dtype=bool),
+    "timeout": np.array([[False], [False], [False], [True]]),
+    "nail_depth_m": np.zeros((4, 1), dtype=np.float32),
+    "delivered_total_n_s": np.zeros((4, 1), dtype=np.float32),
+    "first_strike_productive": np.zeros((4, 1), dtype=bool),
+    "first_strike_delivered_n_s": np.zeros((4, 1), dtype=np.float32),
+    "substep_peak_qv_per_joint": np.zeros((4, 1, 6), dtype=np.float32),
+    "vic_p": np.zeros((4, 1, 6), dtype=np.float32),
+    "vic_kp": np.full((4, 1, 6), 1000.0, dtype=np.float32),
+    "vic_kd": np.full((4, 1, 6), 100.0, dtype=np.float32),
     "delta_velocity": np.zeros((4, 1), dtype=np.float64),
     "delta_impulse": np.zeros((4, 1), dtype=np.float64),
     "delta": np.zeros((4, 1), dtype=np.float64),
@@ -523,6 +533,16 @@ def test_segment_compliance_uses_native_margin_at_float32_cap_boundary():
     "lambda_per_joint": lam,
     "episode_id": np.zeros((1, 1), dtype=np.int64),
     "done": np.ones((1, 1), dtype=bool),
+    "success": np.zeros((1, 1), dtype=bool),
+    "timeout": np.ones((1, 1), dtype=bool),
+    "nail_depth_m": np.zeros((1, 1), dtype=np.float32),
+    "delivered_total_n_s": np.zeros((1, 1), dtype=np.float32),
+    "first_strike_productive": np.zeros((1, 1), dtype=bool),
+    "first_strike_delivered_n_s": np.zeros((1, 1), dtype=np.float32),
+    "substep_peak_qv_per_joint": np.zeros((1, 1, 6), dtype=np.float32),
+    "vic_p": np.zeros((1, 1, 6), dtype=np.float32),
+    "vic_kp": np.full((1, 1, 6), 1000.0, dtype=np.float32),
+    "vic_kd": np.full((1, 1, 6), 100.0, dtype=np.float32),
     "delta_velocity": np.zeros((1, 1), dtype=np.float64),
     "delta_impulse": np.zeros((1, 1), dtype=np.float64),
     "delta": np.zeros((1, 1), dtype=np.float64),
@@ -567,6 +587,213 @@ def test_registered_vic_survey_config_matches_exact_offline_replay_contract():
     "impulse_window_substeps": 25,
     "contact_row_diagnostic_enabled": False,
   }
+
+
+@pytest.mark.integration
+def test_live_vic_recorder_captures_utility_velocity_and_gains_before_auto_reset():
+  """Dropping the pre-reset hook would replace commanded gains with reset defaults."""
+  import torch
+
+  from mjlab.envs import ManagerBasedRlEnv
+  from mjlab.tasks.registry import load_env_cfg
+
+  import mjlab.tasks  # noqa: F401
+  import src.tasks  # noqa: F401
+
+  cfg = load_env_cfg(survey.VIC_TASK, play=False)
+  cfg.scene.num_envs = 2
+  cfg.auto_reset = True
+  _prepare_survey_measurement_config(cfg, PROVISIONAL_CAPS_N_M_S)
+  env = ManagerBasedRlEnv(cfg=cfg, device="cpu", render_mode=None)
+  recorder = survey._LiveSurveyRecorder(env)
+  try:
+    env.reset(seed=20260817)
+    env.episode_length_buf.fill_(env.max_episode_length - 1)
+    stiffness = torch.tensor(
+      [-1.0, -0.5, 0.0, 0.25, 0.5, 1.0], device=env.device
+    ).repeat(2, 1)
+    actions = torch.zeros((2, 12), device=env.device)
+    actions[:, 6:] = stiffness
+
+    env.step(actions)
+    trace = recorder.numpy_trace()
+
+    for name in (
+      "success",
+      "timeout",
+      "nail_depth_m",
+      "delivered_total_n_s",
+      "first_strike_productive",
+      "first_strike_delivered_n_s",
+    ):
+      assert trace[name].shape == (1, 2)
+    for name in (
+      "substep_peak_qv_per_joint",
+      "vic_p",
+      "vic_kp",
+      "vic_kd",
+    ):
+      assert trace[name].shape == (1, 2, 6)
+    for value in trace.values():
+      if np.issubdtype(value.dtype, np.floating):
+        assert np.isfinite(value).all()
+
+    assert trace["success"].tolist() == [[False, False]]
+    assert trace["timeout"].tolist() == [[True, True]]
+    np.testing.assert_allclose(trace["vic_p"][0], stiffness.cpu().numpy())
+    np.testing.assert_allclose(
+      env.action_manager.get_term("joint_stiffness").telemetry.p.cpu().numpy(),
+      np.zeros((2, 6)),
+    )
+  finally:
+    env.close()
+
+
+@pytest.mark.integration
+def test_live_vic_recorder_rejects_action_or_tracker_identity_drift():
+  """Same-shaped side objects must not substitute for configured VIC seams."""
+  from mjlab.envs import ManagerBasedRlEnv
+  from mjlab.tasks.registry import load_env_cfg
+
+  import mjlab.tasks  # noqa: F401
+  import src.tasks  # noqa: F401
+
+  cfg = load_env_cfg(survey.VIC_TASK, play=False)
+  cfg.scene.num_envs = 2
+  _prepare_survey_measurement_config(cfg, PROVISIONAL_CAPS_N_M_S)
+  env = ManagerBasedRlEnv(cfg=cfg, device="cpu", render_mode=None)
+  try:
+    stiffness = env.action_manager._terms["joint_stiffness"]
+    env.action_manager._terms["joint_stiffness"] = object()
+    with pytest.raises(RuntimeError, match="joint_stiffness action identity"):
+      survey._LiveSurveyRecorder(env)
+    env.action_manager._terms["joint_stiffness"] = stiffness
+
+    index = env.metrics_manager.active_terms.index("first_strike")
+    env.metrics_manager._term_cfgs[index].func = object()
+    with pytest.raises(RuntimeError, match="first-strike tracker"):
+      survey._LiveSurveyRecorder(env)
+  finally:
+    env.close()
+
+
+def test_population_summary_reports_task_velocity_and_first_contact_gain_tradeoffs():
+  """Omitting terminal utility or contact-time gains hides policy-shaping tradeoffs."""
+  lam = np.full((2, 2, 6), 0.1, dtype=np.float32)
+  contact = np.zeros((20, 2), dtype=bool)
+  contact[10, :] = True
+  qv = np.array(
+    [
+      [[1.0] * 6, [1.0] * 6],
+      [[3.0] * 6, [1.0, 1.0, 3.2, 1.0, 1.0, 1.0]],
+    ],
+    dtype=np.float32,
+  )
+  vic_p = np.array(
+    [
+      [[-0.5] * 6, [-0.25] * 6],
+      [[0.5] * 6, [0.25] * 6],
+    ],
+    dtype=np.float32,
+  )
+  trace = {
+    "lambda_per_joint": lam,
+    "episode_id": np.zeros((2, 2), dtype=np.int64),
+    "done": np.array([[False, False], [True, True]]),
+    "success": np.array([[False, False], [True, False]]),
+    "timeout": np.array([[False, False], [False, True]]),
+    "nail_depth_m": np.array([[0.0, 0.0], [0.032, 0.01]]),
+    "delivered_total_n_s": np.array([[0.0, 0.0], [0.5, 0.2]]),
+    "first_strike_productive": np.array(
+      [[False, False], [True, False]]
+    ),
+    "first_strike_delivered_n_s": np.array([[0.0, 0.0], [0.4, 0.1]]),
+    "substep_peak_qv_per_joint": qv,
+    "vic_p": vic_p,
+    "vic_kp": 1000.0 + 100.0 * vic_p,
+    "vic_kd": 100.0 + 10.0 * vic_p,
+    "delta_velocity": np.zeros((2, 2), dtype=np.float64),
+    "delta_impulse": np.zeros((2, 2), dtype=np.float64),
+    "delta": np.zeros((2, 2), dtype=np.float64),
+    "substep_contact": contact,
+    "substep_episode_id": np.zeros((20, 2), dtype=np.int64),
+    "substep_rolling_per_joint": np.zeros((20, 2, 6), dtype=np.float32),
+  }
+
+  summary = survey.summarize_population(
+    trace, caps=PROVISIONAL_CAPS_N_M_S, first_episode_only=True
+  )
+
+  utility = summary["utility"]
+  assert utility["task_field_scope"] == "complete first episodes"
+  assert utility["terminal_counts"] == {
+    "population": 2,
+    "terminal": 2,
+    "success": 1,
+    "timeout": 1,
+    "productive_first_strike": 1,
+  }
+  assert utility["terminal_nail_depth_m"] == {
+    "p50": pytest.approx(0.021),
+    "p95": pytest.approx(0.0309),
+    "p99": pytest.approx(0.03178),
+    "max": pytest.approx(0.032),
+  }
+  assert utility["terminal_delivered_total_n_s"]["max"] == pytest.approx(0.5)
+  assert utility["terminal_first_strike_delivered_n_s"]["p50"] == pytest.approx(0.25)
+  velocity = utility["velocity_limit_compliance"]
+  assert velocity["segments"] == 2
+  assert velocity["any_joint_violating_segments"] == 1
+  assert velocity["per_joint"]["joint3"]["violating_segments"] == 1
+  contacts = utility["first_contact_vic_gains"]
+  assert contacts["segments_with_contact"] == 2
+  assert contacts["records"][0] == {
+    "env_id": 0,
+    "episode_id": 0,
+    "contact_control_step": 1,
+    "precontact_control_step": 0,
+    "vic_p_precontact": pytest.approx([-0.5] * 6),
+    "vic_kp_precontact": pytest.approx([950.0] * 6),
+    "vic_kd_precontact": pytest.approx([95.0] * 6),
+    "vic_p_at_contact": pytest.approx([0.5] * 6),
+    "vic_kp_at_contact": pytest.approx([1050.0] * 6),
+    "vic_kd_at_contact": pytest.approx([105.0] * 6),
+    "right_censored": False,
+  }
+
+
+def test_stochastic_utility_summary_labels_task_values_as_censored_fragments():
+  """A 24-step prefix must never be presented as complete task behavior."""
+  trace = {
+    "lambda_per_joint": np.full((1, 1, 6), 0.1, dtype=np.float32),
+    "episode_id": np.zeros((1, 1), dtype=np.int64),
+    "done": np.zeros((1, 1), dtype=bool),
+    "success": np.zeros((1, 1), dtype=bool),
+    "timeout": np.zeros((1, 1), dtype=bool),
+    "nail_depth_m": np.zeros((1, 1), dtype=np.float32),
+    "delivered_total_n_s": np.zeros((1, 1), dtype=np.float32),
+    "first_strike_productive": np.zeros((1, 1), dtype=bool),
+    "first_strike_delivered_n_s": np.zeros((1, 1), dtype=np.float32),
+    "substep_peak_qv_per_joint": np.zeros((1, 1, 6), dtype=np.float32),
+    "vic_p": np.zeros((1, 1, 6), dtype=np.float32),
+    "vic_kp": np.full((1, 1, 6), 1000.0, dtype=np.float32),
+    "vic_kd": np.full((1, 1, 6), 100.0, dtype=np.float32),
+    "delta_velocity": np.zeros((1, 1), dtype=np.float64),
+    "delta_impulse": np.zeros((1, 1), dtype=np.float64),
+    "delta": np.zeros((1, 1), dtype=np.float64),
+    "substep_contact": np.zeros((10, 1), dtype=bool),
+    "substep_episode_id": np.zeros((10, 1), dtype=np.int64),
+    "substep_rolling_per_joint": np.zeros((10, 1, 6), dtype=np.float32),
+  }
+
+  summary = survey.summarize_population(
+    trace, caps=PROVISIONAL_CAPS_N_M_S, first_episode_only=False
+  )
+
+  assert summary["utility"]["task_field_scope"] == (
+    "24-step stochastic task fragments; unfinished and post-reset segments are censored"
+  )
+  assert summary["utility"]["terminal_counts"]["terminal"] == 0
 
 
 @pytest.mark.parametrize(

@@ -353,12 +353,44 @@ class _LiveSurveyRecorder:
     "raw_margin_per_joint",
     "positive_margin_per_joint",
   )
+  _TASK_SCALAR_FIELDS = (
+    "success",
+    "timeout",
+    "nail_depth_m",
+    "delivered_total_n_s",
+    "first_strike_productive",
+    "first_strike_delivered_n_s",
+  )
+  _TASK_JOINT_FIELDS = (
+    "substep_peak_qv_per_joint",
+    "vic_p",
+    "vic_kp",
+    "vic_kd",
+  )
 
   def __init__(self, env: Any):
     import torch
 
+    from mjlab.envs.mdp.actions.actions import JointPositionAction
+    from mjlab.managers.scene_entity_config import SceneEntityCfg
+
     from src.tasks.hammer.cat.hook import CatSoftHook
-    from src.tasks.hammer.mdp.impulse_bound import _ENV_SUBSTEP_IMPULSE_ATTR
+    from src.tasks.hammer.mdp.first_strike import (
+      FirstStrikeEventTracker,
+      _ENV_FIRST_STRIKE_ATTR,
+    )
+    from src.tasks.hammer.mdp.impulse_bound import (
+      SubstepDeliveredImpulse,
+      SubstepImpulseAccumulator,
+      _ENV_SUBSTEP_DELIVERED_ATTR,
+      _ENV_SUBSTEP_IMPULSE_ATTR,
+    )
+    from src.tasks.hammer.mdp.variable_impedance import JointStiffnessAction
+    from src.tasks.hammer.mdp.velocity_bound import (
+      SubstepPeakJointVel,
+      _ENV_SUBSTEP_ATTR,
+    )
+    from src.tasks.hammer.nail_block import NAIL_GOAL_DEPTH
 
     self._torch = torch
     self._env = env
@@ -372,14 +404,62 @@ class _LiveSurveyRecorder:
     if hook._imp_max_p != 0.0:
       raise RuntimeError("survey trajectories must keep impulse CaT log-only (imp_max_p=0)")
     accumulator = getattr(env, _ENV_SUBSTEP_IMPULSE_ATTR, None)
-    if accumulator is None:
+    if type(accumulator) is not SubstepImpulseAccumulator:
       raise RuntimeError("activation survey requires the shipped substep impulse accumulator")
+    delivered = getattr(env, _ENV_SUBSTEP_DELIVERED_ATTR, None)
+    if type(delivered) is not SubstepDeliveredImpulse:
+      raise RuntimeError("activation survey requires the shipped delivered-impulse accumulator")
+    first_strike = getattr(env, _ENV_FIRST_STRIKE_ATTR, None)
+    if type(first_strike) is not FirstStrikeEventTracker:
+      raise RuntimeError("activation survey requires the shipped first-strike tracker")
+    velocity = getattr(env, _ENV_SUBSTEP_ATTR, None)
+    if type(velocity) is not SubstepPeakJointVel:
+      raise RuntimeError("activation survey requires the shipped substep velocity tracker")
+    expected_trackers = {
+      "first_strike": (first_strike, "first-strike tracker"),
+      "substep_impulse": (accumulator, "substep impulse accumulator"),
+      "substep_delivered": (delivered, "delivered-impulse accumulator"),
+      "substep_peak_qv": (velocity, "substep velocity tracker"),
+    }
+    for term_name, (tracker, label) in expected_trackers.items():
+      if term_name not in manager.active_terms:
+        raise RuntimeError(f"activation survey requires the shipped {label}")
+      term_index = manager.active_terms.index(term_name)
+      if manager._term_cfgs[term_index].func is not tracker:
+        raise RuntimeError(
+          f"activation survey {label} is not the exact configured metric term"
+        )
+
+    action_manager = env.action_manager
+    if tuple(action_manager.active_terms) != ("joint_position", "joint_stiffness"):
+      raise RuntimeError(
+        "activation survey requires the exact VIC action pair "
+        "('joint_position', 'joint_stiffness')"
+      )
+    position_action = action_manager.get_term("joint_position")
+    stiffness_action = action_manager.get_term("joint_stiffness")
+    if type(position_action) is not JointPositionAction:
+      raise RuntimeError("activation survey joint_position action identity drift")
+    if type(stiffness_action) is not JointStiffnessAction:
+      raise RuntimeError("activation survey joint_stiffness action identity drift")
+
+    nail_cfg = SceneEntityCfg("nail_block", joint_names=("nail_slide",))
+    nail_cfg.resolve(env.scene)
 
     self._hook = hook
     self._accumulator = accumulator
+    self._delivered = delivered
+    self._first_strike = first_strike
+    self._velocity = velocity
+    self._stiffness_action = stiffness_action
+    self._nail = env.scene[nail_cfg.name]
+    self._nail_joint_ids = nail_cfg.joint_ids
     self._contact = env.scene["hammer_nail_contact"]
     self._episode_id = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
     self._control: dict[str, list[Any]] = {name: [] for name in self._CONTROL_FIELDS}
+    self._control.update(
+      {name: [] for name in (*self._TASK_SCALAR_FIELDS, *self._TASK_JOINT_FIELDS)}
+    )
     self._control["done"] = []
     self._control["episode_id"] = []
     self._substep_contact: list[Any] = []
@@ -413,6 +493,36 @@ class _LiveSurveyRecorder:
       for name in self._CONTROL_FIELDS:
         self._control[name].append(telemetry[name].detach().clone())
       done = (env.reset_terminated | env.reset_time_outs).detach().clone()
+      nail_depth = self._nail.data.joint_pos[:, self._nail_joint_ids].squeeze(1)
+      stiffness = self._stiffness_action.telemetry
+      task_values = {
+        "success": env.reset_terminated,
+        "timeout": env.reset_time_outs,
+        "nail_depth_m": nail_depth.clamp(0.0, NAIL_GOAL_DEPTH),
+        "delivered_total_n_s": self._delivered.delivered,
+        "first_strike_productive": self._first_strike.productive,
+        "first_strike_delivered_n_s": self._first_strike.delivered,
+        "substep_peak_qv_per_joint": self._velocity.peak_qv_joint,
+        "vic_p": stiffness.p,
+        "vic_kp": stiffness.kp,
+        "vic_kd": stiffness.kd,
+      }
+      scalar_shape = (env.num_envs,)
+      joint_shape = (env.num_envs, len(JOINT_NAMES))
+      for name in self._TASK_SCALAR_FIELDS:
+        if task_values[name].shape != scalar_shape:
+          raise RuntimeError(
+            f"live survey field {name} has shape {task_values[name].shape}, "
+            f"expected {scalar_shape}"
+          )
+      for name in self._TASK_JOINT_FIELDS:
+        if task_values[name].shape != joint_shape:
+          raise RuntimeError(
+            f"live survey field {name} has shape {task_values[name].shape}, "
+            f"expected {joint_shape}"
+          )
+      for name, value in task_values.items():
+        self._control[name].append(value.detach().clone())
       self._control["done"].append(done)
       self._control["episode_id"].append(self._episode_id.detach().clone())
       self._episode_id += done.long()
@@ -449,6 +559,7 @@ class _LiveSurveyRecorder:
       "cap_utilization_per_joint",
       "raw_margin_per_joint",
       "positive_margin_per_joint",
+      *self._TASK_JOINT_FIELDS,
     ):
       if trace[name].shape != joint_shape:
         raise RuntimeError(f"live survey field {name} has shape {trace[name].shape}, expected {joint_shape}")
@@ -460,6 +571,7 @@ class _LiveSurveyRecorder:
       "winner_joint",
       "done",
       "episode_id",
+      *self._TASK_SCALAR_FIELDS,
     ):
       if trace[name].shape != scalar_shape:
         raise RuntimeError(f"live survey field {name} has shape {trace[name].shape}, expected {scalar_shape}")
@@ -950,6 +1062,154 @@ def _physical_event_read_counts(
   return result
 
 
+def _utility_summary(
+  trace: dict[str, np.ndarray],
+  *,
+  episode_id: np.ndarray,
+  done: np.ndarray,
+  valid: np.ndarray,
+  substep_contact: np.ndarray,
+  substep_episode_id: np.ndarray,
+  first_episode_only: bool,
+) -> dict[str, object]:
+  """Reduce exact pre-reset task, velocity, and VIC-action telemetry."""
+  scalar_shape = episode_id.shape
+  joint_shape = (*scalar_shape, len(JOINT_NAMES))
+  boolean_fields = ("success", "timeout", "first_strike_productive")
+  scalar_float_fields = (
+    "nail_depth_m",
+    "delivered_total_n_s",
+    "first_strike_delivered_n_s",
+  )
+  joint_float_fields = (
+    "substep_peak_qv_per_joint",
+    "vic_p",
+    "vic_kp",
+    "vic_kd",
+  )
+  arrays: dict[str, np.ndarray] = {}
+  for name in boolean_fields:
+    value = np.asarray(trace[name])
+    if value.shape != scalar_shape or value.dtype != np.bool_:
+      raise ValueError(f"{name} must be boolean with shape (steps, envs)")
+    arrays[name] = value
+  for name in scalar_float_fields:
+    value = np.asarray(trace[name])
+    if (
+      value.shape != scalar_shape
+      or not np.issubdtype(value.dtype, np.floating)
+      or not np.isfinite(value).all()
+    ):
+      raise ValueError(f"{name} must be finite floating with shape (steps, envs)")
+    arrays[name] = value.astype(np.float64)
+  for name in joint_float_fields:
+    value = np.asarray(trace[name])
+    if (
+      value.shape != joint_shape
+      or not np.issubdtype(value.dtype, np.floating)
+      or not np.isfinite(value).all()
+    ):
+      raise ValueError(f"{name} must be finite floating with shape (steps, envs, 6)")
+    arrays[name] = value.astype(np.float64)
+
+  terminal = done & valid
+  success = arrays["success"]
+  timeout = arrays["timeout"]
+  productive = arrays["first_strike_productive"]
+  if not np.array_equal(done, success | timeout):
+    raise ValueError("done must be the exact union of success and timeout")
+
+  qv_segment_peaks = _observed_segment_peaks(
+    arrays["substep_peak_qv_per_joint"], episode_id, valid
+  )
+  qv_violations = qv_segment_peaks > VELOCITY_LIMIT_RAD_S
+  velocity_compliance = {
+    "limit_rad_s": VELOCITY_LIMIT_RAD_S,
+    "segments": int(qv_segment_peaks.shape[0]),
+    "any_joint_violating_segments": int(qv_violations.any(axis=1).sum()),
+    "any_joint_violation_rate": float(qv_violations.any(axis=1).mean()),
+    "max_joint_speed_rad_s": _finite_quantiles(qv_segment_peaks.max(axis=1)),
+    "per_joint": {
+      name: {
+        "violating_segments": int(qv_violations[:, joint].sum()),
+        "violation_rate": float(qv_violations[:, joint].mean()),
+        "peak_speed_rad_s": _finite_quantiles(qv_segment_peaks[:, joint]),
+      }
+      for joint, name in enumerate(JOINT_NAMES)
+    },
+  }
+
+  first_contact_records: list[dict[str, object]] = []
+  steps, envs = scalar_shape
+  for env_id in range(envs):
+    for current_episode in np.unique(episode_id[valid[:, env_id], env_id]):
+      control_mask = valid[:, env_id] & (
+        episode_id[:, env_id] == current_episode
+      )
+      contact_indices = np.flatnonzero(
+        substep_contact[:, env_id]
+        & (substep_episode_id[:, env_id] == current_episode)
+      )
+      contact_indices = contact_indices[
+        control_mask[np.minimum(contact_indices // CONTROL_DECIMATION, steps - 1)]
+      ]
+      if contact_indices.size == 0:
+        continue
+      contact_step = int(contact_indices[0] // CONTROL_DECIMATION)
+      precontact_step = contact_step - 1
+      if precontact_step < 0 or not bool(control_mask[precontact_step]):
+        precontact_step_or_none = None
+      else:
+        precontact_step_or_none = precontact_step
+
+      record: dict[str, object] = {
+        "env_id": env_id,
+        "episode_id": int(current_episode),
+        "contact_control_step": contact_step,
+        "precontact_control_step": precontact_step_or_none,
+      }
+      for name in ("vic_p", "vic_kp", "vic_kd"):
+        values = arrays[name]
+        record[f"{name}_precontact"] = (
+          None
+          if precontact_step_or_none is None
+          else values[precontact_step_or_none, env_id].tolist()
+        )
+        record[f"{name}_at_contact"] = values[contact_step, env_id].tolist()
+      record["right_censored"] = not bool((terminal[:, env_id] & control_mask).any())
+      first_contact_records.append(record)
+
+  return {
+    "task_field_scope": (
+      "complete first episodes"
+      if first_episode_only
+      else "24-step stochastic task fragments; unfinished and post-reset segments are censored"
+    ),
+    "terminal_counts": {
+      "population": envs if first_episode_only else int(qv_segment_peaks.shape[0]),
+      "terminal": int(terminal.sum()),
+      "success": int((success & terminal).sum()),
+      "timeout": int((timeout & terminal).sum()),
+      "productive_first_strike": int((productive & terminal).sum()),
+    },
+    "terminal_nail_depth_m": _finite_quantiles(arrays["nail_depth_m"][terminal]),
+    "terminal_delivered_total_n_s": _finite_quantiles(
+      arrays["delivered_total_n_s"][terminal]
+    ),
+    "terminal_first_strike_delivered_n_s": _finite_quantiles(
+      arrays["first_strike_delivered_n_s"][terminal]
+    ),
+    "velocity_limit_compliance": velocity_compliance,
+    "first_contact_vic_gains": {
+      "segments_with_contact": len(first_contact_records),
+      "right_censored_segments": sum(
+        bool(record["right_censored"]) for record in first_contact_records
+      ),
+      "records": first_contact_records,
+    },
+  }
+
+
 def summarize_population(
   trace: dict[str, np.ndarray],
   *,
@@ -1034,6 +1294,15 @@ def summarize_population(
     active_valid,
     done,
     np.where(active_valid, unit_delta, 0.0),
+  )
+  utility = _utility_summary(
+    trace,
+    episode_id=episode_id,
+    done=done,
+    valid=valid,
+    substep_contact=sub_contact,
+    substep_episode_id=sub_episode,
+    first_episode_only=first_episode_only,
   )
 
   observed_segment_peaks = _observed_segment_peaks(lam, episode_id, valid)
@@ -1191,6 +1460,7 @@ def summarize_population(
     ),
     "observed_peak_segments": int(observed_segment_peaks.shape[0]),
     "segment_compliance": segment_compliance,
+    "utility": utility,
     "candidate_imp_max_p": candidates,
   }
 
