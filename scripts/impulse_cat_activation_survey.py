@@ -617,6 +617,9 @@ def _run_population(
   stochastic: bool,
 ) -> tuple[dict[str, np.ndarray], dict[str, object]]:
   """Run a frozen policy without calling storage collection, an optimizer, or a learner update."""
+  if rng_seeds != EvaluationRngSeeds.from_evaluation_seed(seed):
+    raise ValueError("RNG streams must match evaluation seed")
+
   import torch
 
   from mjlab.envs import ManagerBasedRlEnv
@@ -651,13 +654,20 @@ def _run_population(
     runner.load(str(checkpoint), load_cfg={"actor": True}, strict=True, map_location=device)
     policy = runner.get_inference_policy(device=device)
     torch.manual_seed(seed)
+    if stochastic:
+      _install_evaluator_rng_streams(
+        env,
+        reset_seed=rng_seeds.reset,
+        observation_seed=rng_seeds.observation,
+      )
     observations, _ = wrapped.reset()
     population_hash = _initial_population_sha256(env)
-    _install_evaluator_rng_streams(
-      env,
-      reset_seed=rng_seeds.reset,
-      observation_seed=rng_seeds.observation,
-    )
+    if not stochastic:
+      _install_evaluator_rng_streams(
+        env,
+        reset_seed=rng_seeds.reset,
+        observation_seed=rng_seeds.observation,
+      )
     action_stream = _TorchRngStream(rng_seeds.action, device)
     completed = torch.zeros(num_envs, dtype=torch.bool, device=env.device)
     control_steps = steps if steps is not None else env.max_episode_length

@@ -1,5 +1,9 @@
 """Pure analysis tests for the no-learning impulse-CaT activation survey."""
 
+from dataclasses import dataclass
+from pathlib import Path
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -25,6 +29,101 @@ from scripts.impulse_cat_activation_survey import (
 
 CONTROL_SHA = "f4f86cfd81fdc78824b85a059735b2f605c6761c624be59e0e778ef3fbd681c3"
 TARGET_SHA = "ddd7ac4c855160bff1db2af52e642d960dab2bef34e41dd2532002185eb36d15"
+
+
+def _install_fake_population_runtime(monkeypatch, events):
+  import torch
+
+  import mjlab.envs
+  import mjlab.rl
+  import mjlab.tasks.registry
+
+  @dataclass
+  class AgentCfg:
+    num_steps_per_env: int = survey.TRAINING_LIKE_STEPS
+    clip_actions: float = 1.0
+
+  class Env:
+    def __init__(self, *, cfg, device, render_mode):
+      del cfg, render_mode
+      self.device = device
+      self.max_episode_length = 1
+      self.observation_manager = SimpleNamespace(compute=self._compute_observation)
+
+    def _reset_idx(self, env_ids=None):
+      del env_ids
+      events.append("reset")
+
+    def _compute_observation(self):
+      events.append("observation")
+      return torch.zeros((1, 1))
+
+  class Wrapper:
+    def __init__(self, env, *, clip_actions):
+      del clip_actions
+      self.env = env
+
+    def reset(self):
+      self.env._reset_idx()
+      return self.env.observation_manager.compute(), {}
+
+    def step(self, actions):
+      del actions
+      return self.env.observation_manager.compute(), None, None, None
+
+    def close(self):
+      pass
+
+  class Runner:
+    def __init__(self, wrapped, cfg, *, device):
+      del wrapped, cfg, device
+
+    def load(self, checkpoint, *, load_cfg, strict, map_location):
+      del checkpoint, load_cfg, strict, map_location
+
+    def get_inference_policy(self, *, device):
+      del device
+      return lambda observations, *, stochastic_output: torch.zeros_like(observations)
+
+  class Recorder:
+    def __init__(self, env):
+      del env
+
+    def numpy_trace(self):
+      return {"delta": np.zeros((1, 1), dtype=np.float32)}
+
+  env_cfg = SimpleNamespace(
+    scene=SimpleNamespace(num_envs=None),
+    seed=None,
+    auto_reset=None,
+  )
+  monkeypatch.setattr(mjlab.envs, "ManagerBasedRlEnv", Env)
+  monkeypatch.setattr(mjlab.rl, "MjlabOnPolicyRunner", Runner)
+  monkeypatch.setattr(mjlab.rl, "RslRlVecEnvWrapper", Wrapper)
+  monkeypatch.setattr(mjlab.tasks.registry, "load_env_cfg", lambda task, play: env_cfg)
+  monkeypatch.setattr(mjlab.tasks.registry, "load_rl_cfg", lambda task: AgentCfg())
+  monkeypatch.setattr(mjlab.tasks.registry, "load_runner_cls", lambda task: Runner)
+  monkeypatch.setattr(survey, "_LiveSurveyRecorder", Recorder)
+  monkeypatch.setattr(survey, "_prepare_survey_measurement_config", lambda cfg, caps: {})
+  monkeypatch.setattr(survey, "_initial_population_sha256", lambda env: "population")
+
+  def install_streams(env, *, reset_seed, observation_seed):
+    del env, reset_seed, observation_seed
+    events.append("install")
+
+  monkeypatch.setattr(survey, "_install_evaluator_rng_streams", install_streams)
+
+
+def _run_fake_population(*, stochastic, rng_seeds):
+  return survey._run_population(
+    checkpoint=Path("unused-model_499.pt"),
+    device="cpu",
+    num_envs=1,
+    seed=2,
+    rng_seeds=rng_seeds,
+    steps=1,
+    stochastic=stochastic,
+  )
 
 
 def test_evaluation_checkpoint_roles_are_exact_and_fail_closed(tmp_path, monkeypatch):
@@ -81,6 +180,51 @@ def test_evaluation_roles_derive_identical_rng_streams_from_one_base_seed():
       action=30_000_043,
     ),
   }
+
+
+def test_stochastic_population_installs_rng_streams_before_initial_reset(
+  monkeypatch,
+):
+  events = []
+  _install_fake_population_runtime(monkeypatch, events)
+
+  _run_fake_population(
+    stochastic=True,
+    rng_seeds=survey.EvaluationRngSeeds.from_evaluation_seed(2),
+  )
+
+  assert events[:3] == ["install", "reset", "observation"]
+
+
+def test_fixed_mean_population_preserves_initial_reset_before_stream_install(
+  monkeypatch,
+):
+  events = []
+  _install_fake_population_runtime(monkeypatch, events)
+
+  _run_fake_population(
+    stochastic=False,
+    rng_seeds=survey.EvaluationRngSeeds.from_evaluation_seed(2),
+  )
+
+  assert events[:3] == ["reset", "observation", "install"]
+
+
+def test_run_population_rejects_rng_streams_not_derived_from_evaluation_seed(
+  monkeypatch,
+):
+  events = []
+  _install_fake_population_runtime(monkeypatch, events)
+
+  with pytest.raises(ValueError, match="RNG streams must match evaluation seed"):
+    _run_fake_population(
+      stochastic=True,
+      rng_seeds=survey.EvaluationRngSeeds(
+        reset=10_000_022,
+        observation=20_000_035,
+        action=30_000_043,
+      ),
+    )
 
 
 def test_contiguous_activation_events_count_reads_pressure_and_reset_boundaries():
