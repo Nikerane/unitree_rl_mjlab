@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 import sys
+from types import MappingProxyType
 from typing import Any, Mapping
 
 import numpy as np
@@ -48,10 +49,12 @@ VELOCITY_MAX_P = 0.5
 VELOCITY_DETECTION = "substep"
 EXPECTED_CHECKPOINT_SHA256 = "c1544b779e78e7323bf02ce7b0f165745ee63b5aad9f930f9eea64eb6ea4ea77"
 EXPECTED_FIXED_POPULATION_SHA256 = "320efae8c21b3303c5dc3f18ae7df00e887653abf26aa8fb413803cf78d094cb"
-EVALUATION_CHECKPOINTS: Mapping[str, str] = {
-  "diag90_control": "f4f86cfd81fdc78824b85a059735b2f605c6761c624be59e0e778ef3fbd681c3",
-  "diag90_target": "ddd7ac4c855160bff1db2af52e642d960dab2bef34e41dd2532002185eb36d15",
-}
+EVALUATION_CHECKPOINTS: Mapping[str, str] = MappingProxyType(
+  {
+    "diag90_control": "f4f86cfd81fdc78824b85a059735b2f605c6761c624be59e0e778ef3fbd681c3",
+    "diag90_target": "ddd7ac4c855160bff1db2af52e642d960dab2bef34e41dd2532002185eb36d15",
+  }
+)
 
 
 def validate_checkpoint_role(checkpoint: Path, role: str) -> str:

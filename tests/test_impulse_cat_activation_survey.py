@@ -24,6 +24,7 @@ from scripts.impulse_cat_activation_survey import (
 
 
 CONTROL_SHA = "f4f86cfd81fdc78824b85a059735b2f605c6761c624be59e0e778ef3fbd681c3"
+TARGET_SHA = "ddd7ac4c855160bff1db2af52e642d960dab2bef34e41dd2532002185eb36d15"
 
 
 def test_evaluation_checkpoint_roles_are_exact_and_fail_closed(tmp_path, monkeypatch):
@@ -31,6 +32,12 @@ def test_evaluation_checkpoint_roles_are_exact_and_fail_closed(tmp_path, monkeyp
   checkpoint.write_bytes(b"control")
   monkeypatch.setattr(survey, "_sha256", lambda _: CONTROL_SHA)
 
+  assert dict(survey.EVALUATION_CHECKPOINTS) == {
+    "diag90_control": CONTROL_SHA,
+    "diag90_target": TARGET_SHA,
+  }
+  with pytest.raises(TypeError):
+    survey.EVALUATION_CHECKPOINTS["unexpected_role"] = CONTROL_SHA
   assert survey.validate_checkpoint_role(checkpoint, "diag90_control") == CONTROL_SHA
   with pytest.raises(RuntimeError, match="role/checkpoint SHA-256 mismatch"):
     survey.validate_checkpoint_role(checkpoint, "diag90_target")
