@@ -3,6 +3,8 @@
 import numpy as np
 import pytest
 
+import scripts.impulse_cat_activation_survey as survey
+
 from scripts.impulse_cat_activation_survey import (
   DIAGNOSTIC_LIMITS_N_M_S,
   EXPECTED_CHECKPOINT_SHA256,
@@ -19,6 +21,19 @@ from scripts.impulse_cat_activation_survey import (
   contiguous_activation_events,
   shadow_impulse_cat,
 )
+
+
+CONTROL_SHA = "f4f86cfd81fdc78824b85a059735b2f605c6761c624be59e0e778ef3fbd681c3"
+
+
+def test_evaluation_checkpoint_roles_are_exact_and_fail_closed(tmp_path, monkeypatch):
+  checkpoint = tmp_path / "model_499.pt"
+  checkpoint.write_bytes(b"control")
+  monkeypatch.setattr(survey, "_sha256", lambda _: CONTROL_SHA)
+
+  assert survey.validate_checkpoint_role(checkpoint, "diag90_control") == CONTROL_SHA
+  with pytest.raises(RuntimeError, match="role/checkpoint SHA-256 mismatch"):
+    survey.validate_checkpoint_role(checkpoint, "diag90_target")
 
 
 def test_contiguous_activation_events_count_reads_pressure_and_reset_boundaries():
