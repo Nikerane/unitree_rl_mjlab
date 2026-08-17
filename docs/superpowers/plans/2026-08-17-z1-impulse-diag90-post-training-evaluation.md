@@ -101,6 +101,8 @@ git commit -m "feat(hammer): freeze impulse evaluation checkpoints"
 **Interfaces:**
 - Produces: `segment_compliance` in every `summarize_population` payload with any-joint and
   per-joint counts/rates, p50/p95/p99/max utilization, and conditional positive margin.
+- Produces: `_finite_quantiles(values: np.ndarray) -> dict[str, float | None]`, returning
+  `p50`, `p95`, `p99`, and `max` with `None` for an empty input.
 - Consumes: existing `_observed_segment_peaks(...)` and native-dtype cap subtraction.
 
 - [ ] **Step 1: Add a synthetic repeated-read test** proving one episode segment is counted once
@@ -117,6 +119,23 @@ segment_compliance = {
   "any_joint_violation_rate": float(segment_violating.any(axis=1).mean()),
   "max_joint_utilization": _finite_quantiles(segment_utilization.max(axis=1)),
 }
+```
+
+The helper used above is exactly:
+
+```python
+def _finite_quantiles(values: np.ndarray) -> dict[str, float | None]:
+  flat = np.asarray(values, dtype=np.float64).reshape(-1)
+  if flat.size == 0:
+    return {"p50": None, "p95": None, "p99": None, "max": None}
+  if not np.isfinite(flat).all():
+    raise ValueError("quantile input must be finite")
+  return {
+    "p50": float(np.quantile(flat, 0.50)),
+    "p95": float(np.quantile(flat, 0.95)),
+    "p99": float(np.quantile(flat, 0.99)),
+    "max": float(np.max(flat)),
+  }
 ```
 
 - [ ] **Step 4: Verify the focused and complete survey tests pass.**
