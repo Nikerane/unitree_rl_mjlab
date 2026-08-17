@@ -143,6 +143,7 @@ def _env(tmp_path: Path, task_id: int) -> dict[str, str]:
     "    for name in fixed_trace.npz training_like_seed_2_trace.npz training_like_seed_2026081701_trace.npz training_like_seed_2026081702_trace.npz summary.json; do\n"
     "      printf 'fake %s\\n' \"$name\" > \"$output/$name\"\n"
     "    done\n"
+    "    if [ -n \"${EXTRA_HIDDEN_OUTPUT:-}\" ]; then printf extra > \"$output/.extra\"; fi\n"
     "    if [ -n \"${MUTATE_CHECKPOINT:-}\" ]; then printf mutation > \"$MUTATE_CHECKPOINT\"; fi\n"
     "    ;;\n"
     "  *) exit 72 ;;\n"
@@ -263,6 +264,16 @@ def test_launcher_refuses_wrong_frozen_hash_and_postflight_checkpoint_drift(
   result = _run(env)
   assert result.returncode == 2
   assert "checkpoint SHA-256 drifted during evaluation" in result.stdout
+
+
+def test_launcher_refuses_hidden_extra_evaluator_artifact(tmp_path: Path):
+  env = _env(tmp_path, 0)
+  env["EXTRA_HIDDEN_OUTPUT"] = "1"
+
+  result = _run(env)
+
+  assert result.returncode == 2
+  assert "evaluator output set does not contain exactly five artifacts" in result.stdout
 
 
 def test_launcher_freezes_resources_runtime_guards_and_zero_retry_contract():

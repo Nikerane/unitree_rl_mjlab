@@ -148,6 +148,7 @@ readonly EXPECTED_OUTPUTS=(
 )
 [[ -d "$EVALUATION_DIR" && ! -L "$EVALUATION_DIR" ]] \
   || fail "evaluator did not create a regular output directory"
+shopt -s nullglob dotglob
 ACTUAL_OUTPUTS=("$EVALUATION_DIR"/*)
 [[ "${#ACTUAL_OUTPUTS[@]}" -eq "${#EXPECTED_OUTPUTS[@]}" ]] \
   || fail "evaluator output set does not contain exactly five artifacts"

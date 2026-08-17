@@ -81,3 +81,39 @@ diff checks are performed immediately before the Task 6 commit.
   identities and approved-base ancestry without fabricating SHA-256 preimages or requiring the
   real Vega checkout. Real repository cleanliness, output collision behavior, Bash argument flow,
   and artifact hashing remain exercised by the launcher.
+
+## Fix round 1: hidden evaluator artifacts
+
+Review identified that the original `"$EVALUATION_DIR"/*` enumeration omitted dotfiles, allowing
+the five required artifacts plus a hidden extra file to reach PASS. The regression fixture now has
+the fake evaluator write `.extra` after producing the normal five files.
+
+### RED
+
+```bash
+conda run -n unitree_mjlab python -m pytest -q \
+  tests/test_vic_impulse_diag90_500_eval_launcher.py -k hidden_extra
+```
+
+Result before the fix: `1 failed, 6 deselected in 1.98s`; the launcher returned `0` despite the
+hidden sixth output.
+
+### GREEN and verification
+
+The launcher now enables Bash `nullglob` and `dotglob` before expanding the immediate output
+directory into an array. This remains argument-safe and makes `.extra` count as a sixth artifact.
+
+```bash
+conda run -n unitree_mjlab python -m pytest -q \
+  tests/test_vic_impulse_diag90_500_eval_launcher.py -k hidden_extra
+# 1 passed, 6 deselected in 0.77s
+
+conda run -n unitree_mjlab python -m pytest -q \
+  tests/test_vic_impulse_diag90_500_eval_launcher.py
+# 7 passed in 4.85s
+
+bash -n scripts/slurm/vega_vic_impulse_diag90_500_eval.sbatch
+git diff --check
+```
+
+Both syntax and diff checks exited successfully. No Vega submission or training was performed.
