@@ -165,11 +165,24 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
     assert "no provisional-boundary `imp_max_p` or canary is selected" in route
     assert "redistribution/trade-off, not clean enforcement" in route
     assert "true 500 Hz velocity-limit violation risk increased" in route
+    assert "lower native observed J3 impulse exposure" in route
+    assert (
+        "unequal native episode/contact horizons prevent a causal or full-contact interpretation"
+        in route
+    )
     assert "release/window-flush shadow is planned but not launch-authorized" in route
     assert "direct-reference FIC-0/FIC-TT campaign" not in route
     assert (
         "direct-reference FIC launchers are banked baseline/reproducibility routes"
         in route
+    )
+    assert (
+        "lower *native observed* J3 impulse exposure"
+        in text
+    )
+    assert (
+        "The evaluation observed lower native J3 diagnostic violation risk"
+        in text
     )
     assert (
         "`scripts/slurm/vega_fic_direct_reference_smoke.sbatch` "
@@ -232,3 +245,54 @@ def test_claude_md_records_the_live_nail_driven_weight():
     text = (REPO / "CLAUDE.md").read_text(encoding="utf-8")
     assert "`nail_driven=0.5`" in text
     assert "`nail_driven=2.0`" not in text
+
+
+def test_diag90_result_keeps_observed_prefix_and_causal_claims_separate():
+    text = (
+        REPO / "docs/results/2026-08-17_z1_impulse_diag90_500_evaluation.md"
+    ).read_text(encoding="utf-8")
+    assert "shorter target episodes therefore do not explain" not in text
+    assert "does not resolve the unequal-horizon/contact-censoring confound" in text
+    assert "native observed endpoint remains valid" in text
+    assert "shadow is required for a full-contact or causal interpretation" in text
+    assert "Soft CaT shapes learned behavior" not in text
+
+
+def test_contact_flush_plan_uses_current_rolling_lambda_without_a_second_window():
+    text = (
+        REPO
+        / "docs/superpowers/plans/2026-08-17-z1-impulse-diag90-release-window-flush-shadow.md"
+    ).read_text(encoding="utf-8")
+    assert "fixed 25-sample Boolean ring" not in text
+    assert "current rolling Lambda is zero" in text
+    assert "positive Lambda sample, then exactly 24" in text
+    assert "25th off-contact sample" in text
+    assert "no second 25-sample window" in text
+    result_text = (
+        REPO / "docs/results/2026-08-17_z1_impulse_diag90_500_evaluation.md"
+    ).read_text(encoding="utf-8")
+    assert "current rolling Lambda is zero (no second window)" in result_text
+
+
+def test_diag90_result_names_pressure_gain_and_provenance_claim_boundaries():
+    text = (
+        REPO / "docs/results/2026-08-17_z1_impulse_diag90_500_evaluation.md"
+    ).read_text(encoding="utf-8")
+    flat = " ".join(text.split())
+    assert "unique physical-event dose is not banked" in text
+    assert (
+        "activation-window pressure classified by associated physical-event status"
+        in text
+    )
+    assert "impulse-versus-velocity attribution and activation-window pressure" in text
+    assert "event-pressure quantiles" not in text
+    assert "precontact J4 median" in text
+    assert "control `p=+1, Kp=1250, Kd=111.80`" in text
+    assert "target `p=-1, Kp=800, Kd=89.44`" in text
+    assert "stochastic precontact means also differ at J1, J4, and J5" in text
+    assert "checkpoint binaries were not downloaded or independently rehashed" in text
+    assert "latent action-noise equality is a procedural RNG contract" in flat
+    assert "scheduler status comes from the Task-8 execution record" in flat
+    assert "not derived from trace contents" in flat
+    assert "Analysis-consumed array alignments" in flat
+    assert "delta_velocity, offline delta_impulse, and their exact max" in text

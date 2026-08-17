@@ -27,9 +27,9 @@ cannot be mixed.
   observations, gains, rewards, or domain randomization.
 - Remove only the `nail_driven` termination after proving byte/numeric parity through each world's
   native terminal boundary. Native task outcomes remain authoritative.
-- Stop a shadow world only after five consecutive off-contact 2 ms samples and the 25-substep
-  Lambda window has flushed, or at 250 ms after native success. Preserve unresolved worlds as
-  right-censored.
+- Stop a shadow world only when it has at least five consecutive off-contact 2 ms samples and its
+  current, already-rolling 25-substep Lambda is zero, or at 250 ms after native success. Do not add
+  another flush window; preserve unresolved worlds as right-censored.
 - Complete-event dose requires at least 50 completed, unambiguous activating physical events and at
   least 95% completion. Analyze completed and right-censored events separately.
 - Controller reads are not inferential units. Any paired interval resamples complete environment
@@ -58,7 +58,7 @@ cannot be mixed.
 
 ```python
 def test_shadow_requires_release_run_and_full_lambda_flush():
-  tracker = survey.ReleaseWindowFlushTracker(num_envs=1, window_substeps=25)
+  tracker = survey.ReleaseWindowFlushTracker(num_envs=1)
   for _ in range(4):
     state = tracker.update(np.array([False]), np.zeros((1, 6)))
   assert not state.complete[0]
@@ -66,11 +66,25 @@ def test_shadow_requires_release_run_and_full_lambda_flush():
   assert state.complete[0]
 
 
+def test_shadow_stops_on_exact_existing_rolling_lambda_flush_without_extra_window():
+  tracker = survey.ReleaseWindowFlushTracker(num_envs=1)
+  tracker.update(np.array([True]), np.ones((1, 6)) * 0.01)
+  # One positive Lambda sample, then exactly 24 off-contact samples whose existing
+  # 25-substep rolling Lambda remains positive.
+  for _ in range(24):
+    state = tracker.update(np.array([False]), np.ones((1, 6)) * 0.01)
+    assert not state.complete[0]
+  # The 25th off-contact sample is the first current rolling-Lambda zero.
+  state = tracker.update(np.array([False]), np.zeros((1, 6)))
+  assert state.off_contact_run[0] == 25
+  assert state.window_flushed[0]
+  assert state.complete[0]
+
+
 def test_shadow_does_not_call_contact_release_a_flush_while_lambda_is_nonzero():
-  tracker = survey.ReleaseWindowFlushTracker(num_envs=1, window_substeps=25)
+  tracker = survey.ReleaseWindowFlushTracker(num_envs=1)
   for _ in range(5):
     state = tracker.update(np.array([False]), np.ones((1, 6)) * 0.01)
-  assert state.off_contact_run[0] == 5
   assert not state.window_flushed[0]
   assert not state.complete[0]
 ```
@@ -83,9 +97,11 @@ Expected: FAIL because `ReleaseWindowFlushTracker` is absent.
 
 - [ ] **Step 3: Implement the minimal vectorized state machine**
 
-Use a fixed 25-sample Boolean ring indicating whether any joint Lambda is positive. Increment the
-off-contact run only when contact is false, reset it on contact, and mark complete only when the run
-is at least five and the entire ring is false. Keep timeout/right-censoring outside this class.
+Increment the off-contact run only when contact is false and reset it on contact. Set
+`window_flushed` directly when the **current rolling Lambda is zero for all six joints**; Lambda is
+already the production 25-substep rolling quantity, so there is no second 25-sample window or ring.
+Mark complete when the off-contact run is at least five and the current rolling Lambda is zero.
+Keep timeout/right-censoring outside this class.
 
 - [ ] **Step 4: Run the focused and survey suites and verify GREEN**
 

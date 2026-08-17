@@ -1,9 +1,10 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "purpose": "compact sufficient statistics for the frozen diagnostic-0.9 post-training pair",
   "provenance": {
-    "slurm_job": "41386821_[0-1]",
-    "scheduler_status_from_authoritative_task_8_brief": {
+    "scheduler_execution_record": {
+      "source": "authoritative Task-8 execution record",
+      "slurm_job": "41386821_[0-1]",
       "control": {
         "state": "COMPLETED",
         "exit_code": "0:0",
@@ -15,13 +16,291 @@
         "stderr_empty": true
       }
     },
-    "evaluator_revision": "142098b8af4cbd4b52777012b27f477f0e9aa358",
-    "asset_revision": "b58ccd2f81fd246f27c1e8d88cf86484cd888703",
-    "leaves": {
-      "control": "41386821_0_diag90_control",
-      "target": "41386821_1_diag90_target"
+    "summary_declared_fail_closed_identities": {
+      "validation_scope": "declared evaluator identities checked against frozen constants and paired-summary contracts before analysis",
+      "task": "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-JointPosition-VariableImpedance-TT",
+      "code_revision": "142098b8af4cbd4b52777012b27f477f0e9aa358",
+      "asset_revision": "b58ccd2f81fd246f27c1e8d88cf86484cd888703",
+      "checkpoints": {
+        "control": {
+          "role": "diag90_control",
+          "sha256": "f4f86cfd81fdc78824b85a059735b2f605c6761c624be59e0e778ef3fbd681c3"
+        },
+        "target": {
+          "role": "diag90_target",
+          "sha256": "ddd7ac4c855160bff1db2af52e642d960dab2bef34e41dd2532002185eb36d15"
+        }
+      },
+      "evaluation_protocol": {
+        "control": {
+          "controller_reads_are_independent": false,
+          "fixed_seed": 2026081202,
+          "live_imp_max_p": 0.0,
+          "primary_statistical_unit": "initial episode segment",
+          "stochastic_seeds": [
+            2,
+            2026081701,
+            2026081702
+          ],
+          "threshold_summary_order": [
+            "provisional_caps",
+            "diagnostic_only"
+          ]
+        },
+        "target": {
+          "controller_reads_are_independent": false,
+          "fixed_seed": 2026081202,
+          "live_imp_max_p": 0.0,
+          "primary_statistical_unit": "initial episode segment",
+          "stochastic_seeds": [
+            2,
+            2026081701,
+            2026081702
+          ],
+          "threshold_summary_order": [
+            "provisional_caps",
+            "diagnostic_only"
+          ]
+        }
+      },
+      "populations": {
+        "fixed_mean": {
+          "control": {
+            "auto_reset": false,
+            "cat_replay": {
+              "imp_max_p_live": 0.0,
+              "imp_seed": 0.001,
+              "min_p": 0.0,
+              "tau": 0.95
+            },
+            "contact_row_diagnostic_enabled": false,
+            "control_decimation": 10,
+            "control_steps": 7,
+            "impulse_window_substeps": 25,
+            "initial_population_sha256": "320efae8c21b3303c5dc3f18ae7df00e887653abf26aa8fb413803cf78d094cb",
+            "num_envs": 64,
+            "physics_dt_s": 0.002,
+            "policy_mode": "mean",
+            "rng_streams": {
+              "action": 2056081243,
+              "observation": 2046081235,
+              "reset": 2036081221
+            },
+            "seed": 2026081202,
+            "velocity_cat": {
+              "detection": "substep",
+              "limit_rad_s": 3.1415,
+              "max_p": 0.5
+            }
+          },
+          "target": {
+            "auto_reset": false,
+            "cat_replay": {
+              "imp_max_p_live": 0.0,
+              "imp_seed": 0.001,
+              "min_p": 0.0,
+              "tau": 0.95
+            },
+            "contact_row_diagnostic_enabled": false,
+            "control_decimation": 10,
+            "control_steps": 6,
+            "impulse_window_substeps": 25,
+            "initial_population_sha256": "320efae8c21b3303c5dc3f18ae7df00e887653abf26aa8fb413803cf78d094cb",
+            "num_envs": 64,
+            "physics_dt_s": 0.002,
+            "policy_mode": "mean",
+            "rng_streams": {
+              "action": 2056081243,
+              "observation": 2046081235,
+              "reset": 2036081221
+            },
+            "seed": 2026081202,
+            "velocity_cat": {
+              "detection": "substep",
+              "limit_rad_s": 3.1415,
+              "max_p": 0.5
+            }
+          }
+        },
+        "training_like_sampled": {
+          "2": {
+            "control": {
+              "auto_reset": true,
+              "cat_replay": {
+                "imp_max_p_live": 0.0,
+                "imp_seed": 0.001,
+                "min_p": 0.0,
+                "tau": 0.95
+              },
+              "contact_row_diagnostic_enabled": false,
+              "control_decimation": 10,
+              "control_steps": 24,
+              "impulse_window_substeps": 25,
+              "initial_population_sha256": "5a7dd99270580d0d71b10fcffe70aff6186e8f3b57987cae6f5521f0639c9cc6",
+              "num_envs": 4096,
+              "physics_dt_s": 0.002,
+              "policy_mode": "sampled",
+              "rng_streams": {
+                "action": 30000043,
+                "observation": 20000035,
+                "reset": 10000021
+              },
+              "seed": 2,
+              "velocity_cat": {
+                "detection": "substep",
+                "limit_rad_s": 3.1415,
+                "max_p": 0.5
+              }
+            },
+            "target": {
+              "auto_reset": true,
+              "cat_replay": {
+                "imp_max_p_live": 0.0,
+                "imp_seed": 0.001,
+                "min_p": 0.0,
+                "tau": 0.95
+              },
+              "contact_row_diagnostic_enabled": false,
+              "control_decimation": 10,
+              "control_steps": 24,
+              "impulse_window_substeps": 25,
+              "initial_population_sha256": "5a7dd99270580d0d71b10fcffe70aff6186e8f3b57987cae6f5521f0639c9cc6",
+              "num_envs": 4096,
+              "physics_dt_s": 0.002,
+              "policy_mode": "sampled",
+              "rng_streams": {
+                "action": 30000043,
+                "observation": 20000035,
+                "reset": 10000021
+              },
+              "seed": 2,
+              "velocity_cat": {
+                "detection": "substep",
+                "limit_rad_s": 3.1415,
+                "max_p": 0.5
+              }
+            }
+          },
+          "2026081701": {
+            "control": {
+              "auto_reset": true,
+              "cat_replay": {
+                "imp_max_p_live": 0.0,
+                "imp_seed": 0.001,
+                "min_p": 0.0,
+                "tau": 0.95
+              },
+              "contact_row_diagnostic_enabled": false,
+              "control_decimation": 10,
+              "control_steps": 24,
+              "impulse_window_substeps": 25,
+              "initial_population_sha256": "5a7dd99270580d0d71b10fcffe70aff6186e8f3b57987cae6f5521f0639c9cc6",
+              "num_envs": 4096,
+              "physics_dt_s": 0.002,
+              "policy_mode": "sampled",
+              "rng_streams": {
+                "action": 2056081742,
+                "observation": 2046081734,
+                "reset": 2036081720
+              },
+              "seed": 2026081701,
+              "velocity_cat": {
+                "detection": "substep",
+                "limit_rad_s": 3.1415,
+                "max_p": 0.5
+              }
+            },
+            "target": {
+              "auto_reset": true,
+              "cat_replay": {
+                "imp_max_p_live": 0.0,
+                "imp_seed": 0.001,
+                "min_p": 0.0,
+                "tau": 0.95
+              },
+              "contact_row_diagnostic_enabled": false,
+              "control_decimation": 10,
+              "control_steps": 24,
+              "impulse_window_substeps": 25,
+              "initial_population_sha256": "5a7dd99270580d0d71b10fcffe70aff6186e8f3b57987cae6f5521f0639c9cc6",
+              "num_envs": 4096,
+              "physics_dt_s": 0.002,
+              "policy_mode": "sampled",
+              "rng_streams": {
+                "action": 2056081742,
+                "observation": 2046081734,
+                "reset": 2036081720
+              },
+              "seed": 2026081701,
+              "velocity_cat": {
+                "detection": "substep",
+                "limit_rad_s": 3.1415,
+                "max_p": 0.5
+              }
+            }
+          },
+          "2026081702": {
+            "control": {
+              "auto_reset": true,
+              "cat_replay": {
+                "imp_max_p_live": 0.0,
+                "imp_seed": 0.001,
+                "min_p": 0.0,
+                "tau": 0.95
+              },
+              "contact_row_diagnostic_enabled": false,
+              "control_decimation": 10,
+              "control_steps": 24,
+              "impulse_window_substeps": 25,
+              "initial_population_sha256": "5a7dd99270580d0d71b10fcffe70aff6186e8f3b57987cae6f5521f0639c9cc6",
+              "num_envs": 4096,
+              "physics_dt_s": 0.002,
+              "policy_mode": "sampled",
+              "rng_streams": {
+                "action": 2056081743,
+                "observation": 2046081735,
+                "reset": 2036081721
+              },
+              "seed": 2026081702,
+              "velocity_cat": {
+                "detection": "substep",
+                "limit_rad_s": 3.1415,
+                "max_p": 0.5
+              }
+            },
+            "target": {
+              "auto_reset": true,
+              "cat_replay": {
+                "imp_max_p_live": 0.0,
+                "imp_seed": 0.001,
+                "min_p": 0.0,
+                "tau": 0.95
+              },
+              "contact_row_diagnostic_enabled": false,
+              "control_decimation": 10,
+              "control_steps": 24,
+              "impulse_window_substeps": 25,
+              "initial_population_sha256": "5a7dd99270580d0d71b10fcffe70aff6186e8f3b57987cae6f5521f0639c9cc6",
+              "num_envs": 4096,
+              "physics_dt_s": 0.002,
+              "policy_mode": "sampled",
+              "rng_streams": {
+                "action": 2056081743,
+                "observation": 2046081735,
+                "reset": 2036081721
+              },
+              "seed": 2026081702,
+              "velocity_cat": {
+                "detection": "substep",
+                "limit_rad_s": 3.1415,
+                "max_p": 0.5
+              }
+            }
+          }
+        }
+      }
     },
-    "validated_input_artifacts": {
+    "independently_rehashed_local_artifacts": {
       "control": {
         "fixed_trace.npz": {
           "sha256": "068d37a8d2acb3839e9d051de52b8cee5a465927845cec0b792d57ffa1199ad5",
@@ -67,6 +346,19 @@
         }
       }
     },
+    "claim_boundary": {
+      "checkpoint_binaries_locally_banked_and_rehashed": false,
+      "checkpoint_identity_status": "summary-declared role/hash checked fail-closed; checkpoint binaries are not in the downloaded evidence root",
+      "latent_action_noise_equality_trace_auditable": false,
+      "latent_action_noise_status": "procedural matched-RNG contract declared by identical action stream seeds; no latent noise tensor is stored in the traces",
+      "scheduler_status_derived_from_trace": false,
+      "scheduler_status_source": "authoritative Task-8 execution record",
+      "local_artifact_hash_status": "all downloaded trace and summary bytes independently rehashed against their respective remote SHA256SUMS manifests"
+    },
+    "leaves": {
+      "control": "41386821_0_diag90_control",
+      "target": "41386821_1_diag90_target"
+    },
     "all_manifest_hashes_match": true,
     "all_summary_and_trace_numeric_values_finite": true
   },
@@ -106,9 +398,13 @@
             "p95": 0.796875957308746,
             "p99": 0.8372387849703068
           },
-          "first_contact_event_utilization": {
-            "scope": "observed control reads overlapping the first physical-contact-event prefix",
-            "segments_with_contact": 64,
+          "observed_first_contact_prefix_utilization": {
+            "unit": "observed first-contact physical-event prefix",
+            "scope": "native controller reads overlapping the terminal-cut first-contact prefix",
+            "equal_horizon_across_arms": false,
+            "complete_physical_event": false,
+            "causal_or_full_contact_interpretation_authorized": false,
+            "observed_prefixes_with_contact": 64,
             "rho": {
               "p50": 0.7708577484619328,
               "p95": 0.796875957308746,
@@ -296,41 +592,122 @@
             "tie_reads": 0,
             "impulse_win_share": 0.0,
             "velocity_mask_share": 0.0,
-            "event_pressure_by_physical_censoring_and_ambiguity": {
-              "completed_unambiguous": {
-                "windows": 0,
-                "event_pressure": {
-                  "p50": null,
-                  "p95": null,
-                  "p99": null,
-                  "max": null
-                }
+            "component_summaries_and_invariants": {
+              "scope": "all native initial-episode controller reads",
+              "live_trace": {
+                "delta_velocity": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "delta_impulse": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "combined_delta": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "delta_impulse_identically_zero": true,
+                "combined_delta_exact_max": true
               },
-              "completed_ambiguous": {
-                "windows": 0,
-                "event_pressure": {
-                  "p50": null,
-                  "p95": null,
-                  "p99": null,
-                  "max": null
-                }
-              },
-              "right_censored_unambiguous": {
-                "windows": 0,
-                "event_pressure": {
-                  "p50": null,
-                  "p95": null,
-                  "p99": null,
-                  "max": null
-                }
-              },
-              "right_censored_ambiguous": {
-                "windows": 0,
-                "event_pressure": {
-                  "p50": null,
-                  "p95": null,
-                  "p99": null,
-                  "max": null
+              "offline_replay_at_p_0_5": {
+                "delta_velocity": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "delta_impulse": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "combined_delta": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "active_read_components": {
+                  "delta_velocity": {
+                    "mean": null,
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  },
+                  "delta_impulse": {
+                    "mean": null,
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  },
+                  "combined_delta": {
+                    "mean": null,
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  }
+                },
+                "combined_delta_exact_max": true,
+                "summary_replay_consistent": true
+              }
+            },
+            "activation_window_pressure_by_associated_physical_event_status": {
+              "unit": "contiguous 50 Hz impulse-activation window",
+              "unique_physical_event_dose": false,
+              "classification_basis": "censoring and ambiguity of associated physical event IDs",
+              "groups": {
+                "completed_unambiguous": {
+                  "activation_windows": 0,
+                  "activation_window_pressure": {
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  }
+                },
+                "completed_ambiguous": {
+                  "activation_windows": 0,
+                  "activation_window_pressure": {
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  }
+                },
+                "right_censored_unambiguous": {
+                  "activation_windows": 0,
+                  "activation_window_pressure": {
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  }
+                },
+                "right_censored_ambiguous": {
+                  "activation_windows": 0,
+                  "activation_window_pressure": {
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  }
                 }
               }
             }
@@ -383,9 +760,13 @@
             "p95": 0.5065107254720316,
             "p99": 0.6223302861539329
           },
-          "first_contact_event_utilization": {
-            "scope": "observed control reads overlapping the first physical-contact-event prefix",
-            "segments_with_contact": 64,
+          "observed_first_contact_prefix_utilization": {
+            "unit": "observed first-contact physical-event prefix",
+            "scope": "native controller reads overlapping the terminal-cut first-contact prefix",
+            "equal_horizon_across_arms": false,
+            "complete_physical_event": false,
+            "causal_or_full_contact_interpretation_authorized": false,
+            "observed_prefixes_with_contact": 64,
             "rho": {
               "p50": 0.467532291644957,
               "p95": 0.5065107254720316,
@@ -573,41 +954,122 @@
             "tie_reads": 0,
             "impulse_win_share": 0.0,
             "velocity_mask_share": 0.0,
-            "event_pressure_by_physical_censoring_and_ambiguity": {
-              "completed_unambiguous": {
-                "windows": 0,
-                "event_pressure": {
-                  "p50": null,
-                  "p95": null,
-                  "p99": null,
-                  "max": null
-                }
+            "component_summaries_and_invariants": {
+              "scope": "all native initial-episode controller reads",
+              "live_trace": {
+                "delta_velocity": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "delta_impulse": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "combined_delta": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "delta_impulse_identically_zero": true,
+                "combined_delta_exact_max": true
               },
-              "completed_ambiguous": {
-                "windows": 0,
-                "event_pressure": {
-                  "p50": null,
-                  "p95": null,
-                  "p99": null,
-                  "max": null
-                }
-              },
-              "right_censored_unambiguous": {
-                "windows": 0,
-                "event_pressure": {
-                  "p50": null,
-                  "p95": null,
-                  "p99": null,
-                  "max": null
-                }
-              },
-              "right_censored_ambiguous": {
-                "windows": 0,
-                "event_pressure": {
-                  "p50": null,
-                  "p95": null,
-                  "p99": null,
-                  "max": null
+              "offline_replay_at_p_0_5": {
+                "delta_velocity": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "delta_impulse": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "combined_delta": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "active_read_components": {
+                  "delta_velocity": {
+                    "mean": null,
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  },
+                  "delta_impulse": {
+                    "mean": null,
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  },
+                  "combined_delta": {
+                    "mean": null,
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  }
+                },
+                "combined_delta_exact_max": true,
+                "summary_replay_consistent": true
+              }
+            },
+            "activation_window_pressure_by_associated_physical_event_status": {
+              "unit": "contiguous 50 Hz impulse-activation window",
+              "unique_physical_event_dose": false,
+              "classification_basis": "censoring and ambiguity of associated physical event IDs",
+              "groups": {
+                "completed_unambiguous": {
+                  "activation_windows": 0,
+                  "activation_window_pressure": {
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  }
+                },
+                "completed_ambiguous": {
+                  "activation_windows": 0,
+                  "activation_window_pressure": {
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  }
+                },
+                "right_censored_unambiguous": {
+                  "activation_windows": 0,
+                  "activation_window_pressure": {
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  }
+                },
+                "right_censored_ambiguous": {
+                  "activation_windows": 0,
+                  "activation_window_pressure": {
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  }
                 }
               }
             }
@@ -683,9 +1145,13 @@
             "p95": 0.885417730343051,
             "p99": 0.9302653166336741
           },
-          "first_contact_event_utilization": {
-            "scope": "observed control reads overlapping the first physical-contact-event prefix",
-            "segments_with_contact": 64,
+          "observed_first_contact_prefix_utilization": {
+            "unit": "observed first-contact physical-event prefix",
+            "scope": "native controller reads overlapping the terminal-cut first-contact prefix",
+            "equal_horizon_across_arms": false,
+            "complete_physical_event": false,
+            "causal_or_full_contact_interpretation_authorized": false,
+            "observed_prefixes_with_contact": 64,
             "rho": {
               "p50": 0.8565086094021475,
               "p95": 0.885417730343051,
@@ -873,41 +1339,122 @@
             "tie_reads": 0,
             "impulse_win_share": 0.0,
             "velocity_mask_share": 0.0,
-            "event_pressure_by_physical_censoring_and_ambiguity": {
-              "completed_unambiguous": {
-                "windows": 0,
-                "event_pressure": {
-                  "p50": null,
-                  "p95": null,
-                  "p99": null,
-                  "max": null
-                }
+            "component_summaries_and_invariants": {
+              "scope": "all native initial-episode controller reads",
+              "live_trace": {
+                "delta_velocity": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "delta_impulse": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "combined_delta": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "delta_impulse_identically_zero": true,
+                "combined_delta_exact_max": true
               },
-              "completed_ambiguous": {
-                "windows": 0,
-                "event_pressure": {
-                  "p50": null,
-                  "p95": null,
-                  "p99": null,
-                  "max": null
-                }
-              },
-              "right_censored_unambiguous": {
-                "windows": 0,
-                "event_pressure": {
-                  "p50": null,
-                  "p95": null,
-                  "p99": null,
-                  "max": null
-                }
-              },
-              "right_censored_ambiguous": {
-                "windows": 0,
-                "event_pressure": {
-                  "p50": null,
-                  "p95": null,
-                  "p99": null,
-                  "max": null
+              "offline_replay_at_p_0_5": {
+                "delta_velocity": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "delta_impulse": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "combined_delta": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "active_read_components": {
+                  "delta_velocity": {
+                    "mean": null,
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  },
+                  "delta_impulse": {
+                    "mean": null,
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  },
+                  "combined_delta": {
+                    "mean": null,
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  }
+                },
+                "combined_delta_exact_max": true,
+                "summary_replay_consistent": true
+              }
+            },
+            "activation_window_pressure_by_associated_physical_event_status": {
+              "unit": "contiguous 50 Hz impulse-activation window",
+              "unique_physical_event_dose": false,
+              "classification_basis": "censoring and ambiguity of associated physical event IDs",
+              "groups": {
+                "completed_unambiguous": {
+                  "activation_windows": 0,
+                  "activation_window_pressure": {
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  }
+                },
+                "completed_ambiguous": {
+                  "activation_windows": 0,
+                  "activation_window_pressure": {
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  }
+                },
+                "right_censored_unambiguous": {
+                  "activation_windows": 0,
+                  "activation_window_pressure": {
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  }
+                },
+                "right_censored_ambiguous": {
+                  "activation_windows": 0,
+                  "activation_window_pressure": {
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  }
                 }
               }
             }
@@ -960,9 +1507,13 @@
             "p95": 0.562789694968924,
             "p99": 0.691478095726592
           },
-          "first_contact_event_utilization": {
-            "scope": "observed control reads overlapping the first physical-contact-event prefix",
-            "segments_with_contact": 64,
+          "observed_first_contact_prefix_utilization": {
+            "unit": "observed first-contact physical-event prefix",
+            "scope": "native controller reads overlapping the terminal-cut first-contact prefix",
+            "equal_horizon_across_arms": false,
+            "complete_physical_event": false,
+            "causal_or_full_contact_interpretation_authorized": false,
+            "observed_prefixes_with_contact": 64,
             "rho": {
               "p50": 0.5194803240499521,
               "p95": 0.562789694968924,
@@ -1150,41 +1701,122 @@
             "tie_reads": 0,
             "impulse_win_share": 0.0,
             "velocity_mask_share": 0.0,
-            "event_pressure_by_physical_censoring_and_ambiguity": {
-              "completed_unambiguous": {
-                "windows": 0,
-                "event_pressure": {
-                  "p50": null,
-                  "p95": null,
-                  "p99": null,
-                  "max": null
-                }
+            "component_summaries_and_invariants": {
+              "scope": "all native initial-episode controller reads",
+              "live_trace": {
+                "delta_velocity": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "delta_impulse": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "combined_delta": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "delta_impulse_identically_zero": true,
+                "combined_delta_exact_max": true
               },
-              "completed_ambiguous": {
-                "windows": 0,
-                "event_pressure": {
-                  "p50": null,
-                  "p95": null,
-                  "p99": null,
-                  "max": null
-                }
-              },
-              "right_censored_unambiguous": {
-                "windows": 0,
-                "event_pressure": {
-                  "p50": null,
-                  "p95": null,
-                  "p99": null,
-                  "max": null
-                }
-              },
-              "right_censored_ambiguous": {
-                "windows": 0,
-                "event_pressure": {
-                  "p50": null,
-                  "p95": null,
-                  "p99": null,
-                  "max": null
+              "offline_replay_at_p_0_5": {
+                "delta_velocity": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "delta_impulse": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "combined_delta": {
+                  "mean": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0,
+                  "max": 0.0
+                },
+                "active_read_components": {
+                  "delta_velocity": {
+                    "mean": null,
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  },
+                  "delta_impulse": {
+                    "mean": null,
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  },
+                  "combined_delta": {
+                    "mean": null,
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  }
+                },
+                "combined_delta_exact_max": true,
+                "summary_replay_consistent": true
+              }
+            },
+            "activation_window_pressure_by_associated_physical_event_status": {
+              "unit": "contiguous 50 Hz impulse-activation window",
+              "unique_physical_event_dose": false,
+              "classification_basis": "censoring and ambiguity of associated physical event IDs",
+              "groups": {
+                "completed_unambiguous": {
+                  "activation_windows": 0,
+                  "activation_window_pressure": {
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  }
+                },
+                "completed_ambiguous": {
+                  "activation_windows": 0,
+                  "activation_window_pressure": {
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  }
+                },
+                "right_censored_unambiguous": {
+                  "activation_windows": 0,
+                  "activation_window_pressure": {
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  }
+                },
+                "right_censored_ambiguous": {
+                  "activation_windows": 0,
+                  "activation_window_pressure": {
+                    "p50": null,
+                    "p95": null,
+                    "p99": null,
+                    "max": null
+                  }
                 }
               }
             }
@@ -1245,6 +1877,7 @@
     "utility": {
       "control": {
         "task_scope": "complete initial episodes only; post-reset episodes excluded",
+        "terminal_value_source": "episode_id == 0 and done",
         "terminal_counts": {
           "population": 64,
           "productive_first_strike": 64,
@@ -1281,6 +1914,7 @@
         },
         "episode_reward": {
           "available": false,
+          "trace_field_present": false,
           "reason": "the frozen evaluator trace did not record reward"
         },
         "true_500hz_velocity": {
@@ -1363,36 +1997,42 @@
           "per_joint": {
             "joint1": {
               "vic_p_precontact": {
+                "mean": -1.0,
                 "p50": -1.0,
                 "p95": -1.0,
                 "p99": -1.0,
                 "max": -1.0
               },
               "vic_kp_precontact": {
+                "mean": 800.0,
                 "p50": 800.0,
                 "p95": 800.0,
                 "p99": 800.0,
                 "max": 800.0
               },
               "vic_kd_precontact": {
+                "mean": 89.44271850585938,
                 "p50": 89.44271850585938,
                 "p95": 89.44271850585938,
                 "p99": 89.44271850585938,
                 "max": 89.44271850585938
               },
               "vic_p_at_contact": {
+                "mean": -1.0,
                 "p50": -1.0,
                 "p95": -1.0,
                 "p99": -1.0,
                 "max": -1.0
               },
               "vic_kp_at_contact": {
+                "mean": 800.0,
                 "p50": 800.0,
                 "p95": 800.0,
                 "p99": 800.0,
                 "max": 800.0
               },
               "vic_kd_at_contact": {
+                "mean": 89.44271850585938,
                 "p50": 89.44271850585938,
                 "p95": 89.44271850585938,
                 "p99": 89.44271850585938,
@@ -1401,36 +2041,42 @@
             },
             "joint2": {
               "vic_p_precontact": {
+                "mean": -1.0,
                 "p50": -1.0,
                 "p95": -1.0,
                 "p99": -1.0,
                 "max": -1.0
               },
               "vic_kp_precontact": {
+                "mean": 1200.0,
                 "p50": 1200.0,
                 "p95": 1200.0,
                 "p99": 1200.0,
                 "max": 1200.0
               },
               "vic_kd_precontact": {
+                "mean": 134.16407775878906,
                 "p50": 134.16407775878906,
                 "p95": 134.16407775878906,
                 "p99": 134.16407775878906,
                 "max": 134.16407775878906
               },
               "vic_p_at_contact": {
+                "mean": -1.0,
                 "p50": -1.0,
                 "p95": -1.0,
                 "p99": -1.0,
                 "max": -1.0
               },
               "vic_kp_at_contact": {
+                "mean": 1200.0,
                 "p50": 1200.0,
                 "p95": 1200.0,
                 "p99": 1200.0,
                 "max": 1200.0
               },
               "vic_kd_at_contact": {
+                "mean": 134.16407775878906,
                 "p50": 134.16407775878906,
                 "p95": 134.16407775878906,
                 "p99": 134.16407775878906,
@@ -1439,36 +2085,42 @@
             },
             "joint3": {
               "vic_p_precontact": {
+                "mean": 1.0,
                 "p50": 1.0,
                 "p95": 1.0,
                 "p99": 1.0,
                 "max": 1.0
               },
               "vic_kp_precontact": {
+                "mean": 1250.0,
                 "p50": 1250.0,
                 "p95": 1250.0,
                 "p99": 1250.0,
                 "max": 1250.0
               },
               "vic_kd_precontact": {
+                "mean": 111.80339813232422,
                 "p50": 111.80339813232422,
                 "p95": 111.80339813232422,
                 "p99": 111.80339813232422,
                 "max": 111.80339813232422
               },
               "vic_p_at_contact": {
+                "mean": 1.0,
                 "p50": 1.0,
                 "p95": 1.0,
                 "p99": 1.0,
                 "max": 1.0
               },
               "vic_kp_at_contact": {
+                "mean": 1250.0,
                 "p50": 1250.0,
                 "p95": 1250.0,
                 "p99": 1250.0,
                 "max": 1250.0
               },
               "vic_kd_at_contact": {
+                "mean": 111.80339813232422,
                 "p50": 111.80339813232422,
                 "p95": 111.80339813232422,
                 "p99": 111.80339813232422,
@@ -1477,36 +2129,42 @@
             },
             "joint4": {
               "vic_p_precontact": {
+                "mean": 1.0,
                 "p50": 1.0,
                 "p95": 1.0,
                 "p99": 1.0,
                 "max": 1.0
               },
               "vic_kp_precontact": {
+                "mean": 1250.0,
                 "p50": 1250.0,
                 "p95": 1250.0,
                 "p99": 1250.0,
                 "max": 1250.0
               },
               "vic_kd_precontact": {
+                "mean": 111.80339813232422,
                 "p50": 111.80339813232422,
                 "p95": 111.80339813232422,
                 "p99": 111.80339813232422,
                 "max": 111.80339813232422
               },
               "vic_p_at_contact": {
+                "mean": 1.0,
                 "p50": 1.0,
                 "p95": 1.0,
                 "p99": 1.0,
                 "max": 1.0
               },
               "vic_kp_at_contact": {
+                "mean": 1250.0,
                 "p50": 1250.0,
                 "p95": 1250.0,
                 "p99": 1250.0,
                 "max": 1250.0
               },
               "vic_kd_at_contact": {
+                "mean": 111.80339813232422,
                 "p50": 111.80339813232422,
                 "p95": 111.80339813232422,
                 "p99": 111.80339813232422,
@@ -1515,36 +2173,42 @@
             },
             "joint5": {
               "vic_p_precontact": {
+                "mean": 1.0,
                 "p50": 1.0,
                 "p95": 1.0,
                 "p99": 1.0,
                 "max": 1.0
               },
               "vic_kp_precontact": {
+                "mean": 1250.0,
                 "p50": 1250.0,
                 "p95": 1250.0,
                 "p99": 1250.0,
                 "max": 1250.0
               },
               "vic_kd_precontact": {
+                "mean": 111.80339813232422,
                 "p50": 111.80339813232422,
                 "p95": 111.80339813232422,
                 "p99": 111.80339813232422,
                 "max": 111.80339813232422
               },
               "vic_p_at_contact": {
+                "mean": 1.0,
                 "p50": 1.0,
                 "p95": 1.0,
                 "p99": 1.0,
                 "max": 1.0
               },
               "vic_kp_at_contact": {
+                "mean": 1250.0,
                 "p50": 1250.0,
                 "p95": 1250.0,
                 "p99": 1250.0,
                 "max": 1250.0
               },
               "vic_kd_at_contact": {
+                "mean": 111.80339813232422,
                 "p50": 111.80339813232422,
                 "p95": 111.80339813232422,
                 "p99": 111.80339813232422,
@@ -1553,36 +2217,42 @@
             },
             "joint6": {
               "vic_p_precontact": {
+                "mean": -1.0,
                 "p50": -1.0,
                 "p95": -1.0,
                 "p99": -1.0,
                 "max": -1.0
               },
               "vic_kp_precontact": {
+                "mean": 800.0,
                 "p50": 800.0,
                 "p95": 800.0,
                 "p99": 800.0,
                 "max": 800.0
               },
               "vic_kd_precontact": {
+                "mean": 89.44271850585938,
                 "p50": 89.44271850585938,
                 "p95": 89.44271850585938,
                 "p99": 89.44271850585938,
                 "max": 89.44271850585938
               },
               "vic_p_at_contact": {
+                "mean": -1.0,
                 "p50": -1.0,
                 "p95": -1.0,
                 "p99": -1.0,
                 "max": -1.0
               },
               "vic_kp_at_contact": {
+                "mean": 800.0,
                 "p50": 800.0,
                 "p95": 800.0,
                 "p99": 800.0,
                 "max": 800.0
               },
               "vic_kd_at_contact": {
+                "mean": 89.44271850585938,
                 "p50": 89.44271850585938,
                 "p95": 89.44271850585938,
                 "p99": 89.44271850585938,
@@ -1594,6 +2264,7 @@
       },
       "target": {
         "task_scope": "complete initial episodes only; post-reset episodes excluded",
+        "terminal_value_source": "episode_id == 0 and done",
         "terminal_counts": {
           "population": 64,
           "productive_first_strike": 64,
@@ -1630,6 +2301,7 @@
         },
         "episode_reward": {
           "available": false,
+          "trace_field_present": false,
           "reason": "the frozen evaluator trace did not record reward"
         },
         "true_500hz_velocity": {
@@ -1712,36 +2384,42 @@
           "per_joint": {
             "joint1": {
               "vic_p_precontact": {
+                "mean": -1.0,
                 "p50": -1.0,
                 "p95": -1.0,
                 "p99": -1.0,
                 "max": -1.0
               },
               "vic_kp_precontact": {
+                "mean": 800.0,
                 "p50": 800.0,
                 "p95": 800.0,
                 "p99": 800.0,
                 "max": 800.0
               },
               "vic_kd_precontact": {
+                "mean": 89.44271850585938,
                 "p50": 89.44271850585938,
                 "p95": 89.44271850585938,
                 "p99": 89.44271850585938,
                 "max": 89.44271850585938
               },
               "vic_p_at_contact": {
+                "mean": -0.9999838788062334,
                 "p50": -1.0,
                 "p95": -1.0,
                 "p99": -0.9996182501316071,
                 "max": -0.998968243598938
               },
               "vic_kp_at_contact": {
+                "mean": 800.0028781890869,
                 "p50": 800.0,
                 "p95": 800.0,
                 "p99": 800.0681555175781,
                 "max": 800.1842041015625
               },
               "vic_kd_at_contact": {
+                "mean": 89.44287943840027,
                 "p50": 89.44271850585938,
                 "p95": 89.44271850585938,
                 "p99": 89.44652938842773,
@@ -1750,36 +2428,42 @@
             },
             "joint2": {
               "vic_p_precontact": {
+                "mean": -1.0,
                 "p50": -1.0,
                 "p95": -1.0,
                 "p99": -1.0,
                 "max": -1.0
               },
               "vic_kp_precontact": {
+                "mean": 1200.0,
                 "p50": 1200.0,
                 "p95": 1200.0,
                 "p99": 1200.0,
                 "max": 1200.0
               },
               "vic_kd_precontact": {
+                "mean": 134.16407775878906,
                 "p50": 134.16407775878906,
                 "p95": 134.16407775878906,
                 "p99": 134.16407775878906,
                 "max": 134.16407775878906
               },
               "vic_p_at_contact": {
+                "mean": -1.0,
                 "p50": -1.0,
                 "p95": -1.0,
                 "p99": -1.0,
                 "max": -1.0
               },
               "vic_kp_at_contact": {
+                "mean": 1200.0,
                 "p50": 1200.0,
                 "p95": 1200.0,
                 "p99": 1200.0,
                 "max": 1200.0
               },
               "vic_kd_at_contact": {
+                "mean": 134.16407775878906,
                 "p50": 134.16407775878906,
                 "p95": 134.16407775878906,
                 "p99": 134.16407775878906,
@@ -1788,36 +2472,42 @@
             },
             "joint3": {
               "vic_p_precontact": {
+                "mean": 1.0,
                 "p50": 1.0,
                 "p95": 1.0,
                 "p99": 1.0,
                 "max": 1.0
               },
               "vic_kp_precontact": {
+                "mean": 1250.0,
                 "p50": 1250.0,
                 "p95": 1250.0,
                 "p99": 1250.0,
                 "max": 1250.0
               },
               "vic_kd_precontact": {
+                "mean": 111.80339813232422,
                 "p50": 111.80339813232422,
                 "p95": 111.80339813232422,
                 "p99": 111.80339813232422,
                 "max": 111.80339813232422
               },
               "vic_p_at_contact": {
+                "mean": 1.0,
                 "p50": 1.0,
                 "p95": 1.0,
                 "p99": 1.0,
                 "max": 1.0
               },
               "vic_kp_at_contact": {
+                "mean": 1250.0,
                 "p50": 1250.0,
                 "p95": 1250.0,
                 "p99": 1250.0,
                 "max": 1250.0
               },
               "vic_kd_at_contact": {
+                "mean": 111.80339813232422,
                 "p50": 111.80339813232422,
                 "p95": 111.80339813232422,
                 "p99": 111.80339813232422,
@@ -1826,36 +2516,42 @@
             },
             "joint4": {
               "vic_p_precontact": {
+                "mean": -1.0,
                 "p50": -1.0,
                 "p95": -1.0,
                 "p99": -1.0,
                 "max": -1.0
               },
               "vic_kp_precontact": {
+                "mean": 800.0,
                 "p50": 800.0,
                 "p95": 800.0,
                 "p99": 800.0,
                 "max": 800.0
               },
               "vic_kd_precontact": {
+                "mean": 89.44271850585938,
                 "p50": 89.44271850585938,
                 "p95": 89.44271850585938,
                 "p99": 89.44271850585938,
                 "max": 89.44271850585938
               },
               "vic_p_at_contact": {
+                "mean": 1.0,
                 "p50": 1.0,
                 "p95": 1.0,
                 "p99": 1.0,
                 "max": 1.0
               },
               "vic_kp_at_contact": {
+                "mean": 1250.0,
                 "p50": 1250.0,
                 "p95": 1250.0,
                 "p99": 1250.0,
                 "max": 1250.0
               },
               "vic_kd_at_contact": {
+                "mean": 111.80339813232422,
                 "p50": 111.80339813232422,
                 "p95": 111.80339813232422,
                 "p99": 111.80339813232422,
@@ -1864,36 +2560,42 @@
             },
             "joint5": {
               "vic_p_precontact": {
+                "mean": 1.0,
                 "p50": 1.0,
                 "p95": 1.0,
                 "p99": 1.0,
                 "max": 1.0
               },
               "vic_kp_precontact": {
+                "mean": 1250.0,
                 "p50": 1250.0,
                 "p95": 1250.0,
                 "p99": 1250.0,
                 "max": 1250.0
               },
               "vic_kd_precontact": {
+                "mean": 111.80339813232422,
                 "p50": 111.80339813232422,
                 "p95": 111.80339813232422,
                 "p99": 111.80339813232422,
                 "max": 111.80339813232422
               },
               "vic_p_at_contact": {
+                "mean": 1.0,
                 "p50": 1.0,
                 "p95": 1.0,
                 "p99": 1.0,
                 "max": 1.0
               },
               "vic_kp_at_contact": {
+                "mean": 1250.0,
                 "p50": 1250.0,
                 "p95": 1250.0,
                 "p99": 1250.0,
                 "max": 1250.0
               },
               "vic_kd_at_contact": {
+                "mean": 111.80339813232422,
                 "p50": 111.80339813232422,
                 "p95": 111.80339813232422,
                 "p99": 111.80339813232422,
@@ -1902,36 +2604,42 @@
             },
             "joint6": {
               "vic_p_precontact": {
+                "mean": -1.0,
                 "p50": -1.0,
                 "p95": -1.0,
                 "p99": -1.0,
                 "max": -1.0
               },
               "vic_kp_precontact": {
+                "mean": 800.0,
                 "p50": 800.0,
                 "p95": 800.0,
                 "p99": 800.0,
                 "max": 800.0
               },
               "vic_kd_precontact": {
+                "mean": 89.44271850585938,
                 "p50": 89.44271850585938,
                 "p95": 89.44271850585938,
                 "p99": 89.44271850585938,
                 "max": 89.44271850585938
               },
               "vic_p_at_contact": {
+                "mean": -1.0,
                 "p50": -1.0,
                 "p95": -1.0,
                 "p99": -1.0,
                 "max": -1.0
               },
               "vic_kp_at_contact": {
+                "mean": 800.0,
                 "p50": 800.0,
                 "p95": 800.0,
                 "p99": 800.0,
                 "max": 800.0
               },
               "vic_kd_at_contact": {
+                "mean": 89.44271850585938,
                 "p50": 89.44271850585938,
                 "p95": 89.44271850585938,
                 "p99": 89.44271850585938,
@@ -1987,9 +2695,13 @@
               "p95": 0.8066708358322703,
               "p99": 0.9735026446784418
             },
-            "first_contact_event_utilization": {
-              "scope": "observed control reads overlapping the first physical-contact-event prefix",
-              "segments_with_contact": 4096,
+            "observed_first_contact_prefix_utilization": {
+              "unit": "observed first-contact physical-event prefix",
+              "scope": "native controller reads overlapping the terminal-cut first-contact prefix",
+              "equal_horizon_across_arms": false,
+              "complete_physical_event": false,
+              "causal_or_full_contact_interpretation_authorized": false,
+              "observed_prefixes_with_contact": 4096,
               "rho": {
                 "p50": 0.7533316568630498,
                 "p95": 0.806641524157873,
@@ -2177,41 +2889,122 @@
               "tie_reads": 0,
               "impulse_win_share": 1.0,
               "velocity_mask_share": 0.0,
-              "event_pressure_by_physical_censoring_and_ambiguity": {
-                "completed_unambiguous": {
-                  "windows": 32,
-                  "event_pressure": {
-                    "p50": 0.0933920647225,
-                    "p95": 0.37220116397005,
-                    "p99": 0.46903902193138014,
+              "component_summaries_and_invariants": {
+                "scope": "all native initial-episode controller reads",
+                "live_trace": {
+                  "delta_velocity": {
+                    "mean": 0.00033812746794327443,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
                     "max": 0.5
-                  }
+                  },
+                  "delta_impulse": {
+                    "mean": 0.0,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.0
+                  },
+                  "combined_delta": {
+                    "mean": 0.00033812746794327443,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse_identically_zero": true,
+                  "combined_delta_exact_max": true
                 },
-                "completed_ambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
-                  }
-                },
-                "right_censored_unambiguous": {
-                  "windows": 3,
-                  "event_pressure": {
-                    "p50": 0.353948903594,
-                    "p95": 0.3816937083446,
-                    "p99": 0.38415991321132,
-                    "max": 0.384776464428
-                  }
-                },
-                "right_censored_ambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
+                "offline_replay_at_p_0_5": {
+                  "delta_velocity": {
+                    "mean": 0.00033812746794327443,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse": {
+                    "mean": 0.00018766792257423912,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "combined_delta": {
+                    "mean": 0.0005257953905175135,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "active_read_components": {
+                    "delta_velocity": {
+                      "mean": 0.0,
+                      "p50": 0.0,
+                      "p95": 0.0,
+                      "p99": 0.0,
+                      "max": 0.0
+                    },
+                    "delta_impulse": {
+                      "mean": 0.15415579354312495,
+                      "p50": 0.09813807350482376,
+                      "p95": 0.38938128825878426,
+                      "p99": 0.46604279824745576,
+                      "max": 0.5
+                    },
+                    "combined_delta": {
+                      "mean": 0.15415579354312495,
+                      "p50": 0.09813807350482376,
+                      "p95": 0.38938128825878426,
+                      "p99": 0.46604279824745576,
+                      "max": 0.5
+                    }
+                  },
+                  "combined_delta_exact_max": true,
+                  "summary_replay_consistent": true
+                }
+              },
+              "activation_window_pressure_by_associated_physical_event_status": {
+                "unit": "contiguous 50 Hz impulse-activation window",
+                "unique_physical_event_dose": false,
+                "classification_basis": "censoring and ambiguity of associated physical event IDs",
+                "groups": {
+                  "completed_unambiguous": {
+                    "activation_windows": 32,
+                    "activation_window_pressure": {
+                      "p50": 0.0933920647225,
+                      "p95": 0.37220116397005,
+                      "p99": 0.46903902193138014,
+                      "max": 0.5
+                    }
+                  },
+                  "completed_ambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
+                  },
+                  "right_censored_unambiguous": {
+                    "activation_windows": 3,
+                    "activation_window_pressure": {
+                      "p50": 0.353948903594,
+                      "p95": 0.3816937083446,
+                      "p99": 0.38415991321132,
+                      "max": 0.384776464428
+                    }
+                  },
+                  "right_censored_ambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
                   }
                 }
               }
@@ -2264,9 +3057,13 @@
               "p95": 0.6427711829906557,
               "p99": 0.707616795126985
             },
-            "first_contact_event_utilization": {
-              "scope": "observed control reads overlapping the first physical-contact-event prefix",
-              "segments_with_contact": 4096,
+            "observed_first_contact_prefix_utilization": {
+              "unit": "observed first-contact physical-event prefix",
+              "scope": "native controller reads overlapping the terminal-cut first-contact prefix",
+              "equal_horizon_across_arms": false,
+              "complete_physical_event": false,
+              "causal_or_full_contact_interpretation_authorized": false,
+              "observed_prefixes_with_contact": 4096,
               "rho": {
                 "p50": 0.490293215687682,
                 "p95": 0.6427711829906557,
@@ -2454,41 +3251,122 @@
               "tie_reads": 0,
               "impulse_win_share": 0.0,
               "velocity_mask_share": 0.0,
-              "event_pressure_by_physical_censoring_and_ambiguity": {
-                "completed_unambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
-                  }
+              "component_summaries_and_invariants": {
+                "scope": "all native initial-episode controller reads",
+                "live_trace": {
+                  "delta_velocity": {
+                    "mean": 0.000911178917566295,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse": {
+                    "mean": 0.0,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.0
+                  },
+                  "combined_delta": {
+                    "mean": 0.000911178917566295,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse_identically_zero": true,
+                  "combined_delta_exact_max": true
                 },
-                "completed_ambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
-                  }
-                },
-                "right_censored_unambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
-                  }
-                },
-                "right_censored_ambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
+                "offline_replay_at_p_0_5": {
+                  "delta_velocity": {
+                    "mean": 0.000911178917566295,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse": {
+                    "mean": 0.0,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.0
+                  },
+                  "combined_delta": {
+                    "mean": 0.000911178917566295,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "active_read_components": {
+                    "delta_velocity": {
+                      "mean": null,
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    },
+                    "delta_impulse": {
+                      "mean": null,
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    },
+                    "combined_delta": {
+                      "mean": null,
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
+                  },
+                  "combined_delta_exact_max": true,
+                  "summary_replay_consistent": true
+                }
+              },
+              "activation_window_pressure_by_associated_physical_event_status": {
+                "unit": "contiguous 50 Hz impulse-activation window",
+                "unique_physical_event_dose": false,
+                "classification_basis": "censoring and ambiguity of associated physical event IDs",
+                "groups": {
+                  "completed_unambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
+                  },
+                  "completed_ambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
+                  },
+                  "right_censored_unambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
+                  },
+                  "right_censored_ambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
                   }
                 }
               }
@@ -2567,9 +3445,13 @@
               "p95": 0.8963009287025224,
               "p99": 1.0816696051982686
             },
-            "first_contact_event_utilization": {
-              "scope": "observed control reads overlapping the first physical-contact-event prefix",
-              "segments_with_contact": 4096,
+            "observed_first_contact_prefix_utilization": {
+              "unit": "observed first-contact physical-event prefix",
+              "scope": "native controller reads overlapping the terminal-cut first-contact prefix",
+              "equal_horizon_across_arms": false,
+              "complete_physical_event": false,
+              "causal_or_full_contact_interpretation_authorized": false,
+              "observed_prefixes_with_contact": 4096,
               "rho": {
                 "p50": 0.8370351742922775,
                 "p95": 0.8962683601754144,
@@ -2757,41 +3639,122 @@
               "tie_reads": 0,
               "impulse_win_share": 1.0,
               "velocity_mask_share": 0.0,
-              "event_pressure_by_physical_censoring_and_ambiguity": {
-                "completed_unambiguous": {
-                  "windows": 51,
-                  "event_pressure": {
-                    "p50": 0.5,
-                    "p95": 0.5,
-                    "p99": 0.5,
+              "component_summaries_and_invariants": {
+                "scope": "all native initial-episode controller reads",
+                "live_trace": {
+                  "delta_velocity": {
+                    "mean": 0.00033812746794327443,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
                     "max": 0.5
-                  }
-                },
-                "completed_ambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
-                  }
-                },
-                "right_censored_unambiguous": {
-                  "windows": 5,
-                  "event_pressure": {
-                    "p50": 0.5,
-                    "p95": 0.5,
-                    "p99": 0.5,
+                  },
+                  "delta_impulse": {
+                    "mean": 0.0,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.0
+                  },
+                  "combined_delta": {
+                    "mean": 0.00033812746794327443,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
                     "max": 0.5
-                  }
+                  },
+                  "delta_impulse_identically_zero": true,
+                  "combined_delta_exact_max": true
                 },
-                "right_censored_ambiguous": {
-                  "windows": 2,
-                  "event_pressure": {
-                    "p50": 0.328720984657,
-                    "p95": 0.4828720984657,
-                    "p99": 0.49657441969314,
+                "offline_replay_at_p_0_5": {
+                  "delta_velocity": {
+                    "mean": 0.00033812746794327443,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
                     "max": 0.5
+                  },
+                  "delta_impulse": {
+                    "mean": 0.0009478651040978626,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "combined_delta": {
+                    "mean": 0.0012859925720411372,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "active_read_components": {
+                    "delta_velocity": {
+                      "mean": 0.0,
+                      "p50": 0.0,
+                      "p95": 0.0,
+                      "p99": 0.0,
+                      "max": 0.0
+                    },
+                    "delta_impulse": {
+                      "mean": 0.46984692660023364,
+                      "p50": 0.5,
+                      "p95": 0.5,
+                      "p99": 0.5,
+                      "max": 0.5
+                    },
+                    "combined_delta": {
+                      "mean": 0.46984692660023364,
+                      "p50": 0.5,
+                      "p95": 0.5,
+                      "p99": 0.5,
+                      "max": 0.5
+                    }
+                  },
+                  "combined_delta_exact_max": true,
+                  "summary_replay_consistent": true
+                }
+              },
+              "activation_window_pressure_by_associated_physical_event_status": {
+                "unit": "contiguous 50 Hz impulse-activation window",
+                "unique_physical_event_dose": false,
+                "classification_basis": "censoring and ambiguity of associated physical event IDs",
+                "groups": {
+                  "completed_unambiguous": {
+                    "activation_windows": 51,
+                    "activation_window_pressure": {
+                      "p50": 0.5,
+                      "p95": 0.5,
+                      "p99": 0.5,
+                      "max": 0.5
+                    }
+                  },
+                  "completed_ambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
+                  },
+                  "right_censored_unambiguous": {
+                    "activation_windows": 5,
+                    "activation_window_pressure": {
+                      "p50": 0.5,
+                      "p95": 0.5,
+                      "p99": 0.5,
+                      "max": 0.5
+                    }
+                  },
+                  "right_censored_ambiguous": {
+                    "activation_windows": 2,
+                    "activation_window_pressure": {
+                      "p50": 0.328720984657,
+                      "p95": 0.4828720984657,
+                      "p99": 0.49657441969314,
+                      "max": 0.5
+                    }
                   }
                 }
               }
@@ -2844,9 +3807,13 @@
               "p95": 0.7141902033229508,
               "p99": 0.7862408834744279
             },
-            "first_contact_event_utilization": {
-              "scope": "observed control reads overlapping the first physical-contact-event prefix",
-              "segments_with_contact": 4096,
+            "observed_first_contact_prefix_utilization": {
+              "unit": "observed first-contact physical-event prefix",
+              "scope": "native controller reads overlapping the terminal-cut first-contact prefix",
+              "equal_horizon_across_arms": false,
+              "complete_physical_event": false,
+              "causal_or_full_contact_interpretation_authorized": false,
+              "observed_prefixes_with_contact": 4096,
               "rho": {
                 "p50": 0.54477023965298,
                 "p95": 0.7141902033229508,
@@ -3034,41 +4001,122 @@
               "tie_reads": 0,
               "impulse_win_share": 1.0,
               "velocity_mask_share": 0.0,
-              "event_pressure_by_physical_censoring_and_ambiguity": {
-                "completed_unambiguous": {
-                  "windows": 4,
-                  "event_pressure": {
-                    "p50": 0.213555195883,
-                    "p95": 0.4744148737341499,
-                    "p99": 0.49488297474682996,
+              "component_summaries_and_invariants": {
+                "scope": "all native initial-episode controller reads",
+                "live_trace": {
+                  "delta_velocity": {
+                    "mean": 0.000911178917566295,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
                     "max": 0.5
-                  }
+                  },
+                  "delta_impulse": {
+                    "mean": 0.0,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.0
+                  },
+                  "combined_delta": {
+                    "mean": 0.000911178917566295,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse_identically_zero": true,
+                  "combined_delta_exact_max": true
                 },
-                "completed_ambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
-                  }
-                },
-                "right_censored_unambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
-                  }
-                },
-                "right_censored_ambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
+                "offline_replay_at_p_0_5": {
+                  "delta_velocity": {
+                    "mean": 0.000911178917566295,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse": {
+                    "mean": 4.748653690020413e-05,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "combined_delta": {
+                    "mean": 0.0009586654544664991,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "active_read_components": {
+                    "delta_velocity": {
+                      "mean": 0.0,
+                      "p50": 0.0,
+                      "p95": 0.0,
+                      "p99": 0.0,
+                      "max": 0.0
+                    },
+                    "delta_impulse": {
+                      "mean": 0.2446268948414016,
+                      "p50": 0.21355519588329164,
+                      "p95": 0.47441487373416336,
+                      "p99": 0.4948829747468326,
+                      "max": 0.5
+                    },
+                    "combined_delta": {
+                      "mean": 0.2446268948414016,
+                      "p50": 0.21355519588329164,
+                      "p95": 0.47441487373416336,
+                      "p99": 0.4948829747468326,
+                      "max": 0.5
+                    }
+                  },
+                  "combined_delta_exact_max": true,
+                  "summary_replay_consistent": true
+                }
+              },
+              "activation_window_pressure_by_associated_physical_event_status": {
+                "unit": "contiguous 50 Hz impulse-activation window",
+                "unique_physical_event_dose": false,
+                "classification_basis": "censoring and ambiguity of associated physical event IDs",
+                "groups": {
+                  "completed_unambiguous": {
+                    "activation_windows": 4,
+                    "activation_window_pressure": {
+                      "p50": 0.213555195883,
+                      "p95": 0.4744148737341499,
+                      "p99": 0.49488297474682996,
+                      "max": 0.5
+                    }
+                  },
+                  "completed_ambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
+                  },
+                  "right_censored_unambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
+                  },
+                  "right_censored_ambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
                   }
                 }
               }
@@ -3132,6 +4180,7 @@
       "utility": {
         "control": {
           "task_scope": "complete initial episodes only; post-reset episodes excluded",
+          "terminal_value_source": "episode_id == 0 and done",
           "terminal_counts": {
             "population": 4096,
             "productive_first_strike": 4096,
@@ -3168,6 +4217,7 @@
           },
           "episode_reward": {
             "available": false,
+            "trace_field_present": false,
             "reason": "the frozen evaluator trace did not record reward"
           },
           "true_500hz_velocity": {
@@ -3250,36 +4300,42 @@
             "per_joint": {
               "joint1": {
                 "vic_p_precontact": {
+                  "mean": -0.9816848675836809,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -0.29096536636351894,
                   "max": 1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 803.7273225337267,
                   "p50": 800.0,
                   "p95": 800.0,
                   "p99": 937.1372436523451,
                   "max": 1250.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 89.63758650608361,
                   "p50": 89.44271850585938,
                   "p95": 89.44271850585938,
                   "p99": 96.80581855773933,
                   "max": 111.80339813232422
                 },
                 "vic_p_at_contact": {
+                  "mean": -0.9645022141048685,
                   "p50": -1.0,
                   "p95": -0.9731934666633606,
                   "p99": 0.1337925195694086,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 807.2620636373758,
                   "p50": 800.0,
                   "p95": 804.7997131347656,
                   "p99": 1030.3100830078151,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 89.82135778106749,
                   "p50": 89.44271850585938,
                   "p95": 89.71063232421875,
                   "p99": 101.50406684875502,
@@ -3288,36 +4344,42 @@
               },
               "joint2": {
                 "vic_p_precontact": {
+                  "mean": -1.0,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -1.0,
                   "max": -1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 1200.0,
                   "p50": 1200.0,
                   "p95": 1200.0,
                   "p99": 1200.0,
                   "max": 1200.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 134.16407775878906,
                   "p50": 134.16407775878906,
                   "p95": 134.16407775878906,
                   "p99": 134.16407775878906,
                   "max": 134.16407775878906
                 },
                 "vic_p_at_contact": {
+                  "mean": -1.0,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -1.0,
                   "max": -1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1200.0,
                   "p50": 1200.0,
                   "p95": 1200.0,
                   "p99": 1200.0,
                   "max": 1200.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 134.16407775878906,
                   "p50": 134.16407775878906,
                   "p95": 134.16407775878906,
                   "p99": 134.16407775878906,
@@ -3326,36 +4388,42 @@
               },
               "joint3": {
                 "vic_p_precontact": {
+                  "mean": 0.9921918342297431,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 1248.0358505100012,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 111.71101035550237,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
                   "max": 111.80339813232422
                 },
                 "vic_p_at_contact": {
+                  "mean": 0.9997381313005462,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1249.9331315755844,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 111.80027418211102,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
@@ -3364,36 +4432,42 @@
               },
               "joint4": {
                 "vic_p_precontact": {
+                  "mean": 0.969116127685993,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 1242.021213695407,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 111.43287599273026,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
                   "max": 111.80339813232422
                 },
                 "vic_p_at_contact": {
+                  "mean": 0.9973037040326744,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1249.2842224389315,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 111.77059361711144,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
@@ -3402,36 +4476,42 @@
               },
               "joint5": {
                 "vic_p_precontact": {
+                  "mean": 0.8710009724018164,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 1218.8899311125278,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 110.3094866015017,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
                   "max": 111.80339813232422
                 },
                 "vic_p_at_contact": {
+                  "mean": 0.8765050763904583,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1220.118096113205,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 110.37081380560994,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
@@ -3440,36 +4520,42 @@
               },
               "joint6": {
                 "vic_p_precontact": {
+                  "mean": -0.9971591443754733,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -1.0,
                   "max": 1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 800.5608189404011,
                   "p50": 800.0,
                   "p95": 800.0,
                   "p99": 800.0,
                   "max": 1250.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 89.47249563597143,
                   "p50": 89.44271850585938,
                   "p95": 89.44271850585938,
                   "p99": 89.44271850585938,
                   "max": 111.80339813232422
                 },
                 "vic_p_at_contact": {
+                  "mean": -0.9963952593971044,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -1.0,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 800.7084652930498,
                   "p50": 800.0,
                   "p95": 800.0,
                   "p99": 800.0,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 89.4804265294224,
                   "p50": 89.44271850585938,
                   "p95": 89.44271850585938,
                   "p99": 89.44271850585938,
@@ -3481,6 +4567,7 @@
         },
         "target": {
           "task_scope": "complete initial episodes only; post-reset episodes excluded",
+          "terminal_value_source": "episode_id == 0 and done",
           "terminal_counts": {
             "population": 4096,
             "productive_first_strike": 4096,
@@ -3517,6 +4604,7 @@
           },
           "episode_reward": {
             "available": false,
+            "trace_field_present": false,
             "reason": "the frozen evaluator trace did not record reward"
           },
           "true_500hz_velocity": {
@@ -3599,36 +4687,42 @@
             "per_joint": {
               "joint1": {
                 "vic_p_precontact": {
+                  "mean": -0.5957202183199115,
                   "p50": -1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 885.5943461060524,
                   "p50": 800.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 93.8285772819072,
                   "p50": 89.44271850585938,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
                   "max": 111.80339813232422
                 },
                 "vic_p_at_contact": {
+                  "mean": -0.48052908791578375,
                   "p50": -1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 910.7561829388142,
                   "p50": 800.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 95.09765945188701,
                   "p50": 89.44271850585938,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
@@ -3637,36 +4731,42 @@
               },
               "joint2": {
                 "vic_p_precontact": {
+                  "mean": -0.9996767209959216,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -1.0,
                   "max": 0.016621112823486328
                 },
                 "vic_kp_precontact": {
+                  "mean": 1200.0954132676125,
                   "p50": 1200.0,
                   "p95": 1200.0,
                   "p99": 1200.0,
                   "max": 1505.5736083984375
                 },
                 "vic_kd_precontact": {
+                  "mean": 134.16915530338883,
                   "p50": 134.16407775878906,
                   "p95": 134.16407775878906,
                   "p99": 134.16407775878906,
                   "max": 150.27842712402344
                 },
                 "vic_p_at_contact": {
+                  "mean": -1.0,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -1.0,
                   "max": -1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1200.0,
                   "p50": 1200.0,
                   "p95": 1200.0,
                   "p99": 1200.0,
                   "max": 1200.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 134.16407775878906,
                   "p50": 134.16407775878906,
                   "p95": 134.16407775878906,
                   "p99": 134.16407775878906,
@@ -3675,36 +4775,42 @@
               },
               "joint3": {
                 "vic_p_precontact": {
+                  "mean": 0.9879833187442273,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 1247.0605955570936,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 111.66322474181652,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
                   "max": 111.80339813232422
                 },
                 "vic_p_at_contact": {
+                  "mean": 0.9996770364232361,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1249.9156821370125,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 111.79950144514441,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
@@ -3713,36 +4819,42 @@
               },
               "joint4": {
                 "vic_p_precontact": {
+                  "mean": -0.9783703958237311,
                   "p50": -1.0,
                   "p95": -0.8870049864053726,
                   "p99": -0.4136036515235897,
                   "max": 0.38668322563171387
                 },
                 "vic_kp_precontact": {
+                  "mean": 804.1095619499683,
                   "p50": 800.0,
                   "p95": 820.4277648925781,
                   "p99": 911.8379791259766,
                   "max": 1090.117919921875
                 },
                 "vic_kd_precontact": {
+                  "mean": 89.66531725786626,
                   "p50": 89.44271850585938,
                   "p95": 90.57746887207031,
                   "p99": 95.49020309448242,
                   "max": 104.4087142944336
                 },
                 "vic_p_at_contact": {
+                  "mean": 0.9382788442308083,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1233.8697773069143,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 111.05847396329045,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
@@ -3751,36 +4863,42 @@
               },
               "joint5": {
                 "vic_p_precontact": {
+                  "mean": 0.6503538711258443,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 1166.573717340827,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 107.77627027966082,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
                   "max": 111.80339813232422
                 },
                 "vic_p_at_contact": {
+                  "mean": 0.5758968970476417,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1148.9434415251017,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 106.92199189215899,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
@@ -3789,36 +4907,42 @@
               },
               "joint6": {
                 "vic_p_precontact": {
+                  "mean": -0.9999164887121879,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -1.0,
                   "max": -0.7385790348052979
                 },
                 "vic_kp_precontact": {
+                  "mean": 800.0152786821127,
                   "p50": 800.0,
                   "p95": 800.0,
                   "p99": 800.0,
                   "max": 848.0555419921875
                 },
                 "vic_kd_precontact": {
+                  "mean": 89.44356215558946,
                   "p50": 89.44271850585938,
                   "p95": 89.44271850585938,
                   "p99": 89.44271850585938,
                   "max": 92.08993530273438
                 },
                 "vic_p_at_contact": {
+                  "mean": -0.9881750512868166,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -0.49543994665145724,
                   "max": 0.9323523044586182
                 },
                 "vic_kp_at_contact": {
+                  "mean": 802.3454487323761,
                   "p50": 800.0,
                   "p95": 800.0,
                   "p99": 895.33786315918,
                   "max": 1231.272705078125
                 },
                 "vic_kd_at_contact": {
+                  "mean": 89.56698732450604,
                   "p50": 89.44271850585938,
                   "p95": 89.44271850585938,
                   "p99": 94.62229042053224,
@@ -3876,9 +5000,13 @@
               "p95": 0.8069484517341707,
               "p99": 0.9076938069448268
             },
-            "first_contact_event_utilization": {
-              "scope": "observed control reads overlapping the first physical-contact-event prefix",
-              "segments_with_contact": 4096,
+            "observed_first_contact_prefix_utilization": {
+              "unit": "observed first-contact physical-event prefix",
+              "scope": "native controller reads overlapping the terminal-cut first-contact prefix",
+              "equal_horizon_across_arms": false,
+              "complete_physical_event": false,
+              "causal_or_full_contact_interpretation_authorized": false,
+              "observed_prefixes_with_contact": 4096,
               "rho": {
                 "p50": 0.7533861006178507,
                 "p95": 0.8069162143439782,
@@ -4066,41 +5194,122 @@
               "tie_reads": 0,
               "impulse_win_share": 1.0,
               "velocity_mask_share": 0.0,
-              "event_pressure_by_physical_censoring_and_ambiguity": {
-                "completed_unambiguous": {
-                  "windows": 25,
-                  "event_pressure": {
-                    "p50": 0.139952140362,
-                    "p95": 0.4095644999035999,
-                    "p99": 0.4801414281353598,
+              "component_summaries_and_invariants": {
+                "scope": "all native initial-episode controller reads",
+                "live_trace": {
+                  "delta_velocity": {
+                    "mean": 0.0005519717332406426,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
                     "max": 0.5
-                  }
-                },
-                "completed_ambiguous": {
-                  "windows": 1,
-                  "event_pressure": {
-                    "p50": 0.5,
-                    "p95": 0.5,
-                    "p99": 0.5,
+                  },
+                  "delta_impulse": {
+                    "mean": 0.0,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.0
+                  },
+                  "combined_delta": {
+                    "mean": 0.0005519717332406426,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
                     "max": 0.5
-                  }
+                  },
+                  "delta_impulse_identically_zero": true,
+                  "combined_delta_exact_max": true
                 },
-                "right_censored_unambiguous": {
-                  "windows": 4,
-                  "event_pressure": {
-                    "p50": 0.2777968581215,
-                    "p95": 0.40666985569465,
-                    "p99": 0.41202701550612997,
-                    "max": 0.413366305459
-                  }
-                },
-                "right_censored_ambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
+                "offline_replay_at_p_0_5": {
+                  "delta_velocity": {
+                    "mean": 0.0005519717332406426,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse": {
+                    "mean": 0.0001976884191120127,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "combined_delta": {
+                    "mean": 0.0007496601523526554,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "active_read_components": {
+                    "delta_velocity": {
+                      "mean": 0.0,
+                      "p50": 0.0,
+                      "p95": 0.0,
+                      "p99": 0.0,
+                      "max": 0.0
+                    },
+                    "delta_impulse": {
+                      "mean": 0.1895568354725386,
+                      "p50": 0.15822736880178134,
+                      "p95": 0.4627651777539877,
+                      "p99": 0.5,
+                      "max": 0.5
+                    },
+                    "combined_delta": {
+                      "mean": 0.1895568354725386,
+                      "p50": 0.15822736880178134,
+                      "p95": 0.4627651777539877,
+                      "p99": 0.5,
+                      "max": 0.5
+                    }
+                  },
+                  "combined_delta_exact_max": true,
+                  "summary_replay_consistent": true
+                }
+              },
+              "activation_window_pressure_by_associated_physical_event_status": {
+                "unit": "contiguous 50 Hz impulse-activation window",
+                "unique_physical_event_dose": false,
+                "classification_basis": "censoring and ambiguity of associated physical event IDs",
+                "groups": {
+                  "completed_unambiguous": {
+                    "activation_windows": 25,
+                    "activation_window_pressure": {
+                      "p50": 0.139952140362,
+                      "p95": 0.4095644999035999,
+                      "p99": 0.4801414281353598,
+                      "max": 0.5
+                    }
+                  },
+                  "completed_ambiguous": {
+                    "activation_windows": 1,
+                    "activation_window_pressure": {
+                      "p50": 0.5,
+                      "p95": 0.5,
+                      "p99": 0.5,
+                      "max": 0.5
+                    }
+                  },
+                  "right_censored_unambiguous": {
+                    "activation_windows": 4,
+                    "activation_window_pressure": {
+                      "p50": 0.2777968581215,
+                      "p95": 0.40666985569465,
+                      "p99": 0.41202701550612997,
+                      "max": 0.413366305459
+                    }
+                  },
+                  "right_censored_ambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
                   }
                 }
               }
@@ -4153,9 +5362,13 @@
               "p95": 0.6483260269572095,
               "p99": 0.7131809541364996
             },
-            "first_contact_event_utilization": {
-              "scope": "observed control reads overlapping the first physical-contact-event prefix",
-              "segments_with_contact": 4096,
+            "observed_first_contact_prefix_utilization": {
+              "unit": "observed first-contact physical-event prefix",
+              "scope": "native controller reads overlapping the terminal-cut first-contact prefix",
+              "equal_horizon_across_arms": false,
+              "complete_physical_event": false,
+              "causal_or_full_contact_interpretation_authorized": false,
+              "observed_prefixes_with_contact": 4096,
               "rho": {
                 "p50": 0.4902518558792952,
                 "p95": 0.6483260269572095,
@@ -4343,41 +5556,122 @@
               "tie_reads": 0,
               "impulse_win_share": 1.0,
               "velocity_mask_share": 0.0,
-              "event_pressure_by_physical_censoring_and_ambiguity": {
-                "completed_unambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
-                  }
-                },
-                "completed_ambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
-                  }
-                },
-                "right_censored_unambiguous": {
-                  "windows": 1,
-                  "event_pressure": {
-                    "p50": 0.5,
-                    "p95": 0.5,
-                    "p99": 0.5,
+              "component_summaries_and_invariants": {
+                "scope": "all native initial-episode controller reads",
+                "live_trace": {
+                  "delta_velocity": {
+                    "mean": 0.0008558641744778193,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
                     "max": 0.5
-                  }
+                  },
+                  "delta_impulse": {
+                    "mean": 0.0,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.0
+                  },
+                  "combined_delta": {
+                    "mean": 0.0008558641744778193,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse_identically_zero": true,
+                  "combined_delta_exact_max": true
                 },
-                "right_censored_ambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
+                "offline_replay_at_p_0_5": {
+                  "delta_velocity": {
+                    "mean": 0.0008558641744778193,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse": {
+                    "mean": 2.4263599747658564e-05,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "combined_delta": {
+                    "mean": 0.0008801277742254779,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "active_read_components": {
+                    "delta_velocity": {
+                      "mean": 0.0,
+                      "p50": 0.0,
+                      "p95": 0.0,
+                      "p99": 0.0,
+                      "max": 0.0
+                    },
+                    "delta_impulse": {
+                      "mean": 0.5,
+                      "p50": 0.5,
+                      "p95": 0.5,
+                      "p99": 0.5,
+                      "max": 0.5
+                    },
+                    "combined_delta": {
+                      "mean": 0.5,
+                      "p50": 0.5,
+                      "p95": 0.5,
+                      "p99": 0.5,
+                      "max": 0.5
+                    }
+                  },
+                  "combined_delta_exact_max": true,
+                  "summary_replay_consistent": true
+                }
+              },
+              "activation_window_pressure_by_associated_physical_event_status": {
+                "unit": "contiguous 50 Hz impulse-activation window",
+                "unique_physical_event_dose": false,
+                "classification_basis": "censoring and ambiguity of associated physical event IDs",
+                "groups": {
+                  "completed_unambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
+                  },
+                  "completed_ambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
+                  },
+                  "right_censored_unambiguous": {
+                    "activation_windows": 1,
+                    "activation_window_pressure": {
+                      "p50": 0.5,
+                      "p95": 0.5,
+                      "p99": 0.5,
+                      "max": 0.5
+                    }
+                  },
+                  "right_censored_ambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
                   }
                 }
               }
@@ -4456,9 +5750,13 @@
               "p95": 0.8966093908157452,
               "p99": 1.0085486743831409
             },
-            "first_contact_event_utilization": {
-              "scope": "observed control reads overlapping the first physical-contact-event prefix",
-              "segments_with_contact": 4096,
+            "observed_first_contact_prefix_utilization": {
+              "unit": "observed first-contact physical-event prefix",
+              "scope": "native controller reads overlapping the terminal-cut first-contact prefix",
+              "equal_horizon_across_arms": false,
+              "complete_physical_event": false,
+              "causal_or_full_contact_interpretation_authorized": false,
+              "observed_prefixes_with_contact": 4096,
               "rho": {
                 "p50": 0.8370956673531675,
                 "p95": 0.8965735714933091,
@@ -4646,41 +5944,122 @@
               "tie_reads": 0,
               "impulse_win_share": 1.0,
               "velocity_mask_share": 0.0,
-              "event_pressure_by_physical_censoring_and_ambiguity": {
-                "completed_unambiguous": {
-                  "windows": 35,
-                  "event_pressure": {
-                    "p50": 0.207063075335,
-                    "p95": 0.4240699445272999,
-                    "p99": 0.4805210823903598,
+              "component_summaries_and_invariants": {
+                "scope": "all native initial-episode controller reads",
+                "live_trace": {
+                  "delta_velocity": {
+                    "mean": 0.0005519717332406426,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
                     "max": 0.5
-                  }
+                  },
+                  "delta_impulse": {
+                    "mean": 0.0,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.0
+                  },
+                  "combined_delta": {
+                    "mean": 0.0005519717332406426,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse_identically_zero": true,
+                  "combined_delta_exact_max": true
                 },
-                "completed_ambiguous": {
-                  "windows": 1,
-                  "event_pressure": {
-                    "p50": 0.553956460576,
-                    "p95": 0.553956460576,
-                    "p99": 0.553956460576,
-                    "max": 0.553956460576
-                  }
-                },
-                "right_censored_unambiguous": {
-                  "windows": 4,
-                  "event_pressure": {
-                    "p50": 0.346149352669,
-                    "p95": 0.43537938754805,
-                    "p99": 0.43908861730001,
-                    "max": 0.440015924738
-                  }
-                },
-                "right_censored_ambiguous": {
-                  "windows": 2,
-                  "event_pressure": {
-                    "p50": 0.083595987914,
-                    "p95": 0.0962758259924,
-                    "p99": 0.09740292271048001,
-                    "max": 0.09768469689
+                "offline_replay_at_p_0_5": {
+                  "delta_velocity": {
+                    "mean": 0.0005519717332406426,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse": {
+                    "mean": 0.0003372493304279772,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "combined_delta": {
+                    "mean": 0.0008892210636686197,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "active_read_components": {
+                    "delta_velocity": {
+                      "mean": 0.0,
+                      "p50": 0.0,
+                      "p95": 0.0,
+                      "p99": 0.0,
+                      "max": 0.0
+                    },
+                    "delta_impulse": {
+                      "mean": 0.22561195904863235,
+                      "p50": 0.20706307533483428,
+                      "p95": 0.44243975174222944,
+                      "p99": 0.5,
+                      "max": 0.5
+                    },
+                    "combined_delta": {
+                      "mean": 0.22561195904863235,
+                      "p50": 0.20706307533483428,
+                      "p95": 0.44243975174222944,
+                      "p99": 0.5,
+                      "max": 0.5
+                    }
+                  },
+                  "combined_delta_exact_max": true,
+                  "summary_replay_consistent": true
+                }
+              },
+              "activation_window_pressure_by_associated_physical_event_status": {
+                "unit": "contiguous 50 Hz impulse-activation window",
+                "unique_physical_event_dose": false,
+                "classification_basis": "censoring and ambiguity of associated physical event IDs",
+                "groups": {
+                  "completed_unambiguous": {
+                    "activation_windows": 35,
+                    "activation_window_pressure": {
+                      "p50": 0.207063075335,
+                      "p95": 0.4240699445272999,
+                      "p99": 0.4805210823903598,
+                      "max": 0.5
+                    }
+                  },
+                  "completed_ambiguous": {
+                    "activation_windows": 1,
+                    "activation_window_pressure": {
+                      "p50": 0.553956460576,
+                      "p95": 0.553956460576,
+                      "p99": 0.553956460576,
+                      "max": 0.553956460576
+                    }
+                  },
+                  "right_censored_unambiguous": {
+                    "activation_windows": 4,
+                    "activation_window_pressure": {
+                      "p50": 0.346149352669,
+                      "p95": 0.43537938754805,
+                      "p99": 0.43908861730001,
+                      "max": 0.440015924738
+                    }
+                  },
+                  "right_censored_ambiguous": {
+                    "activation_windows": 2,
+                    "activation_window_pressure": {
+                      "p50": 0.083595987914,
+                      "p95": 0.0962758259924,
+                      "p99": 0.09740292271048001,
+                      "max": 0.09768469689
+                    }
                   }
                 }
               }
@@ -4733,9 +6112,13 @@
               "p95": 0.7203622521746772,
               "p99": 0.7924232823738885
             },
-            "first_contact_event_utilization": {
-              "scope": "observed control reads overlapping the first physical-contact-event prefix",
-              "segments_with_contact": 4096,
+            "observed_first_contact_prefix_utilization": {
+              "unit": "observed first-contact physical-event prefix",
+              "scope": "native controller reads overlapping the terminal-cut first-contact prefix",
+              "equal_horizon_across_arms": false,
+              "complete_physical_event": false,
+              "causal_or_full_contact_interpretation_authorized": false,
+              "observed_prefixes_with_contact": 4096,
               "rho": {
                 "p50": 0.5447242843103279,
                 "p95": 0.7203622521746772,
@@ -4923,41 +6306,122 @@
               "tie_reads": 0,
               "impulse_win_share": 1.0,
               "velocity_mask_share": 0.0,
-              "event_pressure_by_physical_censoring_and_ambiguity": {
-                "completed_unambiguous": {
-                  "windows": 2,
-                  "event_pressure": {
-                    "p50": 0.137814451828,
-                    "p95": 0.20124390066189998,
-                    "p99": 0.20688207389158,
-                    "max": 0.208291617199
-                  }
-                },
-                "completed_ambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
-                  }
-                },
-                "right_censored_unambiguous": {
-                  "windows": 1,
-                  "event_pressure": {
-                    "p50": 0.5,
-                    "p95": 0.5,
-                    "p99": 0.5,
+              "component_summaries_and_invariants": {
+                "scope": "all native initial-episode controller reads",
+                "live_trace": {
+                  "delta_velocity": {
+                    "mean": 0.0008558641744778193,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
                     "max": 0.5
-                  }
+                  },
+                  "delta_impulse": {
+                    "mean": 0.0,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.0
+                  },
+                  "combined_delta": {
+                    "mean": 0.0008558641744778193,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse_identically_zero": true,
+                  "combined_delta_exact_max": true
                 },
-                "right_censored_ambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
+                "offline_replay_at_p_0_5": {
+                  "delta_velocity": {
+                    "mean": 0.0008558641744778193,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse": {
+                    "mean": 3.7639098542071336e-05,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "combined_delta": {
+                    "mean": 0.0008935032730198907,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "active_read_components": {
+                    "delta_velocity": {
+                      "mean": 0.0,
+                      "p50": 0.0,
+                      "p95": 0.0,
+                      "p99": 0.0,
+                      "max": 0.0
+                    },
+                    "delta_impulse": {
+                      "mean": 0.25854296788548803,
+                      "p50": 0.20829161719915928,
+                      "p95": 0.4708291617199159,
+                      "p99": 0.4941658323439832,
+                      "max": 0.5
+                    },
+                    "combined_delta": {
+                      "mean": 0.25854296788548803,
+                      "p50": 0.20829161719915928,
+                      "p95": 0.4708291617199159,
+                      "p99": 0.4941658323439832,
+                      "max": 0.5
+                    }
+                  },
+                  "combined_delta_exact_max": true,
+                  "summary_replay_consistent": true
+                }
+              },
+              "activation_window_pressure_by_associated_physical_event_status": {
+                "unit": "contiguous 50 Hz impulse-activation window",
+                "unique_physical_event_dose": false,
+                "classification_basis": "censoring and ambiguity of associated physical event IDs",
+                "groups": {
+                  "completed_unambiguous": {
+                    "activation_windows": 2,
+                    "activation_window_pressure": {
+                      "p50": 0.137814451828,
+                      "p95": 0.20124390066189998,
+                      "p99": 0.20688207389158,
+                      "max": 0.208291617199
+                    }
+                  },
+                  "completed_ambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
+                  },
+                  "right_censored_unambiguous": {
+                    "activation_windows": 1,
+                    "activation_window_pressure": {
+                      "p50": 0.5,
+                      "p95": 0.5,
+                      "p99": 0.5,
+                      "max": 0.5
+                    }
+                  },
+                  "right_censored_ambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
                   }
                 }
               }
@@ -5021,6 +6485,7 @@
       "utility": {
         "control": {
           "task_scope": "complete initial episodes only; post-reset episodes excluded",
+          "terminal_value_source": "episode_id == 0 and done",
           "terminal_counts": {
             "population": 4096,
             "productive_first_strike": 4096,
@@ -5057,6 +6522,7 @@
           },
           "episode_reward": {
             "available": false,
+            "trace_field_present": false,
             "reason": "the frozen evaluator trace did not record reward"
           },
           "true_500hz_velocity": {
@@ -5139,36 +6605,42 @@
             "per_joint": {
               "joint1": {
                 "vic_p_precontact": {
+                  "mean": -0.9811859871842898,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -0.23773068189620883,
                   "max": 1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 803.8598552048206,
                   "p50": 800.0,
                   "p95": 800.0,
                   "p99": 948.3344573974612,
                   "max": 1250.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 89.64366939105093,
                   "p50": 89.44271850585938,
                   "p95": 89.44271850585938,
                   "p99": 97.38246536254884,
                   "max": 111.80339813232422
                 },
                 "vic_p_at_contact": {
+                  "mean": -0.961402484215796,
                   "p50": -1.0,
                   "p95": -0.9299771785736084,
                   "p99": 0.2809282541275041,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 807.9161936938763,
                   "p50": 800.0,
                   "p95": 812.5983276367188,
                   "p99": 1064.6939819335942,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 89.85495783574879,
                   "p50": 89.44271850585938,
                   "p95": 90.14423179626465,
                   "p99": 103.18400688171388,
@@ -5177,36 +6649,42 @@
               },
               "joint2": {
                 "vic_p_precontact": {
+                  "mean": -1.0,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -1.0,
                   "max": -1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 1200.0,
                   "p50": 1200.0,
                   "p95": 1200.0,
                   "p99": 1200.0,
                   "max": 1200.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 134.16407775878906,
                   "p50": 134.16407775878906,
                   "p95": 134.16407775878906,
                   "p99": 134.16407775878906,
                   "max": 134.16407775878906
                 },
                 "vic_p_at_contact": {
+                  "mean": -1.0,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -1.0,
                   "max": -1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1200.0,
                   "p50": 1200.0,
                   "p95": 1200.0,
                   "p99": 1200.0,
                   "max": 1200.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 134.16407775878906,
                   "p50": 134.16407775878906,
                   "p95": 134.16407775878906,
                   "p99": 134.16407775878906,
@@ -5215,36 +6693,42 @@
               },
               "joint3": {
                 "vic_p_precontact": {
+                  "mean": 0.9889153681579046,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 1247.2935643792152,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 111.67423788458109,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
                   "max": 111.80339813232422
                 },
                 "vic_p_at_contact": {
+                  "mean": 0.9995686089387164,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1249.9005611389875,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 111.79851415008307,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
@@ -5253,36 +6737,42 @@
               },
               "joint4": {
                 "vic_p_precontact": {
+                  "mean": 0.9648870096716564,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 1240.950701996684,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 111.38261947222054,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
                   "max": 111.80339813232422
                 },
                 "vic_p_at_contact": {
+                  "mean": 0.9970500964845996,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1249.2244146317244,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 111.76768380776048,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
@@ -5291,36 +6781,42 @@
               },
               "joint5": {
                 "vic_p_precontact": {
+                  "mean": 0.8825542935228441,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 1221.4191524386406,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 110.43699486926198,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
                   "max": 111.80339813232422
                 },
                 "vic_p_at_contact": {
+                  "mean": 0.8794827663223259,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1220.7768559753895,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 110.40381731837988,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
@@ -5329,36 +6825,42 @@
               },
               "joint6": {
                 "vic_p_precontact": {
+                  "mean": -0.9978969421354122,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -1.0,
                   "max": 0.3163924217224121
                 },
                 "vic_kp_precontact": {
+                  "mean": 800.407044634223,
                   "p50": 800.0,
                   "p95": 800.0,
                   "p99": 800.0,
                   "max": 1073.1529541015625
                 },
                 "vic_kd_precontact": {
+                  "mean": 89.46455786004663,
                   "p50": 89.44271850585938,
                   "p95": 89.44271850585938,
                   "p99": 89.44271850585938,
                   "max": 103.59310150146484
                 },
                 "vic_p_at_contact": {
+                  "mean": -0.9956985845346935,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -1.0,
                   "max": 0.4958369731903076
                 },
                 "vic_kp_at_contact": {
+                  "mean": 800.8546882122755,
                   "p50": 800.0,
                   "p95": 800.0,
                   "p99": 800.0,
                   "max": 1116.995849609375
                 },
                 "vic_kd_at_contact": {
+                  "mean": 89.48796477541327,
                   "p50": 89.44271850585938,
                   "p95": 89.44271850585938,
                   "p99": 89.44271850585938,
@@ -5370,6 +6872,7 @@
         },
         "target": {
           "task_scope": "complete initial episodes only; post-reset episodes excluded",
+          "terminal_value_source": "episode_id == 0 and done",
           "terminal_counts": {
             "population": 4096,
             "productive_first_strike": 4096,
@@ -5406,6 +6909,7 @@
           },
           "episode_reward": {
             "available": false,
+            "trace_field_present": false,
             "reason": "the frozen evaluator trace did not record reward"
           },
           "true_500hz_velocity": {
@@ -5488,36 +6992,42 @@
             "per_joint": {
               "joint1": {
                 "vic_p_precontact": {
+                  "mean": -0.6026023318408988,
                   "p50": -1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 884.2938274890184,
                   "p50": 800.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 93.75774839706719,
                   "p50": 89.44271850585938,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
                   "max": 111.80339813232422
                 },
                 "vic_p_at_contact": {
+                  "mean": -0.48521832669212017,
                   "p50": -1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 909.8033747375011,
                   "p50": 800.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 95.04768611676991,
                   "p50": 89.44271850585938,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
@@ -5526,36 +7036,42 @@
               },
               "joint2": {
                 "vic_p_precontact": {
+                  "mean": -1.0,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -1.0,
                   "max": -1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 1200.0,
                   "p50": 1200.0,
                   "p95": 1200.0,
                   "p99": 1200.0,
                   "max": 1200.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 134.16407775878906,
                   "p50": 134.16407775878906,
                   "p95": 134.16407775878906,
                   "p99": 134.16407775878906,
                   "max": 134.16407775878906
                 },
                 "vic_p_at_contact": {
+                  "mean": -1.0,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -1.0,
                   "max": -1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1200.0,
                   "p50": 1200.0,
                   "p95": 1200.0,
                   "p99": 1200.0,
                   "max": 1200.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 134.16407775878906,
                   "p50": 134.16407775878906,
                   "p95": 134.16407775878906,
                   "p99": 134.16407775878906,
@@ -5564,36 +7080,42 @@
               },
               "joint3": {
                 "vic_p_precontact": {
+                  "mean": 0.9872538767085643,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 1246.8281455636024,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 111.65341077558696,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
                   "max": 111.80339813232422
                 },
                 "vic_p_at_contact": {
+                  "mean": 0.9993017181986943,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1249.8320603221655,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 111.79532589390874,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
@@ -5602,36 +7124,42 @@
               },
               "joint4": {
                 "vic_p_precontact": {
+                  "mean": -0.9780532092263456,
                   "p50": -1.0,
                   "p95": -0.8641433119773865,
                   "p99": -0.4116292417049395,
                   "max": 0.36248743534088135
                 },
                 "vic_kp_precontact": {
+                  "mean": 804.1521665304899,
                   "p50": 800.0,
                   "p95": 824.623779296875,
                   "p99": 912.2398529052737,
                   "max": 1084.248046875
                 },
                 "vic_kd_precontact": {
+                  "mean": 89.66811390407383,
                   "p50": 89.44271850585938,
                   "p95": 90.80879402160645,
                   "p99": 95.51124916076661,
                   "max": 104.12722778320312
                 },
                 "vic_p_at_contact": {
+                  "mean": 0.936519977869466,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1233.4795322865248,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 111.03889100626111,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
@@ -5640,36 +7168,42 @@
               },
               "joint5": {
                 "vic_p_precontact": {
+                  "mean": 0.681921250114101,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 1173.8719496577978,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 108.13413939997554,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
                   "max": 111.80339813232422
                 },
                 "vic_p_at_contact": {
+                  "mean": 0.5880592165049165,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1151.7823086678982,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 107.06044127233326,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
@@ -5678,36 +7212,42 @@
               },
               "joint6": {
                 "vic_p_precontact": {
+                  "mean": -0.9993430681061,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -1.0,
                   "max": 0.1057744026184082
                 },
                 "vic_kp_precontact": {
+                  "mean": 800.1267913728952,
                   "p50": 800.0,
                   "p95": 800.0,
                   "p99": 800.0,
                   "max": 1023.8836059570312
                 },
                 "vic_kd_precontact": {
+                  "mean": 89.44953130185604,
                   "p50": 89.44271850585938,
                   "p95": 89.44271850585938,
                   "p99": 89.44271850585938,
                   "max": 101.1871337890625
                 },
                 "vic_p_at_contact": {
+                  "mean": -0.9897918425267562,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -0.6607038736343372,
                   "max": 0.9344422817230225
                 },
                 "vic_kp_at_contact": {
+                  "mean": 802.0024144202471,
                   "p50": 800.0,
                   "p95": 800.0,
                   "p99": 862.9212890625003,
                   "max": 1231.84716796875
                 },
                 "vic_kd_at_contact": {
+                  "mean": 89.54940623603761,
                   "p50": 89.44271850585938,
                   "p95": 89.44271850585938,
                   "p99": 92.89356079101563,
@@ -5765,9 +7305,13 @@
               "p95": 0.806837129156764,
               "p99": 0.9870193353513393
             },
-            "first_contact_event_utilization": {
-              "scope": "observed control reads overlapping the first physical-contact-event prefix",
-              "segments_with_contact": 4096,
+            "observed_first_contact_prefix_utilization": {
+              "unit": "observed first-contact physical-event prefix",
+              "scope": "native controller reads overlapping the terminal-cut first-contact prefix",
+              "equal_horizon_across_arms": false,
+              "complete_physical_event": false,
+              "causal_or_full_contact_interpretation_authorized": false,
+              "observed_prefixes_with_contact": 4096,
               "rho": {
                 "p50": 0.7552620477792693,
                 "p95": 0.8066974580287933,
@@ -5955,41 +7499,122 @@
               "tie_reads": 0,
               "impulse_win_share": 1.0,
               "velocity_mask_share": 0.0,
-              "event_pressure_by_physical_censoring_and_ambiguity": {
-                "completed_unambiguous": {
-                  "windows": 31,
-                  "event_pressure": {
-                    "p50": 0.178028204487,
-                    "p95": 0.39916369007249997,
-                    "p99": 0.45626002523729997,
-                    "max": 0.478415794983
-                  }
-                },
-                "completed_ambiguous": {
-                  "windows": 1,
-                  "event_pressure": {
-                    "p50": 0.192189148631,
-                    "p95": 0.192189148631,
-                    "p99": 0.192189148631,
-                    "max": 0.192189148631
-                  }
-                },
-                "right_censored_unambiguous": {
-                  "windows": 2,
-                  "event_pressure": {
-                    "p50": 0.4901347443285,
-                    "p95": 0.49901347443285,
-                    "p99": 0.49980269488657,
+              "component_summaries_and_invariants": {
+                "scope": "all native initial-episode controller reads",
+                "live_trace": {
+                  "delta_velocity": {
+                    "mean": 0.00042955552906281084,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
                     "max": 0.5
-                  }
+                  },
+                  "delta_impulse": {
+                    "mean": 0.0,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.0
+                  },
+                  "combined_delta": {
+                    "mean": 0.00042955552906281084,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse_identically_zero": true,
+                  "combined_delta_exact_max": true
                 },
-                "right_censored_ambiguous": {
-                  "windows": 1,
-                  "event_pressure": {
-                    "p50": 0.049697641231,
-                    "p95": 0.049697641231,
-                    "p99": 0.049697641231,
-                    "max": 0.049697641231
+                "offline_replay_at_p_0_5": {
+                  "delta_velocity": {
+                    "mean": 0.00042955552906281084,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse": {
+                    "mean": 0.00026106247900846815,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "combined_delta": {
+                    "mean": 0.0006906180080712789,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "active_read_components": {
+                    "delta_velocity": {
+                      "mean": 0.0,
+                      "p50": 0.0,
+                      "p95": 0.0,
+                      "p99": 0.0,
+                      "max": 0.0
+                    },
+                    "delta_impulse": {
+                      "mean": 0.21441434347364066,
+                      "p50": 0.1921891486312555,
+                      "p95": 0.47897190308512044,
+                      "p99": 0.4932916261435057,
+                      "max": 0.5
+                    },
+                    "combined_delta": {
+                      "mean": 0.21441434347364066,
+                      "p50": 0.1921891486312555,
+                      "p95": 0.47897190308512044,
+                      "p99": 0.4932916261435057,
+                      "max": 0.5
+                    }
+                  },
+                  "combined_delta_exact_max": true,
+                  "summary_replay_consistent": true
+                }
+              },
+              "activation_window_pressure_by_associated_physical_event_status": {
+                "unit": "contiguous 50 Hz impulse-activation window",
+                "unique_physical_event_dose": false,
+                "classification_basis": "censoring and ambiguity of associated physical event IDs",
+                "groups": {
+                  "completed_unambiguous": {
+                    "activation_windows": 31,
+                    "activation_window_pressure": {
+                      "p50": 0.178028204487,
+                      "p95": 0.39916369007249997,
+                      "p99": 0.45626002523729997,
+                      "max": 0.478415794983
+                    }
+                  },
+                  "completed_ambiguous": {
+                    "activation_windows": 1,
+                    "activation_window_pressure": {
+                      "p50": 0.192189148631,
+                      "p95": 0.192189148631,
+                      "p99": 0.192189148631,
+                      "max": 0.192189148631
+                    }
+                  },
+                  "right_censored_unambiguous": {
+                    "activation_windows": 2,
+                    "activation_window_pressure": {
+                      "p50": 0.4901347443285,
+                      "p95": 0.49901347443285,
+                      "p99": 0.49980269488657,
+                      "max": 0.5
+                    }
+                  },
+                  "right_censored_ambiguous": {
+                    "activation_windows": 1,
+                    "activation_window_pressure": {
+                      "p50": 0.049697641231,
+                      "p95": 0.049697641231,
+                      "p99": 0.049697641231,
+                      "max": 0.049697641231
+                    }
                   }
                 }
               }
@@ -6042,9 +7667,13 @@
               "p95": 0.6378879270902494,
               "p99": 0.7014493208105974
             },
-            "first_contact_event_utilization": {
-              "scope": "observed control reads overlapping the first physical-contact-event prefix",
-              "segments_with_contact": 4096,
+            "observed_first_contact_prefix_utilization": {
+              "unit": "observed first-contact physical-event prefix",
+              "scope": "native controller reads overlapping the terminal-cut first-contact prefix",
+              "equal_horizon_across_arms": false,
+              "complete_physical_event": false,
+              "causal_or_full_contact_interpretation_authorized": false,
+              "observed_prefixes_with_contact": 4096,
               "rho": {
                 "p50": 0.48992890046864024,
                 "p95": 0.6378879270902494,
@@ -6232,41 +7861,122 @@
               "tie_reads": 0,
               "impulse_win_share": 0.0,
               "velocity_mask_share": 0.0,
-              "event_pressure_by_physical_censoring_and_ambiguity": {
-                "completed_unambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
-                  }
+              "component_summaries_and_invariants": {
+                "scope": "all native initial-episode controller reads",
+                "live_trace": {
+                  "delta_velocity": {
+                    "mean": 0.0008917086547012028,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse": {
+                    "mean": 0.0,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.0
+                  },
+                  "combined_delta": {
+                    "mean": 0.0008917086547012028,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse_identically_zero": true,
+                  "combined_delta_exact_max": true
                 },
-                "completed_ambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
-                  }
-                },
-                "right_censored_unambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
-                  }
-                },
-                "right_censored_ambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
+                "offline_replay_at_p_0_5": {
+                  "delta_velocity": {
+                    "mean": 0.0008917086547012028,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse": {
+                    "mean": 0.0,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.0
+                  },
+                  "combined_delta": {
+                    "mean": 0.0008917086547012028,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "active_read_components": {
+                    "delta_velocity": {
+                      "mean": null,
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    },
+                    "delta_impulse": {
+                      "mean": null,
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    },
+                    "combined_delta": {
+                      "mean": null,
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
+                  },
+                  "combined_delta_exact_max": true,
+                  "summary_replay_consistent": true
+                }
+              },
+              "activation_window_pressure_by_associated_physical_event_status": {
+                "unit": "contiguous 50 Hz impulse-activation window",
+                "unique_physical_event_dose": false,
+                "classification_basis": "censoring and ambiguity of associated physical event IDs",
+                "groups": {
+                  "completed_unambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
+                  },
+                  "completed_ambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
+                  },
+                  "right_censored_unambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
+                  },
+                  "right_censored_ambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
                   }
                 }
               }
@@ -6345,9 +8055,13 @@
               "p95": 0.8964856990630711,
               "p99": 1.096688150390377
             },
-            "first_contact_event_utilization": {
-              "scope": "observed control reads overlapping the first physical-contact-event prefix",
-              "segments_with_contact": 4096,
+            "observed_first_contact_prefix_utilization": {
+              "unit": "observed first-contact physical-event prefix",
+              "scope": "native controller reads overlapping the terminal-cut first-contact prefix",
+              "equal_horizon_across_arms": false,
+              "complete_physical_event": false,
+              "causal_or_full_contact_interpretation_authorized": false,
+              "observed_prefixes_with_contact": 4096,
               "rho": {
                 "p50": 0.8391800530880771,
                 "p95": 0.8963305089208815,
@@ -6535,41 +8249,122 @@
               "tie_reads": 0,
               "impulse_win_share": 1.0,
               "velocity_mask_share": 0.0,
-              "event_pressure_by_physical_censoring_and_ambiguity": {
-                "completed_unambiguous": {
-                  "windows": 51,
-                  "event_pressure": {
-                    "p50": 0.204662514761,
-                    "p95": 0.42565538142250003,
-                    "p99": 0.4611248540365,
-                    "max": 0.485659167266
-                  }
-                },
-                "completed_ambiguous": {
-                  "windows": 1,
-                  "event_pressure": {
-                    "p50": 0.30181252863,
-                    "p95": 0.30181252863,
-                    "p99": 0.30181252863,
-                    "max": 0.30181252863
-                  }
-                },
-                "right_censored_unambiguous": {
-                  "windows": 2,
-                  "event_pressure": {
-                    "p50": 0.49344539299199996,
-                    "p95": 0.4993445392992,
-                    "p99": 0.49986890785984,
+              "component_summaries_and_invariants": {
+                "scope": "all native initial-episode controller reads",
+                "live_trace": {
+                  "delta_velocity": {
+                    "mean": 0.00042955552906281084,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
                     "max": 0.5
-                  }
+                  },
+                  "delta_impulse": {
+                    "mean": 0.0,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.0
+                  },
+                  "combined_delta": {
+                    "mean": 0.00042955552906281084,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse_identically_zero": true,
+                  "combined_delta_exact_max": true
                 },
-                "right_censored_ambiguous": {
-                  "windows": 1,
-                  "event_pressure": {
-                    "p50": 0.200813126924,
-                    "p95": 0.200813126924,
-                    "p99": 0.200813126924,
-                    "max": 0.200813126924
+                "offline_replay_at_p_0_5": {
+                  "delta_velocity": {
+                    "mean": 0.00042955552906281084,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse": {
+                    "mean": 0.00045143444262117773,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "combined_delta": {
+                    "mean": 0.0008809899716839885,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "active_read_components": {
+                    "delta_velocity": {
+                      "mean": 0.0,
+                      "p50": 0.0,
+                      "p95": 0.0,
+                      "p99": 0.0,
+                      "max": 0.0
+                    },
+                    "delta_impulse": {
+                      "mean": 0.23173097299264955,
+                      "p50": 0.20775351428460614,
+                      "p95": 0.44885769742184567,
+                      "p99": 0.4927899322914622,
+                      "max": 0.5
+                    },
+                    "combined_delta": {
+                      "mean": 0.23173097299264955,
+                      "p50": 0.20775351428460614,
+                      "p95": 0.44885769742184567,
+                      "p99": 0.4927899322914622,
+                      "max": 0.5
+                    }
+                  },
+                  "combined_delta_exact_max": true,
+                  "summary_replay_consistent": true
+                }
+              },
+              "activation_window_pressure_by_associated_physical_event_status": {
+                "unit": "contiguous 50 Hz impulse-activation window",
+                "unique_physical_event_dose": false,
+                "classification_basis": "censoring and ambiguity of associated physical event IDs",
+                "groups": {
+                  "completed_unambiguous": {
+                    "activation_windows": 51,
+                    "activation_window_pressure": {
+                      "p50": 0.204662514761,
+                      "p95": 0.42565538142250003,
+                      "p99": 0.4611248540365,
+                      "max": 0.485659167266
+                    }
+                  },
+                  "completed_ambiguous": {
+                    "activation_windows": 1,
+                    "activation_window_pressure": {
+                      "p50": 0.30181252863,
+                      "p95": 0.30181252863,
+                      "p99": 0.30181252863,
+                      "max": 0.30181252863
+                    }
+                  },
+                  "right_censored_unambiguous": {
+                    "activation_windows": 2,
+                    "activation_window_pressure": {
+                      "p50": 0.49344539299199996,
+                      "p95": 0.4993445392992,
+                      "p99": 0.49986890785984,
+                      "max": 0.5
+                    }
+                  },
+                  "right_censored_ambiguous": {
+                    "activation_windows": 1,
+                    "activation_window_pressure": {
+                      "p50": 0.200813126924,
+                      "p95": 0.200813126924,
+                      "p99": 0.200813126924,
+                      "max": 0.200813126924
+                    }
                   }
                 }
               }
@@ -6622,9 +8417,13 @@
               "p95": 0.7087643634336105,
               "p99": 0.7793881342339971
             },
-            "first_contact_event_utilization": {
-              "scope": "observed control reads overlapping the first physical-contact-event prefix",
-              "segments_with_contact": 4096,
+            "observed_first_contact_prefix_utilization": {
+              "unit": "observed first-contact physical-event prefix",
+              "scope": "native controller reads overlapping the terminal-cut first-contact prefix",
+              "equal_horizon_across_arms": false,
+              "complete_physical_event": false,
+              "causal_or_full_contact_interpretation_authorized": false,
+              "observed_prefixes_with_contact": 4096,
               "rho": {
                 "p50": 0.5443654449651558,
                 "p95": 0.7087643634336105,
@@ -6812,41 +8611,122 @@
               "tie_reads": 0,
               "impulse_win_share": 0.0,
               "velocity_mask_share": 0.0,
-              "event_pressure_by_physical_censoring_and_ambiguity": {
-                "completed_unambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
-                  }
+              "component_summaries_and_invariants": {
+                "scope": "all native initial-episode controller reads",
+                "live_trace": {
+                  "delta_velocity": {
+                    "mean": 0.0008917086547012028,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse": {
+                    "mean": 0.0,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.0
+                  },
+                  "combined_delta": {
+                    "mean": 0.0008917086547012028,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse_identically_zero": true,
+                  "combined_delta_exact_max": true
                 },
-                "completed_ambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
-                  }
-                },
-                "right_censored_unambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
-                  }
-                },
-                "right_censored_ambiguous": {
-                  "windows": 0,
-                  "event_pressure": {
-                    "p50": null,
-                    "p95": null,
-                    "p99": null,
-                    "max": null
+                "offline_replay_at_p_0_5": {
+                  "delta_velocity": {
+                    "mean": 0.0008917086547012028,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "delta_impulse": {
+                    "mean": 0.0,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.0
+                  },
+                  "combined_delta": {
+                    "mean": 0.0008917086547012028,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0,
+                    "max": 0.5
+                  },
+                  "active_read_components": {
+                    "delta_velocity": {
+                      "mean": null,
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    },
+                    "delta_impulse": {
+                      "mean": null,
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    },
+                    "combined_delta": {
+                      "mean": null,
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
+                  },
+                  "combined_delta_exact_max": true,
+                  "summary_replay_consistent": true
+                }
+              },
+              "activation_window_pressure_by_associated_physical_event_status": {
+                "unit": "contiguous 50 Hz impulse-activation window",
+                "unique_physical_event_dose": false,
+                "classification_basis": "censoring and ambiguity of associated physical event IDs",
+                "groups": {
+                  "completed_unambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
+                  },
+                  "completed_ambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
+                  },
+                  "right_censored_unambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
+                  },
+                  "right_censored_ambiguous": {
+                    "activation_windows": 0,
+                    "activation_window_pressure": {
+                      "p50": null,
+                      "p95": null,
+                      "p99": null,
+                      "max": null
+                    }
                   }
                 }
               }
@@ -6910,6 +8790,7 @@
       "utility": {
         "control": {
           "task_scope": "complete initial episodes only; post-reset episodes excluded",
+          "terminal_value_source": "episode_id == 0 and done",
           "terminal_counts": {
             "population": 4096,
             "productive_first_strike": 4096,
@@ -6946,6 +8827,7 @@
           },
           "episode_reward": {
             "available": false,
+            "trace_field_present": false,
             "reason": "the frozen evaluator trace did not record reward"
           },
           "true_500hz_velocity": {
@@ -7028,36 +8910,42 @@
             "per_joint": {
               "joint1": {
                 "vic_p_precontact": {
+                  "mean": -0.9799155566724949,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -0.22559928894042913,
                   "max": 1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 804.0801645815372,
                   "p50": 800.0,
                   "p95": 800.0,
                   "p99": 950.9051269531251,
                   "max": 1250.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 89.65623298287392,
                   "p50": 89.44271850585938,
                   "p95": 89.44271850585938,
                   "p99": 97.51436347961426,
                   "max": 111.80339813232422
                 },
                 "vic_p_at_contact": {
+                  "mean": -0.9585192310041748,
                   "p50": -1.0,
                   "p95": -0.8837296366691589,
                   "p99": 0.2920342803001417,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 808.4611756801605,
                   "p50": 800.0,
                   "p95": 821.0277709960938,
                   "p99": 1067.3358337402346,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 89.88459912128747,
                   "p50": 89.44271850585938,
                   "p95": 90.6105785369873,
                   "p99": 103.31194877624513,
@@ -7066,36 +8954,42 @@
               },
               "joint2": {
                 "vic_p_precontact": {
+                  "mean": -0.9999887063167989,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -1.0,
                   "max": -0.9537410736083984
                 },
                 "vic_kp_precontact": {
+                  "mean": 1200.0030398070812,
                   "p50": 1200.0,
                   "p95": 1200.0,
                   "p99": 1200.0,
                   "max": 1212.4510498046875
                 },
                 "vic_kd_precontact": {
+                  "mean": 134.16424724832177,
                   "p50": 134.16407775878906,
                   "p95": 134.16407775878906,
                   "p99": 134.16407775878906,
                   "max": 134.85830688476562
                 },
                 "vic_p_at_contact": {
+                  "mean": -1.0,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -1.0,
                   "max": -1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1200.0,
                   "p50": 1200.0,
                   "p95": 1200.0,
                   "p99": 1200.0,
                   "max": 1200.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 134.16407775878906,
                   "p50": 134.16407775878906,
                   "p95": 134.16407775878906,
                   "p99": 134.16407775878906,
@@ -7104,36 +8998,42 @@
               },
               "joint3": {
                 "vic_p_precontact": {
+                  "mean": 0.9899393334053457,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 1247.498844921589,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 111.68505351059139,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
                   "max": 111.80339813232422
                 },
                 "vic_p_at_contact": {
+                  "mean": 1.0,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1250.0,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 111.80339813232422,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
@@ -7142,36 +9042,42 @@
               },
               "joint4": {
                 "vic_p_precontact": {
+                  "mean": 0.9688115527533228,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 1241.927958831191,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 111.428830454126,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
                   "max": 111.80339813232422
                 },
                 "vic_p_at_contact": {
+                  "mean": 0.9973392284882721,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1249.2951939702034,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 111.77106295712292,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
@@ -7180,36 +9086,42 @@
               },
               "joint5": {
                 "vic_p_precontact": {
+                  "mean": 0.8809112958842888,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 1221.0494228303432,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 110.41865923255682,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
                   "max": 111.80339813232422
                 },
                 "vic_p_at_contact": {
+                  "mean": 0.890283758577425,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1223.2679992616177,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 110.526103656739,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
@@ -7218,36 +9130,42 @@
               },
               "joint6": {
                 "vic_p_precontact": {
+                  "mean": -0.998199011257384,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -1.0,
                   "max": 0.7487752437591553
                 },
                 "vic_kp_precontact": {
+                  "mean": 800.3528054505587,
                   "p50": 800.0,
                   "p95": 800.0,
                   "p99": 800.0,
                   "max": 1181.85400390625
                 },
                 "vic_kd_precontact": {
+                  "mean": 89.4615251980722,
                   "p50": 89.44271850585938,
                   "p95": 89.44271850585938,
                   "p99": 89.44271850585938,
                   "max": 108.7131118774414
                 },
                 "vic_p_at_contact": {
+                  "mean": -0.9963503348990344,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -1.0,
                   "max": 0.3393847942352295
                 },
                 "vic_kp_at_contact": {
+                  "mean": 800.7106850296259,
                   "p50": 800.0,
                   "p95": 800.0,
                   "p99": 800.0,
                   "max": 1078.6728515625
                 },
                 "vic_kd_at_contact": {
+                  "mean": 89.48073520511389,
                   "p50": 89.44271850585938,
                   "p95": 89.44271850585938,
                   "p99": 89.44271850585938,
@@ -7259,6 +9177,7 @@
         },
         "target": {
           "task_scope": "complete initial episodes only; post-reset episodes excluded",
+          "terminal_value_source": "episode_id == 0 and done",
           "terminal_counts": {
             "population": 4096,
             "productive_first_strike": 4096,
@@ -7295,6 +9214,7 @@
           },
           "episode_reward": {
             "available": false,
+            "trace_field_present": false,
             "reason": "the frozen evaluator trace did not record reward"
           },
           "true_500hz_velocity": {
@@ -7377,36 +9297,42 @@
             "per_joint": {
               "joint1": {
                 "vic_p_precontact": {
+                  "mean": -0.6019018017104827,
                   "p50": -1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 884.4915469437838,
                   "p50": 800.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 93.76654275134206,
                   "p50": 89.44271850585938,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
                   "max": 111.80339813232422
                 },
                 "vic_p_at_contact": {
+                  "mean": -0.4968171593209263,
                   "p50": -1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 907.1936024427414,
                   "p50": 800.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 94.91798417828977,
                   "p50": 89.44271850585938,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
@@ -7415,36 +9341,42 @@
               },
               "joint2": {
                 "vic_p_precontact": {
+                  "mean": -0.9996226321673021,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -1.0,
                   "max": -0.32392096519470215
                 },
                 "vic_kp_precontact": {
+                  "mean": 1200.1080820858479,
                   "p50": 1200.0,
                   "p95": 1200.0,
                   "p99": 1200.0,
                   "max": 1395.404296875
                 },
                 "vic_kd_precontact": {
+                  "mean": 134.16991836205125,
                   "p50": 134.16407775878906,
                   "p95": 134.16407775878906,
                   "p99": 134.16407775878906,
                   "max": 144.67572021484375
                 },
                 "vic_p_at_contact": {
+                  "mean": -1.0,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -1.0,
                   "max": -1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1200.0,
                   "p50": 1200.0,
                   "p95": 1200.0,
                   "p99": 1200.0,
                   "max": 1200.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 134.16407775878906,
                   "p50": 134.16407775878906,
                   "p95": 134.16407775878906,
                   "p99": 134.16407775878906,
@@ -7453,36 +9385,42 @@
               },
               "joint3": {
                 "vic_p_precontact": {
+                  "mean": 0.9915294900565641,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 1247.8595127761364,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 111.70292040333152,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
                   "max": 111.80339813232422
                 },
                 "vic_p_at_contact": {
+                  "mean": 0.9996349696302786,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1249.9075157791376,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 111.79906088113785,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
@@ -7491,36 +9429,42 @@
               },
               "joint4": {
                 "vic_p_precontact": {
+                  "mean": -0.9781596433676896,
                   "p50": -1.0,
                   "p95": -0.8759978264570236,
                   "p99": -0.39945322275161727,
                   "max": 0.5520815849304199
                 },
                 "vic_kp_precontact": {
+                  "mean": 804.1341874450445,
                   "p50": 800.0,
                   "p95": 822.4453735351562,
                   "p99": 914.7217041015625,
                   "max": 1131.1031494140625
                 },
                 "vic_kd_precontact": {
+                  "mean": 89.66707703284919,
                   "p50": 89.44271850585938,
                   "p95": 90.68877220153809,
                   "p99": 95.64108238220216,
                   "max": 106.35333251953125
                 },
                 "vic_p_at_contact": {
+                  "mean": 0.9402241397783655,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1234.3759498596191,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 111.08190904557705,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
@@ -7529,36 +9473,42 @@
               },
               "joint5": {
                 "vic_p_precontact": {
+                  "mean": 0.6605359782115556,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_precontact": {
+                  "mean": 1169.0114694982767,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_precontact": {
+                  "mean": 107.89374506659806,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
                   "max": 111.80339813232422
                 },
                 "vic_p_at_contact": {
+                  "mean": 0.5698696318722796,
                   "p50": 1.0,
                   "p95": 1.0,
                   "p99": 1.0,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 1147.6901751607656,
                   "p50": 1250.0,
                   "p95": 1250.0,
                   "p99": 1250.0,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 106.8571508191526,
                   "p50": 111.80339813232422,
                   "p95": 111.80339813232422,
                   "p99": 111.80339813232422,
@@ -7567,36 +9517,42 @@
               },
               "joint6": {
                 "vic_p_precontact": {
+                  "mean": -0.9991855647531338,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -1.0,
                   "max": 0.3838648796081543
                 },
                 "vic_kp_precontact": {
+                  "mean": 800.1613875478506,
                   "p50": 800.0,
                   "p95": 800.0,
                   "p99": 800.0,
                   "max": 1089.4326171875
                 },
                 "vic_kd_precontact": {
+                  "mean": 89.45127381570637,
                   "p50": 89.44271850585938,
                   "p95": 89.44271850585938,
                   "p99": 89.44271850585938,
                   "max": 104.37588500976562
                 },
                 "vic_p_at_contact": {
+                  "mean": -0.9877360890386626,
                   "p50": -1.0,
                   "p95": -1.0,
                   "p99": -0.5304846405982947,
                   "max": 1.0
                 },
                 "vic_kp_at_contact": {
+                  "mean": 802.4249829053879,
                   "p50": 800.0,
                   "p95": 800.0,
                   "p99": 888.3637695312505,
                   "max": 1250.0
                 },
                 "vic_kd_at_contact": {
+                  "mean": 89.57138696871698,
                   "p50": 89.44271850585938,
                   "p95": 89.44271850585938,
                   "p99": 94.25304679870608,
@@ -7714,6 +9670,37 @@
   "native_verdict": {
     "selected_branch": 3,
     "text": "Lower J3 exposure with higher exposure at another joint or in velocity: redistribution/trade-off, not clean enforcement.",
+    "preregistered_branches_verbatim": [
+      {
+        "branch": 1,
+        "text": "Lower diagnostic violation probability and lower p95/p99 utilization, with retained task and velocity behavior: learned graded impulse reduction for this training seed.",
+        "selected": false
+      },
+      {
+        "branch": 2,
+        "text": "Lower mean but unchanged violation rate or tail: behavioral softening, not boundary confinement.",
+        "selected": false
+      },
+      {
+        "branch": 3,
+        "text": "Lower J3 exposure with higher exposure at another joint or in velocity: redistribution/trade-off, not clean enforcement.",
+        "selected": true
+      },
+      {
+        "branch": 4,
+        "text": "Active, winning impulse pressure with unchanged tail: calibration/treatment-strength problem.",
+        "selected": false
+      },
+      {
+        "branch": 5,
+        "text": "Absent or too-rare provisional-cap violations: report exactly, \"impulse constraint is empirically nonbinding under the surveyed population.\"",
+        "selected": false
+      }
+    ],
+    "branch_5_scope_application": "applies only to the fixed mean-action provisional-cap population; it is not the stochastic verdict",
+    "native_observed_endpoint_valid": true,
+    "full_contact_or_causal_softening_interpretation_authorized": false,
+    "shadow_required_to_resolve_episode_horizon_confound": true,
     "event_dose_calibration_complete": false,
     "follow_up_plan_required": true,
     "imp_max_p_increase_authorized": false
