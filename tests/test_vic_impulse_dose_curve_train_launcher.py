@@ -23,6 +23,7 @@ CAPS = "[0.82,1.64,0.82,0.82,0.82,0.82]"
 EXPECTED_MODELS = (0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 499)
 ARMS = ((0, "dose_p01_target", "0.1"), (1, "dose_p03_target", "0.3"))
 ARRAY_JOB_IDS = count(900000)
+ELEMENT_JOB_IDS = count(1900000)
 
 
 def _git(path: Path, *args: str) -> str:
@@ -72,6 +73,7 @@ def _env(tmp_path: Path, task_id: int) -> dict[str, str]:
   )
   sha256sum.chmod(0o755)
   array_job_id = str(next(ARRAY_JOB_IDS))
+  element_job_id = str(next(ELEMENT_JOB_IDS))
   env = {
     "PATH": f"{fake_bin}:{os.environ['PATH']}",
     "HOME": str(home),
@@ -85,7 +87,7 @@ def _env(tmp_path: Path, task_id: int) -> dict[str, str]:
     "SLURM_ARRAY_TASK_MIN": "0",
     "SLURM_ARRAY_TASK_MAX": "1",
     "SLURM_ARRAY_TASK_STEP": "1",
-    "SLURM_JOB_ID": f"{array_job_id}_{task_id}",
+    "SLURM_JOB_ID": element_job_id,
   }
   python = home / "repos/unitree_rl_mjlab/.venv/bin/python"
   python.parent.mkdir(parents=True)
@@ -265,19 +267,30 @@ def test_dose_curve_launcher_rejects_wrong_array_or_unsupported_execution_contex
   assert result.returncode == 2
 
 
-@pytest.mark.parametrize("job_id_template", ("99999", "99999_0", "{array}", "{array}_1"))
-def test_dose_curve_launcher_rejects_a_job_id_not_bound_to_its_array_arm(
-  tmp_path: Path, job_id_template: str
+def test_dose_curve_launcher_accepts_a_numeric_element_job_id_distinct_from_array_id(
+  tmp_path: Path,
 ):
-  """Breaks if one arm can write a leaf under another Slurm job identity."""
-  env = _env(tmp_path / job_id_template.replace("_", "-"), 0)
-  job_id = job_id_template.format(array=env["SLURM_ARRAY_JOB_ID"])
+  """Breaks if real Slurm numeric element IDs are mistaken for API composite IDs."""
+  env = _env(tmp_path, 0)
+  assert env["SLURM_JOB_ID"] != env["SLURM_ARRAY_JOB_ID"]
+
+  result = _run(env)
+
+  assert result.returncode == 0, result.stderr + result.stdout
+
+
+@pytest.mark.parametrize("job_id", ("not-numeric", "1900000_0", "array-0"))
+def test_dose_curve_launcher_rejects_a_nonnumeric_element_job_id(
+  tmp_path: Path, job_id: str
+):
+  """Breaks if malformed element job IDs can create a training attempt leaf."""
+  env = _env(tmp_path / job_id.replace("_", "-"), 0)
   env["SLURM_JOB_ID"] = job_id
 
   result = _run(env)
 
   assert result.returncode == 2
-  assert "SLURM_JOB_ID must match the array job and task id" in result.stdout
+  assert "SLURM_JOB_ID must be numeric" in result.stdout
 
 
 def test_dose_curve_launcher_rejects_arguments_provenance_and_leaf_collisions(tmp_path: Path):
