@@ -135,6 +135,8 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
         "docs/superpowers/specs/2026-08-17-z1-impulse-diag90-post-training-evaluation-design.md",
         "docs/superpowers/plans/2026-08-17-z1-impulse-diag90-post-training-evaluation.md",
         "docs/superpowers/plans/2026-08-17-z1-impulse-diag90-release-window-flush-shadow.md",
+        "docs/superpowers/specs/2026-08-18-z1-impulse-cat-thesis-campaign-design.md",
+        "docs/research/reward-design/Z1_IMPULSE_CAT_CAMPAIGN_CROSS_MODEL_PACKET.md",
         "docs/thesis/decisions/2026-08-13_vic_impulse_cat_and_trajectory_direction.md",
         "src/tasks/hammer/mdp/variable_impedance.py",
         "scripts/slurm/vega_fic_direct_reference_smoke.sbatch",
@@ -147,7 +149,7 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
     missing = [ref for ref in required_refs if f"`{ref}`" not in text]
     assert not missing, "Current FIC/VIC paths missing from index:\n" + "\n".join(missing)
 
-    assert "# Docs index — current truth map (2026-08-17)" in text
+    assert "# Docs index — current truth map (2026-08-18)" in text
     assert "the checked-out code wins" in text
     route = next(
         line for line in text.splitlines() if line.startswith("**Current GPU route:**")
