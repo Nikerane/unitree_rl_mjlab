@@ -22,6 +22,10 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 
 import src.tasks.hammer.config.z1  # noqa: F401  (registers tasks)
 from src.tasks.hammer.cat.hook import CatSoftHook
+from src.tasks.hammer.mdp.impulse_bound import (
+    SubstepImpulseAccumulator,
+    _ENV_SUBSTEP_IMPULSE_ATTR,
+)
 from src.tasks.hammer.rl.cat_ppo import CatPPO
 from src.tasks.hammer.rl.cat_storage import CatRolloutStorage
 
@@ -36,6 +40,7 @@ HISTORICAL_DIAGNOSTIC_CAPS = (0.738, 1.476, 0.738, 0.738, 0.738, 0.738)
 PROVISIONAL_CAPS = (0.82, 1.64, 0.82, 0.82, 0.82, 0.82)
 SEED = 2
 NUM_ENVS = 2
+TEST_IMPULSE_PULSE_N_M_S = 2.0
 
 
 def _snapshot(value: Any) -> Any:
@@ -54,7 +59,7 @@ def _snapshot(value: Any) -> Any:
 
 
 def _rng_state() -> dict[str, Any]:
-    """Capture every host RNG used by mjlab's seeded CPU path."""
+    """Capture the Python, NumPy, and Torch host RNG states observable from this test."""
     return {
         "python": _snapshot(random.getstate()),
         "numpy": _snapshot(np.random.get_state()),
@@ -111,10 +116,27 @@ def _batch_snapshot(batch: Any) -> dict[str, Any]:
     }
 
 
+def _inject_one_control_impulse_pulse(env: ManagerBasedRlEnv) -> None:
+    """Place one test-only J1 pulse in the live accumulator's next preserved window slot.
+
+    The first real control step overwrites ``decimation`` ring slots before ``CatSoftHook`` reads
+    Lambda. Placing this pulse in the immediately following slot preserves it for that hook call;
+    the next control step overwrites it. This changes telemetry state only, identically in both
+    runs, and exercises the real accumulator -> hook -> CatPPO boundary without touching physics.
+    """
+    accumulator = getattr(env, _ENV_SUBSTEP_IMPULSE_ATTR)
+    assert isinstance(accumulator, SubstepImpulseAccumulator)
+    assert accumulator._dec == int(env.cfg.decimation)
+    assert accumulator._window > accumulator._dec
+    slot = (accumulator._buf_i + int(env.cfg.decimation)) % accumulator._window
+    accumulator._buf[:, 0, slot] = TEST_IMPULSE_PULSE_N_M_S
+    accumulator._rolling = accumulator._buf.sum(dim=-1)
+
+
 def _run_one_update(tmp_path, caps: tuple[float, ...]) -> dict[str, Any]:
     """Run the real two-environment VIC-TT CatPPO path with one cap-only cfg mutation."""
-    # ManagerBasedRlEnv.seed() resets Python, NumPy, Torch, and Warp. Seed here too so config
-    # loading and construction before that call cannot depend on state left by the other arm.
+    # Seed the three host generators this test can snapshot so config loading and construction
+    # before ManagerBasedRlEnv's own seed call cannot depend on state left by the other arm.
     random.seed(SEED)
     np.random.seed(SEED)
     torch.manual_seed(SEED)
@@ -148,9 +170,10 @@ def _run_one_update(tmp_path, caps: tuple[float, ...]) -> dict[str, Any]:
         obs = env.get_observations().to("cpu")
         alg.train_mode()
         sampled_actions = []
+        post_step_observations = []
         raw_rewards = []
         aggregate_delta = []
-        hook_rng_states = []
+        host_rng_states_after_hook = []
         impulse_margins = []
         impulse_utilization = []
         impulse_delta = []
@@ -158,11 +181,14 @@ def _run_one_update(tmp_path, caps: tuple[float, ...]) -> dict[str, Any]:
         lambda_per_joint = []
 
         initial_algorithm_state = _snapshot(alg.save())
-        for _ in range(runner_cfg["num_steps_per_env"]):
+        for step in range(runner_cfg["num_steps_per_env"]):
             with torch.inference_mode():
                 actions = alg.act(obs)
                 sampled_actions.append(actions.detach().cpu().clone())
+                if step == 0:
+                    _inject_one_control_impulse_pulse(raw_env)
                 obs, rewards, dones, extras = env.step(actions.to(env.device))
+                post_step_observations.append(_snapshot(obs))
                 raw_rewards.append(rewards.detach().cpu().clone())
                 aggregate_delta.append(extras[alg.DELTA_KEY].detach().cpu().clone())
 
@@ -171,7 +197,7 @@ def _run_one_update(tmp_path, caps: tuple[float, ...]) -> dict[str, Any]:
                 telemetry = hook.constraint_telemetry()
                 rng_after = _rng_state()
                 _assert_exact(rng_before, rng_after, path="telemetry_rng_noop")
-                hook_rng_states.append(rng_after)
+                host_rng_states_after_hook.append(rng_after)
                 impulse_margins.append(telemetry["raw_margin_per_joint"].cpu())
                 impulse_utilization.append(telemetry["cap_utilization_per_joint"].cpu())
                 impulse_delta.append(telemetry["delta_impulse"].cpu())
@@ -212,6 +238,7 @@ def _run_one_update(tmp_path, caps: tuple[float, ...]) -> dict[str, Any]:
 
         return {
             "sampled_actions": torch.stack(sampled_actions),
+            "post_step_observations": post_step_observations,
             "raw_rewards": torch.stack(raw_rewards),
             "aggregate_delta": torch.stack(aggregate_delta),
             "scaled_rewards": pre_return_storage["rewards"],
@@ -222,7 +249,7 @@ def _run_one_update(tmp_path, caps: tuple[float, ...]) -> dict[str, Any]:
             "minibatches": minibatches,
             "initial_algorithm_state": initial_algorithm_state,
             "post_update_algorithm_state": _snapshot(alg.save()),
-            "hook_rng_states": hook_rng_states,
+            "host_rng_states_after_hook": host_rng_states_after_hook,
             "rng_before_update": rng_before_update,
             "rng_after_update": _rng_state(),
             # These fields may reflect the cap-only mutation and are therefore not identity fields.
@@ -238,7 +265,7 @@ def _run_one_update(tmp_path, caps: tuple[float, ...]) -> dict[str, Any]:
 
 
 def test_log_only_impulse_cap_vector_is_exactly_training_invariant(tmp_path) -> None:
-    """Changing only log-only caps cannot alter any action, PPO datum, RNG, or update."""
+    """Changing only log-only caps cannot alter outputs, PPO data, host RNG, or updates."""
     historical = _run_one_update(tmp_path / "historical", HISTORICAL_DIAGNOSTIC_CAPS)
     provisional = _run_one_update(tmp_path / "provisional", PROVISIONAL_CAPS)
 
@@ -252,12 +279,19 @@ def test_log_only_impulse_cap_vector_is_exactly_training_invariant(tmp_path) -> 
     )
     assert torch.equal(provisional["active_caps"], torch.tensor(PROVISIONAL_CAPS))
     assert not torch.equal(historical["impulse_margins"], provisional["impulse_margins"])
+    assert not torch.equal(
+        historical["impulse_utilization"], provisional["impulse_utilization"]
+    )
 
     # The log-only arm is zero at every real control read in both runs, while the active velocity
     # arm and aggregate soft-OR remain covered by the exact equality assertions above.
     assert torch.count_nonzero(historical["impulse_delta"]) == 0
     assert torch.count_nonzero(provisional["impulse_delta"]) == 0
     for run in (historical, provisional):
+        active_caps = run["active_caps"].view(1, 1, -1)
+        assert torch.any(run["lambda_per_joint"] > active_caps)
+        assert torch.any(run["impulse_margins"] > 0.0)
+        assert torch.any(run["impulse_utilization"] > 1.0)
         assert torch.equal(
             run["aggregate_delta"],
             torch.maximum(run["velocity_delta"], run["impulse_delta"]),
