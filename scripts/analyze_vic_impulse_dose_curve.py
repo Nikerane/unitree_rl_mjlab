@@ -59,6 +59,8 @@ def validate_checkpoint_identities(
     if path.name != "model_499.pt" or path.is_symlink() or not path.is_file():
       raise ValueError("checkpoint must be a regular non-symlink model_499.pt")
     canonical_path = str(path.resolve(strict=True))
+    if historical._sha256(path) != EXPECTED_CHECKPOINTS[role]:
+      raise ValueError(f"{role} checkpoint file SHA-256 does not match the frozen role")
     checkpoint = summaries[role].get("checkpoint")
     expected_checkpoint = {
       "role": role,

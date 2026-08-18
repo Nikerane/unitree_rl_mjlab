@@ -7,8 +7,8 @@ import copy
 import hashlib
 import json
 from pathlib import Path
-import subprocess
 import sys
+from types import MappingProxyType
 
 import numpy as np
 import pytest
@@ -360,8 +360,11 @@ def _refresh_manifest(leaf: Path) -> None:
   )
 
 
-def _four_leaves(tmp_path: Path) -> dict[str, Path]:
+def _four_leaves(
+  tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> dict[str, Path]:
   paths = _checkpoint_paths(tmp_path / "checkpoints")
+  _bind_synthetic_checkpoint_hashes(monkeypatch, paths)
   return {
     role: _write_leaf(tmp_path, role, paths[role]) for role in analysis.EXPECTED_ROLES
   }
@@ -384,8 +387,23 @@ def _checkpoint_paths(tmp_path: Path) -> dict[str, Path]:
   return result
 
 
-def test_four_leaf_all_pass_curve_is_finite_complete_and_byte_deterministic(tmp_path: Path):
-  leaves = _four_leaves(tmp_path)
+def _bind_synthetic_checkpoint_hashes(
+  monkeypatch: pytest.MonkeyPatch, paths: dict[str, Path]
+) -> dict[str, str]:
+  hashes = {
+    role: hashlib.sha256(path.read_bytes()).hexdigest()
+    for role, path in paths.items()
+  }
+  frozen = MappingProxyType(hashes)
+  monkeypatch.setattr(analysis, "EXPECTED_CHECKPOINTS", frozen)
+  monkeypatch.setattr(survey, "EVALUATION_CHECKPOINTS", frozen)
+  return hashes
+
+
+def test_four_leaf_all_pass_curve_is_finite_complete_and_byte_deterministic(
+  tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+  leaves = _four_leaves(tmp_path, monkeypatch)
 
   first = analysis.analyze_evaluation_curve(
     leaves,
@@ -445,8 +463,10 @@ def test_four_leaf_all_pass_curve_is_finite_complete_and_byte_deterministic(tmp_
   json.loads(analysis.encode_analysis(first))
 
 
-def test_curve_rejects_missing_extra_misordered_or_duplicate_leaf_roles(tmp_path: Path):
-  leaves = _four_leaves(tmp_path)
+def test_curve_rejects_missing_extra_misordered_or_duplicate_leaf_roles(
+  tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+  leaves = _four_leaves(tmp_path, monkeypatch)
   invalid_inputs = (
     {role: leaf for role, leaf in leaves.items() if role != "dose_p02_target"},
     {**leaves, "unexpected": leaves["dose_p03_target"]},
@@ -462,8 +482,10 @@ def test_curve_rejects_missing_extra_misordered_or_duplicate_leaf_roles(tmp_path
       )
 
 
-def test_curve_rehashes_every_raw_artifact_and_rejects_manifest_drift(tmp_path: Path):
-  leaves = _four_leaves(tmp_path)
+def test_curve_rehashes_every_raw_artifact_and_rejects_manifest_drift(
+  tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+  leaves = _four_leaves(tmp_path, monkeypatch)
   trace = leaves["dose_p01_target"] / "evaluation" / "fixed_trace.npz"
   trace.write_bytes(trace.read_bytes() + b"drift")
 
@@ -492,9 +514,12 @@ def test_curve_rehashes_every_raw_artifact_and_rejects_manifest_drift(tmp_path: 
   ),
 )
 def test_curve_fails_closed_on_summary_identity_or_protocol_drift(
-  tmp_path: Path, mutation: str, message: str
+  tmp_path: Path,
+  monkeypatch: pytest.MonkeyPatch,
+  mutation: str,
+  message: str,
 ):
-  leaves = _four_leaves(tmp_path)
+  leaves = _four_leaves(tmp_path, monkeypatch)
   leaf = leaves["dose_p01_target"]
   path = leaf / "evaluation" / "summary.json"
   payload = json.loads(path.read_text())
@@ -537,9 +562,9 @@ def test_curve_fails_closed_on_summary_identity_or_protocol_drift(
 
 @pytest.mark.parametrize("mutation", ("nonfinite", "live_impulse", "wrong_delta"))
 def test_curve_rejects_nonfinite_or_invalid_live_cat_traces(
-  tmp_path: Path, mutation: str
+  tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str
 ):
-  leaves = _four_leaves(tmp_path)
+  leaves = _four_leaves(tmp_path, monkeypatch)
   leaf = leaves["dose_p01_target"]
   path = leaf / "evaluation" / "training_like_seed_2_trace.npz"
   with np.load(path, allow_pickle=False) as archive:
@@ -561,8 +586,10 @@ def test_curve_rejects_nonfinite_or_invalid_live_cat_traces(
     )
 
 
-def test_censored_utility_fragment_fails_only_its_dose(tmp_path: Path):
-  leaves = _four_leaves(tmp_path)
+def test_censored_utility_fragment_fails_only_its_dose(
+  tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+  leaves = _four_leaves(tmp_path, monkeypatch)
   leaf = leaves["dose_p01_target"]
   path = leaf / "evaluation" / "training_like_seed_2_trace.npz"
   with np.load(path, allow_pickle=False) as archive:
@@ -586,13 +613,14 @@ def test_censored_utility_fragment_fails_only_its_dose(tmp_path: Path):
 
 def test_cli_requires_four_immutable_role_flags_and_regenerates_identical_bytes(
   tmp_path: Path,
+  monkeypatch: pytest.MonkeyPatch,
+  capsys: pytest.CaptureFixture[str],
 ):
-  leaves = _four_leaves(tmp_path / "leaves")
+  leaves = _four_leaves(tmp_path / "leaves", monkeypatch)
   checkpoint_paths = _fixture_checkpoint_paths(tmp_path / "leaves")
   outputs = (tmp_path / "first.json", tmp_path / "second.json")
-  command = [
-    sys.executable,
-    str(Path(analysis.__file__)),
+  arguments = [
+    "analyze_vic_impulse_dose_curve.py",
     "--dose-p0-control-leaf",
     str(leaves["dose_p0_control"]),
     "--dose-p01-target-leaf",
@@ -613,15 +641,9 @@ def test_cli_requires_four_immutable_role_flags_and_regenerates_identical_bytes(
     CODE_REVISION,
   ]
   for output in outputs:
-    result = subprocess.run(
-      [*command, "--output", str(output)],
-      cwd=Path(__file__).resolve().parents[1],
-      capture_output=True,
-      text=True,
-      timeout=30,
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == str(output)
+    monkeypatch.setattr(sys, "argv", [*arguments, "--output", str(output)])
+    analysis.main()
+    assert capsys.readouterr().out.strip() == str(output)
 
   assert outputs[0].read_bytes() == outputs[1].read_bytes()
 
@@ -679,9 +701,10 @@ def test_analysis_output_resolves_symlinked_parent_before_containment_check(
 
 @pytest.mark.parametrize("mutation", ("wrong", "missing", "extra"))
 def test_checkpoint_summary_requires_exact_canonical_path_key(
-  tmp_path: Path, mutation: str
+  tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str
 ):
   paths = _checkpoint_paths(tmp_path / "checkpoints")
+  _bind_synthetic_checkpoint_hashes(monkeypatch, paths)
   summaries = {
     role: _summary(role, control=role == "dose_p0_control")
     for role in analysis.EXPECTED_ROLES
@@ -701,9 +724,10 @@ def test_checkpoint_summary_requires_exact_canonical_path_key(
 
 
 def test_checkpoint_paths_are_exact_ordered_regular_nonsymlink_model_499_files(
-  tmp_path: Path,
+  tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
   paths = _checkpoint_paths(tmp_path / "checkpoints")
+  _bind_synthetic_checkpoint_hashes(monkeypatch, paths)
   summaries = {
     role: _summary(role, control=role == "dose_p0_control")
     for role in analysis.EXPECTED_ROLES
@@ -726,6 +750,21 @@ def test_checkpoint_paths_are_exact_ordered_regular_nonsymlink_model_499_files(
   invalid = {**paths, "dose_p01_target": symlink}
   with pytest.raises(ValueError, match="regular non-symlink model_499.pt"):
     analysis.validate_checkpoint_identities(summaries, invalid)
+
+
+def test_checkpoint_identity_independently_rehashes_explicit_file(
+  tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+  paths = _checkpoint_paths(tmp_path / "checkpoints")
+  _bind_synthetic_checkpoint_hashes(monkeypatch, paths)
+  summaries = {
+    role: _summary(role, control=role == "dose_p0_control", checkpoint_path=path)
+    for (role, path) in paths.items()
+  }
+  paths["dose_p01_target"].write_bytes(b"mutated checkpoint\n")
+
+  with pytest.raises(ValueError, match="checkpoint file SHA-256"):
+    analysis.validate_checkpoint_identities(summaries, paths)
 
 
 def test_compact_protocol_identity_emits_exact_caps_seeds_population_digests_and_rng():
