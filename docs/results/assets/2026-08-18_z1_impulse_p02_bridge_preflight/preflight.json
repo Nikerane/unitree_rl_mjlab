@@ -1,0 +1,1678 @@
+{
+  "schema_version": 1,
+  "purpose": "zero-learning p=0.2 impulse-CaT bridge preflight",
+  "candidate_imp_max_p": 0.2,
+  "caps_n_m_s": [
+    0.82,
+    1.64,
+    0.82,
+    0.82,
+    0.82,
+    0.82
+  ],
+  "caps_status": "project-defined simulation thresholds; not hardware limits",
+  "fixed_mean": {
+    "active_reads": 0,
+    "distinct_positive_doses": 0,
+    "winner_reads": {
+      "impulse": 0,
+      "velocity_masked": 0,
+      "tie": 0
+    },
+    "combined_delta_exact_max": true,
+    "delta_velocity": {
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0.0,
+      "max": 0.0
+    },
+    "delta_impulse": {
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0.0,
+      "max": 0.0
+    },
+    "combined_delta": {
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0.0,
+      "max": 0.0
+    },
+    "activation_window_read_counts": [],
+    "activation_window_pressure": {
+      "unit": "contiguous 50 Hz impulse-activation window",
+      "unique_physical_event_dose": false,
+      "observed_prefixes": [],
+      "all_observed_summary": {
+        "median": null,
+        "p95": null,
+        "max": null
+      },
+      "completed_only_summary": {
+        "median": null,
+        "p95": null,
+        "max": null
+      },
+      "right_censored_windows": 0
+    },
+    "physical_event_read_counts": [],
+    "physical_contact": {
+      "events": 64,
+      "right_censored_events": 64,
+      "all_observed_prefixes": {
+        "median": 18.000000000000004,
+        "p95": 18.000000000000004,
+        "max": 20.0
+      },
+      "completed_events_only": {
+        "median": null,
+        "p95": null,
+        "max": null
+      },
+      "cap_associated_observed_prefixes": {
+        "median": null,
+        "p95": null,
+        "max": null
+      },
+      "cap_associated_completed_only": {
+        "median": null,
+        "p95": null,
+        "max": null
+      },
+      "cap_associated_censored_prefixes": {
+        "median": null,
+        "p95": null,
+        "max": null
+      }
+    },
+    "native_initial_episode_rho": {
+      "p50": 0.7708577484619328,
+      "p95": 0.796875957308746,
+      "p99": 0.8372387849703068,
+      "max": 0.8528421564799984
+    },
+    "observed_first_contact_prefix_rho": {
+      "p50": 0.7708577484619328,
+      "p95": 0.796875957308746,
+      "p99": 0.8372387849703068,
+      "max": 0.8528421564799984
+    },
+    "observed_first_contact_prefix": {
+      "unit": "observed first-contact physical-event prefix",
+      "scope": "native controller reads overlapping the terminal-cut first-contact prefix",
+      "equal_horizon_across_arms": false,
+      "complete_physical_event": false,
+      "causal_or_full_contact_interpretation_authorized": false,
+      "observed_prefixes_with_contact": 64,
+      "rho": {
+        "p50": 0.7708577484619328,
+        "p95": 0.796875957308746,
+        "p99": 0.8372387849703068,
+        "max": 0.8528421564799984
+      }
+    },
+    "per_joint": {
+      "joint1": {
+        "cap_n_m_s": 0.82,
+        "observed_segment_peak_median_n_m_s": 0.3880435526371002,
+        "observed_segment_peak_p95_n_m_s": 0.39399234652519227,
+        "observed_segment_peak_max_n_m_s": 0.4474632740020752,
+        "median_cap_utilization": 0.47322384467939055,
+        "max_cap_utilization": 0.5456869195147259,
+        "violating_reads": 0,
+        "associated_physical_events": 0,
+        "responsible_physical_events": 0
+      },
+      "joint2": {
+        "cap_n_m_s": 1.64,
+        "observed_segment_peak_median_n_m_s": 0.2970116436481476,
+        "observed_segment_peak_p95_n_m_s": 0.3017322778701782,
+        "observed_segment_peak_max_n_m_s": 0.3436329662799835,
+        "median_cap_utilization": 0.1811046607610656,
+        "max_cap_utilization": 0.20953229651218508,
+        "violating_reads": 0,
+        "associated_physical_events": 0,
+        "responsible_physical_events": 0
+      },
+      "joint3": {
+        "cap_n_m_s": 0.82,
+        "observed_segment_peak_median_n_m_s": 0.6321033537387848,
+        "observed_segment_peak_p95_n_m_s": 0.6534382849931717,
+        "observed_segment_peak_max_n_m_s": 0.6993305683135986,
+        "median_cap_utilization": 0.7708577484619327,
+        "max_cap_utilization": 0.8528421564799984,
+        "violating_reads": 0,
+        "associated_physical_events": 0,
+        "responsible_physical_events": 0
+      },
+      "joint4": {
+        "cap_n_m_s": 0.82,
+        "observed_segment_peak_median_n_m_s": 0.3743739128112793,
+        "observed_segment_peak_p95_n_m_s": 0.3825925081968307,
+        "observed_segment_peak_max_n_m_s": 0.3878662884235382,
+        "median_cap_utilization": 0.4565535522088772,
+        "max_cap_utilization": 0.473007668809193,
+        "violating_reads": 0,
+        "associated_physical_events": 0,
+        "responsible_physical_events": 0
+      },
+      "joint5": {
+        "cap_n_m_s": 0.82,
+        "observed_segment_peak_median_n_m_s": 0.2502152621746063,
+        "observed_segment_peak_p95_n_m_s": 0.25327699482440946,
+        "observed_segment_peak_max_n_m_s": 0.2837089002132416,
+        "median_cap_utilization": 0.3051405636275687,
+        "max_cap_utilization": 0.3459864636746849,
+        "violating_reads": 0,
+        "associated_physical_events": 0,
+        "responsible_physical_events": 0
+      },
+      "joint6": {
+        "cap_n_m_s": 0.82,
+        "observed_segment_peak_median_n_m_s": 0.014290268998593092,
+        "observed_segment_peak_p95_n_m_s": 0.014695075806230307,
+        "observed_segment_peak_max_n_m_s": 0.01578550413250923,
+        "median_cap_utilization": 0.01742715731535743,
+        "max_cap_utilization": 0.019250614795742967,
+        "violating_reads": 0,
+        "associated_physical_events": 0,
+        "responsible_physical_events": 0
+      }
+    },
+    "positive_margin_per_joint": {
+      "joint1": {
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "max": null
+      },
+      "joint2": {
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "max": null
+      },
+      "joint3": {
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "max": null
+      },
+      "joint4": {
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "max": null
+      },
+      "joint5": {
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "max": null
+      },
+      "joint6": {
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "max": null
+      }
+    },
+    "descriptive_only": true,
+    "empirically_nonbinding": true
+  },
+  "training_like_sampled": {
+    "2": {
+      "active_reads": 35,
+      "distinct_positive_doses": 35,
+      "winner_reads": {
+        "impulse": 35,
+        "velocity_masked": 0,
+        "tie": 0
+      },
+      "combined_delta_exact_max": true,
+      "delta_velocity": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.5
+      },
+      "delta_impulse": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.2
+      },
+      "combined_delta": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.5
+      },
+      "activation_window_read_counts": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "activation_window_pressure": {
+        "unit": "contiguous 50 Hz impulse-activation window",
+        "unique_physical_event_dose": false,
+        "observed_prefixes": [
+          0.001170316427,
+          0.160050350879,
+          0.087233843115,
+          0.071975840879,
+          0.079246684188,
+          0.02843216401,
+          0.096254275332,
+          0.118303494116,
+          0.045480301321,
+          0.027430717282,
+          0.034769476632,
+          0.018978076731,
+          0.03658354218,
+          0.039255229402,
+          0.2,
+          0.153910585771,
+          0.022525842126,
+          0.066136611518,
+          0.03187839444,
+          0.057190150624,
+          0.029162091901,
+          0.021211264665,
+          0.043558548641,
+          0.000505301157,
+          0.1217315587,
+          0.112681286055,
+          0.009075171964,
+          0.038130109598,
+          0.002415863676,
+          0.141579561438,
+          0.077735818712,
+          0.139741468532,
+          0.022358861675,
+          0.004872903268,
+          0.016615402651
+        ],
+        "all_observed_summary": {
+          "median": 0.039255229402,
+          "p95": 0.15575251530339998,
+          "max": 0.2
+        },
+        "completed_only_summary": {
+          "median": 0.039255229402,
+          "p95": 0.15575251530339998,
+          "max": 0.2
+        },
+        "right_censored_windows": 0
+      },
+      "physical_event_read_counts": [
+        {
+          "event_id": 868,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 1372,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 1459,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 1864,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 2329,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 2701,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 2806,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 3433,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 3737,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 4019,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 4142,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 4514,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 4910,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 4964,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 5006,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 5703,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 6090,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 6322,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 6644,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 7052,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 7112,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 7586,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 7703,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 8138,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 8459,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 8654,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 9773,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 10206,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 10377,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 10985,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 11072,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 11279,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 11843,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 11918,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 12266,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        }
+      ],
+      "physical_contact": {
+        "events": 4103,
+        "right_censored_events": 4036,
+        "all_observed_prefixes": {
+          "median": 18.000000000000004,
+          "p95": 18.000000000000004,
+          "max": 34.0
+        },
+        "completed_events_only": {
+          "median": 26.000000000000004,
+          "p95": 32.0,
+          "max": 34.0
+        },
+        "cap_associated_observed_prefixes": {
+          "median": 28.0,
+          "p95": 32.0,
+          "max": 34.0
+        },
+        "cap_associated_completed_only": {
+          "median": 28.0,
+          "p95": 32.0,
+          "max": 34.0
+        },
+        "cap_associated_censored_prefixes": {
+          "median": 26.000000000000004,
+          "p95": 31.4,
+          "max": 32.0
+        }
+      },
+      "native_initial_episode_rho": {
+        "p50": 0.753351827947105,
+        "p95": 0.8066708358322703,
+        "p99": 0.9735026446784418,
+        "max": 1.3001040714543042
+      },
+      "observed_first_contact_prefix_rho": {
+        "p50": 0.7533316568630498,
+        "p95": 0.806641524157873,
+        "p99": 0.9735026446784418,
+        "max": 1.3001040714543042
+      },
+      "observed_first_contact_prefix": {
+        "unit": "observed first-contact physical-event prefix",
+        "scope": "native controller reads overlapping the terminal-cut first-contact prefix",
+        "equal_horizon_across_arms": false,
+        "complete_physical_event": false,
+        "causal_or_full_contact_interpretation_authorized": false,
+        "observed_prefixes_with_contact": 4096,
+        "rho": {
+          "p50": 0.7533316568630498,
+          "p95": 0.806641524157873,
+          "p99": 0.9735026446784418,
+          "max": 1.3001040714543042
+        }
+      },
+      "per_joint": {
+        "joint1": {
+          "cap_n_m_s": 0.82,
+          "observed_segment_peak_median_n_m_s": 0.38223710656166077,
+          "observed_segment_peak_p95_n_m_s": 0.39409681409597397,
+          "observed_segment_peak_max_n_m_s": 0.6024757623672485,
+          "median_cap_utilization": 0.46614281288007414,
+          "max_cap_utilization": 0.7347265394722543,
+          "violating_reads": 0,
+          "associated_physical_events": 0,
+          "responsible_physical_events": 0
+        },
+        "joint2": {
+          "cap_n_m_s": 1.64,
+          "observed_segment_peak_median_n_m_s": 0.2934143543243408,
+          "observed_segment_peak_p95_n_m_s": 0.3012979105114937,
+          "observed_segment_peak_max_n_m_s": 0.4945567846298218,
+          "median_cap_utilization": 0.17891119166118344,
+          "max_cap_utilization": 0.30155901501818405,
+          "violating_reads": 0,
+          "associated_physical_events": 0,
+          "responsible_physical_events": 0
+        },
+        "joint3": {
+          "cap_n_m_s": 0.82,
+          "observed_segment_peak_median_n_m_s": 0.617748498916626,
+          "observed_segment_peak_p95_n_m_s": 0.6614700853824615,
+          "observed_segment_peak_max_n_m_s": 1.0660853385925293,
+          "median_cap_utilization": 0.7533518279471049,
+          "max_cap_utilization": 1.3001040714543042,
+          "violating_reads": 35,
+          "associated_physical_events": 35,
+          "responsible_physical_events": 35
+        },
+        "joint4": {
+          "cap_n_m_s": 0.82,
+          "observed_segment_peak_median_n_m_s": 0.3520030081272125,
+          "observed_segment_peak_p95_n_m_s": 0.38537707924842834,
+          "observed_segment_peak_max_n_m_s": 0.578758955001831,
+          "median_cap_utilization": 0.429271961130747,
+          "max_cap_utilization": 0.7058036036607697,
+          "violating_reads": 0,
+          "associated_physical_events": 0,
+          "responsible_physical_events": 0
+        },
+        "joint5": {
+          "cap_n_m_s": 0.82,
+          "observed_segment_peak_median_n_m_s": 0.24694989621639252,
+          "observed_segment_peak_p95_n_m_s": 0.2532253786921501,
+          "observed_segment_peak_max_n_m_s": 0.3753350079059601,
+          "median_cap_utilization": 0.3011584100199909,
+          "max_cap_utilization": 0.45772561939751233,
+          "violating_reads": 0,
+          "associated_physical_events": 0,
+          "responsible_physical_events": 0
+        },
+        "joint6": {
+          "cap_n_m_s": 0.82,
+          "observed_segment_peak_median_n_m_s": 0.014640907291322947,
+          "observed_segment_peak_p95_n_m_s": 0.022299162577837706,
+          "observed_segment_peak_max_n_m_s": 0.05532366782426834,
+          "median_cap_utilization": 0.01785476498941823,
+          "max_cap_utilization": 0.06746788759057115,
+          "violating_reads": 0,
+          "associated_physical_events": 0,
+          "responsible_physical_events": 0
+        }
+      },
+      "positive_margin_per_joint": {
+        "joint1": {
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "joint2": {
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "joint3": {
+          "p50": 0.04830068349838257,
+          "p95": 0.19164205789566038,
+          "p99": 0.22937260627746564,
+          "max": 0.24608534574508667
+        },
+        "joint4": {
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "joint5": {
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "joint6": {
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        }
+      }
+    },
+    "2026081701": {
+      "active_reads": 30,
+      "distinct_positive_doses": 29,
+      "winner_reads": {
+        "impulse": 30,
+        "velocity_masked": 0,
+        "tie": 0
+      },
+      "combined_delta_exact_max": true,
+      "delta_velocity": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.5
+      },
+      "delta_impulse": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.2
+      },
+      "combined_delta": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.5
+      },
+      "activation_window_read_counts": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "activation_window_pressure": {
+        "unit": "contiguous 50 Hz impulse-activation window",
+        "unique_physical_event_dose": false,
+        "observed_prefixes": [
+          0.068701702376,
+          0.055980856145,
+          0.047450796127,
+          0.011947406069,
+          0.039704187395,
+          0.008605434103,
+          0.102803018193,
+          0.127118620532,
+          0.015520150619,
+          0.018948153674,
+          0.057880192666,
+          0.076625540318,
+          0.151519478905,
+          0.109323748488,
+          0.054452189611,
+          0.089599700312,
+          0.022142606865,
+          0.015585836518,
+          0.0490075584,
+          0.2,
+          0.165346522184,
+          0.166902380226,
+          0.074748163685,
+          0.030767029812,
+          0.077544690793,
+          0.001947260746,
+          0.147489322812,
+          0.085851857952,
+          0.2,
+          0.001167620146
+        ],
+        "all_observed_summary": {
+          "median": 0.06329094752100001,
+          "p95": 0.1851060711016999,
+          "max": 0.2
+        },
+        "completed_only_summary": {
+          "median": 0.06329094752100001,
+          "p95": 0.1851060711016999,
+          "max": 0.2
+        },
+        "right_censored_windows": 0
+      },
+      "physical_event_read_counts": [
+        {
+          "event_id": 36,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 222,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 228,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 450,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 588,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 1204,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 1243,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 1414,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 2233,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 2311,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 2905,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 3484,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 3490,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 3577,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 4093,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 4871,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 5012,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 5616,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 7627,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 7652,
+          "exclusive_reads": 0,
+          "ambiguous_read_associations": 1
+        },
+        {
+          "event_id": 7653,
+          "exclusive_reads": 0,
+          "ambiguous_read_associations": 1
+        },
+        {
+          "event_id": 8210,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 8502,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 9141,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 9582,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 9789,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 9846,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 10983,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 11562,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 11781,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 11865,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        }
+      ],
+      "physical_contact": {
+        "events": 4112,
+        "right_censored_events": 4050,
+        "all_observed_prefixes": {
+          "median": 18.000000000000004,
+          "p95": 18.000000000000004,
+          "max": 36.00000000000001
+        },
+        "completed_events_only": {
+          "median": 24.0,
+          "p95": 30.0,
+          "max": 34.0
+        },
+        "cap_associated_observed_prefixes": {
+          "median": 26.000000000000004,
+          "p95": 35.0,
+          "max": 36.00000000000001
+        },
+        "cap_associated_completed_only": {
+          "median": 26.000000000000004,
+          "p95": 33.4,
+          "max": 34.0
+        },
+        "cap_associated_censored_prefixes": {
+          "median": 35.0,
+          "p95": 36.00000000000001,
+          "max": 36.00000000000001
+        }
+      },
+      "native_initial_episode_rho": {
+        "p50": 0.7533926062467622,
+        "p95": 0.8069484517341707,
+        "p99": 0.9076938069448268,
+        "max": 1.2387778700851813
+      },
+      "observed_first_contact_prefix_rho": {
+        "p50": 0.7533861006178507,
+        "p95": 0.8069162143439782,
+        "p99": 0.8984876951066475,
+        "max": 1.2250842117681737
+      },
+      "observed_first_contact_prefix": {
+        "unit": "observed first-contact physical-event prefix",
+        "scope": "native controller reads overlapping the terminal-cut first-contact prefix",
+        "equal_horizon_across_arms": false,
+        "complete_physical_event": false,
+        "causal_or_full_contact_interpretation_authorized": false,
+        "observed_prefixes_with_contact": 4096,
+        "rho": {
+          "p50": 0.7533861006178507,
+          "p95": 0.8069162143439782,
+          "p99": 0.8984876951066475,
+          "max": 1.2250842117681737
+        }
+      },
+      "per_joint": {
+        "joint1": {
+          "cap_n_m_s": 0.82,
+          "observed_segment_peak_median_n_m_s": 0.3822406530380249,
+          "observed_segment_peak_p95_n_m_s": 0.39428796619176865,
+          "observed_segment_peak_max_n_m_s": 0.6907154321670532,
+          "median_cap_utilization": 0.4661471378512499,
+          "max_cap_utilization": 0.8423358928866503,
+          "violating_reads": 0,
+          "associated_physical_events": 0,
+          "responsible_physical_events": 0
+        },
+        "joint2": {
+          "cap_n_m_s": 1.64,
+          "observed_segment_peak_median_n_m_s": 0.2932603657245636,
+          "observed_segment_peak_p95_n_m_s": 0.300981268286705,
+          "observed_segment_peak_max_n_m_s": 0.5235171318054199,
+          "median_cap_utilization": 0.1788172961735144,
+          "max_cap_utilization": 0.3192177632959878,
+          "violating_reads": 0,
+          "associated_physical_events": 0,
+          "responsible_physical_events": 0
+        },
+        "joint3": {
+          "cap_n_m_s": 0.82,
+          "observed_segment_peak_median_n_m_s": 0.617781937122345,
+          "observed_segment_peak_p95_n_m_s": 0.66169773042202,
+          "observed_segment_peak_max_n_m_s": 1.0157978534698486,
+          "median_cap_utilization": 0.7533926062467622,
+          "max_cap_utilization": 1.2387778700851813,
+          "violating_reads": 30,
+          "associated_physical_events": 31,
+          "responsible_physical_events": 31
+        },
+        "joint4": {
+          "cap_n_m_s": 0.82,
+          "observed_segment_peak_median_n_m_s": 0.3524079769849777,
+          "observed_segment_peak_p95_n_m_s": 0.38491323590278625,
+          "observed_segment_peak_max_n_m_s": 0.5692614316940308,
+          "median_cap_utilization": 0.4297658255914363,
+          "max_cap_utilization": 0.6942212581634521,
+          "violating_reads": 0,
+          "associated_physical_events": 0,
+          "responsible_physical_events": 0
+        },
+        "joint5": {
+          "cap_n_m_s": 0.82,
+          "observed_segment_peak_median_n_m_s": 0.2469349354505539,
+          "observed_segment_peak_p95_n_m_s": 0.2532339319586754,
+          "observed_segment_peak_max_n_m_s": 0.4255159795284271,
+          "median_cap_utilization": 0.3011401651836023,
+          "max_cap_utilization": 0.5189219262541794,
+          "violating_reads": 0,
+          "associated_physical_events": 0,
+          "responsible_physical_events": 0
+        },
+        "joint6": {
+          "cap_n_m_s": 0.82,
+          "observed_segment_peak_median_n_m_s": 0.014686287380754948,
+          "observed_segment_peak_p95_n_m_s": 0.022403591312468052,
+          "observed_segment_peak_max_n_m_s": 0.05716010183095932,
+          "median_cap_utilization": 0.017910106561896278,
+          "max_cap_utilization": 0.06970744125726747,
+          "violating_reads": 0,
+          "associated_physical_events": 0,
+          "responsible_physical_events": 0
+        }
+      },
+      "positive_margin_per_joint": {
+        "joint1": {
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "joint2": {
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "joint3": {
+          "p50": 0.058407753705978394,
+          "p95": 0.17082426846027365,
+          "p99": 0.19254150867462158,
+          "max": 0.195797860622406
+        },
+        "joint4": {
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "joint5": {
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "joint6": {
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        }
+      }
+    },
+    "2026081702": {
+      "active_reads": 35,
+      "distinct_positive_doses": 35,
+      "winner_reads": {
+        "impulse": 35,
+        "velocity_masked": 0,
+        "tie": 0
+      },
+      "combined_delta_exact_max": true,
+      "delta_velocity": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.5
+      },
+      "delta_impulse": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.2
+      },
+      "combined_delta": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.5
+      },
+      "activation_window_read_counts": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "activation_window_pressure": {
+        "unit": "contiguous 50 Hz impulse-activation window",
+        "unique_physical_event_dose": false,
+        "observed_prefixes": [
+          0.071211281795,
+          0.129895941296,
+          0.145869281003,
+          0.01435880152,
+          0.040061811818,
+          0.016888401326,
+          0.077181798189,
+          0.161825291666,
+          0.139245988345,
+          0.088409770203,
+          0.070749418724,
+          0.035657517886,
+          0.191366317993,
+          0.108924420771,
+          0.085326375282,
+          0.2,
+          0.068707014701,
+          0.008012112708,
+          0.039171054917,
+          0.022196522369,
+          0.116966418737,
+          0.076875659453,
+          0.152978227452,
+          0.025918301636,
+          0.034823153805,
+          0.133638207017,
+          0.151241504822,
+          0.048940817277,
+          0.088126631252,
+          0.00332769038,
+          0.157505660393,
+          0.064377617484,
+          0.019879056492,
+          0.192107795463,
+          0.020034944457
+        ],
+        "all_observed_summary": {
+          "median": 0.076875659453,
+          "p95": 0.19158876123399998,
+          "max": 0.2
+        },
+        "completed_only_summary": {
+          "median": 0.076875659453,
+          "p95": 0.19158876123399998,
+          "max": 0.2
+        },
+        "right_censored_windows": 0
+      },
+      "physical_event_read_counts": [
+        {
+          "event_id": 165,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 405,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 564,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 630,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 801,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 966,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 2113,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 2179,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 2323,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 3184,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 3424,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 3538,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 4135,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 4258,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 4891,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 5206,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 5413,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 5731,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 6580,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 6821,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 7607,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 9003,
+          "exclusive_reads": 0,
+          "ambiguous_read_associations": 1
+        },
+        {
+          "event_id": 9004,
+          "exclusive_reads": 0,
+          "ambiguous_read_associations": 1
+        },
+        {
+          "event_id": 9416,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 9665,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 9887,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 10022,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 10391,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 10493,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 10742,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 10899,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 11214,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 11455,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 11683,
+          "exclusive_reads": 0,
+          "ambiguous_read_associations": 1
+        },
+        {
+          "event_id": 11684,
+          "exclusive_reads": 0,
+          "ambiguous_read_associations": 1
+        },
+        {
+          "event_id": 11729,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        },
+        {
+          "event_id": 12269,
+          "exclusive_reads": 1,
+          "ambiguous_read_associations": 0
+        }
+      ],
+      "physical_contact": {
+        "events": 4103,
+        "right_censored_events": 4036,
+        "all_observed_prefixes": {
+          "median": 18.000000000000004,
+          "p95": 18.000000000000004,
+          "max": 34.0
+        },
+        "completed_events_only": {
+          "median": 26.000000000000004,
+          "p95": 32.0,
+          "max": 34.0
+        },
+        "cap_associated_observed_prefixes": {
+          "median": 26.000000000000004,
+          "p95": 32.0,
+          "max": 34.0
+        },
+        "cap_associated_completed_only": {
+          "median": 28.0,
+          "p95": 32.0,
+          "max": 34.0
+        },
+        "cap_associated_censored_prefixes": {
+          "median": 24.0,
+          "p95": 24.0,
+          "max": 24.0
+        }
+      },
+      "native_initial_episode_rho": {
+        "p50": 0.7553099132165677,
+        "p95": 0.806837129156764,
+        "p99": 0.9870193353513393,
+        "max": 1.197985614218363
+      },
+      "observed_first_contact_prefix_rho": {
+        "p50": 0.7552620477792693,
+        "p95": 0.8066974580287933,
+        "p99": 0.9865910832474873,
+        "max": 1.197985614218363
+      },
+      "observed_first_contact_prefix": {
+        "unit": "observed first-contact physical-event prefix",
+        "scope": "native controller reads overlapping the terminal-cut first-contact prefix",
+        "equal_horizon_across_arms": false,
+        "complete_physical_event": false,
+        "causal_or_full_contact_interpretation_authorized": false,
+        "observed_prefixes_with_contact": 4096,
+        "rho": {
+          "p50": 0.7552620477792693,
+          "p95": 0.8066974580287933,
+          "p99": 0.9865910832474873,
+          "max": 1.197985614218363
+        }
+      },
+      "per_joint": {
+        "joint1": {
+          "cap_n_m_s": 0.82,
+          "observed_segment_peak_median_n_m_s": 0.382528617978096,
+          "observed_segment_peak_p95_n_m_s": 0.3938904255628586,
+          "observed_segment_peak_max_n_m_s": 0.5529153347015381,
+          "median_cap_utilization": 0.4664983146074342,
+          "max_cap_utilization": 0.6742869935384611,
+          "violating_reads": 0,
+          "associated_physical_events": 0,
+          "responsible_physical_events": 0
+        },
+        "joint2": {
+          "cap_n_m_s": 1.64,
+          "observed_segment_peak_median_n_m_s": 0.2934829294681549,
+          "observed_segment_peak_p95_n_m_s": 0.3011997193098068,
+          "observed_segment_peak_max_n_m_s": 0.4757736325263977,
+          "median_cap_utilization": 0.1789530057732652,
+          "max_cap_utilization": 0.2901058734917059,
+          "violating_reads": 0,
+          "associated_physical_events": 0,
+          "responsible_physical_events": 0
+        },
+        "joint3": {
+          "cap_n_m_s": 0.82,
+          "observed_segment_peak_median_n_m_s": 0.6193541288375854,
+          "observed_segment_peak_p95_n_m_s": 0.6616064459085464,
+          "observed_segment_peak_max_n_m_s": 0.9823482036590576,
+          "median_cap_utilization": 0.7553099132165677,
+          "max_cap_utilization": 1.197985614218363,
+          "violating_reads": 35,
+          "associated_physical_events": 37,
+          "responsible_physical_events": 37
+        },
+        "joint4": {
+          "cap_n_m_s": 0.82,
+          "observed_segment_peak_median_n_m_s": 0.3527418226003647,
+          "observed_segment_peak_p95_n_m_s": 0.38490916043519974,
+          "observed_segment_peak_max_n_m_s": 0.5241835713386536,
+          "median_cap_utilization": 0.43017295439068864,
+          "max_cap_utilization": 0.6392482577300653,
+          "violating_reads": 0,
+          "associated_physical_events": 0,
+          "responsible_physical_events": 0
+        },
+        "joint5": {
+          "cap_n_m_s": 0.82,
+          "observed_segment_peak_median_n_m_s": 0.2470112144947052,
+          "observed_segment_peak_p95_n_m_s": 0.2530115693807602,
+          "observed_segment_peak_max_n_m_s": 0.3557644486427307,
+          "median_cap_utilization": 0.3012331884081771,
+          "max_cap_utilization": 0.43385908371064724,
+          "violating_reads": 0,
+          "associated_physical_events": 0,
+          "responsible_physical_events": 0
+        },
+        "joint6": {
+          "cap_n_m_s": 0.82,
+          "observed_segment_peak_median_n_m_s": 0.014695993158966303,
+          "observed_segment_peak_p95_n_m_s": 0.02233739336952567,
+          "observed_segment_peak_max_n_m_s": 0.05045073479413986,
+          "median_cap_utilization": 0.017921942876788177,
+          "max_cap_utilization": 0.061525286334316906,
+          "violating_reads": 0,
+          "associated_physical_events": 0,
+          "responsible_physical_events": 0
+        }
+      },
+      "positive_margin_per_joint": {
+        "joint1": {
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "joint2": {
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "joint3": {
+          "p50": 0.060444653034210205,
+          "p95": 0.15552046298980712,
+          "p99": 0.16017002582550047,
+          "max": 0.162348210811615
+        },
+        "joint4": {
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "joint5": {
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        },
+        "joint6": {
+          "p50": null,
+          "p95": null,
+          "p99": null,
+          "max": null
+        }
+      }
+    }
+  },
+  "exposure_direction_gate": {
+    "comparison": "historical p=0.5 target minus p=0 control",
+    "threshold": "provisional caps only",
+    "populations": {
+      "fixed_mean": {
+        "native_initial_episode_rho_target_minus_control": {
+          "p95": -0.2903652318367145,
+          "p99": -0.21490849881637386
+        },
+        "observed_first_contact_prefix_rho_target_minus_control": {
+          "p95": -0.2903652318367145,
+          "p99": -0.21490849881637386
+        },
+        "all_four_strictly_negative": true
+      },
+      "2": {
+        "native_initial_episode_rho_target_minus_control": {
+          "p95": -0.16389965284161456,
+          "p99": -0.2658858495514568
+        },
+        "observed_first_contact_prefix_rho_target_minus_control": {
+          "p95": -0.16387034116721733,
+          "p99": -0.2658858495514568
+        },
+        "all_four_strictly_negative": true
+      },
+      "2026081701": {
+        "native_initial_episode_rho_target_minus_control": {
+          "p95": -0.1586224247769612,
+          "p99": -0.1945128528083272
+        },
+        "observed_first_contact_prefix_rho_target_minus_control": {
+          "p95": -0.15859018738676867,
+          "p99": -0.18530674097014788
+        },
+        "all_four_strictly_negative": true
+      },
+      "2026081702": {
+        "native_initial_episode_rho_target_minus_control": {
+          "p95": -0.16894920206651454,
+          "p99": -0.28557001454074193
+        },
+        "observed_first_contact_prefix_rho_target_minus_control": {
+          "p95": -0.1688095309385439,
+          "p99": -0.28514176243688993
+        },
+        "all_four_strictly_negative": true
+      }
+    },
+    "all_populations_pass": true
+  },
+  "provenance": {
+    "frozen_leaf_manifests": {
+      "control": {
+        "fixed_trace.npz": {
+          "sha256": "068d37a8d2acb3839e9d051de52b8cee5a465927845cec0b792d57ffa1199ad5",
+          "size_bytes": 36023
+        },
+        "training_like_seed_2_trace.npz": {
+          "sha256": "a2666a6f9cde2f5607f8d7bc8cde696578f3aab65247166d20b6c530359c1547",
+          "size_bytes": 6359939
+        },
+        "training_like_seed_2026081701_trace.npz": {
+          "sha256": "b31d45ada8c9c854c600dd878b5674044cb77c9600b0b8129746a92b9cf7caac",
+          "size_bytes": 6370380
+        },
+        "training_like_seed_2026081702_trace.npz": {
+          "sha256": "ca2ddac51d058b2b015ac643ce8f18786a6fdc4d1a542ecd72e1d29d79ab770d",
+          "size_bytes": 6358465
+        },
+        "summary.json": {
+          "sha256": "2f2d4532935137a33014934d186e8172c8e745fa396a8d9b5272cbd6a9e67c86",
+          "size_bytes": 44475598
+        }
+      },
+      "target": {
+        "fixed_trace.npz": {
+          "sha256": "2f0609977559d7be76396c4b401ca9b3d2e5fc31d3fe1077dbc15af035ede4c6",
+          "size_bytes": 33330
+        },
+        "training_like_seed_2_trace.npz": {
+          "sha256": "62967852edd9e3a3abaa3dbf9de5b77faae1e0cc4854e9b41ead92c010c6b54d",
+          "size_bytes": 7536277
+        },
+        "training_like_seed_2026081701_trace.npz": {
+          "sha256": "2f98ddda0a00783ff6176215b8beec210e1887d0a3dca40e4265832a21b3fce2",
+          "size_bytes": 7571272
+        },
+        "training_like_seed_2026081702_trace.npz": {
+          "sha256": "7a9a69bddae7bc5687f91671f5ededed5113344dae6a8a15b6cb9558e45d93ff",
+          "size_bytes": 7535097
+        },
+        "summary.json": {
+          "sha256": "1e9ab149845b580a71a5ebd20f865498b979ea952ebb820e4302e4c40c37768e",
+          "size_bytes": 43627410
+        }
+      }
+    },
+    "banked_analysis_reconciled": true
+  },
+  "claim_boundary": {
+    "no_learning": true,
+    "no_simulation": true,
+    "dose_selected_or_optimized": false,
+    "complete_physical_event_claim": false,
+    "hardware_limit_claim": false
+  },
+  "preflight_pass": true
+}

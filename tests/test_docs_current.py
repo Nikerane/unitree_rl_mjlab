@@ -136,6 +136,8 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
         "docs/superpowers/plans/2026-08-17-z1-impulse-diag90-post-training-evaluation.md",
         "docs/superpowers/plans/2026-08-17-z1-impulse-diag90-release-window-flush-shadow.md",
         "docs/superpowers/specs/2026-08-18-z1-impulse-cat-thesis-campaign-design.md",
+        "docs/superpowers/plans/2026-08-18-z1-impulse-cat-p02-bridge.md",
+        "docs/results/2026-08-18_z1_impulse_p02_bridge_preflight.md",
         "docs/research/reward-design/Z1_IMPULSE_CAT_CAMPAIGN_CROSS_MODEL_PACKET.md",
         "docs/research/reward-design/Z1_IMPULSE_CAT_SIMPLIFIED_CROSS_MODEL_REVIEWS.md",
         "docs/thesis/decisions/2026-08-13_vic_impulse_cat_and_trajectory_direction.md",
@@ -145,6 +147,7 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
         "scripts/slurm/vega_vic_canary.sbatch",
         "scripts/slurm/vega_vic_impulse_diag90_500.sbatch",
         "scripts/analyze_vic_impulse_diag90_500_evaluation.py",
+        "scripts/preflight_vic_impulse_p02_bridge.py",
         "evaluation/joint_position/evaluate_fic_pilot.py",
     )
     missing = [ref for ref in required_refs if f"`{ref}`" not in text]
@@ -163,9 +166,10 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
     assert "Training job `41119011` completed 500 iterations" in route
     assert "one-seed engineering result, not a VIC-superiority claim" in route
     assert "impulse CaT was log-only" in route
-    assert "next scientific route is not yet launch-authorized" in route
+    assert "user-authorized provisional-cap `p=0.2` bridge is now the current route" in route
+    assert "its zero-learning preflight passed" in route
+    assert "one target training run and frozen matched evaluation remain" in route
     assert "Event-dose calibration is not complete" in route
-    assert "no provisional-boundary `imp_max_p` or canary is selected" in route
     assert "redistribution/trade-off, not clean enforcement" in route
     assert "true 500 Hz velocity-limit violation risk increased" in route
     assert "lower native observed J3 impulse exposure" in route
@@ -173,7 +177,6 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
         "unequal native episode/contact horizons prevent a causal or full-contact interpretation"
         in route
     )
-    assert "release/window-flush shadow is planned but not launch-authorized" in route
     assert "direct-reference FIC-0/FIC-TT campaign" not in route
     assert (
         "direct-reference FIC launchers are banked baseline/reproducibility routes"
