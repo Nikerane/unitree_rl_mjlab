@@ -100,12 +100,14 @@ expected for distinct learned policies; no action-equality claim is made.
 
 The compact sufficient statistics are in
 `docs/results/assets/2026-08-18_z1_impulse_p02_bridge/analysis.json`; the adjacent `SHA256SUMS`
-binds it, the deterministic analyzer, and the exact sanitized review packet. Raw traces and
-checkpoints remain outside Git.
+binds it, the deterministic analyzer, the exact sanitized review packet, and the final review
+ledger. Raw traces and checkpoints remain outside Git.
 
 - Compact analysis SHA-256: `90c17761a73ff5b06598e86056109b6b6e8c9ec1c393e4edc3b2135c4d62abdd`.
 - Analyzer SHA-256: `0d33a835bc6bb6b816ddfd39e903767616f3b3837b2303b5f16a447070624655`.
 - Sanitized packet SHA-256: `fd8fc307bdef15ce17b6ebe157776083faba1a291422becbccca958ee1b72cb5`.
+- Final independent-review ledger SHA-256:
+  `34ff3748e7c282b95ca8b3d7a972bba6faf0ed377cc18eca89201fceefd95a16`.
 
 ## Decision
 
@@ -115,3 +117,23 @@ delivered-impulse, identity, and finiteness screens. That supports proposing mat
 training-seed confirmation at the same fixed treatment—not raising the dose or changing the caps.
 No confirmation run, another dose, contact flush, torque constraint, or rescue experiment is
 authorized by this record.
+
+## Independent review
+
+Five OpenCode Zen models received the same hashed sanitized packet. The Kimi K3 and GLM-5.2
+commands initially failed before inference; after transparent reporting, the user explicitly
+authorized one corrected attempt each. Both corrected attempts succeeded. Kimi K3, GLM-5.2,
+Qwen3.6-Plus, DeepSeek V4 Pro, and Claude Opus 5 all returned `CONFIRM`.
+
+All five judged independent training-seed confirmation scientifically justified and identified the
+single PPO training seed as the principal limitation. Qwen, DeepSeek, and GLM reserved
+contact/window completion for complete-contact or actuator-loading claims; Opus recommended cheap
+contact descriptors alongside confirmation; Kimi requested one cheap censoring sensitivity before
+confirmation. Opus and GLM raised the strongest caution: the target may be a luckier or
+better-converged overall training run, which could warrant paired newly trained `p=0` controls.
+
+The reviewers disagreed on exact seed count, control reuse, and timing of the cheap censoring check.
+Their unanimous `CONFIRM` advice does not alter the preregistered PASS and does not automatically
+authorize any confirmation design. Full provenance, response hashes, provider cost-field caveats,
+transport failures, user-authorized corrections, and adjudication are in
+`docs/research/reward-design/Z1_IMPULSE_CAT_P02_BRIDGE_CROSS_MODEL_REVIEWS.md`.

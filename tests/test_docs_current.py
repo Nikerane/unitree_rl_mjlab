@@ -354,8 +354,35 @@ def test_p02_bridge_result_and_review_packet_preserve_the_screening_claim():
         assert seed in packet
 
     reviews = reviews_path.read_text(encoding="utf-8")
-    assert "External review status: pending" in reviews
-    assert "No external model was invoked while banking this packet" in reviews
+    flat_reviews = " ".join(reviews.split())
+    assert "External review status: complete" in reviews
+    assert "Five initial one-shot attempts" in flat_reviews
+    assert "Two user-authorized single corrected attempts" in flat_reviews
+    assert "Kimi K3" in reviews and "original attempt failed before inference" in reviews
+    assert "GLM-5.2" in reviews and "original attempt failed before inference" in reviews
+    for session_id in (
+        "ses_feba5cbe1ffekvYzZOXyvSXDix",
+        "ses_feba3f003ffekOBTJjyglZ79o1",
+        "ses_febacb884ffeHpIAmgnOoybzXb",
+        "ses_febac38e0ffefKkxZE6AEEwb7I",
+        "ses_febaba3bcffelKhCypldwCohwf",
+    ):
+        assert session_id in reviews
+    for response_hash in (
+        "de852428883961a84674ad703548fdc864fe690aad732ca30ff7d53fa4a7718d",
+        "65ecac553b87dd6f3ee30c80813b4c617111260c1d15d8d7cfeb84eea8c10992",
+        "fa0cc4994a88f6ef0978c88e83d59444c06e1e1f2bbd36f2235b4de392064ed1",
+        "ddd8aa9a70f2a70861555a886d37b4b5648c8e5017836480910f7c731f715f5c",
+        "e4bf976dce79e5a01e8a29625ec95921278149211b179800478ed662c9557b16",
+    ):
+        assert response_hash in reviews
+    assert reviews.count("CONFIRM") >= 5
+    assert "unknown unit and currency" in flat_reviews
+    assert "preregistered numerical PASS controls the scientific verdict" in flat_reviews
+    assert "single PPO training seed" in flat_reviews
+    assert "complete-contact or actuator-loading claim" in flat_reviews
+    assert "paired newly trained controls" in flat_reviews
+    assert "not automatically authorized" in flat_reviews
 
     analysis = json.loads(analysis_path.read_text(encoding="utf-8"))
     assert tuple(analysis["training_like_by_seed"]) == ("2", "2026081701", "2026081702")
@@ -369,6 +396,7 @@ def test_p02_bridge_result_and_review_packet_preserve_the_screening_claim():
     for name in (
         "analysis.json",
         "../../../research/reward-design/Z1_IMPULSE_CAT_P02_BRIDGE_CROSS_MODEL_PACKET.md",
+        "../../../research/reward-design/Z1_IMPULSE_CAT_P02_BRIDGE_CROSS_MODEL_REVIEWS.md",
     ):
         path = analysis_path.parent / name
         assert manifest[name] == hashlib.sha256(path.read_bytes()).hexdigest()
@@ -387,3 +415,6 @@ def test_index_routes_to_the_completed_p02_bridge_without_overclaiming():
     assert "bridge passed every preregistered gate in all three stochastic populations" in route
     assert "independent training-seed confirmation is not yet run or authorized" in route
     assert "one target training run and frozen matched evaluation remain" not in route
+    assert "Five successful external reviews recommend confirmation" in route
+    assert "two initial attempts failed before inference" in route
+    assert "user-authorized corrected attempts succeeded" in route
