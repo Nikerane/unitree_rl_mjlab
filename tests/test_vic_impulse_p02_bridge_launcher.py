@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -51,8 +52,23 @@ def _env(tmp_path: Path) -> dict[str, str]:
   home = tmp_path / "home"
   code = tmp_path / "repos/code"
   assets = tmp_path / "repos/safe_impact_manipulation"
+  fake_bin = home / "bin"
+  fake_bin.mkdir(parents=True)
+  real_sha256sum = shutil.which("sha256sum")
+  assert real_sha256sum is not None
+  sha256sum = fake_bin / "sha256sum"
+  sha256sum.write_text(
+    "#!/bin/sh\n"
+    "case \"${BAD_SHA256_MODE:-}\" in\n"
+    "  fail) exit 9 ;;\n"
+    "  empty) exit 0 ;;\n"
+    "  invalid) printf 'not-a-digest  %s\\n' \"$1\"; exit 0 ;;\n"
+    f"  *) exec \"{real_sha256sum}\" \"$@\" ;;\n"
+    "esac\n"
+  )
+  sha256sum.chmod(0o755)
   env = {
-    "PATH": os.environ["PATH"],
+    "PATH": f"{fake_bin}:{os.environ['PATH']}",
     "HOME": str(home),
     "RUN_ROOT": str(code),
     "ASSET_REPO": str(assets),
@@ -205,3 +221,17 @@ def test_bridge_launcher_rejects_invalid_checkpoint_set_or_content(
 
   assert result.returncode == 2
   assert "checkpoint" in result.stdout
+
+
+@pytest.mark.parametrize("mode", ("fail", "empty", "invalid"))
+def test_bridge_launcher_rejects_failed_or_malformed_checkpoint_sha256(
+  tmp_path: Path, mode: str
+):
+  env = _env(tmp_path)
+  env["BAD_SHA256_MODE"] = mode
+
+  result = _run(env)
+
+  assert result.returncode == 2
+  assert "checkpoint SHA-256 validation failed" in result.stdout
+  assert "Z1_VIC_IMPULSE_P02_BRIDGE_PASS" not in result.stdout

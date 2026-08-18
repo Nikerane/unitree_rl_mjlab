@@ -169,8 +169,13 @@ FINAL_ASSET_STATUS=$(git -C "$ASSET_REPO" status --porcelain=v1 --untracked-file
   || fail "postflight asset provenance drifted"
 
 for CHECKPOINT in "${EXPECTED_CHECKPOINTS[@]}"; do
+  CHECKPOINT_SHA256_LINE=$(sha256sum "$CHECKPOINT") \
+    || fail "checkpoint SHA-256 validation failed"
+  CHECKPOINT_SHA256="${CHECKPOINT_SHA256_LINE%%[[:space:]]*}"
+  [[ "$CHECKPOINT_SHA256" =~ ^[0-9a-f]{64}$ ]] \
+    || fail "checkpoint SHA-256 validation failed"
   printf 'Z1_VIC_IMPULSE_P02_BRIDGE_CHECKPOINT imp_max_p=%s basename=%s sha256=%s\n' \
-    "$IMP_MAX_P" "$(basename "$CHECKPOINT")" "$(sha256sum "$CHECKPOINT" | cut -d ' ' -f 1)"
+    "$IMP_MAX_P" "$(basename "$CHECKPOINT")" "$CHECKPOINT_SHA256"
 done
 printf 'Z1_VIC_IMPULSE_P02_BRIDGE_PASS imp_max_p=%s caps=%s run_dir=%s\n' \
   "$IMP_MAX_P" "$CAPS" "$RUN_DIR"
