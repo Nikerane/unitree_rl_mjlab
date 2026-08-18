@@ -589,6 +589,10 @@ def test_dose_curve_result_packet_and_analysis_are_exact_and_bounded():
 def test_current_docs_route_to_dose_curve_without_overclaiming():
     index = (REPO / "docs/README.md").read_text(encoding="utf-8")
     thesis = (REPO / "docs/thesis/README.md").read_text(encoding="utf-8")
+    result = (
+        REPO / "docs/results/2026-08-18_z1_impulse_cat_dose_curve.md"
+    ).read_text(encoding="utf-8")
+    results_index = (REPO / "docs/results/README.md").read_text(encoding="utf-8")
     for text in (index, thesis):
         flat_text = " ".join(text.split())
         assert "p=.1 is too weak" in flat_text
@@ -597,8 +601,28 @@ def test_current_docs_route_to_dose_curve_without_overclaiming():
         assert "not a formal PASS" in flat_text
         assert "independent training-seed confirmation" in flat_text.lower()
         assert "not an optimal-dose" in flat_text
+        assert "unapproved replay-only 10-repeat execution-nondeterminism envelope" in flat_text
     assert "`docs/results/2026-08-18_z1_impulse_cat_dose_curve.md`" in index
+    assert (
+        "`docs/research/reward-design/"
+        "Z1_IMPULSE_CAT_DOSE_CURVE_CROSS_MODEL_REVIEWS.md`"
+        in index
+    )
     assert "`../results/2026-08-18_z1_impulse_cat_dose_curve.md`" in thesis
+    assert (
+        "[2026-08-18_z1_impulse_cat_dose_curve.md]"
+        "(2026-08-18_z1_impulse_cat_dose_curve.md)"
+        in results_index
+    )
+    flat_result = " ".join(result.split())
+    assert "unapproved replay-only 10-repeat execution-nondeterminism envelope" in flat_result
+    assert "Neither replay nor training is authorized" in flat_result
+    assert "The next scientific question is independent training-seed confirmation" not in result
+    assert (
+        "Independent training-seed confirmation remains unrun and is the bounded next question"
+        not in index
+    )
+    assert "Independent training-seed confirmation is the bounded next question" not in index
 
 
 def test_dose_curve_cross_model_reviews_are_bounded_and_manifested():
@@ -619,6 +643,7 @@ def test_dose_curve_cross_model_reviews_are_bounded_and_manifested():
     assert hashlib.sha256(packet_path.read_bytes()).hexdigest() == (
         "485bf07d472d94c3a200721b72732ec2735ba1fea02219619fac80cb0a51a6cd"
     )
+    assert len(packet_path.read_bytes()) == 3278
 
     reviews = reviews_path.read_text(encoding="utf-8")
     flat_reviews = " ".join(reviews.split())
@@ -685,6 +710,7 @@ def test_dose_curve_cross_model_reviews_are_bounded_and_manifested():
         "risk-difference fraction",
         "DeepSeek's optimum claim is unsupported",
         "fresh-RNG rescue",
+        "3,278 bytes",
         "`-21/4096`",
         "`-20/4096`",
         "`-20.48/4096`",
@@ -705,7 +731,8 @@ def test_dose_curve_cross_model_reviews_are_bounded_and_manifested():
         "one PPO training seed",
         "cannot turn numerical FAIL into PASS",
         "no new training",
-        "strongest tested policy instance, not an optimum",
+        "All five treated p=.2 as the strongest tested policy instance",
+        "DeepSeek explicitly overcalled it an optimum",
     ):
         assert boundary in flat_reviews
 

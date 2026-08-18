@@ -176,9 +176,10 @@ applied above and in `CONSTRAINED_RL_LANDSCAPE.md` §5.*
   a GPU-sensitive contact/termination boundary despite identical declared population/RNG identity.
   The bounded thesis-ready claim is therefore that p=.2 produced the best native-observed trade-off
   among these seed-2 policy instances, not that it passed formally and not an optimal-dose claim.
-  Independent training-seed confirmation remains unrun; project caps are not hardware limits,
-  soft-CaT is not a
-  hard clamp, and terminal censoring prevents a complete-contact claim. See
+  Independent training-seed confirmation remains unrun; before it, the bounded next proposal is an
+  unapproved replay-only 10-repeat execution-nondeterminism envelope. Neither replay nor training
+  is authorized. Project caps are not hardware limits, soft-CaT is not a hard clamp, and terminal
+  censoring prevents a complete-contact claim. See
   `../results/2026-08-18_z1_impulse_cat_dose_curve.md`.
 - worst-case tail closure via VIC (capability layer — after fixed-impedance results).
 - ~~citation verification pass~~ **DONE** (2026-06-17): no fabricated ids; 4 minor title/year fixes

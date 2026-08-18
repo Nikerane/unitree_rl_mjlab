@@ -11,7 +11,7 @@
   private repository paths supplied: no
 - Review authority: advisory interpretation only; opinions cannot turn numerical FAIL into PASS
 
-The unchanged source packet remained 3,274 bytes, including its terminal newline. A post-session
+The unchanged source packet remained 3,278 bytes, including its terminal newline. A post-session
 audit found a small shell-transport deviation that must not be hidden: all five OpenCode user
 messages had the same SHA-256
 `86e1f9e8cc8a96b535e0e3267abce2a78ea1ecd7a53652a23116fadf3f4e6c02`, consisting of the packet
@@ -67,14 +67,15 @@ dollars.
 
 ## Convergence and disagreement
 
-None recommended increasing directly to p=.3, and all recognized p=.2 as the strongest tested
-policy instance, not an optimum. All accepted that the same declared population and RNG can cross
-the strict boundary under separate A100 executions. They split on what that means next: Kimi, GLM,
-and DeepSeek voted to advance p=.2; Qwen voted to stop before training seeds; Opus asked to revise
-the evaluation decision procedure first. Kimi and GLM would combine independent training-seed
-confirmation with deterministic or repeated evaluation. Qwen asked for a larger evaluation
-population. Opus asked first for repeated executions of the existing frozen pair and population.
-These are advisory design proposals, not new experimental evidence or authorization.
+None recommended increasing directly to p=.3. All five treated p=.2 as the strongest tested policy
+instance. DeepSeek explicitly overcalled it an optimum; the adjudication below rejects that claim.
+All accepted that the same declared population and RNG can cross the strict boundary under
+separate A100 executions. They split on what that means next: Kimi, GLM, and DeepSeek voted to
+advance p=.2; Qwen voted to stop before training seeds; Opus asked to revise the evaluation
+decision procedure first. Kimi and GLM would combine independent training-seed confirmation with
+deterministic or repeated evaluation. Qwen asked for a larger evaluation population. Opus asked
+first for repeated executions of the existing frozen pair and population. These are advisory
+design proposals, not new experimental evidence or authorization.
 
 ## Factual adjudication
 

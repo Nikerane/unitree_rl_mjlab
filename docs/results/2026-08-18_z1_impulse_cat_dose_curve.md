@@ -5,8 +5,9 @@ dose fails the preregistered every-population gate. The separate matrix is `p=.1
 `p=.2` PASS/FAIL/PASS, and `p=.3` FAIL/FAIL/FAIL. Thus `p=.1 is too weak`; `p=.3 is not
 monotonically better` and has worse impulse-tail/velocity results plus two censored utility
 populations; `p=.2 is the strongest tested policy instance`, but it is borderline and **not a
-formal PASS**. The next scientific question is independent training-seed confirmation of the same
-`p=.2` treatment, not an increased dose.
+formal PASS**. Before independent training-seed confirmation, the bounded next proposal is an
+unapproved replay-only 10-repeat execution-nondeterminism envelope on the frozen p=0 versus p=.2
+pair; neither replay nor training is authorized.
 
 This is native observed horizon evidence from one training seed under provisional project caps;
 soft pressure, not a clamp, was applied during training. This record makes no manufacturer or
