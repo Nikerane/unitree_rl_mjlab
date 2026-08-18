@@ -32,7 +32,8 @@ fail() {
 [[ "${SLURM_ARRAY_TASK_STEP:-}" = 1 ]] || fail "array step must be exactly 1"
 [[ "${SLURM_ARRAY_JOB_ID:-}" =~ ^[0-9]+$ ]] || fail "array job id must be numeric"
 [[ "${SLURM_ARRAY_TASK_ID:-}" =~ ^[01]$ ]] || fail "array task id must be 0 or 1"
-[[ "${SLURM_JOB_ID:-}" =~ ^[0-9]+(_[01])?$ ]] || fail "SLURM_JOB_ID must be numeric or array-form"
+[[ "${SLURM_JOB_ID:-}" = "${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}" ]] \
+  || fail "SLURM_JOB_ID must match the array job and task id"
 for VARIABLE in WORLD_SIZE RANK LOCAL_RANK MASTER_ADDR MASTER_PORT RESUME_PATH; do
   [[ -z "${!VARIABLE:-}" ]] || fail "$VARIABLE must be empty"
 done
