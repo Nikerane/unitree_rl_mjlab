@@ -169,14 +169,17 @@ applied above and in `CONSTRAINED_RL_LANDSCAPE.md` §5.*
   completed uniform-`0.9` pair is diagnostic plumbing only. Complete physical-event dose remains
   unresolved because 585/593 violating reads were terminal and only 9/580 unambiguous associated
   contacts completed. See `../results/2026-08-15_z1_impulse_cat_step1.md`.
-  **One-training-seed bridge screen DONE (2026-08-18):** the predeclared provisional-cap
-  `imp_max_p=0.2` target passed every impulse, velocity, joint-tail, utility, delivered-impulse,
-  identity, and finiteness gate separately in three matched 4,096-world stochastic evaluation
-  populations. This is thesis-relevant evidence that the active graded mechanism can shape a VIC
-  policy without reproducing the earlier high-dose velocity trade-off, but it is not yet the thesis
-  confirmation: independent PPO training seeds remain unrun, the project caps are not hardware
-  limits, soft-CaT is not a hard clamp, and complete physical contacts remain terminal-censored.
-  See `../results/2026-08-18_z1_impulse_p02_bridge.md`.
+  **One-training-seed compact dose screen DONE (2026-08-18):** p=.1 is too weak; p=.3 is not
+  monotonically better and worsens tail/velocity behavior; p=.2 is the strongest tested policy
+  instance but not a formal PASS under the strict every-population rule. It passed two replicas and
+  missed the third impulse-risk CI-high gate by 0.0001171875 after one control environment crossed
+  a GPU-sensitive contact/termination boundary despite identical declared population/RNG identity.
+  The bounded thesis-ready claim is therefore that p=.2 produced the best native-observed trade-off
+  among these seed-2 policy instances, not that it passed formally and not an optimal-dose claim.
+  Independent training-seed confirmation remains unrun; project caps are not hardware limits,
+  soft-CaT is not a
+  hard clamp, and terminal censoring prevents a complete-contact claim. See
+  `../results/2026-08-18_z1_impulse_cat_dose_curve.md`.
 - worst-case tail closure via VIC (capability layer — after fixed-impedance results).
 - ~~citation verification pass~~ **DONE** (2026-06-17): no fabricated ids; 4 minor title/year fixes
   applied. Still confirm exact published venues per the thesis house citation style.

@@ -18,6 +18,7 @@ grep-confirmed to hit a living doc now and traced to the consolidation step that
 """
 import hashlib
 import json
+import math
 import re
 from pathlib import Path
 
@@ -174,9 +175,9 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
     assert "Training job `41119011` completed 500 iterations" in route
     assert "one-seed engineering result, not a VIC-superiority claim" in route
     assert "impulse CaT was log-only" in route
-    assert "user-authorized provisional-cap `p=0.2` bridge is complete" in route
-    assert "bridge passed every preregistered gate in all three stochastic populations" in route
-    assert "independent training-seed confirmation is not yet run or authorized" in route
+    assert "provisional-cap compact dose screen is complete" in route
+    assert "p=.2 is the strongest tested policy instance but not a formal PASS" in route
+    assert "Independent training-seed confirmation remains unrun" in route
     assert "Event-dose calibration is not complete" in route
     assert "redistribution/trade-off, not clean enforcement" in route
     assert "true 500 Hz velocity-limit violation risk increased" in route
@@ -413,9 +414,188 @@ def test_index_routes_to_the_completed_p02_bridge_without_overclaiming():
     route = next(
         line for line in text.splitlines() if line.startswith("**Current GPU route:**")
     )
-    assert "bridge passed every preregistered gate in all three stochastic populations" in route
-    assert "independent training-seed confirmation is not yet run or authorized" in route
+    assert "p=.2 is the strongest tested policy instance but not a formal PASS" in route
+    assert "Independent training-seed confirmation remains unrun" in route
     assert "one target training run and frozen matched evaluation remain" not in route
-    assert "Five successful external reviews recommend confirmation" in route
-    assert "two initial attempts failed before inference" in route
-    assert "user-authorized corrected attempts succeeded" in route
+    assert "not an optimal-dose" in route
+
+
+def test_dose_curve_result_packet_and_analysis_are_exact_and_bounded():
+    result_path = REPO / "docs/results/2026-08-18_z1_impulse_cat_dose_curve.md"
+    asset_dir = REPO / "docs/results/assets/2026-08-18_z1_impulse_cat_dose_curve"
+    analysis_path = asset_dir / "analysis.json"
+    manifest_path = asset_dir / "SHA256SUMS"
+    packet_path = (
+        REPO
+        / "docs/research/reward-design/Z1_IMPULSE_CAT_DOSE_CURVE_REVIEW_PACKET.md"
+    )
+
+    assert hashlib.sha256(analysis_path.read_bytes()).hexdigest() == (
+        "8289a3c0247e086ae244c70bbbddb0820cf6390543ee61a90d6d71026da24135"
+    )
+    analysis = json.loads(analysis_path.read_text(encoding="utf-8"))
+    numeric_values = []
+
+    def collect_numbers(value):
+        if isinstance(value, dict):
+            for nested in value.values():
+                collect_numbers(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                collect_numbers(nested)
+        elif isinstance(value, (int, float)) and not isinstance(value, bool):
+            numeric_values.append(value)
+
+    collect_numbers(analysis)
+    assert all(math.isfinite(value) for value in numeric_values)
+    assert analysis["provenance"]["code_revision"] == (
+        "9718a7958cbd7ec6b2f3e126f8fbae8ef81762df"
+    )
+    assert analysis["provenance"]["asset_revision"] == (
+        "b58ccd2f81fd246f27c1e8d88cf86484cd888703"
+    )
+    assert analysis["protocol_identity"]["live_imp_max_p"] == 0.0
+    assert analysis["protocol_identity"]["provisional_caps_n_m_s"] == [
+        0.82,
+        1.64,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+    ]
+    assert analysis["protocol_identity"]["stochastic_seeds"] == [
+        2,
+        2026081701,
+        2026081702,
+    ]
+    expected_population_identity = {
+        "2": (
+            "5a7dd99270580d0d71b10fcffe70aff6186e8f3b57987cae6f5521f0639c9cc6",
+            {"reset": 10000021, "observation": 20000035, "action": 30000043},
+        ),
+        "2026081701": (
+            "5a7dd99270580d0d71b10fcffe70aff6186e8f3b57987cae6f5521f0639c9cc6",
+            {"reset": 2036081720, "observation": 2046081734, "action": 2056081742},
+        ),
+        "2026081702": (
+            "5a7dd99270580d0d71b10fcffe70aff6186e8f3b57987cae6f5521f0639c9cc6",
+            {"reset": 2036081721, "observation": 2046081735, "action": 2056081743},
+        ),
+    }
+    for seed, (population_hash, rng_streams) in expected_population_identity.items():
+        identity = analysis["protocol_identity"]["populations"]["training_like_by_seed"][seed]
+        assert identity["initial_population_sha256"] == population_hash
+        assert identity["rng_streams"] == rng_streams
+    assert tuple(analysis["dose_results"]) == (
+        "dose_p01_target",
+        "dose_p02_target",
+        "dose_p03_target",
+    )
+    expected_verdicts = {
+        "0.1": (False, False, False),
+        "0.2": (True, False, True),
+        "0.3": (False, False, False),
+    }
+    for dose, expected in expected_verdicts.items():
+        role = {"0.1": "dose_p01_target", "0.2": "dose_p02_target", "0.3": "dose_p03_target"}[dose]
+        dose_result = analysis["dose_results"][role]
+        populations = dose_result["training_like_by_seed"]
+        assert tuple(populations) == ("2", "2026081701", "2026081702")
+        assert tuple(pop["verdict"]["pass"] for pop in populations.values()) == expected
+        assert dose_result["overall_verdict"]["pass"] is False
+
+    result = result_path.read_text(encoding="utf-8")
+    flat_result = " ".join(result.split())
+    for exact_row in (
+        "| .1 | 2 | 0.8545->0.3418 (-0.5127; -0.1709), F | .8067->.8161 / .9735->.9485, F | 0.5127->0.7324 (+0.2197; +0.4883), F | 0/0; .9827 (.9817), P |",
+        "| .1 | 2026081701 | 0.7324->0.2686 (-0.4639; -0.1709), F | .8070->.8108 / .9071->.9383, F | 0.6836->0.6104 (-0.0732; +0.2197), F | censored initial fragment, F |",
+        "| .1 | 2026081702 | 0.8545->0.2197 (-0.6348; -0.3418), F | .8069->.8097 / .9870->.9418, F | 0.6592->1.1719 (+0.5127; +0.8301), F | 0/0; .9834 (.9825), P |",
+        "| .2 | 2 | 0.8545->0 (-0.8545; -0.5859), P | .8067->.5158 / .9735->.6434, P | 0.5127->0.1709 (-0.3418; -0.1221), P | 0/0; .9954 (.9948), P |",
+        "| .2 | 2026081701 | 0.7324->0 (-0.7324; -0.4883), **F** | .8070->.4559 / .9071->.6361, P | 0.6836->0.1953 (-0.4883; -0.2441), P | 0/0; .9964 (.9957), P |",
+        "| .2 | 2026081702 | 0.8545->0 (-0.8545; -0.5859), P | .8069->.5208 / .9870->.6335, P | 0.6592->0.2441 (-0.4150; -0.1465), P | 0/0; .9955 (.9950), P |",
+        "| .3 | 2 | 0.8545->0.0732 (-0.7812; -0.4883), F | .8067->.7877 / .9735->.8787, F | 0.5127->0.6104 (+0.0977; +0.3662), F | censored initial fragment, F |",
+        "| .3 | 2026081701 | 0.7324->0.0488 (-0.6836; -0.4150), F | .8070->.7866 / .9071->.8753, F | 0.6836->0.6348 (-0.0488; +0.2197), F | 0/0; .9740 (.9729), P |",
+        "| .3 | 2026081702 | 0.8545->0.0977 (-0.7568; -0.4639), F | .8069->.7866 / .9870->.8842, F | 0.6592->0.9033 (+0.2441; +0.5371), F | censored initial fragment, F |",
+    ):
+        assert exact_row in result
+    for fact in (
+        "p=.1 is too weak",
+        "p=.3 is not monotonically better",
+        "p=.2 is the strongest tested policy instance",
+        "not a formal PASS",
+        "identical declared initial-population hashes and RNG stream IDs",
+        "control environment `3253`",
+        "`0.8731314`",
+        "`+0.0531314`",
+        "`0.54809135`",
+        "`-0.27190864`",
+        "`-0.005126953125`",
+        "`-0.0048828125`",
+        "`0.0001171875`",
+        "native-float margin",
+        "array `41504493_0`",
+        "array `41513714`",
+        "00:25:31",
+        "0.845 allocated A100 GPU-hours",
+        "0b24cab9bcc59e1507b2ca4f3ccdcf63d1bf58901b03a263a7bb1b8cee60371c",
+    ):
+        assert fact in flat_result
+    for boundary in (
+        "one training seed",
+        "native observed horizon",
+        "provisional project caps",
+        "soft pressure, not a clamp",
+        "no manufacturer or hardware-safety claim",
+        "no complete-contact claim",
+        "no optimal-dose claim",
+        "evaluation replicas are not training seeds",
+    ):
+        assert boundary in flat_result
+
+    packet = packet_path.read_text(encoding="utf-8")
+    flat_packet = " ".join(packet.split())
+    assert len(re.findall(r"\b[\w.-]+\b", packet)) <= 700
+    assert "moving to independent training-seed confirmation of `p=0.2`" in flat_packet
+    assert "rather than increasing dose" in flat_packet
+    for forbidden in (
+        "/Users/",
+        "/private/",
+        "/ceph/",
+        "eunikhilr",
+        "nikerane",
+        "model_499.pt",
+        "analysis-41513714.json",
+        "f4f86cfd81fdc78824b85a059735b2f605c6761c624be59e0e778ef3fbd681c3",
+        "9718a7958cbd7ec6b2f3e126f8fbae8ef81762df",
+        ".npz",
+        "summary.json",
+    ):
+        assert forbidden not in packet
+    assert re.search(r"\b[0-9a-f]{40,64}\b", packet) is None
+
+    manifest = dict(
+        row.split("  ", 1)[::-1]
+        for row in manifest_path.read_text(encoding="utf-8").splitlines()
+    )
+    for name in (
+        "analysis.json",
+        "../../../../scripts/analyze_vic_impulse_dose_curve.py",
+        "../../2026-08-18_z1_impulse_cat_dose_curve.md",
+        "../../../research/reward-design/Z1_IMPULSE_CAT_DOSE_CURVE_REVIEW_PACKET.md",
+    ):
+        assert manifest[name] == hashlib.sha256((asset_dir / name).read_bytes()).hexdigest()
+
+
+def test_current_docs_route_to_dose_curve_without_overclaiming():
+    index = (REPO / "docs/README.md").read_text(encoding="utf-8")
+    thesis = (REPO / "docs/thesis/README.md").read_text(encoding="utf-8")
+    for text in (index, thesis):
+        flat_text = " ".join(text.split())
+        assert "p=.1 is too weak" in flat_text
+        assert "p=.3 is not monotonically better" in flat_text
+        assert "p=.2 is the strongest tested policy instance" in flat_text
+        assert "not a formal PASS" in flat_text
+        assert "independent training-seed confirmation" in flat_text.lower()
+        assert "not an optimal-dose" in flat_text
+    assert "`docs/results/2026-08-18_z1_impulse_cat_dose_curve.md`" in index
+    assert "`../results/2026-08-18_z1_impulse_cat_dose_curve.md`" in thesis
