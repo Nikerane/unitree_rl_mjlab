@@ -129,7 +129,7 @@ def _env(tmp_path: Path, task_id: int) -> dict[str, str]:
     "import json, os, sys\n"
     "from pathlib import Path\n"
     "import numpy as np\n"
-    "output, role, checkpoint_sha, code_sha, asset_sha = sys.argv[1:]\n"
+    "output, role, checkpoint, checkpoint_sha, code_sha, asset_sha = sys.argv[1:]\n"
     "root = Path(output); root.mkdir()\n"
     "mode = os.environ.get('BAD_OUTPUT_MODE', '')\n"
     "velocity = np.array([[0.2, 0.4]], dtype=np.float64)\n"
@@ -146,7 +146,7 @@ def _env(tmp_path: Path, task_id: int) -> dict[str, str]:
     "lambda_per_joint=np.zeros((1, 2, 6)), substep_rolling_per_joint=np.zeros((10, 2, 6)))\n"
     "summary = {'schema_version': 2, 'task': "
     "'Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-JointPosition-VariableImpedance-TT', "
-    "'checkpoint': {'role': role, 'sha256': checkpoint_sha}, 'code_revision': code_sha, "
+    "'checkpoint': {'role': role, 'path': str(Path(checkpoint).resolve()), 'sha256': checkpoint_sha}, 'code_revision': code_sha, "
     "'asset_revision': asset_sha, 'protocol': {'live_imp_max_p': 0.0, "
     "'fixed_seed': 2026081202, 'stochastic_seeds': [2, 2026081701, 2026081702]}}\n"
     "def population_protocol(seed, num_envs, steps, mode):\n"
@@ -159,6 +159,7 @@ def _env(tmp_path: Path, task_id: int) -> dict[str, str]:
     "for seed in (2, 2026081701, 2026081702)}}\n"
     "if mode == 'wrong_role': summary['checkpoint']['role'] = 'dose_p0_control'\n"
     "if mode == 'wrong_summary_hash': summary['checkpoint']['sha256'] = '0' * 64\n"
+    "if mode == 'wrong_checkpoint_path': summary['checkpoint']['path'] = '/wrong/model_499.pt'\n"
     "if mode == 'wrong_code': summary['code_revision'] = '0' * 40\n"
     "if mode == 'wrong_asset': summary['asset_revision'] = '0' * 40\n"
     "if mode == 'wrong_live_p': summary['protocol']['live_imp_max_p'] = 0.3\n"
@@ -179,9 +180,10 @@ def _env(tmp_path: Path, task_id: int) -> dict[str, str]:
     "case \"${1:-}\" in\n"
     "  -) PYTHONPATH=\"$HOME/runtime-stubs:${PYTHONPATH:-}\" exec \"$REAL_PYTHON\" \"$@\" ;;\n"
     "  *scripts/impulse_cat_activation_survey.py)\n"
-    "    role=''; output=''; previous=''\n"
+    "    role=''; checkpoint=''; output=''; previous=''\n"
     "    for arg in \"$@\"; do\n"
     "      [ \"$previous\" = --checkpoint-role ] && role=\"$arg\"\n"
+    "      [ \"$previous\" = --checkpoint ] && checkpoint=\"$arg\"\n"
     "      [ \"$previous\" = --output-dir ] && output=\"$arg\"\n"
     "      previous=\"$arg\"\n"
     "    done\n"
@@ -192,7 +194,7 @@ def _env(tmp_path: Path, task_id: int) -> dict[str, str]:
     "      dose_p03_target) digest=$P03_CHECKPOINT_FROZEN_SHA ;;\n"
     "      *) exit 73 ;;\n"
     "    esac\n"
-    "    \"$REAL_PYTHON\" \"$HOME/generate_evaluation.py\" \"$output\" \"$role\" \"$digest\" \"$EXPECTED_CODE_REVISION\" \"$EXPECTED_ASSET_REVISION\"\n"
+    "    \"$REAL_PYTHON\" \"$HOME/generate_evaluation.py\" \"$output\" \"$role\" \"$checkpoint\" \"$digest\" \"$EXPECTED_CODE_REVISION\" \"$EXPECTED_ASSET_REVISION\"\n"
     "    case \"${POSTFLIGHT_MUTATION:-}\" in\n"
     "      checkpoint) printf mutation > \"${MUTATE_CHECKPOINT}\" ;;\n"
     "      code_dirty) printf no > \"$RUN_ROOT/postflight-dirty\" ;;\n"
@@ -444,7 +446,7 @@ def test_dose_eval_rejects_postflight_provenance_drift(
   "mode",
   (
     "missing", "extra", "symlink", "nonfinite", "nonzero_impulse", "wrong_delta",
-    "wrong_shape", "wrong_role", "wrong_summary_hash", "wrong_code", "wrong_asset",
+    "wrong_shape", "wrong_role", "wrong_summary_hash", "wrong_checkpoint_path", "wrong_code", "wrong_asset",
     "wrong_live_p", "wrong_seeds", "wrong_population", "wrong_rng",
   ),
 )

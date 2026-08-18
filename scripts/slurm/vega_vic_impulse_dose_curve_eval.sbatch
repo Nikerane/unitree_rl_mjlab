@@ -105,6 +105,9 @@ case "$SLURM_ARRAY_TASK_ID" in
 esac
 [[ -f "$CHECKPOINT" && ! -L "$CHECKPOINT" && "$(basename "$CHECKPOINT")" = model_499.pt ]] \
   || fail "checkpoint must be a regular non-symlink model_499.pt"
+CHECKPOINT_DIRECTORY=$(cd "$(dirname "$CHECKPOINT")" 2>/dev/null && pwd -P) \
+  || fail "checkpoint directory is unavailable"
+readonly RESOLVED_CHECKPOINT="$CHECKPOINT_DIRECTORY/model_499.pt"
 CHECKPOINT_SHA256=$(sha256sum "$CHECKPOINT" 2>/dev/null | cut -d ' ' -f 1) \
   || fail "checkpoint SHA-256 generation failed"
 [[ "$CHECKPOINT_SHA256" =~ ^[0-9a-f]{64}$ ]] || fail "checkpoint SHA-256 is invalid"
@@ -149,7 +152,7 @@ PY
 
 "$PY" "$RUN_ROOT/scripts/impulse_cat_activation_survey.py" \
   --checkpoint-role "$ROLE" \
-  --checkpoint "$CHECKPOINT" \
+  --checkpoint "$RESOLVED_CHECKPOINT" \
   --output-dir "$EVALUATION_DIR" \
   --device cuda:0
 
@@ -175,7 +178,7 @@ for OUTPUT in "${ACTUAL_OUTPUTS[@]}"; do
     || fail "evaluator output set contains a non-regular artifact"
 done
 
-"$PY" - "$EVALUATION_DIR" "$ROLE" "$CHECKPOINT_SHA256" \
+"$PY" - "$EVALUATION_DIR" "$ROLE" "$RESOLVED_CHECKPOINT" "$CHECKPOINT_SHA256" \
   "$EXPECTED_CODE_REVISION" "$EXPECTED_ASSET_REVISION" <<'PY' \
   || fail "evaluation traces or provenance failed validation"
 import json
@@ -186,7 +189,7 @@ import sys
 import numpy as np
 
 root = Path(sys.argv[1])
-role, checkpoint_sha, code_revision, asset_revision = sys.argv[2:]
+role, checkpoint_path, checkpoint_sha, code_revision, asset_revision = sys.argv[2:]
 trace_names = (
   "fixed_trace.npz",
   "training_like_seed_2_trace.npz",
@@ -233,7 +236,11 @@ expected_task = (
 )
 if summary.get("schema_version") != 2 or summary.get("task") != expected_task:
   raise RuntimeError("summary schema or task mismatch")
-if summary.get("checkpoint") != {"role": role, "sha256": checkpoint_sha}:
+if summary.get("checkpoint") != {
+  "role": role,
+  "path": checkpoint_path,
+  "sha256": checkpoint_sha,
+}:
   raise RuntimeError("summary checkpoint provenance mismatch")
 if summary.get("code_revision") != code_revision or summary.get("asset_revision") != asset_revision:
   raise RuntimeError("summary repository provenance mismatch")
