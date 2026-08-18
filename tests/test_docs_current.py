@@ -137,6 +137,7 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
         "docs/superpowers/plans/2026-08-17-z1-impulse-diag90-release-window-flush-shadow.md",
         "docs/superpowers/specs/2026-08-18-z1-impulse-cat-thesis-campaign-design.md",
         "docs/research/reward-design/Z1_IMPULSE_CAT_CAMPAIGN_CROSS_MODEL_PACKET.md",
+        "docs/research/reward-design/Z1_IMPULSE_CAT_SIMPLIFIED_CROSS_MODEL_REVIEWS.md",
         "docs/thesis/decisions/2026-08-13_vic_impulse_cat_and_trajectory_direction.md",
         "src/tasks/hammer/mdp/variable_impedance.py",
         "scripts/slurm/vega_fic_direct_reference_smoke.sbatch",
