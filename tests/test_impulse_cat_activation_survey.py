@@ -1,6 +1,7 @@
 """Pure analysis tests for the no-learning impulse-CaT activation survey."""
 
 from dataclasses import dataclass
+import inspect
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -30,6 +31,8 @@ from scripts.impulse_cat_activation_survey import (
 CONTROL_SHA = "f4f86cfd81fdc78824b85a059735b2f605c6761c624be59e0e778ef3fbd681c3"
 TARGET_SHA = "ddd7ac4c855160bff1db2af52e642d960dab2bef34e41dd2532002185eb36d15"
 BRIDGE_TARGET_SHA = "57000e958bbafa2c62929652d3b76fd6ed571c9867bee3735c14baf0ca57d8de"
+DOSE_P01_SHA = "92f1d97c8ff1476cb26c0b648478a0bc3c522e4e1eb7087389fb8e0d6bf73f86"
+DOSE_P03_SHA = "4c0a665fffc077d488630a28b258c1593050f969b4f6227147c3594097dc4efd"
 
 
 def _install_fake_population_runtime(monkeypatch, events):
@@ -46,8 +49,10 @@ def _install_fake_population_runtime(monkeypatch, events):
 
   class Env:
     def __init__(self, *, cfg, device, render_mode):
-      del cfg, render_mode
+      del render_mode
       self.device = device
+      self.num_envs = cfg.scene.num_envs
+      self.control_steps = 0
       self.max_episode_length = 1
       self.observation_manager = SimpleNamespace(compute=self._compute_observation)
 
@@ -57,7 +62,7 @@ def _install_fake_population_runtime(monkeypatch, events):
 
     def _compute_observation(self):
       events.append("observation")
-      return torch.zeros((1, 1))
+      return torch.zeros((self.num_envs, 1))
 
   class Wrapper:
     def __init__(self, env, *, clip_actions):
@@ -70,6 +75,7 @@ def _install_fake_population_runtime(monkeypatch, events):
 
     def step(self, actions):
       del actions
+      self.env.control_steps += 1
       return self.env.observation_manager.compute(), None, None, None
 
     def close(self):
@@ -88,10 +94,17 @@ def _install_fake_population_runtime(monkeypatch, events):
 
   class Recorder:
     def __init__(self, env):
-      del env
+      self.env = env
 
     def numpy_trace(self):
-      return {"delta": np.zeros((1, 1), dtype=np.float32)}
+      scalar_shape = (self.env.control_steps, self.env.num_envs)
+      joint_shape = (*scalar_shape, 6)
+      return {
+        "delta_velocity": np.zeros(scalar_shape, dtype=np.float32),
+        "delta_impulse": np.zeros(scalar_shape, dtype=np.float32),
+        "delta": np.zeros(scalar_shape, dtype=np.float32),
+        "lambda_per_joint": np.zeros(joint_shape, dtype=np.float32),
+      }
 
   env_cfg = SimpleNamespace(
     scene=SimpleNamespace(num_envs=None),
@@ -137,9 +150,16 @@ def test_evaluation_checkpoint_roles_are_exact_and_fail_closed(tmp_path, monkeyp
     "diag90_target": TARGET_SHA,
     "bridge_p0_control": CONTROL_SHA,
     "bridge_p02_target": BRIDGE_TARGET_SHA,
+    "dose_p0_control": CONTROL_SHA,
+    "dose_p01_target": DOSE_P01_SHA,
+    "dose_p02_target": BRIDGE_TARGET_SHA,
+    "dose_p03_target": DOSE_P03_SHA,
   }
   with pytest.raises(TypeError):
     survey.EVALUATION_CHECKPOINTS["unexpected_role"] = CONTROL_SHA
+  assert inspect.signature(survey.compare_policy_evaluations).parameters[
+    "expected_roles"
+  ].default == ("diag90_control", "diag90_target")
   assert survey.validate_checkpoint_role(checkpoint, "diag90_control") == CONTROL_SHA
   with pytest.raises(RuntimeError, match="role/checkpoint SHA-256 mismatch"):
     survey.validate_checkpoint_role(checkpoint, "diag90_target")
@@ -192,7 +212,83 @@ def test_evaluation_roles_derive_identical_rng_streams_from_one_base_seed():
       observation=20_000_035,
       action=30_000_043,
     ),
+    "dose_p0_control": survey.EvaluationRngSeeds(
+      reset=10_000_021,
+      observation=20_000_035,
+      action=30_000_043,
+    ),
+    "dose_p01_target": survey.EvaluationRngSeeds(
+      reset=10_000_021,
+      observation=20_000_035,
+      action=30_000_043,
+    ),
+    "dose_p02_target": survey.EvaluationRngSeeds(
+      reset=10_000_021,
+      observation=20_000_035,
+      action=30_000_043,
+    ),
+    "dose_p03_target": survey.EvaluationRngSeeds(
+      reset=10_000_021,
+      observation=20_000_035,
+      action=30_000_043,
+    ),
   }
+
+
+def test_four_role_local_smoke_seam_runs_two_envs_for_eight_steps(
+  tmp_path, monkeypatch
+):
+  """The real smoke can use this seam once all four frozen checkpoint files are local."""
+  events = []
+  _install_fake_population_runtime(monkeypatch, events)
+  role_hashes = {
+    "dose_p0_control": CONTROL_SHA,
+    "dose_p01_target": DOSE_P01_SHA,
+    "dose_p02_target": BRIDGE_TARGET_SHA,
+    "dose_p03_target": DOSE_P03_SHA,
+  }
+  checkpoint_roles: dict[Path, str] = {}
+  for role in role_hashes:
+    checkpoint = tmp_path / role / "model_499.pt"
+    checkpoint.parent.mkdir()
+    checkpoint.write_bytes(role.encode())
+    checkpoint_roles[checkpoint.resolve()] = role
+  monkeypatch.setattr(
+    survey,
+    "_sha256",
+    lambda checkpoint: role_hashes[checkpoint_roles[checkpoint.resolve()]],
+  )
+
+  population_hashes = []
+  for checkpoint, role in checkpoint_roles.items():
+    assert survey.validate_checkpoint_role(checkpoint, role) == role_hashes[role]
+    trace, protocol = survey._run_population(
+      checkpoint=checkpoint,
+      device="cpu",
+      num_envs=2,
+      seed=2,
+      rng_seeds=survey.EvaluationRngSeeds.from_evaluation_seed(2),
+      steps=8,
+      stochastic=True,
+    )
+    assert protocol["num_envs"] == 2
+    assert protocol["control_steps"] == 8
+    assert protocol["rng_streams"] == {
+      "reset": 10_000_021,
+      "observation": 20_000_035,
+      "action": 30_000_043,
+    }
+    assert trace["delta_velocity"].shape == (8, 2)
+    assert trace["delta_impulse"].shape == (8, 2)
+    assert trace["delta"].shape == (8, 2)
+    assert trace["lambda_per_joint"].shape == (8, 2, 6)
+    assert all(np.isfinite(value).all() for value in trace.values())
+    assert np.array_equal(trace["delta_impulse"], np.zeros((8, 2)))
+    assert np.array_equal(
+      trace["delta"], np.maximum(trace["delta_velocity"], trace["delta_impulse"])
+    )
+    population_hashes.append(protocol["initial_population_sha256"])
+  assert population_hashes == ["population"] * 4
 
 
 def test_stochastic_population_installs_rng_streams_before_initial_reset(
