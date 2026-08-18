@@ -17,7 +17,7 @@ def _passing_gate_metrics() -> dict[str, object]:
     "provisional_risk_difference_upper_97_5": -0.006,
     "rho": {
       "control": {"p95": 1.0, "p99": 1.0},
-      "target": {"p95": 0.9, "p99": 0.9},
+      "target": {"p95": 0.89, "p99": 0.89},
     },
     "per_joint": {
       "control_p99": [0.2, 0.09, 0.5, 0.1, 0.3, 0.4],
@@ -65,9 +65,9 @@ def test_each_failed_boundary_fails_its_population_gate(mutation: str, gate: str
   if mutation == "risk_equal":
     metrics["provisional_risk_difference_upper_97_5"] = -0.005
   elif mutation == "rho_below":
-    metrics["rho"]["target"]["p99"] = 0.9000001
+    metrics["rho"]["target"]["p99"] = np.nextafter(0.9, np.inf)
   elif mutation == "joint_equal":
-    metrics["per_joint"]["target_p99"][0] = 0.22
+    metrics["per_joint"]["target_p99"][0] = np.nextafter(0.22, np.inf)
   elif mutation == "new_joint_violation":
     metrics["per_joint"]["target_any_violation"][1] = True
   elif mutation == "velocity_above":
@@ -87,6 +87,53 @@ def test_each_failed_boundary_fails_its_population_gate(mutation: str, gate: str
   assert result[gate]["pass"] is False
 
 
+def test_literal_strict_risk_boundary_uses_adjacent_floats_without_tolerance():
+  below = _passing_gate_metrics()
+  below["provisional_risk_difference_upper_97_5"] = np.nextafter(-0.005, -np.inf)
+  above = _passing_gate_metrics()
+  above["provisional_risk_difference_upper_97_5"] = np.nextafter(-0.005, np.inf)
+
+  assert analysis.evaluate_gate_metrics(below)["provisional_risk_reduction"]["pass"] is True
+  assert analysis.evaluate_gate_metrics(above)["provisional_risk_reduction"]["pass"] is False
+
+
+def test_literal_rho_and_joint_boundaries_use_adjacent_floats_without_tolerance():
+  rho_pass = _passing_gate_metrics()
+  rho_pass["rho"]["target"]["p99"] = np.nextafter(0.9, -np.inf)
+  rho_fail = _passing_gate_metrics()
+  rho_fail["rho"]["target"]["p99"] = np.nextafter(0.9, np.inf)
+  joint_pass = _passing_gate_metrics()
+  joint_pass["per_joint"]["target_p99"][0] = np.nextafter(0.22, -np.inf)
+  joint_fail = _passing_gate_metrics()
+  joint_fail["per_joint"]["target_p99"][0] = np.nextafter(0.22, np.inf)
+
+  assert analysis.evaluate_gate_metrics(rho_pass)["global_rho_reduction"]["pass"] is True
+  assert analysis.evaluate_gate_metrics(rho_fail)["global_rho_reduction"]["pass"] is False
+  assert analysis.evaluate_gate_metrics(joint_pass)["joint_tail_noninferiority"]["pass"] is True
+  assert analysis.evaluate_gate_metrics(joint_fail)["joint_tail_noninferiority"]["pass"] is False
+
+
+def test_literal_inclusive_velocity_utility_and_delivered_boundaries():
+  passing = analysis.evaluate_gate_metrics(_passing_gate_metrics())
+  assert passing["velocity_noninferiority"]["pass"] is True
+  assert passing["utility_noninferiority"]["pass"] is True
+  assert passing["delivered_impulse_retention"]["pass"] is True
+
+  velocity = _passing_gate_metrics()
+  velocity["velocity_risk_difference_upper_97_5"] = np.nextafter(0.001, np.inf)
+  success = _passing_gate_metrics()
+  success["success_difference"] = np.nextafter(-0.01, -np.inf)
+  productive = _passing_gate_metrics()
+  productive["productive_strike_difference"] = np.nextafter(-0.01, -np.inf)
+  delivered = _passing_gate_metrics()
+  delivered["first_event_delivered_ratio_lower_97_5"] = np.nextafter(0.90, -np.inf)
+
+  assert analysis.evaluate_gate_metrics(velocity)["velocity_noninferiority"]["pass"] is False
+  assert analysis.evaluate_gate_metrics(success)["utility_noninferiority"]["pass"] is False
+  assert analysis.evaluate_gate_metrics(productive)["utility_noninferiority"]["pass"] is False
+  assert analysis.evaluate_gate_metrics(delivered)["delivered_impulse_retention"]["pass"] is False
+
+
 def test_delivered_impulse_bootstrap_resamples_paired_environment_means():
   result = analysis.paired_mean_ratio_bootstrap(
     np.array([1.0, 2.0, 3.0, 4.0]),
@@ -100,6 +147,38 @@ def test_delivered_impulse_bootstrap_resamples_paired_environment_means():
   assert result["point_target_over_control_mean_ratio"] == pytest.approx(0.9)
   assert result["lower_97_5"] == pytest.approx(0.9)
   assert result["valid"] is True
+
+
+def test_terminal_extraction_preserves_environment_identity_across_staggered_order():
+  control = _trace(0.5)
+  target = _trace(0.5)
+  control["done"] = np.array(
+    [[True, False, False, False], [False, True, True, True]], dtype=bool
+  )
+  target["done"] = np.array(
+    [[False, True, True, True], [True, False, False, False]], dtype=bool
+  )
+  control["first_strike_delivered_n_s"] = np.array(
+    [[1.0, 0.0, 0.0, 0.0], [0.0, 2.0, 3.0, 4.0]], dtype=np.float32
+  )
+  target["first_strike_delivered_n_s"] = np.array(
+    [[0.0, 1.8, 2.7, 3.6], [0.9, 0.0, 0.0, 0.0]], dtype=np.float32
+  )
+
+  control_endpoint = analysis._terminal_endpoint_by_environment(
+    control, "first_strike_delivered_n_s"
+  )
+  target_endpoint = analysis._terminal_endpoint_by_environment(
+    target, "first_strike_delivered_n_s"
+  )
+  result = analysis.paired_mean_ratio_bootstrap(
+    control_endpoint["values"], target_endpoint["values"]
+  )
+
+  np.testing.assert_array_equal(control_endpoint["env_ids"], np.arange(4))
+  np.testing.assert_allclose(control_endpoint["values"], [1.0, 2.0, 3.0, 4.0])
+  np.testing.assert_allclose(target_endpoint["values"], [0.9, 1.8, 2.7, 3.6])
+  assert result["lower_97_5"] == pytest.approx(0.9)
 
 
 @pytest.mark.parametrize(
@@ -209,6 +288,60 @@ def test_synthetic_population_passes_and_emits_every_mandatory_descriptor():
     "complete_contact_claim_authorized": False,
     "actuator_loading_or_hardware_safety_claim_authorized": False,
   }
+
+
+def test_native_float32_margin_controls_exact_boundary_risk_and_new_joint_flags():
+  caps = np.asarray(analysis.survey.PROVISIONAL_CAPS_N_M_S, dtype=np.float32)
+  control = _trace(0.0)
+  target = _trace(0.0)
+  control["lambda_per_joint"][:, :, 0] = caps[0]
+  target["lambda_per_joint"][:, :, 0] = caps[0]
+  target["lambda_per_joint"][:, :, 1] = caps[1]
+
+  exact = analysis.evaluate_population_pair(
+    control, target, _population_summary(), _population_summary(), inferential=True
+  )
+
+  assert exact["endpoints"]["provisional_risk"]["point"] == {
+    "control_risk": 0.0,
+    "target_risk": 0.0,
+    "target_minus_control_risk": 0.0,
+    "target_over_control_risk": None,
+  }
+  assert exact["endpoints"]["per_joint"]["target_any_violation"] == [False] * 6
+
+  target["lambda_per_joint"][:, :, 1] = np.nextafter(caps[1], np.float32(np.inf))
+  above = analysis.evaluate_population_pair(
+    control, target, _population_summary(), _population_summary(), inferential=True
+  )
+
+  assert above["endpoints"]["provisional_risk"]["point"]["target_risk"] == 1.0
+  assert above["endpoints"]["per_joint"]["target_any_violation"][1] is True
+  assert above["verdict"]["joint_tail_noninferiority"]["pass"] is False
+
+
+def test_censored_population_emits_counts_and_fails_utility_delivered_and_identity_gates():
+  control = _trace(1.2, 1.0)
+  target = _trace(0.8, 0.95)
+  target["done"][:, 0] = False
+  target["success"][:, 0] = False
+  target["first_strike_productive"][:, 0] = False
+
+  result = analysis.evaluate_population_pair(
+    control, target, _population_summary(), _population_summary(), inferential=True
+  )
+
+  target_duration = result["secondary_descriptors"]["target"]["episode_duration_ms"]
+  assert target_duration["completed_environments"] == 3
+  assert target_duration["right_censored_environments"] == 1
+  assert result["endpoints"]["success_difference"] is None
+  assert result["endpoints"]["productive_strike_difference"] is None
+  ratio = result["endpoints"]["first_event_delivered_impulse_ratio"]
+  assert ratio["valid"] is False
+  assert ratio["failure_reason"] == "initial episode fragment is censored in at least one arm"
+  assert result["verdict"]["utility_noninferiority"]["pass"] is False
+  assert result["verdict"]["delivered_impulse_retention"]["pass"] is False
+  assert result["verdict"]["identity_finiteness_native_claims"]["pass"] is False
 
 
 def test_population_analysis_rejects_missing_mandatory_contact_censoring_descriptor():

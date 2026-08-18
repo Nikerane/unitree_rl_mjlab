@@ -105,14 +105,6 @@ def paired_mean_ratio_bootstrap(
   }
 
 
-def _inclusive_ge(value: float, threshold: float) -> bool:
-  return bool(value > threshold or np.isclose(value, threshold, rtol=0.0, atol=1e-15))
-
-
-def _strict_lt(value: float, threshold: float) -> bool:
-  return bool(value < threshold and not np.isclose(value, threshold, rtol=0.0, atol=1e-15))
-
-
 def evaluate_gate_metrics(metrics: Mapping[str, object]) -> dict[str, object]:
   """Apply all six bridge gates to one stochastic population, never to pooled reads."""
   rho = metrics["rho"]
@@ -149,32 +141,38 @@ def evaluate_gate_metrics(metrics: Mapping[str, object]) -> dict[str, object]:
       (target_joint[joint] - control_joint[joint]) / control_joint[joint]
     )
   joint_tail_pass = all(
-    _strict_lt(float(relative_joint_increase[joint]), 0.10)
+    float(relative_joint_increase[joint]) < 0.10
     for joint in np.flatnonzero(considered)
   )
   newly_violating = (~control_violates) & target_violates
 
   risk_upper = float(metrics["provisional_risk_difference_upper_97_5"])
   velocity_upper = float(metrics["velocity_risk_difference_upper_97_5"])
-  success_difference = float(metrics["success_difference"])
-  productive_difference = float(metrics["productive_strike_difference"])
+  success_raw = metrics["success_difference"]
+  productive_raw = metrics["productive_strike_difference"]
+  success_difference = None if success_raw is None else float(success_raw)
+  productive_difference = None if productive_raw is None else float(productive_raw)
   delivered_lower_raw = metrics["first_event_delivered_ratio_lower_97_5"]
   delivered_lower = None if delivered_lower_raw is None else float(delivered_lower_raw)
-  finite_scalars = (risk_upper, velocity_upper, success_difference, productive_difference)
+  finite_scalars = (risk_upper, velocity_upper)
   if not np.isfinite(finite_scalars).all() or (
+    success_difference is not None and not np.isfinite(success_difference)
+  ) or (
+    productive_difference is not None and not np.isfinite(productive_difference)
+  ) or (
     delivered_lower is not None and not np.isfinite(delivered_lower)
   ):
     raise ValueError("bridge gate endpoints must be finite")
 
   gates = {
     "provisional_risk_reduction": {
-      "pass": _strict_lt(risk_upper, -0.005),
+      "pass": risk_upper < -0.005,
       "upper_97_5": risk_upper,
       "comparison": "<",
       "threshold": -0.005,
     },
     "global_rho_reduction": {
-      "pass": all(_inclusive_ge(value, 0.10) for value in rho_reductions.values()),
+      "pass": all(value >= 0.10 for value in rho_reductions.values()),
       "relative_reduction": rho_reductions,
       "comparison": ">=",
       "threshold": 0.10,
@@ -194,7 +192,12 @@ def evaluate_gate_metrics(metrics: Mapping[str, object]) -> dict[str, object]:
       "threshold": 0.001,
     },
     "utility_noninferiority": {
-      "pass": success_difference >= -0.01 and productive_difference >= -0.01,
+      "pass": (
+        success_difference is not None
+        and productive_difference is not None
+        and success_difference >= -0.01
+        and productive_difference >= -0.01
+      ),
       "success_difference": success_difference,
       "productive_strike_difference": productive_difference,
       "comparison": ">=",
@@ -233,8 +236,44 @@ def _initial_joint_utilization(
   return np.where(valid[:, :, None], lam / cap_array, -np.inf).max(axis=0)
 
 
-def _terminal_vector(trace: Mapping[str, np.ndarray], name: str) -> np.ndarray:
-  return historical._terminal_values(trace, name)
+def _initial_joint_violation_flags(
+  trace: Mapping[str, np.ndarray], caps: Sequence[float]
+) -> np.ndarray:
+  """Classify violations from Lambda-cap subtraction in Lambda's native dtype."""
+  lam = np.asarray(trace["lambda_per_joint"])
+  episode_id = np.asarray(trace["episode_id"], dtype=np.int64)
+  if lam.ndim != 3 or episode_id.shape != lam.shape[:2]:
+    raise ValueError("trace lacks aligned initial-episode Lambda reads")
+  valid = episode_id == 0
+  margins = survey._native_cap_margins(lam, tuple(caps))
+  return np.where(valid[:, :, None], margins, -np.inf).max(axis=0) > 0.0
+
+
+def _terminal_endpoint_by_environment(
+  trace: Mapping[str, np.ndarray], name: str
+) -> dict[str, np.ndarray | int]:
+  """Extract one initial-episode terminal value per completed environment, in env-ID order."""
+  done = np.asarray(trace["done"], dtype=bool)
+  episode_id = np.asarray(trace["episode_id"], dtype=np.int64)
+  values = np.asarray(trace[name])
+  terminal = done & (episode_id == 0)
+  if values.shape != terminal.shape:
+    raise ValueError(f"terminal field {name} is not an aligned scalar trace")
+  counts = terminal.sum(axis=0)
+  if bool((counts > 1).any()):
+    raise ValueError(f"initial episode terminates more than once for {name}")
+  completed = counts == 1
+  env_ids = np.flatnonzero(completed)
+  selected = np.asarray(
+    [values[np.flatnonzero(terminal[:, env_id])[0], env_id] for env_id in env_ids],
+    dtype=values.dtype,
+  )
+  return {
+    "env_ids": env_ids,
+    "values": selected,
+    "completed_environments": int(completed.sum()),
+    "right_censored_environments": int((~completed).sum()),
+  }
 
 
 def _binary_difference(control: np.ndarray, target: np.ndarray) -> float:
@@ -256,6 +295,7 @@ def _observed_duration(trace: Mapping[str, np.ndarray]) -> dict[str, object]:
   return {
     "unit": "native observed initial-episode prefix",
     "duration_ms": _quantiles(reads.astype(np.float64) * 20.0),
+    "completed_environments": int(terminated.sum()),
     "right_censored_environments": int((~terminated).sum()),
   }
 
@@ -335,6 +375,8 @@ def _secondary_descriptors(
     raise ValueError("population summary is missing physical-contact censoring telemetry")
   valid = np.asarray(trace["episode_id"], dtype=np.int64) == 0
   reads_per_env = valid.sum(axis=0)
+  nail_depth = _terminal_endpoint_by_environment(trace, "nail_depth_m")
+  delivered = _terminal_endpoint_by_environment(trace, "delivered_total_n_s")
   return {
     "episode_duration_ms": _observed_duration(trace),
     "physical_contact_censoring": dict(physical_contact),
@@ -345,10 +387,16 @@ def _secondary_descriptors(
       "physical_event_read_counts": binding.get("physical_event_read_counts"),
     },
     "observed_first_contact_prefix_lambda": _observed_first_contact_prefix_lambda(trace),
-    "nail_depth_m": _quantiles(_terminal_vector(trace, "nail_depth_m")),
-    "cumulative_delivered_impulse_n_s": _quantiles(
-      _terminal_vector(trace, "delivered_total_n_s")
-    ),
+    "nail_depth_m": {
+      "completed_environments": nail_depth["completed_environments"],
+      "right_censored_environments": nail_depth["right_censored_environments"],
+      **_quantiles(nail_depth["values"]),
+    },
+    "cumulative_delivered_impulse_n_s": {
+      "completed_environments": delivered["completed_environments"],
+      "right_censored_environments": delivered["right_censored_environments"],
+      **_quantiles(delivered["values"]),
+    },
     "vic_gains": historical._compact_gain_summary(gains),
     "policy_action": _action_descriptors(trace),
   }
@@ -388,6 +436,8 @@ def evaluate_population_pair(
     raise ValueError("paired populations must contain the same environment IDs")
   control_rho = control_utilization.max(axis=1)
   target_rho = target_utilization.max(axis=1)
+  control_violation = _initial_joint_violation_flags(control_trace, caps)
+  target_violation = _initial_joint_violation_flags(target_trace, caps)
   result: dict[str, object] = {
     "statistical_unit": "whole paired environment ID",
     "controller_reads_are_inferential_units": False,
@@ -416,8 +466,8 @@ def evaluate_population_pair(
     return result
 
   impulse_bootstrap = historical.paired_binary_risk_bootstrap(
-    control_rho > 1.0,
-    target_rho > 1.0,
+    control_violation.any(axis=1),
+    target_violation.any(axis=1),
     resamples=BOOTSTRAP_RESAMPLES,
     seed=BOOTSTRAP_SEED,
   )
@@ -429,27 +479,76 @@ def evaluate_population_pair(
     resamples=BOOTSTRAP_RESAMPLES,
     seed=BOOTSTRAP_SEED,
   )
-  control_delivered = _terminal_vector(control_trace, "first_strike_delivered_n_s")
-  target_delivered = _terminal_vector(target_trace, "first_strike_delivered_n_s")
-  delivered_bootstrap = paired_mean_ratio_bootstrap(control_delivered, target_delivered)
+  terminal_endpoints = {
+    role: {
+      name: _terminal_endpoint_by_environment(trace, name)
+      for name in (
+        "success",
+        "first_strike_productive",
+        "first_strike_delivered_n_s",
+      )
+    }
+    for role, trace in (("control", control_trace), ("target", target_trace))
+  }
+  expected_environments = control_utilization.shape[0]
+  terminal_complete = all(
+    endpoint["completed_environments"] == expected_environments
+    for role in terminal_endpoints.values()
+    for endpoint in role.values()
+  )
+  if terminal_complete:
+    control_delivered = terminal_endpoints["control"][
+      "first_strike_delivered_n_s"
+    ]["values"]
+    target_delivered = terminal_endpoints["target"][
+      "first_strike_delivered_n_s"
+    ]["values"]
+    delivered_bootstrap = paired_mean_ratio_bootstrap(
+      control_delivered, target_delivered
+    )
+    success_difference = _binary_difference(
+      terminal_endpoints["control"]["success"]["values"],
+      terminal_endpoints["target"]["success"]["values"],
+    )
+    productive_difference = _binary_difference(
+      terminal_endpoints["control"]["first_strike_productive"]["values"],
+      terminal_endpoints["target"]["first_strike_productive"]["values"],
+    )
+  else:
+    delivered_bootstrap = {
+      "resampling_unit": "whole paired environment ID",
+      "controller_reads_are_inferential_units": False,
+      "environments": expected_environments,
+      "resamples": BOOTSTRAP_RESAMPLES,
+      "seed": BOOTSTRAP_SEED,
+      "point_target_over_control_mean_ratio": None,
+      "valid": False,
+      "lower_97_5": None,
+      "invalid_nonpositive_control_resamples": 0,
+      "failure_reason": "initial episode fragment is censored in at least one arm",
+      "completed_environments": {
+        role: endpoint["first_strike_delivered_n_s"]["completed_environments"]
+        for role, endpoint in terminal_endpoints.items()
+      },
+      "right_censored_environments": {
+        role: endpoint["first_strike_delivered_n_s"]["right_censored_environments"]
+        for role, endpoint in terminal_endpoints.items()
+      },
+    }
+    success_difference = None
+    productive_difference = None
   endpoints = {
     "provisional_risk": impulse_bootstrap,
     "rho": {"control": _quantiles(control_rho), "target": _quantiles(target_rho)},
     "per_joint": {
       "control_p99": np.quantile(control_utilization, 0.99, axis=0).tolist(),
       "target_p99": np.quantile(target_utilization, 0.99, axis=0).tolist(),
-      "control_any_violation": (control_utilization > 1.0).any(axis=0).tolist(),
-      "target_any_violation": (target_utilization > 1.0).any(axis=0).tolist(),
+      "control_any_violation": control_violation.any(axis=0).tolist(),
+      "target_any_violation": target_violation.any(axis=0).tolist(),
     },
     "true_velocity_risk": velocity_bootstrap,
-    "success_difference": _binary_difference(
-      _terminal_vector(control_trace, "success"),
-      _terminal_vector(target_trace, "success"),
-    ),
-    "productive_strike_difference": _binary_difference(
-      _terminal_vector(control_trace, "first_strike_productive"),
-      _terminal_vector(target_trace, "first_strike_productive"),
-    ),
+    "success_difference": success_difference,
+    "productive_strike_difference": productive_difference,
     "first_event_delivered_impulse_ratio": delivered_bootstrap,
   }
   result["endpoints"] = endpoints
@@ -466,7 +565,9 @@ def evaluate_population_pair(
       "success_difference": endpoints["success_difference"],
       "productive_strike_difference": endpoints["productive_strike_difference"],
       "first_event_delivered_ratio_lower_97_5": delivered_bootstrap["lower_97_5"],
-      "identity_finiteness_native_claims": delivered_bootstrap["valid"],
+      "identity_finiteness_native_claims": (
+        terminal_complete and delivered_bootstrap["valid"]
+      ),
     }
   )
   return result
