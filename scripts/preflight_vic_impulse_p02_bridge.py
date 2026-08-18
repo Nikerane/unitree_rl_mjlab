@@ -163,6 +163,19 @@ def _candidate_population(
     caps=survey.PROVISIONAL_CAPS_N_M_S,
     first_episode_only=True,
   )
+  if not _numeric_tree_equal(
+    stored_summary["binding"], recomputed_summary["binding"]
+  ):
+    raise ValueError(
+      f"{population} stored binding descriptors differ from raw-trace recomputation"
+    )
+  if not _numeric_tree_equal(
+    stored_summary["physical_contact_duration_ms"],
+    recomputed_summary["physical_contact_duration_ms"],
+  ):
+    raise ValueError(
+      f"{population} stored physical-contact descriptors differ from raw-trace recomputation"
+    )
   candidates = _require_mapping(
     stored_summary.get("candidate_imp_max_p"),
     label=f"{population} stored candidates",
@@ -223,8 +236,8 @@ def _candidate_population(
   if int(velocity_masks.sum()) != 0 or int(ties.sum()) != 0:
     raise ValueError(f"{population} frozen p=0.2 winner/masking counts drifted")
 
-  binding = stored_summary["binding"]
-  physical = stored_summary["physical_contact_duration_ms"]
+  binding = recomputed_summary["binding"]
+  physical = recomputed_summary["physical_contact_duration_ms"]
   candidate_pressure = {
     "unit": "contiguous 50 Hz impulse-activation window",
     "unique_physical_event_dose": False,
@@ -320,8 +333,17 @@ def _direction_gate(
   }
   passed = all(value < 0.0 for value in (*native.values(), *prefix.values()))
   if not passed:
+    failures = [
+      f"native_initial_episode_rho.{quantile}"
+      for quantile, value in native.items()
+      if value >= 0.0
+    ] + [
+      f"observed_first_contact_prefix_rho.{quantile}"
+      for quantile, value in prefix.items()
+      if value >= 0.0
+    ]
     raise ValueError(
-      f"{population} exposure direction is not strictly lower in all four provisional-cap tails"
+      f"{population} exposure direction is not strictly lower for: {', '.join(failures)}"
     )
   return {
     "native_initial_episode_rho_target_minus_control": native,

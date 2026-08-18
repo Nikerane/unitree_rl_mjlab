@@ -230,6 +230,32 @@ def _refresh_banked_manifest(analysis_path: Path, role: str, leaf: Path) -> None
   analysis_path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def _refresh_banked_exposure(
+  analysis_path: Path,
+  *,
+  population: str,
+  role: str,
+  trace: dict[str, np.ndarray],
+) -> None:
+  payload = json.loads(analysis_path.read_text(encoding="utf-8"))
+  if population == "fixed_mean":
+    banked = payload["fixed_mean"]
+  else:
+    banked = payload["training_like_replicas_before_pooling"][population]
+  provisional = banked["thresholds_in_required_order"]["provisional_caps"][role]
+  provisional["rho"] = historical_analysis._quantiles(
+    historical_analysis._initial_episode_rho(
+      trace, survey.PROVISIONAL_CAPS_N_M_S
+    )
+  )
+  provisional["observed_first_contact_prefix_utilization"] = (
+    historical_analysis._observed_first_contact_prefix_utilization(
+      trace, survey.PROVISIONAL_CAPS_N_M_S
+    )
+  )
+  analysis_path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 def test_preflight_banks_exact_p02_attribution_and_exposure_gate(frozen_evidence):
   """Returning defaults would hide whether the lower dose independently activates."""
   from scripts.preflight_vic_impulse_p02_bridge import evaluate_preflight
@@ -313,6 +339,32 @@ def test_preflight_rejects_a_stored_nonmax_combination(frozen_evidence, tmp_path
     evaluate_preflight(control, target, analysis)
 
 
+@pytest.mark.parametrize("descriptor", ("read_count", "duration"))
+def test_preflight_rejects_finite_stored_descriptor_corruption(
+  frozen_evidence, tmp_path, descriptor
+):
+  """Finite stored descriptors must still agree exactly with the frozen raw trace."""
+  from scripts.preflight_vic_impulse_p02_bridge import evaluate_preflight
+
+  control, target, analysis = _copy_evidence(frozen_evidence, tmp_path)
+
+  def corrupt(payload):
+    summary = payload["populations"]["training_like_sampled"]["2"][
+      "provisional_caps"
+    ]
+    if descriptor == "read_count":
+      summary["binding"]["activation_window_read_counts"][0] += 1
+    else:
+      summary["physical_contact_duration_ms"]["all_observed_prefixes"][
+        "median"
+      ] += 1.0
+
+  _rewrite_summary(control, corrupt)
+  _refresh_banked_manifest(analysis, "control", control)
+  with pytest.raises(ValueError, match="stored (binding|physical-contact) descriptors"):
+    evaluate_preflight(control, target, analysis)
+
+
 @pytest.mark.parametrize(
   "missing_path",
   ("activation_window_read_counts", "right_censored_events"),
@@ -389,16 +441,28 @@ def test_preflight_rejects_reversed_observed_prefix_direction(frozen_evidence, t
   from scripts.preflight_vic_impulse_p02_bridge import evaluate_preflight
 
   control, target, analysis_path = _copy_evidence(frozen_evidence, tmp_path)
-  analysis = json.loads(analysis_path.read_text(encoding="utf-8"))
-  population = analysis["training_like_replicas_before_pooling"]["2"][
-    "thresholds_in_required_order"
-  ]["provisional_caps"]
-  population["target"]["observed_first_contact_prefix_utilization"]["rho"][
-    "p99"
-  ] = population["control"]["observed_first_contact_prefix_utilization"]["rho"][
-    "p99"
-  ] + 0.01
-  analysis_path.write_text(json.dumps(analysis), encoding="utf-8")
+  trace_path = target / "evaluation" / "training_like_seed_2_trace.npz"
+  trace = historical_analysis._load_trace(trace_path)
+  trace["lambda_per_joint"][0, :100, 0] = np.float32(1.2)
+  trace["substep_rolling_per_joint"][0] = trace["lambda_per_joint"][0]
+  np.savez_compressed(trace_path, **trace)
 
-  with pytest.raises(ValueError, match="banked analysis|exposure direction"):
+  def replace_summary(payload):
+    payload["populations"]["training_like_sampled"]["2"][
+      "provisional_caps"
+    ] = _population_summary(trace)
+
+  _rewrite_summary(target, replace_summary)
+  _refresh_banked_manifest(analysis_path, "target", target)
+  _refresh_banked_exposure(
+    analysis_path,
+    population="2",
+    role="target",
+    trace=trace,
+  )
+
+  with pytest.raises(
+    ValueError,
+    match=r"2 exposure direction.*observed_first_contact_prefix_rho\.p99",
+  ):
     evaluate_preflight(control, target, analysis_path)
