@@ -276,7 +276,9 @@ def _threshold_summary(caps: tuple[float, ...], *, violating: bool) -> dict[str,
   }
 
 
-def _summary(role: str, *, control: bool) -> dict[str, object]:
+def _summary(
+  role: str, *, control: bool, checkpoint_path: Path | None = None
+) -> dict[str, object]:
   def population(seed: int, *, fixed: bool) -> dict[str, object]:
     return {
       "protocol": _population_protocol(seed, fixed=fixed),
@@ -291,7 +293,11 @@ def _summary(role: str, *, control: bool) -> dict[str, object]:
   return {
     "schema_version": 2,
     "task": survey.VIC_TASK,
-    "checkpoint": {"role": role, "sha256": analysis.EXPECTED_CHECKPOINTS[role]},
+    "checkpoint": {
+      "role": role,
+      **({"path": str(checkpoint_path.resolve())} if checkpoint_path else {}),
+      "sha256": analysis.EXPECTED_CHECKPOINTS[role],
+    },
     "code_revision": CODE_REVISION,
     "asset_revision": survey.EXPECTED_EVALUATION_ASSET_REVISION,
     "protocol": {
@@ -312,7 +318,7 @@ def _summary(role: str, *, control: bool) -> dict[str, object]:
   }
 
 
-def _write_leaf(tmp_path: Path, role: str) -> Path:
+def _write_leaf(tmp_path: Path, role: str, checkpoint_path: Path) -> Path:
   leaf = tmp_path / role
   evaluation = leaf / "evaluation"
   evaluation.mkdir(parents=True)
@@ -327,7 +333,11 @@ def _write_leaf(tmp_path: Path, role: str) -> Path:
   for name in names:
     np.savez(evaluation / name, **trace)
   (evaluation / "summary.json").write_text(
-    json.dumps(_summary(role, control=control), sort_keys=True, allow_nan=False) + "\n"
+    json.dumps(
+      _summary(role, control=control, checkpoint_path=checkpoint_path),
+      sort_keys=True,
+      allow_nan=False,
+    ) + "\n"
   )
   _refresh_manifest(leaf)
   return leaf
@@ -351,17 +361,41 @@ def _refresh_manifest(leaf: Path) -> None:
 
 
 def _four_leaves(tmp_path: Path) -> dict[str, Path]:
-  return {role: _write_leaf(tmp_path, role) for role in analysis.EXPECTED_ROLES}
+  paths = _checkpoint_paths(tmp_path / "checkpoints")
+  return {
+    role: _write_leaf(tmp_path, role, paths[role]) for role in analysis.EXPECTED_ROLES
+  }
+
+
+def _fixture_checkpoint_paths(tmp_path: Path) -> dict[str, Path]:
+  return {
+    role: tmp_path / "checkpoints" / role / "model_499.pt"
+    for role in analysis.EXPECTED_ROLES
+  }
+
+
+def _checkpoint_paths(tmp_path: Path) -> dict[str, Path]:
+  result = {}
+  for role in analysis.EXPECTED_ROLES:
+    checkpoint = tmp_path / role / "model_499.pt"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_bytes(f"{role} checkpoint fixture\n".encode())
+    result[role] = checkpoint
+  return result
 
 
 def test_four_leaf_all_pass_curve_is_finite_complete_and_byte_deterministic(tmp_path: Path):
   leaves = _four_leaves(tmp_path)
 
   first = analysis.analyze_evaluation_curve(
-    leaves, expected_code_revision=CODE_REVISION
+    leaves,
+    checkpoint_paths=_fixture_checkpoint_paths(tmp_path),
+    expected_code_revision=CODE_REVISION,
   )
   second = analysis.analyze_evaluation_curve(
-    leaves, expected_code_revision=CODE_REVISION
+    leaves,
+    checkpoint_paths=_fixture_checkpoint_paths(tmp_path),
+    expected_code_revision=CODE_REVISION,
   )
 
   assert all(
@@ -379,6 +413,12 @@ def test_four_leaf_all_pass_curve_is_finite_complete_and_byte_deterministic(tmp_
     role: hashlib.sha256((leaf / "SHA256SUMS").read_bytes()).hexdigest()
     for role, leaf in leaves.items()
   }
+  assert first["protocol_identity"] == analysis.compact_protocol_identity(
+    {
+      role: json.loads((leaf / "evaluation" / "summary.json").read_text())
+      for role, leaf in leaves.items()
+    }
+  )
   for dose in first["dose_results"].values():
     assert dose["fixed_mean_descriptive_only"]["descriptive_only"] is True
     for population in dose["training_like_by_seed"].values():
@@ -416,7 +456,9 @@ def test_curve_rejects_missing_extra_misordered_or_duplicate_leaf_roles(tmp_path
   for invalid in invalid_inputs:
     with pytest.raises(ValueError, match="exact ordered policy roles|distinct evaluation leaf"):
       analysis.analyze_evaluation_curve(
-        invalid, expected_code_revision=CODE_REVISION
+        invalid,
+        checkpoint_paths=_fixture_checkpoint_paths(tmp_path),
+        expected_code_revision=CODE_REVISION,
       )
 
 
@@ -426,7 +468,11 @@ def test_curve_rehashes_every_raw_artifact_and_rejects_manifest_drift(tmp_path: 
   trace.write_bytes(trace.read_bytes() + b"drift")
 
   with pytest.raises(ValueError, match="artifact SHA-256 mismatch"):
-    analysis.analyze_evaluation_curve(leaves, expected_code_revision=CODE_REVISION)
+    analysis.analyze_evaluation_curve(
+      leaves,
+      checkpoint_paths=_fixture_checkpoint_paths(tmp_path),
+      expected_code_revision=CODE_REVISION,
+    )
 
 
 @pytest.mark.parametrize(
@@ -434,8 +480,8 @@ def test_curve_rehashes_every_raw_artifact_and_rejects_manifest_drift(tmp_path: 
   (
     ("schema", "schema version 2"),
     ("task", "exact task"),
-    ("role", "ordered control then target"),
-    ("checkpoint", "checkpoint SHA"),
+    ("role", "exact role, path, and SHA"),
+    ("checkpoint", "exact role, path, and SHA"),
     ("code", "same code revision"),
     ("asset", "frozen asset revision"),
     ("live", "same evaluation protocol"),
@@ -482,7 +528,11 @@ def test_curve_fails_closed_on_summary_identity_or_protocol_drift(
   _refresh_manifest(leaf)
 
   with pytest.raises(ValueError, match=message):
-    analysis.analyze_evaluation_curve(leaves, expected_code_revision=CODE_REVISION)
+    analysis.analyze_evaluation_curve(
+      leaves,
+      checkpoint_paths=_fixture_checkpoint_paths(tmp_path),
+      expected_code_revision=CODE_REVISION,
+    )
 
 
 @pytest.mark.parametrize("mutation", ("nonfinite", "live_impulse", "wrong_delta"))
@@ -504,7 +554,11 @@ def test_curve_rejects_nonfinite_or_invalid_live_cat_traces(
   _refresh_manifest(leaf)
 
   with pytest.raises(ValueError, match="non-finite trace field|log-only|exact max soft-OR"):
-    analysis.analyze_evaluation_curve(leaves, expected_code_revision=CODE_REVISION)
+    analysis.analyze_evaluation_curve(
+      leaves,
+      checkpoint_paths=_fixture_checkpoint_paths(tmp_path),
+      expected_code_revision=CODE_REVISION,
+    )
 
 
 def test_censored_utility_fragment_fails_only_its_dose(tmp_path: Path):
@@ -520,7 +574,9 @@ def test_censored_utility_fragment_fails_only_its_dose(tmp_path: Path):
   _refresh_manifest(leaf)
 
   result = analysis.analyze_evaluation_curve(
-    leaves, expected_code_revision=CODE_REVISION
+    leaves,
+    checkpoint_paths=_fixture_checkpoint_paths(tmp_path),
+    expected_code_revision=CODE_REVISION,
   )
 
   assert result["dose_results"]["dose_p01_target"]["overall_verdict"]["pass"] is False
@@ -532,6 +588,7 @@ def test_cli_requires_four_immutable_role_flags_and_regenerates_identical_bytes(
   tmp_path: Path,
 ):
   leaves = _four_leaves(tmp_path / "leaves")
+  checkpoint_paths = _fixture_checkpoint_paths(tmp_path / "leaves")
   outputs = (tmp_path / "first.json", tmp_path / "second.json")
   command = [
     sys.executable,
@@ -544,6 +601,14 @@ def test_cli_requires_four_immutable_role_flags_and_regenerates_identical_bytes(
     str(leaves["dose_p02_target"]),
     "--dose-p03-target-leaf",
     str(leaves["dose_p03_target"]),
+    "--dose-p0-control-checkpoint",
+    str(checkpoint_paths["dose_p0_control"]),
+    "--dose-p01-target-checkpoint",
+    str(checkpoint_paths["dose_p01_target"]),
+    "--dose-p02-target-checkpoint",
+    str(checkpoint_paths["dose_p02_target"]),
+    "--dose-p03-target-checkpoint",
+    str(checkpoint_paths["dose_p03_target"]),
     "--expected-code-revision",
     CODE_REVISION,
   ]
@@ -559,3 +624,147 @@ def test_cli_requires_four_immutable_role_flags_and_regenerates_identical_bytes(
     assert result.stdout.strip() == str(output)
 
   assert outputs[0].read_bytes() == outputs[1].read_bytes()
+
+
+@pytest.mark.parametrize("mode", ("existing", "symlink", "inside_leaf"))
+def test_analysis_output_must_be_fresh_and_outside_immutable_input_leaves(
+  tmp_path: Path, mode: str
+):
+  leaf = tmp_path / "leaf"
+  leaf.mkdir()
+  output = tmp_path / "analysis.json"
+  if mode == "existing":
+    output.write_text("immutable\n")
+  elif mode == "symlink":
+    target = tmp_path / "target.json"
+    output.symlink_to(target)
+  else:
+    output = leaf / "analysis.json"
+
+  with pytest.raises((FileExistsError, ValueError), match="fresh|immutable input leaf"):
+    analysis.write_analysis(
+      output,
+      {"finite": 1.0},
+      immutable_leaves=(leaf,),
+    )
+
+
+def test_analysis_output_is_created_once_without_overwrite(tmp_path: Path):
+  leaf = tmp_path / "leaf"
+  leaf.mkdir()
+  output = tmp_path / "analysis.json"
+
+  analysis.write_analysis(output, {"finite": 1.0}, immutable_leaves=(leaf,))
+
+  assert output.read_text() == '{\n  "finite": 1.0\n}\n'
+  with pytest.raises(FileExistsError, match="fresh"):
+    analysis.write_analysis(output, {"finite": 2.0}, immutable_leaves=(leaf,))
+
+
+def test_analysis_output_resolves_symlinked_parent_before_containment_check(
+  tmp_path: Path,
+):
+  leaf = tmp_path / "leaf"
+  leaf.mkdir()
+  linked_parent = tmp_path / "linked-parent"
+  linked_parent.symlink_to(leaf, target_is_directory=True)
+
+  with pytest.raises(ValueError, match="immutable input leaf"):
+    analysis.write_analysis(
+      linked_parent / "analysis.json",
+      {"finite": 1.0},
+      immutable_leaves=(leaf,),
+    )
+
+
+@pytest.mark.parametrize("mutation", ("wrong", "missing", "extra"))
+def test_checkpoint_summary_requires_exact_canonical_path_key(
+  tmp_path: Path, mutation: str
+):
+  paths = _checkpoint_paths(tmp_path / "checkpoints")
+  summaries = {
+    role: _summary(role, control=role == "dose_p0_control")
+    for role in analysis.EXPECTED_ROLES
+  }
+  for role, path in paths.items():
+    summaries[role]["checkpoint"]["path"] = str(path.resolve())
+  checkpoint = summaries["dose_p01_target"]["checkpoint"]
+  if mutation == "wrong":
+    checkpoint["path"] = str(paths["dose_p02_target"].resolve())
+  elif mutation == "missing":
+    checkpoint.pop("path")
+  else:
+    checkpoint["alternate_path"] = checkpoint["path"]
+
+  with pytest.raises(ValueError, match="exact role, path, and SHA"):
+    analysis.validate_checkpoint_identities(summaries, paths)
+
+
+def test_checkpoint_paths_are_exact_ordered_regular_nonsymlink_model_499_files(
+  tmp_path: Path,
+):
+  paths = _checkpoint_paths(tmp_path / "checkpoints")
+  summaries = {
+    role: _summary(role, control=role == "dose_p0_control")
+    for role in analysis.EXPECTED_ROLES
+  }
+  for role, path in paths.items():
+    summaries[role]["checkpoint"]["path"] = str(path.resolve())
+
+  assert analysis.validate_checkpoint_identities(summaries, paths) == {
+    role: str(path.resolve()) for role, path in paths.items()
+  }
+
+  wrong_name = tmp_path / "wrong.pt"
+  wrong_name.write_bytes(b"wrong\n")
+  invalid = {**paths, "dose_p01_target": wrong_name}
+  with pytest.raises(ValueError, match="regular non-symlink model_499.pt"):
+    analysis.validate_checkpoint_identities(summaries, invalid)
+
+  symlink = tmp_path / "model_499.pt"
+  symlink.symlink_to(paths["dose_p01_target"])
+  invalid = {**paths, "dose_p01_target": symlink}
+  with pytest.raises(ValueError, match="regular non-symlink model_499.pt"):
+    analysis.validate_checkpoint_identities(summaries, invalid)
+
+
+def test_compact_protocol_identity_emits_exact_caps_seeds_population_digests_and_rng():
+  summaries = {
+    role: _summary(role, control=role == "dose_p0_control")
+    for role in analysis.EXPECTED_ROLES
+  }
+
+  result = analysis.compact_protocol_identity(summaries)
+  regenerated = analysis.compact_protocol_identity(copy.deepcopy(summaries))
+
+  assert result["live_imp_max_p"] == 0.0
+  assert result["provisional_caps_n_m_s"] == list(survey.PROVISIONAL_CAPS_N_M_S)
+  assert result["fixed_seed"] == survey.FIXED_SEED
+  assert result["stochastic_seeds"] == list(
+    survey.POLICY_EVALUATION_STOCHASTIC_SEEDS
+  )
+  assert result["training_seed"] == 2
+  expected_seeds = (survey.FIXED_SEED, *survey.POLICY_EVALUATION_STOCHASTIC_SEEDS)
+  populations = (
+    result["populations"]["fixed_mean"],
+    *(result["populations"]["training_like_by_seed"][str(seed)] for seed in expected_seeds[1:]),
+  )
+  for population, seed in zip(populations, expected_seeds, strict=True):
+    assert population == {
+      "seed": seed,
+      "initial_population_sha256": survey.EXPECTED_FIXED_POPULATION_SHA256,
+      "rng_streams": {
+        "reset": seed + survey.RESET_RNG_OFFSET,
+        "observation": seed + survey.OBSERVATION_RNG_OFFSET,
+        "action": seed + survey.ACTION_RNG_OFFSET,
+      },
+    }
+  digest_payload = {key: value for key, value in result.items() if key != "identity_sha256"}
+  expected_digest = hashlib.sha256(
+    json.dumps(
+      digest_payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode()
+  ).hexdigest()
+  assert result["identity_sha256"] == expected_digest
+  assert result == regenerated
+  json.dumps(result, sort_keys=True, allow_nan=False)

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Mapping
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -37,11 +38,125 @@ EXPECTED_IMP_MAX_P = MappingProxyType(
     "dose_p03_target": 0.3,
   }
 )
+TRAINING_SEED = 2
 
 
 def evaluate_gate_metrics(metrics: Mapping[str, object]) -> dict[str, object]:
   """Delegate every dose gate to the approved bridge comparator."""
   return bridge.evaluate_gate_metrics(metrics)
+
+
+def validate_checkpoint_identities(
+  summaries: Mapping[str, Mapping[str, object]],
+  checkpoint_paths: Mapping[str, Path],
+) -> dict[str, str]:
+  """Bind every summary to one explicit canonical frozen checkpoint path."""
+  if tuple(summaries) != EXPECTED_ROLES or tuple(checkpoint_paths) != EXPECTED_ROLES:
+    raise ValueError("checkpoint identity requires the exact ordered policy roles")
+  canonical: dict[str, str] = {}
+  for role in EXPECTED_ROLES:
+    path = Path(checkpoint_paths[role])
+    if path.name != "model_499.pt" or path.is_symlink() or not path.is_file():
+      raise ValueError("checkpoint must be a regular non-symlink model_499.pt")
+    canonical_path = str(path.resolve(strict=True))
+    checkpoint = summaries[role].get("checkpoint")
+    expected_checkpoint = {
+      "role": role,
+      "path": canonical_path,
+      "sha256": EXPECTED_CHECKPOINTS[role],
+    }
+    if (
+      not isinstance(checkpoint, Mapping)
+      or set(checkpoint) != set(expected_checkpoint)
+      or checkpoint != expected_checkpoint
+    ):
+      raise ValueError("summary checkpoint must contain exact role, path, and SHA")
+    canonical[role] = canonical_path
+  if len(set(canonical.values())) != len(EXPECTED_ROLES):
+    raise ValueError("each policy role requires a distinct checkpoint path")
+  return canonical
+
+
+def compact_protocol_identity(
+  summaries: Mapping[str, Mapping[str, object]],
+) -> dict[str, object]:
+  """Extract one canonical matched protocol identity from the validated summaries."""
+  if tuple(summaries) != EXPECTED_ROLES:
+    raise ValueError("protocol identity requires the exact ordered policy roles")
+  protocols = [summaries[role].get("protocol") for role in EXPECTED_ROLES]
+  if not all(isinstance(protocol, Mapping) for protocol in protocols) or any(
+    protocol != protocols[0] for protocol in protocols[1:]
+  ):
+    raise ValueError("all dose summaries require one matched evaluation protocol")
+  protocol = protocols[0]
+  if (
+    protocol.get("live_imp_max_p") != 0.0
+    or protocol.get("fixed_seed") != survey.FIXED_SEED
+    or protocol.get("stochastic_seeds")
+    != list(survey.POLICY_EVALUATION_STOCHASTIC_SEEDS)
+  ):
+    raise ValueError("dose summaries drifted from the canonical evaluation seeds or live dose")
+
+  def population_identity(slot: str, *, seed: int) -> dict[str, object]:
+    identities: list[dict[str, object]] = []
+    for role in EXPECTED_ROLES:
+      populations = summaries[role].get("populations")
+      if not isinstance(populations, Mapping):
+        raise ValueError("dose summary is missing population identity")
+      if slot == "fixed_mean":
+        population = populations.get(slot)
+      else:
+        sampled = populations.get("training_like_sampled")
+        population = sampled.get(slot) if isinstance(sampled, Mapping) else None
+      population_protocol = (
+        population.get("protocol") if isinstance(population, Mapping) else None
+      )
+      if not isinstance(population_protocol, Mapping):
+        raise ValueError("dose summary is missing population protocol identity")
+      identity = {
+        "seed": population_protocol.get("seed"),
+        "initial_population_sha256": population_protocol.get(
+          "initial_population_sha256"
+        ),
+        "rng_streams": population_protocol.get("rng_streams"),
+      }
+      identities.append(identity)
+    if any(identity != identities[0] for identity in identities[1:]):
+      raise ValueError("population or RNG identity is not matched across dose roles")
+    identity = identities[0]
+    if identity["seed"] != seed:
+      raise ValueError("population identity seed drifted")
+    return identity
+
+  control_populations = summaries[EXPECTED_ROLES[0]].get("populations")
+  fixed = (
+    control_populations.get("fixed_mean")
+    if isinstance(control_populations, Mapping)
+    else None
+  )
+  provisional = fixed.get("provisional_caps") if isinstance(fixed, Mapping) else None
+  if not isinstance(provisional, Mapping) or provisional.get("caps_n_m_s") != list(
+    survey.PROVISIONAL_CAPS_N_M_S
+  ):
+    raise ValueError("protocol identity requires the exact provisional cap vector")
+  identity: dict[str, object] = {
+    "live_imp_max_p": 0.0,
+    "provisional_caps_n_m_s": list(survey.PROVISIONAL_CAPS_N_M_S),
+    "fixed_seed": survey.FIXED_SEED,
+    "stochastic_seeds": list(survey.POLICY_EVALUATION_STOCHASTIC_SEEDS),
+    "training_seed": TRAINING_SEED,
+    "training_seed_source": "frozen seed-2 checkpoint role bindings",
+    "populations": {
+      "fixed_mean": population_identity("fixed_mean", seed=survey.FIXED_SEED),
+      "training_like_by_seed": {
+        str(seed): population_identity(str(seed), seed=seed)
+        for seed in survey.POLICY_EVALUATION_STOCHASTIC_SEEDS
+      },
+    },
+  }
+  encoded = json.dumps(identity, sort_keys=True, separators=(",", ":"), allow_nan=False)
+  identity["identity_sha256"] = hashlib.sha256(encoded.encode()).hexdigest()
+  return identity
 
 
 def assemble_analysis(
@@ -105,7 +220,10 @@ def assemble_analysis(
 
 
 def analyze_evaluation_curve(
-  leaves: Mapping[str, Path], *, expected_code_revision: str
+  leaves: Mapping[str, Path],
+  *,
+  checkpoint_paths: Mapping[str, Path],
+  expected_code_revision: str,
 ) -> dict[str, object]:
   """Validate four frozen leaves and compare every dose with the same control."""
   if tuple(leaves) != EXPECTED_ROLES:
@@ -129,6 +247,7 @@ def analyze_evaluation_curve(
     if summary.get("schema_version") != 2:
       raise ValueError("dose evaluation requires summary schema version 2")
     summaries[role] = summary
+  canonical_checkpoints = validate_checkpoint_identities(summaries, checkpoint_paths)
 
   control_role = EXPECTED_ROLES[0]
   control_summary = summaries[control_role]
@@ -167,9 +286,11 @@ def analyze_evaluation_curve(
     }
 
   payload = assemble_analysis(pair_results=pair_results)
+  payload["protocol_identity"] = compact_protocol_identity(summaries)
   payload["provenance"] = {
     "expected_roles": list(EXPECTED_ROLES),
     "expected_checkpoint_sha256": dict(EXPECTED_CHECKPOINTS),
+    "canonical_checkpoint_paths": canonical_checkpoints,
     "imp_max_p_during_training": dict(EXPECTED_IMP_MAX_P),
     "code_revision": expected_code_revision,
     "asset_revision": survey.EXPECTED_EVALUATION_ASSET_REVISION,
@@ -190,12 +311,36 @@ def encode_analysis(payload: Mapping[str, object]) -> str:
   return json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n"
 
 
+def write_analysis(
+  output: Path,
+  payload: Mapping[str, object],
+  *,
+  immutable_leaves: tuple[Path, ...],
+) -> None:
+  """Create one fresh output outside every immutable evaluator leaf."""
+  output = Path(output)
+  if output.exists() or output.is_symlink():
+    raise FileExistsError(f"analysis output must be fresh: {output}")
+  output_parent = output.parent.resolve(strict=True)
+  resolved_output = output_parent / output.name
+  for leaf in immutable_leaves:
+    resolved_leaf = Path(leaf).resolve(strict=True)
+    if resolved_output == resolved_leaf or resolved_leaf in resolved_output.parents:
+      raise ValueError("analysis output must remain outside every immutable input leaf")
+  with resolved_output.open("x", encoding="utf-8") as handle:
+    handle.write(encode_analysis(payload))
+
+
 def main() -> None:
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("--dose-p0-control-leaf", required=True, type=Path)
   parser.add_argument("--dose-p01-target-leaf", required=True, type=Path)
   parser.add_argument("--dose-p02-target-leaf", required=True, type=Path)
   parser.add_argument("--dose-p03-target-leaf", required=True, type=Path)
+  parser.add_argument("--dose-p0-control-checkpoint", required=True, type=Path)
+  parser.add_argument("--dose-p01-target-checkpoint", required=True, type=Path)
+  parser.add_argument("--dose-p02-target-checkpoint", required=True, type=Path)
+  parser.add_argument("--dose-p03-target-checkpoint", required=True, type=Path)
   parser.add_argument("--expected-code-revision", required=True)
   parser.add_argument("--output", required=True, type=Path)
   args = parser.parse_args()
@@ -203,10 +348,20 @@ def main() -> None:
     role: getattr(args, f"{role}_leaf")
     for role in EXPECTED_ROLES
   }
+  checkpoint_paths = {
+    role: getattr(args, f"{role}_checkpoint")
+    for role in EXPECTED_ROLES
+  }
   payload = analyze_evaluation_curve(
-    leaves, expected_code_revision=args.expected_code_revision
+    leaves,
+    checkpoint_paths=checkpoint_paths,
+    expected_code_revision=args.expected_code_revision,
   )
-  args.output.write_text(encode_analysis(payload), encoding="utf-8")
+  write_analysis(
+    args.output,
+    payload,
+    immutable_leaves=tuple(leaves.values()),
+  )
   print(args.output)
 
 
