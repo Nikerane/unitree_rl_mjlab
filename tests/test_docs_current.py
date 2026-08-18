@@ -395,6 +395,7 @@ def test_p02_bridge_result_and_review_packet_preserve_the_screening_claim():
     manifest = dict(row.split("  ", 1)[::-1] for row in rows)
     for name in (
         "analysis.json",
+        "../../../../scripts/analyze_vic_impulse_p02_bridge_evaluation.py",
         "../../../research/reward-design/Z1_IMPULSE_CAT_P02_BRIDGE_CROSS_MODEL_PACKET.md",
         "../../../research/reward-design/Z1_IMPULSE_CAT_P02_BRIDGE_CROSS_MODEL_REVIEWS.md",
     ):
