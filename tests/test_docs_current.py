@@ -16,6 +16,8 @@ memory/archive, which this guard does not scan).
 The curated list below was validated by an adversarial review (2026-07-05): each entry was
 grep-confirmed to hit a living doc now and traced to the consolidation step that removes it.
 """
+import hashlib
+import json
 import re
 from pathlib import Path
 
@@ -138,6 +140,9 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
         "docs/superpowers/specs/2026-08-18-z1-impulse-cat-thesis-campaign-design.md",
         "docs/superpowers/plans/2026-08-18-z1-impulse-cat-p02-bridge.md",
         "docs/results/2026-08-18_z1_impulse_p02_bridge_preflight.md",
+        "docs/results/2026-08-18_z1_impulse_p02_bridge.md",
+        "docs/research/reward-design/Z1_IMPULSE_CAT_P02_BRIDGE_CROSS_MODEL_PACKET.md",
+        "docs/research/reward-design/Z1_IMPULSE_CAT_P02_BRIDGE_CROSS_MODEL_REVIEWS.md",
         "docs/research/reward-design/Z1_IMPULSE_CAT_CAMPAIGN_CROSS_MODEL_PACKET.md",
         "docs/research/reward-design/Z1_IMPULSE_CAT_SIMPLIFIED_CROSS_MODEL_REVIEWS.md",
         "docs/thesis/decisions/2026-08-13_vic_impulse_cat_and_trajectory_direction.md",
@@ -148,6 +153,9 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
         "scripts/slurm/vega_vic_impulse_diag90_500.sbatch",
         "scripts/analyze_vic_impulse_diag90_500_evaluation.py",
         "scripts/preflight_vic_impulse_p02_bridge.py",
+        "scripts/analyze_vic_impulse_p02_bridge_evaluation.py",
+        "scripts/slurm/vega_vic_impulse_p02_bridge.sbatch",
+        "scripts/slurm/vega_vic_impulse_p02_bridge_eval.sbatch",
         "evaluation/joint_position/evaluate_fic_pilot.py",
     )
     missing = [ref for ref in required_refs if f"`{ref}`" not in text]
@@ -166,9 +174,9 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
     assert "Training job `41119011` completed 500 iterations" in route
     assert "one-seed engineering result, not a VIC-superiority claim" in route
     assert "impulse CaT was log-only" in route
-    assert "user-authorized provisional-cap `p=0.2` bridge is now the current route" in route
-    assert "its zero-learning preflight passed" in route
-    assert "one target training run and frozen matched evaluation remain" in route
+    assert "user-authorized provisional-cap `p=0.2` bridge is complete" in route
+    assert "bridge passed every preregistered gate in all three stochastic populations" in route
+    assert "independent training-seed confirmation is not yet run or authorized" in route
     assert "Event-dose calibration is not complete" in route
     assert "redistribution/trade-off, not clean enforcement" in route
     assert "true 500 Hz velocity-limit violation risk increased" in route
@@ -302,3 +310,80 @@ def test_diag90_result_names_pressure_gain_and_provenance_claim_boundaries():
     assert "not derived from trace contents" in flat
     assert "Analysis-consumed array alignments" in flat
     assert "delta_velocity, offline delta_impulse, and their exact max" in text
+
+
+def test_p02_bridge_result_and_review_packet_preserve_the_screening_claim():
+    result_path = REPO / "docs/results/2026-08-18_z1_impulse_p02_bridge.md"
+    packet_path = (
+        REPO
+        / "docs/research/reward-design/Z1_IMPULSE_CAT_P02_BRIDGE_CROSS_MODEL_PACKET.md"
+    )
+    reviews_path = (
+        REPO
+        / "docs/research/reward-design/Z1_IMPULSE_CAT_P02_BRIDGE_CROSS_MODEL_REVIEWS.md"
+    )
+    analysis_path = (
+        REPO
+        / "docs/results/assets/2026-08-18_z1_impulse_p02_bridge/analysis.json"
+    )
+    manifest_path = analysis_path.parent / "SHA256SUMS"
+
+    result = result_path.read_text(encoding="utf-8")
+    flat_result = " ".join(result.split())
+    assert "**Verdict: bridge PASS**" in result
+    assert "all three stochastic populations passed every preregistered gate separately" in result
+    assert "one PPO training seed" in result
+    for boundary in (
+        "not a hard clamp",
+        "not a hardware-safety result",
+        "not evidence that `p=0.2` is optimal",
+        "not proof across training seeds",
+        "native observed exposure",
+    ):
+        assert boundary in flat_result
+    for seed in ("`2`", "`2026081701`", "`2026081702`"):
+        assert seed in result
+
+    packet = packet_path.read_text(encoding="utf-8")
+    assert "VERDICT: CONFIRM | STOP | REVISE" in packet
+    assert "Do the preregistered results justify matched independent-seed confirmation" in packet
+    assert "No pooled gate" in packet
+    for forbidden in ("/Users/", "/private/", "/ceph/", "eunikhilr", "nikerane"):
+        assert forbidden not in packet
+    for seed in ("`2`", "`2026081701`", "`2026081702`"):
+        assert seed in packet
+
+    reviews = reviews_path.read_text(encoding="utf-8")
+    assert "External review status: pending" in reviews
+    assert "No external model was invoked while banking this packet" in reviews
+
+    analysis = json.loads(analysis_path.read_text(encoding="utf-8"))
+    assert tuple(analysis["training_like_by_seed"]) == ("2", "2026081701", "2026081702")
+    assert all(
+        population["verdict"]["pass"] is True
+        for population in analysis["training_like_by_seed"].values()
+    )
+
+    rows = manifest_path.read_text(encoding="utf-8").splitlines()
+    manifest = dict(row.split("  ", 1)[::-1] for row in rows)
+    for name in (
+        "analysis.json",
+        "../../../research/reward-design/Z1_IMPULSE_CAT_P02_BRIDGE_CROSS_MODEL_PACKET.md",
+    ):
+        path = analysis_path.parent / name
+        assert manifest[name] == hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_index_routes_to_the_completed_p02_bridge_without_overclaiming():
+    text = (REPO / "docs/README.md").read_text(encoding="utf-8")
+    assert "`docs/results/2026-08-18_z1_impulse_p02_bridge.md`" in text
+    assert (
+        "`docs/research/reward-design/Z1_IMPULSE_CAT_P02_BRIDGE_CROSS_MODEL_PACKET.md`"
+        in text
+    )
+    route = next(
+        line for line in text.splitlines() if line.startswith("**Current GPU route:**")
+    )
+    assert "bridge passed every preregistered gate in all three stochastic populations" in route
+    assert "independent training-seed confirmation is not yet run or authorized" in route
+    assert "one target training run and frozen matched evaluation remain" not in route
