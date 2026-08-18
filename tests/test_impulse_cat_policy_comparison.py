@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+from types import MappingProxyType
 
 import numpy as np
 import pytest
@@ -588,12 +589,84 @@ def _compare(
   target: dict[str, object],
   *,
   expected_code_revision: str = CODE_REVISION,
+  expected_roles: tuple[str, str] | None = None,
 ) -> dict[str, object]:
-  return survey.compare_policy_evaluations(
-    control,
-    target,
-    expected_code_revision=expected_code_revision,
+  kwargs = {"expected_code_revision": expected_code_revision}
+  if expected_roles is not None:
+    kwargs["expected_roles"] = expected_roles
+  return survey.compare_policy_evaluations(control, target, **kwargs)
+
+
+def test_policy_comparison_accepts_an_exact_parameterized_bridge_role_pair(monkeypatch):
+  control, target = _valid_policy_pair()
+  bridge_roles = ("bridge_p0_control", "bridge_p02_target")
+  bridge_hashes = {
+    bridge_roles[0]: "1" * 64,
+    bridge_roles[1]: "2" * 64,
+  }
+  monkeypatch.setattr(
+    survey,
+    "EVALUATION_CHECKPOINTS",
+    MappingProxyType(bridge_hashes),
   )
+  for payload, role in zip((control, target), bridge_roles, strict=True):
+    payload["checkpoint"] = {"role": role, "sha256": bridge_hashes[role]}
+
+  result = _compare(control, target, expected_roles=bridge_roles)
+
+  assert result["roles"] == {
+    "control": "bridge_p0_control",
+    "target": "bridge_p02_target",
+  }
+
+
+@pytest.mark.parametrize(
+  ("mutation", "message"),
+  (
+    ("role", "ordered control then target"),
+    ("sha", "checkpoint SHA"),
+    ("live_p", "live imp_max_p=0"),
+    ("revision", "exact expected evaluation code revision"),
+    ("population", "same initial population hash"),
+    ("rng", "RNG streams"),
+  ),
+)
+def test_policy_comparison_rejects_any_bridge_identity_drift(
+  monkeypatch, mutation, message
+):
+  control, target = _valid_policy_pair()
+  bridge_roles = ("bridge_p0_control", "bridge_p02_target")
+  bridge_hashes = {
+    bridge_roles[0]: "1" * 64,
+    bridge_roles[1]: "2" * 64,
+  }
+  monkeypatch.setattr(
+    survey,
+    "EVALUATION_CHECKPOINTS",
+    MappingProxyType(bridge_hashes),
+  )
+  for payload, role in zip((control, target), bridge_roles, strict=True):
+    payload["checkpoint"] = {"role": role, "sha256": bridge_hashes[role]}
+  if mutation == "role":
+    target["checkpoint"]["role"] = bridge_roles[0]
+  elif mutation == "sha":
+    target["checkpoint"]["sha256"] = "3" * 64
+  elif mutation == "live_p":
+    control["protocol"]["live_imp_max_p"] = 0.5
+    target["protocol"]["live_imp_max_p"] = 0.5
+  elif mutation == "revision":
+    control["code_revision"] = target["code_revision"] = "c" * 40
+  elif mutation == "population":
+    target["populations"]["training_like_sampled"]["2"]["protocol"][
+      "initial_population_sha256"
+    ] = "c" * 64
+  else:
+    target["populations"]["training_like_sampled"]["2"]["protocol"][
+      "rng_streams"
+    ]["action"] += 1
+
+  with pytest.raises(ValueError, match=message):
+    _compare(control, target, expected_roles=bridge_roles)
 
 
 def test_policy_comparison_rejects_fabricated_common_revision_not_expected():

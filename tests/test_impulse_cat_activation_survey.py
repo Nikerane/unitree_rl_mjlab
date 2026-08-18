@@ -634,6 +634,7 @@ def test_live_vic_recorder_captures_utility_velocity_and_gains_before_auto_reset
       "vic_kd",
     ):
       assert trace[name].shape == (1, 2, 6)
+    assert trace["policy_action"].shape == (1, 2, 12)
     for value in trace.values():
       if np.issubdtype(value.dtype, np.floating):
         assert np.isfinite(value).all()
@@ -641,6 +642,7 @@ def test_live_vic_recorder_captures_utility_velocity_and_gains_before_auto_reset
     assert trace["success"].tolist() == [[False, False]]
     assert trace["timeout"].tolist() == [[True, True]]
     np.testing.assert_allclose(trace["vic_p"][0], stiffness.cpu().numpy())
+    np.testing.assert_allclose(trace["policy_action"][0], actions.cpu().numpy())
     np.testing.assert_allclose(
       env.action_manager.get_term("joint_stiffness").telemetry.p.cpu().numpy(),
       np.zeros((2, 6)),

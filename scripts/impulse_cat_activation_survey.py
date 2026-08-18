@@ -465,6 +465,7 @@ class _LiveSurveyRecorder:
     self._control.update(
       {name: [] for name in (*self._TASK_SCALAR_FIELDS, *self._TASK_JOINT_FIELDS)}
     )
+    self._control["policy_action"] = []
     self._control["done"] = []
     self._control["episode_id"] = []
     self._substep_contact: list[Any] = []
@@ -512,6 +513,7 @@ class _LiveSurveyRecorder:
         "vic_kp": stiffness.kp,
         "vic_kd": stiffness.kd,
       }
+      policy_action = action_manager.action
       scalar_shape = (env.num_envs,)
       joint_shape = (env.num_envs, len(JOINT_NAMES))
       for name in self._TASK_SCALAR_FIELDS:
@@ -526,8 +528,14 @@ class _LiveSurveyRecorder:
             f"live survey field {name} has shape {task_values[name].shape}, "
             f"expected {joint_shape}"
           )
+      if policy_action.shape != (env.num_envs, 12):
+        raise RuntimeError(
+          f"live survey policy_action has shape {policy_action.shape}, "
+          f"expected {(env.num_envs, 12)}"
+        )
       for name, value in task_values.items():
         self._control[name].append(value.detach().clone())
+      self._control["policy_action"].append(policy_action.detach().clone())
       self._control["done"].append(done)
       self._control["episode_id"].append(self._episode_id.detach().clone())
       self._episode_id += done.long()
@@ -580,6 +588,11 @@ class _LiveSurveyRecorder:
     ):
       if trace[name].shape != scalar_shape:
         raise RuntimeError(f"live survey field {name} has shape {trace[name].shape}, expected {scalar_shape}")
+    if trace["policy_action"].shape != (*scalar_shape, 12):
+      raise RuntimeError(
+        f"live survey field policy_action has shape {trace['policy_action'].shape}, "
+        f"expected {(*scalar_shape, 12)}"
+      )
     if trace["active_limit_per_joint"].shape != (len(JOINT_NAMES),):
       raise RuntimeError("live active impulse threshold does not have shape (6,)")
     expected_limit = np.asarray(
@@ -1845,23 +1858,33 @@ def compare_policy_evaluations(
   target: Mapping[str, object],
   *,
   expected_code_revision: str,
+  expected_roles: tuple[str, str] = ("diag90_control", "diag90_target"),
 ) -> dict[str, object]:
   """Build pure comparisons bound to one explicitly approved evaluator revision."""
+  if (
+    not isinstance(expected_roles, tuple)
+    or len(expected_roles) != 2
+    or not all(isinstance(role, str) and role for role in expected_roles)
+    or expected_roles[0] == expected_roles[1]
+  ):
+    raise ValueError("expected_roles must be an exact ordered pair of distinct role names")
+  control_role, target_role = expected_roles
   control_checkpoint = control.get("checkpoint")
   target_checkpoint = target.get("checkpoint")
   if not isinstance(control_checkpoint, Mapping) or not isinstance(
     target_checkpoint, Mapping
   ):
     raise ValueError("policy summaries must record checkpoint roles")
-  if control_checkpoint.get("role") != "diag90_control" or target_checkpoint.get(
+  if control_checkpoint.get("role") != control_role or target_checkpoint.get(
     "role"
-  ) != "diag90_target":
+  ) != target_role:
     raise ValueError("policy summaries must be ordered control then target")
   for checkpoint, role in (
-    (control_checkpoint, "diag90_control"),
-    (target_checkpoint, "diag90_target"),
+    (control_checkpoint, control_role),
+    (target_checkpoint, target_role),
   ):
-    if checkpoint.get("sha256") != EVALUATION_CHECKPOINTS[role]:
+    expected_hash = EVALUATION_CHECKPOINTS.get(role)
+    if expected_hash is None or checkpoint.get("sha256") != expected_hash:
       raise ValueError(f"{role} checkpoint SHA does not match the frozen role")
   if control.get("task") != VIC_TASK or target.get("task") != VIC_TASK:
     raise ValueError("paired policy summaries must record the exact task")
@@ -1987,7 +2010,7 @@ def compare_policy_evaluations(
     for seed in expected_seed_keys
   }
   return {
-    "roles": {"control": "diag90_control", "target": "diag90_target"},
+    "roles": {"control": control_role, "target": target_role},
     "threshold_order": list(threshold_order),
     "statistical_unit": "paired episode segment",
     "controller_reads_are_independent": False,
