@@ -109,7 +109,30 @@ The authoritative analysis is 575,179 bytes with SHA-256
 verified finite/provenanced, and banked byte-for-byte unchanged. The adjacent `SHA256SUMS` binds
 that JSON, the exact analyzer source, this record, and the sanitized review packet.
 
-**Decision:** do not increase dose on this evidence. The bounded next proposal is matched
-independent training-seed confirmation of `p=.2`; it is not authorized by this record. No further
-training, evaluation, curriculum, domain-randomization, contact-flush, torque-CaT, or hardware run
-was performed while banking this result.
+**Pre-consultation decision:** do not increase dose on this evidence. The bounded next question was
+matched independent training-seed confirmation of `p=.2`; it was not authorized by this record. No
+further training, evaluation, curriculum, domain-randomization, contact-flush, torque-CaT, or
+hardware run was performed while banking this result.
+
+## Consultation and adjudication
+
+Five one-shot advisory reviews returned three `CONFIRM`, one `STOP`, and one `REVISE`. Their votes
+do not control the experiment: every tested dose remains a preregistered numerical FAIL, and p=.2
+remains the strongest tested policy instance rather than a PASS or an optimum. The reviews
+converged that increasing to p=.3 is unsupported and disagreed over whether p=.2 should proceed
+directly to training-seed confirmation.
+
+The material new observation is the 4,096-environment lattice at the strict boundary. The old and
+new impulse-risk CI highs were exactly `-21/4096` and `-20/4096`; the threshold is `-20.48/4096`.
+The one-environment A100 execution difference therefore moved the result by one attainable step.
+This does not change the existing FAIL, excuse the preregistered gate, or make the analyzer wrong.
+It means the future confirmation design must state how it handles execution-repeat variation at
+that resolution.
+
+The final bounded next proposal is therefore a separately preregistered no-learning envelope:
+repeat only the frozen p=0 versus p=.2 evaluation for population `2026081701` ten times with the
+same declared population and RNG identities, report the risk and CI-high distribution, and do not
+rescore this screen. Only afterward should a separately approved protocol consider independent
+training-seed confirmation of `p=.2`. Neither replay nor training is authorized here. The exact
+review provenance, transport caveat, disagreements, and factual corrections are recorded in
+`docs/research/reward-design/Z1_IMPULSE_CAT_DOSE_CURVE_CROSS_MODEL_REVIEWS.md`.

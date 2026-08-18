@@ -599,3 +599,134 @@ def test_current_docs_route_to_dose_curve_without_overclaiming():
         assert "not an optimal-dose" in flat_text
     assert "`docs/results/2026-08-18_z1_impulse_cat_dose_curve.md`" in index
     assert "`../results/2026-08-18_z1_impulse_cat_dose_curve.md`" in thesis
+
+
+def test_dose_curve_cross_model_reviews_are_bounded_and_manifested():
+    result_path = REPO / "docs/results/2026-08-18_z1_impulse_cat_dose_curve.md"
+    packet_path = (
+        REPO
+        / "docs/research/reward-design/Z1_IMPULSE_CAT_DOSE_CURVE_REVIEW_PACKET.md"
+    )
+    reviews_path = (
+        REPO
+        / "docs/research/reward-design/Z1_IMPULSE_CAT_DOSE_CURVE_CROSS_MODEL_REVIEWS.md"
+    )
+    manifest_path = (
+        REPO
+        / "docs/results/assets/2026-08-18_z1_impulse_cat_dose_curve/SHA256SUMS"
+    )
+
+    assert hashlib.sha256(packet_path.read_bytes()).hexdigest() == (
+        "485bf07d472d94c3a200721b72732ec2735ba1fea02219619fac80cb0a51a6cd"
+    )
+
+    reviews = reviews_path.read_text(encoding="utf-8")
+    flat_reviews = " ".join(reviews.split())
+    expected_reviews = (
+        (
+            "opencode/kimi-k3",
+            "ses_fea78634effejHlbQaCDimILyc",
+            "CONFIRM",
+            "e52485ddd075716b015e79c0d9a6dd5417b284eda3c8f59b4fa3ba4bb9f5ae6a",
+            "11557 / 1534 / 0 / 20139 / 0",
+            "0.0637227",
+        ),
+        (
+            "opencode/glm-5.2",
+            "ses_fea778cc1ffeHj1ZmfxvMgTY8v",
+            "CONFIRM",
+            "38ccfef1095d37ecda28dcfafea547a36b076821e351a894795f6054e661daea",
+            "9911 / 3587 / 0 / 152 / 0",
+            "0.02969772",
+        ),
+        (
+            "opencode/qwen3.6-plus",
+            "ses_fea763a7effet5fEug5xht5c0P",
+            "STOP",
+            "ae588f1eb460c9cea5755ceffc7b633a37eafbc34828d060d712d1aac27540b0",
+            "6 / 713 / 0 / 0 / 10609",
+            "0.008772625",
+        ),
+        (
+            "opencode/deepseek-v4-pro",
+            "ses_fea75787affeRP4SV1D9ZYolmI",
+            "CONFIRM",
+            "85b40e5d7f61485af08f6dad8225f909bac2713c9c4bb3cec672831498601b25",
+            "10435 / 909 / 0 / 0 / 0",
+            "0.02164746",
+        ),
+        (
+            "opencode/claude-opus-5",
+            "ses_fea7501f6ffeWDX31EMku6uNAH",
+            "REVISE",
+            "d91c641923f55f2a88d1cfad57e2a354866dc40352e66bb8c4d7a7a92a6698bb",
+            "4 / 6748 / 0 / 14995 / 20176",
+            "0.3023175",
+        ),
+    )
+    for model, session, verdict, text_hash, tokens, cost in expected_reviews:
+        expected_row = (
+            f"| `{model}` | max | `{session}` | `{verdict}` | `{text_hash}` | "
+            f"{tokens} | {cost} |"
+        )
+        assert expected_row in reviews
+    for fact in (
+        "0.426158005",
+        "485bf07d472d94c3a200721b72732ec2735ba1fea02219619fac80cb0a51a6cd",
+        "86e1f9e8cc8a96b535e0e3267abce2a78ea1ecd7a53652a23116fadf3f4e6c02",
+        "f7ba41a559af3cd73f2fbf0e5cc1c00b983a56c0f9225e31623750c030a7f548",
+        "literal opening and closing quote",
+        "terminal newline",
+        "two pre-launch authorization blocks",
+        "no process, session, inference, or cost",
+        "exactly one successful inference attempt per model",
+        "one inference attempt per model and no inference retry",
+        "Qwen's `0.000117 N.m.s` unit is wrong",
+        "risk-difference fraction",
+        "DeepSeek's optimum claim is unsupported",
+        "fresh-RNG rescue",
+        "`-21/4096`",
+        "`-20/4096`",
+        "`-20.48/4096`",
+        "replay-only execution-nondeterminism envelope",
+    ):
+        assert fact in flat_reviews
+    for model in (
+        "opencode/kimi-k3",
+        "opencode/glm-5.2",
+        "opencode/qwen3.6-plus",
+        "opencode/deepseek-v4-pro",
+        "opencode/claude-opus-5",
+    ):
+        assert f"`{model}`" in reviews
+    for boundary in (
+        "advisory",
+        "unknown unit and currency",
+        "one PPO training seed",
+        "cannot turn numerical FAIL into PASS",
+        "no new training",
+        "strongest tested policy instance, not an optimum",
+    ):
+        assert boundary in flat_reviews
+
+    result = result_path.read_text(encoding="utf-8")
+    flat_result = " ".join(result.split())
+    assert "Consultation and adjudication" in result
+    assert "every tested dose remains a preregistered numerical FAIL" in flat_result
+    assert "independent training-seed confirmation of `p=.2`" in flat_result
+    assert "not authorized" in flat_result
+
+    manifest = dict(
+        row.split("  ", 1)[::-1]
+        for row in manifest_path.read_text(encoding="utf-8").splitlines()
+    )
+    for name in (
+        "analysis.json",
+        "../../../../scripts/analyze_vic_impulse_dose_curve.py",
+        "../../2026-08-18_z1_impulse_cat_dose_curve.md",
+        "../../../research/reward-design/Z1_IMPULSE_CAT_DOSE_CURVE_REVIEW_PACKET.md",
+        "../../../research/reward-design/Z1_IMPULSE_CAT_DOSE_CURVE_CROSS_MODEL_REVIEWS.md",
+    ):
+        assert manifest[name] == hashlib.sha256(
+            (manifest_path.parent / name).read_bytes()
+        ).hexdigest()
