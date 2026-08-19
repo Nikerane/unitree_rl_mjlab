@@ -618,6 +618,44 @@ def test_current_docs_route_to_dose_curve_without_overclaiming():
     assert "unapproved replay-only 10-repeat execution-nondeterminism envelope" in flat_result
     assert "Neither replay nor training is authorized" in flat_result
     assert "The next scientific question is independent training-seed confirmation" not in result
+
+
+def test_two_boundary_p02_result_is_indexed_and_preserves_its_diagnostic_boundary():
+    result_path = REPO / "docs/results/2026-08-19_z1_impulse_two_boundary_p02.md"
+    asset_dir = REPO / "docs/results/assets/2026-08-19_z1_impulse_two_boundary_p02"
+    result = " ".join(result_path.read_text(encoding="utf-8").split())
+    index = (REPO / "docs/README.md").read_text(encoding="utf-8")
+    thesis = (REPO / "docs/thesis/README.md").read_text(encoding="utf-8")
+    results_index = (REPO / "docs/results/README.md").read_text(encoding="utf-8")
+
+    assert "uniform-0.9 at J3" in result
+    assert "joint-stress chiefly at J6" in result
+    for boundary in (
+        "one-seed project-cap experiment",
+        "Soft-CaT is pressure, not a clamp",
+        "hardware safety",
+        "complete-contact behavior",
+        "Controller reads are descriptive measurements, not inferential units",
+    ):
+        assert boundary in result
+    assert "2026-08-19_z1_impulse_two_boundary_p02.md" in index
+    assert "2026-08-19_z1_impulse_two_boundary_p02.md" in thesis
+    assert "2026-08-19_z1_impulse_two_boundary_p02.md" in results_index
+
+    analysis = asset_dir / "analysis.json"
+    manifest = dict(
+        row.split("  ", 1)[::-1]
+        for row in (asset_dir / "SHA256SUMS").read_text(encoding="utf-8").splitlines()
+    )
+    assert manifest["analysis.json"] == hashlib.sha256(analysis.read_bytes()).hexdigest()
+    payload = json.loads(analysis.read_text(encoding="utf-8"))
+    assert payload["claim_limits"]["controller_reads_are_inferential_units"] is False
+    assert payload["provenance"]["live_imp_max_p"] == 0.0
+    assert tuple(payload["populations"]["training_like_by_seed"]) == (
+        "2",
+        "2026081701",
+        "2026081702",
+    )
     assert (
         "Independent training-seed confirmation remains unrun and is the bounded next question"
         not in index

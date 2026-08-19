@@ -181,6 +181,13 @@ applied above and in `CONSTRAINED_RL_LANDSCAPE.md` §5.*
   is authorized. Project caps are not hardware limits, soft-CaT is not a hard clamp, and terminal
   censoring prevents a complete-contact claim. See
   `../results/2026-08-18_z1_impulse_cat_dose_curve.md`.
+  **Two-boundary same-dose diagnostic DONE (2026-08-19):** with `p=.2`, uniform-0.9 retained a
+  sparse own-boundary J3 tail (4–6 stochastic reads), while deliberately joint-stress caps retained
+  a sparse chiefly-J6 tail (10–11 reads; J1/J5 also appear once in one population). Both policies
+  completed all 4,096 initial episodes in each replica. This supports only a one-seed,
+  geometry-sensitive partial-compliance observation; it does not establish hard enforcement,
+  safety, a hardware threshold, or individual-joint causal transfer. See
+  `../results/2026-08-19_z1_impulse_two_boundary_p02.md`.
 - worst-case tail closure via VIC (capability layer — after fixed-impedance results).
 - ~~citation verification pass~~ **DONE** (2026-06-17): no fabricated ids; 4 minor title/year fixes
   applied. Still confirm exact published venues per the thesis house citation style.
