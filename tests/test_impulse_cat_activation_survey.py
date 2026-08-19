@@ -33,6 +33,7 @@ TARGET_SHA = "ddd7ac4c855160bff1db2af52e642d960dab2bef34e41dd2532002185eb36d15"
 BRIDGE_TARGET_SHA = "57000e958bbafa2c62929652d3b76fd6ed571c9867bee3735c14baf0ca57d8de"
 DOSE_P01_SHA = "92f1d97c8ff1476cb26c0b648478a0bc3c522e4e1eb7087389fb8e0d6bf73f86"
 DOSE_P03_SHA = "4c0a665fffc077d488630a28b258c1593050f969b4f6227147c3594097dc4efd"
+DOSE_P025_SHA = "5efc45c11c02dd400ad7d417bcdeefe9d271038ab43007f08a2820ceca0e744d"
 
 
 def _install_fake_population_runtime(monkeypatch, events):
@@ -154,6 +155,7 @@ def test_evaluation_checkpoint_roles_are_exact_and_fail_closed(tmp_path, monkeyp
     "dose_p01_target": DOSE_P01_SHA,
     "dose_p02_target": BRIDGE_TARGET_SHA,
     "dose_p03_target": DOSE_P03_SHA,
+    "dose_p025_exploratory": DOSE_P025_SHA,
   }
   with pytest.raises(TypeError):
     survey.EVALUATION_CHECKPOINTS["unexpected_role"] = CONTROL_SHA
@@ -228,6 +230,11 @@ def test_evaluation_roles_derive_identical_rng_streams_from_one_base_seed():
       action=30_000_043,
     ),
     "dose_p03_target": survey.EvaluationRngSeeds(
+      reset=10_000_021,
+      observation=20_000_035,
+      action=30_000_043,
+    ),
+    "dose_p025_exploratory": survey.EvaluationRngSeeds(
       reset=10_000_021,
       observation=20_000_035,
       action=30_000_043,

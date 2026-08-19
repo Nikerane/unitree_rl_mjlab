@@ -60,6 +60,7 @@ EVALUATION_CHECKPOINTS: Mapping[str, str] = MappingProxyType(
     "dose_p01_target": "92f1d97c8ff1476cb26c0b648478a0bc3c522e4e1eb7087389fb8e0d6bf73f86",
     "dose_p02_target": "57000e958bbafa2c62929652d3b76fd6ed571c9867bee3735c14baf0ca57d8de",
     "dose_p03_target": "4c0a665fffc077d488630a28b258c1593050f969b4f6227147c3594097dc4efd",
+    "dose_p025_exploratory": "5efc45c11c02dd400ad7d417bcdeefe9d271038ab43007f08a2820ceca0e744d",
   }
 )
 RESET_RNG_OFFSET = 10_000_019

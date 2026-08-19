@@ -174,6 +174,10 @@ def _env(tmp_path: Path, task_id: int) -> dict[str, str]:
 
   python = home / "repos/unitree_rl_mjlab/.venv/bin/python"
   python.parent.mkdir(parents=True)
+  role_cases = "".join(
+    f"      {role}) digest=${variable}_FROZEN_SHA ;;\n"
+    for _, role, variable, _ in ARMS
+  )
   python.write_text(
     "#!/bin/sh\n"
     "{ printf 'CALL'; for arg in \"$@\"; do printf '\\t%s' \"$arg\"; done; printf '\\n'; } >> \"$HOME/calls\"\n"
@@ -188,10 +192,7 @@ def _env(tmp_path: Path, task_id: int) -> dict[str, str]:
     "      previous=\"$arg\"\n"
     "    done\n"
     "    case \"$role\" in\n"
-    "      dose_p0_control) digest=$P0_CHECKPOINT_FROZEN_SHA ;;\n"
-    "      dose_p01_target) digest=$P01_CHECKPOINT_FROZEN_SHA ;;\n"
-    "      dose_p02_target) digest=$P02_CHECKPOINT_FROZEN_SHA ;;\n"
-    "      dose_p03_target) digest=$P03_CHECKPOINT_FROZEN_SHA ;;\n"
+    + role_cases +
     "      *) exit 73 ;;\n"
     "    esac\n"
     "    \"$REAL_PYTHON\" \"$HOME/generate_evaluation.py\" \"$output\" \"$role\" \"$checkpoint\" \"$digest\" \"$EXPECTED_CODE_REVISION\" \"$EXPECTED_ASSET_REVISION\"\n"
