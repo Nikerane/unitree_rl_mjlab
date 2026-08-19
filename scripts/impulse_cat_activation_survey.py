@@ -61,7 +61,17 @@ EVALUATION_CHECKPOINTS: Mapping[str, str] = MappingProxyType(
     "dose_p02_target": "57000e958bbafa2c62929652d3b76fd6ed571c9867bee3735c14baf0ca57d8de",
     "dose_p03_target": "4c0a665fffc077d488630a28b258c1593050f969b4f6227147c3594097dc4efd",
     "dose_p025_exploratory": "5efc45c11c02dd400ad7d417bcdeefe9d271038ab43007f08a2820ceca0e744d",
+    "p02_uniform09": "a99593b263a74944d60ac412bb1da733a36a29a1cd9f4eeeaed89906372595df",
+    "p02_joint_stress": "509cc26a2e521a935bcbc8c342040c95c7d2e3d7fc105a52d5d9450518bd2ec7",
   }
+)
+TWO_BOUNDARY_P02_TRAINING_CAPS_N_M_S: Mapping[str, tuple[float, ...]] = (
+  MappingProxyType(
+    {
+      "p02_uniform09": (0.738, 1.476, 0.738, 0.738, 0.738, 0.738),
+      "p02_joint_stress": (0.369, 0.246, 0.738, 0.369, 0.246, 0.0164),
+    }
+  )
 )
 RESET_RNG_OFFSET = 10_000_019
 OBSERVATION_RNG_OFFSET = 20_000_033
@@ -155,6 +165,30 @@ def validate_checkpoint_role(checkpoint: Path, role: str) -> str:
   actual = _sha256(checkpoint.resolve(strict=True))
   if actual != EVALUATION_CHECKPOINTS[role]:
     raise RuntimeError("role/checkpoint SHA-256 mismatch")
+  return actual
+
+
+def validate_training_cap_identity(
+  role: str, training_caps_n_m_s: object | None
+) -> tuple[float, ...] | None:
+  """Fail closed on the immutable training-cap identity for two-boundary roles."""
+  expected = TWO_BOUNDARY_P02_TRAINING_CAPS_N_M_S.get(role)
+  if expected is None:
+    if training_caps_n_m_s is not None:
+      raise ValueError("training-cap identity is only valid for two-boundary roles")
+    return None
+  if not isinstance(training_caps_n_m_s, (list, tuple)) or len(training_caps_n_m_s) != 6:
+    raise ValueError("training-cap identity must contain six finite numeric values")
+  if any(
+    isinstance(cap, bool)
+    or not isinstance(cap, (int, float))
+    or not np.isfinite(cap)
+    for cap in training_caps_n_m_s
+  ):
+    raise ValueError("training-cap identity must contain six finite numeric values")
+  actual = tuple(float(cap) for cap in training_caps_n_m_s)
+  if actual != expected:
+    raise ValueError("training-cap identity mismatch for checkpoint role")
   return actual
 
 
@@ -2032,6 +2066,7 @@ def run_policy_evaluation(
   output_dir: Path,
   device: str,
   stochastic_seeds: tuple[int, ...],
+  training_caps_n_m_s: object | None = None,
 ) -> dict[str, object]:
   """Run one frozen role on the prespecified matched post-training populations."""
   seeds = tuple(stochastic_seeds)
@@ -2048,6 +2083,7 @@ def run_policy_evaluation(
       f"refusing to overwrite policy evaluation output: {output_dir}"
     )
   checkpoint_sha256 = validate_checkpoint_role(checkpoint, role)
+  training_cap_identity = validate_training_cap_identity(role, training_caps_n_m_s)
   revisions = _evaluation_revisions()
   revisions["code_revision"] = validate_evaluation_revision(
     _REPO_ROOT, revisions["code_revision"]
@@ -2120,6 +2156,8 @@ def run_policy_evaluation(
       "training_like_sampled": stochastic_payloads,
     },
   }
+  if training_cap_identity is not None:
+    payload["training_cap_identity_n_m_s"] = list(training_cap_identity)
   encoded = json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n"
   (output_dir / "summary.json").write_text(encoded)
   return payload
@@ -2131,6 +2169,7 @@ def _parse_args() -> argparse.Namespace:
   parser.add_argument("--checkpoint", required=True, type=Path)
   parser.add_argument("--output-dir", required=True, type=Path)
   parser.add_argument("--device", default="cpu")
+  parser.add_argument("--training-caps-n-m-s", type=json.loads)
   return parser.parse_args()
 
 
@@ -2155,6 +2194,7 @@ def main() -> None:
       output_dir=args.output_dir,
       device=args.device,
       stochastic_seeds=POLICY_EVALUATION_STOCHASTIC_SEEDS,
+      training_caps_n_m_s=args.training_caps_n_m_s,
     )
   print(f"wrote {args.output_dir / 'summary.json'}")
 

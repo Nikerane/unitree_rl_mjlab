@@ -156,6 +156,8 @@ def test_evaluation_checkpoint_roles_are_exact_and_fail_closed(tmp_path, monkeyp
     "dose_p02_target": BRIDGE_TARGET_SHA,
     "dose_p03_target": DOSE_P03_SHA,
     "dose_p025_exploratory": DOSE_P025_SHA,
+    "p02_uniform09": "a99593b263a74944d60ac412bb1da733a36a29a1cd9f4eeeaed89906372595df",
+    "p02_joint_stress": "509cc26a2e521a935bcbc8c342040c95c7d2e3d7fc105a52d5d9450518bd2ec7",
   }
   with pytest.raises(TypeError):
     survey.EVALUATION_CHECKPOINTS["unexpected_role"] = CONTROL_SHA
@@ -165,6 +167,31 @@ def test_evaluation_checkpoint_roles_are_exact_and_fail_closed(tmp_path, monkeyp
   assert survey.validate_checkpoint_role(checkpoint, "diag90_control") == CONTROL_SHA
   with pytest.raises(RuntimeError, match="role/checkpoint SHA-256 mismatch"):
     survey.validate_checkpoint_role(checkpoint, "diag90_target")
+
+
+def test_two_boundary_roles_bind_exact_checkpoint_and_training_cap_identities():
+  """The new p=0.2 diagnostic leaves cannot be relabelled across cap geometries."""
+  assert dict(survey.TWO_BOUNDARY_P02_TRAINING_CAPS_N_M_S) == {
+    "p02_uniform09": (0.738, 1.476, 0.738, 0.738, 0.738, 0.738),
+    "p02_joint_stress": (0.369, 0.246, 0.738, 0.369, 0.246, 0.0164),
+  }
+  assert survey.EVALUATION_CHECKPOINTS["p02_uniform09"] == (
+    "a99593b263a74944d60ac412bb1da733a36a29a1cd9f4eeeaed89906372595df"
+  )
+  assert survey.EVALUATION_CHECKPOINTS["p02_joint_stress"] == (
+    "509cc26a2e521a935bcbc8c342040c95c7d2e3d7fc105a52d5d9450518bd2ec7"
+  )
+  with pytest.raises(TypeError):
+    survey.TWO_BOUNDARY_P02_TRAINING_CAPS_N_M_S["p02_uniform09"] = (0.0,) * 6
+  assert survey.validate_training_cap_identity(
+    "p02_uniform09", [0.738, 1.476, 0.738, 0.738, 0.738, 0.738]
+  ) == (0.738, 1.476, 0.738, 0.738, 0.738, 0.738)
+  with pytest.raises(ValueError, match="training-cap identity mismatch"):
+    survey.validate_training_cap_identity(
+      "p02_uniform09", [0.369, 0.246, 0.738, 0.369, 0.246, 0.0164]
+    )
+  with pytest.raises(ValueError, match="six finite numeric values"):
+    survey.validate_training_cap_identity("p02_joint_stress", [0.369, float("nan")])
 
 
 def test_environment_rng_consumption_cannot_advance_policy_action_noise():
@@ -235,6 +262,16 @@ def test_evaluation_roles_derive_identical_rng_streams_from_one_base_seed():
       action=30_000_043,
     ),
     "dose_p025_exploratory": survey.EvaluationRngSeeds(
+      reset=10_000_021,
+      observation=20_000_035,
+      action=30_000_043,
+    ),
+    "p02_uniform09": survey.EvaluationRngSeeds(
+      reset=10_000_021,
+      observation=20_000_035,
+      action=30_000_043,
+    ),
+    "p02_joint_stress": survey.EvaluationRngSeeds(
       reset=10_000_021,
       observation=20_000_035,
       action=30_000_043,
