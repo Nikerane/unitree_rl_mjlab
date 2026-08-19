@@ -114,26 +114,13 @@ print(f"Z1_VIC_IMPULSE_TWO_BOUNDARY_P02_TRAIN_RUNTIME={actual}")
 PY
 
 "$PY" - <<'PY' || fail "native VIC-TT preflight failed"
-from collections.abc import Mapping
-from dataclasses import fields, is_dataclass
+from dataclasses import asdict
 import json
 import os
 
 import mjlab.tasks  # noqa: F401
 import src.tasks  # noqa: F401
 from mjlab.tasks.registry import load_env_cfg
-
-
-def snapshot(value):
-  if is_dataclass(value):
-    return {field.name: snapshot(getattr(value, field.name)) for field in fields(value)}
-  if isinstance(value, Mapping):
-    return {str(key): snapshot(item) for key, item in value.items()}
-  if isinstance(value, (list, tuple)):
-    return [snapshot(item) for item in value]
-  if hasattr(value, "__dict__"):
-    return {key: snapshot(item) for key, item in vars(value).items()}
-  return value
 
 
 def require_native_victt(cfg):
@@ -159,8 +146,8 @@ first = load_env_cfg(task)
 second = load_env_cfg(task)
 require_native_victt(first)
 require_native_victt(second)
-first_identity = snapshot(first)
-second_identity = snapshot(second)
+first_identity = asdict(first)
+second_identity = asdict(second)
 for identity in (first_identity, second_identity):
   params = identity["metrics"]["cat_soft"]["params"]
   params["imp_limit"] = "<treatment>"

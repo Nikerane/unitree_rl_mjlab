@@ -100,7 +100,7 @@ def _env(tmp_path: Path, task_id: int) -> dict[str, str]:
     "import os\n"
     "import sys\n"
     "import types\n"
-    "from types import SimpleNamespace\n"
+    "from dataclasses import dataclass\n"
     "from importlib import metadata\n"
     "versions = {\n"
     "  'mjlab': os.environ.get('RUNTIME_MJLAB_VERSION', '1.4.0'),\n"
@@ -115,6 +115,17 @@ def _env(tmp_path: Path, task_id: int) -> dict[str, str]:
     "  get_device_name=lambda index: os.environ.get('RUNTIME_GPU', 'NVIDIA A100-SXM4-40GB'),\n"
     ")\n"
     "sys.modules['torch'] = torch\n"
+    "@dataclass\n"
+    "class MetricCfg:\n"
+    "  params: dict\n"
+    "@dataclass\n"
+    "class RewardCfg:\n"
+    "  weight: float\n"
+    "@dataclass\n"
+    "class FixtureCfg:\n"
+    "  metrics: dict\n"
+    "  rewards: dict\n"
+    "  reference: str\n"
     "calls = [0]\n"
     "def load_env_cfg(task):\n"
     "  calls[0] += 1\n"
@@ -125,9 +136,9 @@ def _env(tmp_path: Path, task_id: int) -> dict[str, str]:
     "  delivered = 3.0 if mode == 'delivered_weight' else 4.0\n"
     "  impact = 7.0 if mode == 'impact_weight' else 8.0\n"
     "  reference = 'drifted' if mode == 'config_drift' and calls[0] == 2 else 'fixed'\n"
-    "  return SimpleNamespace(\n"
-    "    metrics={'cat_soft': SimpleNamespace(params={'use_vel': use_vel, 'use_impulse': True, 'imp_limit': [0.82] * 6, 'imp_max_p': 0.0})},\n"
-    "    rewards={'delivered_impulse': SimpleNamespace(weight=delivered), 'impact_progress': SimpleNamespace(weight=impact)},\n"
+    "  return FixtureCfg(\n"
+    "    metrics={'cat_soft': MetricCfg(params={'use_vel': use_vel, 'use_impulse': True, 'imp_limit': [0.82] * 6, 'imp_max_p': 0.0})},\n"
+    "    rewards={'delivered_impulse': RewardCfg(weight=delivered), 'impact_progress': RewardCfg(weight=impact)},\n"
     "    reference=reference,\n"
     "  )\n"
     "mjlab = types.ModuleType('mjlab')\n"
@@ -215,6 +226,48 @@ def _training_call(env: dict[str, str]) -> list[str]:
 
 def _value(call: list[str], flag: str) -> str:
   return call[call.index(flag) + 1]
+
+
+def _native_preflight_program() -> str:
+  source = LAUNCHER.read_text()
+  match = re.search(
+    r'"\$PY" - <<\'PY\' \|\| fail "native VIC-TT preflight failed"\n'
+    r"(?P<program>.*?)\nPY\n\ncd \"\$ATTEMPT_DIR\"",
+    source,
+    flags=re.DOTALL,
+  )
+  assert match is not None
+  return match.group("program")
+
+
+def test_two_boundary_preflight_handles_the_real_registered_victt_config(
+  tmp_path: Path,
+):
+  """Breaks if the embedded preflight recurses through the live config graph."""
+  env = dict(os.environ)
+  env.update(
+    {
+      "PYTHONPATH": str(ROOT),
+      "TASK": TASK,
+      "CAPS": ARMS[0][2],
+      "IMP_MAX_P": "0.2",
+      "MPLCONFIGDIR": str(tmp_path / "matplotlib"),
+    }
+  )
+
+  result = subprocess.run(
+    [sys.executable, "-"],
+    input=_native_preflight_program(),
+    cwd=ROOT,
+    env=env,
+    capture_output=True,
+    text=True,
+    timeout=30,
+  )
+
+  assert result.returncode == 0, result.stderr + result.stdout
+  assert "RecursionError" not in result.stderr
+  assert "Z1_VIC_IMPULSE_TWO_BOUNDARY_P02_TRAIN_PREFLIGHT_PASS" in result.stdout
 
 
 def test_two_boundary_arms_only_vary_by_their_literal_cap_vectors(tmp_path: Path):
