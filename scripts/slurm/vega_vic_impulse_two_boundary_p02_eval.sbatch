@@ -169,7 +169,7 @@ for OUTPUT in "${ACTUAL_OUTPUTS[@]}"; do
     || fail "evaluator output set contains a non-regular artifact"
 done
 
-"$PY" - "$EVALUATION_DIR" "$ROLE" "$RESOLVED_CHECKPOINT" "$CHECKPOINT_SHA256" \
+"$PY" - "$EVALUATION_DIR" "$ROLE" "$TRAINING_CAPS" "$RESOLVED_CHECKPOINT" "$CHECKPOINT_SHA256" \
   "$EXPECTED_CODE_REVISION" "$EXPECTED_ASSET_REVISION" <<'PY' \
   || fail "evaluation traces or provenance failed validation"
 import json
@@ -180,7 +180,8 @@ import sys
 import numpy as np
 
 root = Path(sys.argv[1])
-role, checkpoint_path, checkpoint_sha, code_revision, asset_revision = sys.argv[2:]
+role, training_caps, checkpoint_path, checkpoint_sha, code_revision, asset_revision = sys.argv[2:]
+expected_training_caps = json.loads(training_caps)
 trace_names = (
   "fixed_trace.npz",
   "training_like_seed_2_trace.npz",
@@ -233,6 +234,8 @@ if summary.get("checkpoint") != {
   "sha256": checkpoint_sha,
 }:
   raise RuntimeError("summary checkpoint provenance mismatch")
+if summary.get("training_cap_identity_n_m_s") != expected_training_caps:
+  raise RuntimeError("summary training-cap identity mismatch")
 if summary.get("code_revision") != code_revision or summary.get("asset_revision") != asset_revision:
   raise RuntimeError("summary repository provenance mismatch")
 protocol = summary.get("protocol")

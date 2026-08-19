@@ -45,6 +45,19 @@ def _env(
 ) -> dict[str, str]:
   _configure(monkeypatch)
   env = qualified._env(tmp_path, task_id)
+  generator = Path(env["HOME"]) / "generate_evaluation.py"
+  source = generator.read_text()
+  source = source.replace(
+    "if mode == 'wrong_role': summary['checkpoint']['role'] = 'dose_p0_control'\n",
+    "summary['training_cap_identity_n_m_s'] = {\n"
+    "  'p02_uniform09': [0.738, 1.476, 0.738, 0.738, 0.738, 0.738],\n"
+    "  'p02_joint_stress': [0.369, 0.246, 0.738, 0.369, 0.246, 0.0164],\n"
+    "}[role]\n"
+    "if mode == 'missing_training_cap_identity': summary.pop('training_cap_identity_n_m_s')\n"
+    "if mode == 'wrong_training_cap_identity': summary['training_cap_identity_n_m_s'] = [0.0] * 6\n"
+    "if mode == 'wrong_role': summary['checkpoint']['role'] = 'dose_p0_control'\n",
+  )
+  generator.write_text(source)
   env.update(
     {
       "SLURM_ARRAY_TASK_COUNT": "2",
@@ -137,3 +150,19 @@ def test_two_boundary_eval_rejects_checkpoint_drift_nonzero_or_malformed_telemet
     result = qualified._run(env)
     assert result.returncode == 2
     assert "Z1_VIC_IMPULSE_TWO_BOUNDARY_P02_EVAL_PASS" not in result.stdout
+
+
+@pytest.mark.parametrize("task_id", (0, 1))
+@pytest.mark.parametrize(
+  "mode", ("missing_training_cap_identity", "wrong_training_cap_identity")
+)
+def test_two_boundary_eval_rejects_missing_or_wrong_training_cap_identity(
+  tmp_path: Path, monkeypatch: pytest.MonkeyPatch, task_id: int, mode: str
+):
+  env = _env(tmp_path / f"{mode}-{task_id}", task_id, monkeypatch)
+  env["BAD_OUTPUT_MODE"] = mode
+
+  result = qualified._run(env)
+
+  assert result.returncode == 2
+  assert "Z1_VIC_IMPULSE_TWO_BOUNDARY_P02_EVAL_PASS" not in result.stdout
