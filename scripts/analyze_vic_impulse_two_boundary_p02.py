@@ -19,6 +19,7 @@ if str(_REPO_ROOT) not in sys.path:
   sys.path.insert(0, str(_REPO_ROOT))
 
 from scripts import analyze_vic_impulse_diag90_500_evaluation as historical
+from scripts import analyze_vic_impulse_p02_bridge_evaluation as bridge
 from scripts import impulse_cat_activation_survey as survey
 
 
@@ -195,6 +196,69 @@ def _compact_survey_summary(summary: Mapping[str, object]) -> dict[str, object]:
   }
 
 
+def _counterfactual_cat_attribution(
+  trace: Mapping[str, np.ndarray], *, caps: Sequence[float], first_episode_only: bool
+) -> dict[str, object]:
+  """Compose the shipped shadow normalizer; do not recreate its event or margin logic."""
+  lam = np.asarray(trace["lambda_per_joint"])
+  episode_id = np.asarray(trace["episode_id"], dtype=np.int64)
+  velocity = np.asarray(trace["delta_velocity"], dtype=np.float64)
+  valid = episode_id == 0 if first_episode_only else np.ones(episode_id.shape, dtype=bool)
+  margins = survey._native_cap_margins(lam, tuple(float(cap) for cap in caps))
+  unit_per_joint = survey.shadow_impulse_cat(
+    margins,
+    tau=survey.CAT_TAU,
+    seed=survey.IMPULSE_SEED,
+    max_p=1.0,
+    valid=valid,
+  )
+  unit = unit_per_joint.max(axis=2)
+  impulse = 0.2 * unit
+  combined = np.maximum(velocity, impulse)
+  active = valid & (unit > 0.0)
+  impulse_wins = active & (impulse > velocity)
+  velocity_wins = active & (velocity > impulse)
+  ties = active & ~(impulse_wins | velocity_wins)
+  responsible = np.argmax(unit_per_joint, axis=2)
+  positive = (margins > 0.0) & valid[:, :, None]
+  winner = np.full(active.shape, -1, dtype=np.int8)
+  winner[impulse_wins] = 0
+  winner[velocity_wins] = 1
+  winner[ties] = 2
+  switches = 0
+  for env_id in range(active.shape[1]):
+    steps = np.flatnonzero(active[:, env_id])
+    if steps.size > 1:
+      prior = winner[steps[:-1], env_id]
+      current = winner[steps[1:], env_id]
+      switches += int(((steps[1:] == steps[:-1] + 1) & (current != prior)).sum())
+  return {
+    "deltas": {
+      "delta_velocity": _quantiles(velocity[valid]),
+      "delta_impulse": _quantiles(impulse[valid]),
+      "combined_delta": _quantiles(combined[valid]),
+    },
+    "combined_delta_exact_max": bool(np.array_equal(combined, np.maximum(velocity, impulse))),
+    "attribution": {
+      "active_reads": int(active.sum()),
+      "responsible_joint_reads": {
+        name: int((active & (responsible == joint)).sum())
+        for joint, name in enumerate(survey.JOINT_NAMES)
+      },
+      "all_active_joint_reads": {
+        name: int(positive[:, :, joint].sum())
+        for joint, name in enumerate(survey.JOINT_NAMES)
+      },
+      "co_violation_reads": int((positive.sum(axis=2) > 1).sum()),
+      "co_violation_joint_count": _quantiles(positive.sum(axis=2)[active]),
+      "impulse_winner_reads": int(impulse_wins.sum()),
+      "velocity_masked_active_reads": int(velocity_wins.sum()),
+      "tie_active_reads": int(ties.sum()),
+      "adjacent_active_read_winner_switches": switches,
+    },
+  }
+
+
 def analyze_population(
   trace: Mapping[str, np.ndarray],
   *,
@@ -210,13 +274,22 @@ def analyze_population(
   if not isinstance(utility, Mapping):
     raise ValueError("survey summary lacks utility telemetry")
   compact = _compact_survey_summary(summary)
+  attribution = _counterfactual_cat_attribution(
+    trace, caps=cap_tuple, first_episode_only=first_episode_only
+  )
   return {
     "raw_lambda_n_m_s": _raw_lambda_descriptors(
       trace, first_episode_only=first_episode_only
     ),
     "survey_summary": compact,
-    "counterfactual_cat_p02": compact["candidate_imp_max_p_0_2"],
+    "counterfactual_cat_p02": compact["candidate_imp_max_p_0_2"] | attribution,
     "true_velocity_risk": utility["velocity_limit_compliance"],
+    "episode_duration_ms": bridge._observed_duration(trace),
+    "policy_action": bridge._action_descriptors(trace),
+    "impact_progress": {
+      "available": False,
+      "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field",
+    },
     "task_utility": {
       "terminal_counts": utility["terminal_counts"],
       "terminal_first_strike_delivered_n_s": utility[

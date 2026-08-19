@@ -656,6 +656,30 @@ def test_two_boundary_p02_result_is_indexed_and_preserves_its_diagnostic_boundar
         "2026081701",
         "2026081702",
     )
+    stress_seed2 = payload["populations"]["training_like_by_seed"]["2"]["roles"][
+        "p02_joint_stress"
+    ]["own_training_caps"]
+    attribution = stress_seed2["counterfactual_cat_p02"]["attribution"]
+    assert attribution["all_active_joint_reads"] == {
+        "joint1": 1,
+        "joint2": 0,
+        "joint3": 0,
+        "joint4": 0,
+        "joint5": 2,
+        "joint6": 11,
+    }
+    assert attribution["responsible_joint_reads"] == {
+        "joint1": 1,
+        "joint2": 0,
+        "joint3": 0,
+        "joint4": 0,
+        "joint5": 1,
+        "joint6": 11,
+    }
+    assert attribution["co_violation_reads"] == 1
+    assert stress_seed2["impact_progress"]["available"] is False
+    assert "13 responsible (J1:1, J5:1, J6:11; J5 all-active:2)" in result
+    assert "18/20/20 ms" in result
     assert (
         "Independent training-seed confirmation remains unrun and is the bounded next question"
         not in index

@@ -205,9 +205,60 @@
             "counterfactual_cat_p02": {
               "activation_windows": 0,
               "active_reads": 0,
+              "attribution": {
+                "active_reads": 0,
+                "adjacent_active_read_winner_switches": 0,
+                "all_active_joint_reads": {
+                  "joint1": 0,
+                  "joint2": 0,
+                  "joint3": 0,
+                  "joint4": 0,
+                  "joint5": 0,
+                  "joint6": 0
+                },
+                "co_violation_joint_count": {
+                  "max": null,
+                  "p50": null,
+                  "p95": null,
+                  "p99": null
+                },
+                "co_violation_reads": 0,
+                "impulse_winner_reads": 0,
+                "responsible_joint_reads": {
+                  "joint1": 0,
+                  "joint2": 0,
+                  "joint3": 0,
+                  "joint4": 0,
+                  "joint5": 0,
+                  "joint6": 0
+                },
+                "tie_active_reads": 0,
+                "velocity_masked_active_reads": 0
+              },
+              "combined_delta_exact_max": true,
               "combined_delta_max": 0.0,
               "delta_impulse_active_mean": 0.0,
               "delta_impulse_max": 0.0,
+              "deltas": {
+                "combined_delta": {
+                  "max": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0
+                },
+                "delta_impulse": {
+                  "max": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0
+                },
+                "delta_velocity": {
+                  "max": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0
+                }
+              },
               "event_pressure_all_observed_summary": {
                 "max": null,
                 "median": null,
@@ -230,6 +281,95 @@
               "tie_reads": 0,
               "velocity_mask_share": 0.0,
               "velocity_masked_reads": 0
+            },
+            "episode_duration_ms": {
+              "completed_environments": 64,
+              "duration_ms": {
+                "max": 120.0,
+                "p50": 120.0,
+                "p95": 120.0,
+                "p99": 120.0
+              },
+              "right_censored_environments": 0,
+              "unit": "native observed initial-episode prefix"
+            },
+            "impact_progress": {
+              "available": false,
+              "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+            },
+            "policy_action": {
+              "action_0": {
+                "max": 1.0,
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_1": {
+                "max": 1.0,
+                "p50": 0.7587671279907227,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_10": {
+                "max": 0.8755552768707275,
+                "p50": 0.26306895911693573,
+                "p95": 0.814047348499298,
+                "p99": 0.8609155762195588
+              },
+              "action_11": {
+                "max": -1.0,
+                "p50": -1.0,
+                "p95": -1.0,
+                "p99": -1.0
+              },
+              "action_2": {
+                "max": 1.0,
+                "p50": 1.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_3": {
+                "max": 1.0,
+                "p50": 1.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_4": {
+                "max": 1.0,
+                "p50": -0.84861621260643,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_5": {
+                "max": 1.0,
+                "p50": 0.818513810634613,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_6": {
+                "max": -0.026183538138866425,
+                "p50": -0.804644376039505,
+                "p95": -0.14186021834611906,
+                "p99": -0.07209710679948299
+              },
+              "action_7": {
+                "max": 0.6554319858551025,
+                "p50": -1.0,
+                "p95": 0.5506862342357635,
+                "p99": 0.6339184081554414
+              },
+              "action_8": {
+                "max": 1.0,
+                "p50": 0.5934071093797684,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_9": {
+                "max": 1.0,
+                "p50": 1.0,
+                "p95": 1.0,
+                "p99": 1.0
+              }
             },
             "raw_lambda_n_m_s": {
               "joint1": {
@@ -1310,9 +1450,60 @@
             "counterfactual_cat_p02": {
               "activation_windows": 0,
               "active_reads": 0,
+              "attribution": {
+                "active_reads": 0,
+                "adjacent_active_read_winner_switches": 0,
+                "all_active_joint_reads": {
+                  "joint1": 0,
+                  "joint2": 0,
+                  "joint3": 0,
+                  "joint4": 0,
+                  "joint5": 0,
+                  "joint6": 0
+                },
+                "co_violation_joint_count": {
+                  "max": null,
+                  "p50": null,
+                  "p95": null,
+                  "p99": null
+                },
+                "co_violation_reads": 0,
+                "impulse_winner_reads": 0,
+                "responsible_joint_reads": {
+                  "joint1": 0,
+                  "joint2": 0,
+                  "joint3": 0,
+                  "joint4": 0,
+                  "joint5": 0,
+                  "joint6": 0
+                },
+                "tie_active_reads": 0,
+                "velocity_masked_active_reads": 0
+              },
+              "combined_delta_exact_max": true,
               "combined_delta_max": 0.0,
               "delta_impulse_active_mean": 0.0,
               "delta_impulse_max": 0.0,
+              "deltas": {
+                "combined_delta": {
+                  "max": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0
+                },
+                "delta_impulse": {
+                  "max": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0
+                },
+                "delta_velocity": {
+                  "max": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0
+                }
+              },
               "event_pressure_all_observed_summary": {
                 "max": null,
                 "median": null,
@@ -1335,6 +1526,95 @@
               "tie_reads": 0,
               "velocity_mask_share": 0.0,
               "velocity_masked_reads": 0
+            },
+            "episode_duration_ms": {
+              "completed_environments": 64,
+              "duration_ms": {
+                "max": 120.0,
+                "p50": 120.0,
+                "p95": 120.0,
+                "p99": 120.0
+              },
+              "right_censored_environments": 0,
+              "unit": "native observed initial-episode prefix"
+            },
+            "impact_progress": {
+              "available": false,
+              "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+            },
+            "policy_action": {
+              "action_0": {
+                "max": 1.0,
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_1": {
+                "max": 1.0,
+                "p50": 0.7587671279907227,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_10": {
+                "max": 0.8755552768707275,
+                "p50": 0.26306895911693573,
+                "p95": 0.814047348499298,
+                "p99": 0.8609155762195588
+              },
+              "action_11": {
+                "max": -1.0,
+                "p50": -1.0,
+                "p95": -1.0,
+                "p99": -1.0
+              },
+              "action_2": {
+                "max": 1.0,
+                "p50": 1.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_3": {
+                "max": 1.0,
+                "p50": 1.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_4": {
+                "max": 1.0,
+                "p50": -0.84861621260643,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_5": {
+                "max": 1.0,
+                "p50": 0.818513810634613,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_6": {
+                "max": -0.026183538138866425,
+                "p50": -0.804644376039505,
+                "p95": -0.14186021834611906,
+                "p99": -0.07209710679948299
+              },
+              "action_7": {
+                "max": 0.6554319858551025,
+                "p50": -1.0,
+                "p95": 0.5506862342357635,
+                "p99": 0.6339184081554414
+              },
+              "action_8": {
+                "max": 1.0,
+                "p50": 0.5934071093797684,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_9": {
+                "max": 1.0,
+                "p50": 1.0,
+                "p95": 1.0,
+                "p99": 1.0
+              }
             },
             "raw_lambda_n_m_s": {
               "joint1": {
@@ -2415,9 +2695,60 @@
             "counterfactual_cat_p02": {
               "activation_windows": 0,
               "active_reads": 0,
+              "attribution": {
+                "active_reads": 0,
+                "adjacent_active_read_winner_switches": 0,
+                "all_active_joint_reads": {
+                  "joint1": 0,
+                  "joint2": 0,
+                  "joint3": 0,
+                  "joint4": 0,
+                  "joint5": 0,
+                  "joint6": 0
+                },
+                "co_violation_joint_count": {
+                  "max": null,
+                  "p50": null,
+                  "p95": null,
+                  "p99": null
+                },
+                "co_violation_reads": 0,
+                "impulse_winner_reads": 0,
+                "responsible_joint_reads": {
+                  "joint1": 0,
+                  "joint2": 0,
+                  "joint3": 0,
+                  "joint4": 0,
+                  "joint5": 0,
+                  "joint6": 0
+                },
+                "tie_active_reads": 0,
+                "velocity_masked_active_reads": 0
+              },
+              "combined_delta_exact_max": true,
               "combined_delta_max": 0.0,
               "delta_impulse_active_mean": 0.0,
               "delta_impulse_max": 0.0,
+              "deltas": {
+                "combined_delta": {
+                  "max": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0
+                },
+                "delta_impulse": {
+                  "max": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0
+                },
+                "delta_velocity": {
+                  "max": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0
+                }
+              },
               "event_pressure_all_observed_summary": {
                 "max": null,
                 "median": null,
@@ -2440,6 +2771,95 @@
               "tie_reads": 0,
               "velocity_mask_share": 0.0,
               "velocity_masked_reads": 0
+            },
+            "episode_duration_ms": {
+              "completed_environments": 64,
+              "duration_ms": {
+                "max": 120.0,
+                "p50": 120.0,
+                "p95": 120.0,
+                "p99": 120.0
+              },
+              "right_censored_environments": 0,
+              "unit": "native observed initial-episode prefix"
+            },
+            "impact_progress": {
+              "available": false,
+              "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+            },
+            "policy_action": {
+              "action_0": {
+                "max": 1.0,
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_1": {
+                "max": 1.0,
+                "p50": 0.7587671279907227,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_10": {
+                "max": 0.8755552768707275,
+                "p50": 0.26306895911693573,
+                "p95": 0.814047348499298,
+                "p99": 0.8609155762195588
+              },
+              "action_11": {
+                "max": -1.0,
+                "p50": -1.0,
+                "p95": -1.0,
+                "p99": -1.0
+              },
+              "action_2": {
+                "max": 1.0,
+                "p50": 1.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_3": {
+                "max": 1.0,
+                "p50": 1.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_4": {
+                "max": 1.0,
+                "p50": -0.84861621260643,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_5": {
+                "max": 1.0,
+                "p50": 0.818513810634613,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_6": {
+                "max": -0.026183538138866425,
+                "p50": -0.804644376039505,
+                "p95": -0.14186021834611906,
+                "p99": -0.07209710679948299
+              },
+              "action_7": {
+                "max": 0.6554319858551025,
+                "p50": -1.0,
+                "p95": 0.5506862342357635,
+                "p99": 0.6339184081554414
+              },
+              "action_8": {
+                "max": 1.0,
+                "p50": 0.5934071093797684,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_9": {
+                "max": 1.0,
+                "p50": 1.0,
+                "p95": 1.0,
+                "p99": 1.0
+              }
             },
             "raw_lambda_n_m_s": {
               "joint1": {
@@ -3522,9 +3942,60 @@
             "counterfactual_cat_p02": {
               "activation_windows": 64,
               "active_reads": 64,
+              "attribution": {
+                "active_reads": 64,
+                "adjacent_active_read_winner_switches": 0,
+                "all_active_joint_reads": {
+                  "joint1": 0,
+                  "joint2": 64,
+                  "joint3": 0,
+                  "joint4": 0,
+                  "joint5": 0,
+                  "joint6": 64
+                },
+                "co_violation_joint_count": {
+                  "max": 2.0,
+                  "p50": 2.0,
+                  "p95": 2.0,
+                  "p99": 2.0
+                },
+                "co_violation_reads": 64,
+                "impulse_winner_reads": 64,
+                "responsible_joint_reads": {
+                  "joint1": 0,
+                  "joint2": 6,
+                  "joint3": 0,
+                  "joint4": 0,
+                  "joint5": 0,
+                  "joint6": 58
+                },
+                "tie_active_reads": 0,
+                "velocity_masked_active_reads": 0
+              },
+              "combined_delta_exact_max": true,
               "combined_delta_max": 0.2,
               "delta_impulse_active_mean": 0.1827758283304825,
               "delta_impulse_max": 0.2,
+              "deltas": {
+                "combined_delta": {
+                  "max": 0.2,
+                  "p50": 0.0,
+                  "p95": 0.18943474332762336,
+                  "p99": 0.19715123173719004
+                },
+                "delta_impulse": {
+                  "max": 0.2,
+                  "p50": 0.0,
+                  "p95": 0.18943474332762336,
+                  "p99": 0.19715123173719004
+                },
+                "delta_velocity": {
+                  "max": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0
+                }
+              },
               "event_pressure_all_observed_summary": {
                 "max": 0.2,
                 "median": 0.186911090236,
@@ -3547,6 +4018,95 @@
               "tie_reads": 0,
               "velocity_mask_share": 0.0,
               "velocity_masked_reads": 0
+            },
+            "episode_duration_ms": {
+              "completed_environments": 64,
+              "duration_ms": {
+                "max": 160.0,
+                "p50": 160.0,
+                "p95": 160.0,
+                "p99": 160.0
+              },
+              "right_censored_environments": 0,
+              "unit": "native observed initial-episode prefix"
+            },
+            "impact_progress": {
+              "available": false,
+              "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+            },
+            "policy_action": {
+              "action_0": {
+                "max": 1.0,
+                "p50": -1.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_1": {
+                "max": 1.0,
+                "p50": 0.8587841093540192,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_10": {
+                "max": 1.0,
+                "p50": 0.1372162476181984,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_11": {
+                "max": -1.0,
+                "p50": -1.0,
+                "p95": -1.0,
+                "p99": -1.0
+              },
+              "action_2": {
+                "max": 1.0,
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_3": {
+                "max": 1.0,
+                "p50": 1.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_4": {
+                "max": 1.0,
+                "p50": 0.025151334702968597,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_5": {
+                "max": -0.10332178324460983,
+                "p50": -0.9375559389591217,
+                "p95": -0.1405907951295376,
+                "p99": -0.11810332879424097
+              },
+              "action_6": {
+                "max": 1.0,
+                "p50": -0.12005836516618729,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_7": {
+                "max": 1.0,
+                "p50": -1.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_8": {
+                "max": 1.0,
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_9": {
+                "max": 1.0,
+                "p50": 0.8812491595745087,
+                "p95": 1.0,
+                "p99": 1.0
+              }
             },
             "raw_lambda_n_m_s": {
               "joint1": {
@@ -4627,9 +5187,60 @@
             "counterfactual_cat_p02": {
               "activation_windows": 0,
               "active_reads": 0,
+              "attribution": {
+                "active_reads": 0,
+                "adjacent_active_read_winner_switches": 0,
+                "all_active_joint_reads": {
+                  "joint1": 0,
+                  "joint2": 0,
+                  "joint3": 0,
+                  "joint4": 0,
+                  "joint5": 0,
+                  "joint6": 0
+                },
+                "co_violation_joint_count": {
+                  "max": null,
+                  "p50": null,
+                  "p95": null,
+                  "p99": null
+                },
+                "co_violation_reads": 0,
+                "impulse_winner_reads": 0,
+                "responsible_joint_reads": {
+                  "joint1": 0,
+                  "joint2": 0,
+                  "joint3": 0,
+                  "joint4": 0,
+                  "joint5": 0,
+                  "joint6": 0
+                },
+                "tie_active_reads": 0,
+                "velocity_masked_active_reads": 0
+              },
+              "combined_delta_exact_max": true,
               "combined_delta_max": 0.0,
               "delta_impulse_active_mean": 0.0,
               "delta_impulse_max": 0.0,
+              "deltas": {
+                "combined_delta": {
+                  "max": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0
+                },
+                "delta_impulse": {
+                  "max": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0
+                },
+                "delta_velocity": {
+                  "max": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0
+                }
+              },
               "event_pressure_all_observed_summary": {
                 "max": null,
                 "median": null,
@@ -4652,6 +5263,95 @@
               "tie_reads": 0,
               "velocity_mask_share": 0.0,
               "velocity_masked_reads": 0
+            },
+            "episode_duration_ms": {
+              "completed_environments": 64,
+              "duration_ms": {
+                "max": 160.0,
+                "p50": 160.0,
+                "p95": 160.0,
+                "p99": 160.0
+              },
+              "right_censored_environments": 0,
+              "unit": "native observed initial-episode prefix"
+            },
+            "impact_progress": {
+              "available": false,
+              "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+            },
+            "policy_action": {
+              "action_0": {
+                "max": 1.0,
+                "p50": -1.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_1": {
+                "max": 1.0,
+                "p50": 0.8587841093540192,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_10": {
+                "max": 1.0,
+                "p50": 0.1372162476181984,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_11": {
+                "max": -1.0,
+                "p50": -1.0,
+                "p95": -1.0,
+                "p99": -1.0
+              },
+              "action_2": {
+                "max": 1.0,
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_3": {
+                "max": 1.0,
+                "p50": 1.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_4": {
+                "max": 1.0,
+                "p50": 0.025151334702968597,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_5": {
+                "max": -0.10332178324460983,
+                "p50": -0.9375559389591217,
+                "p95": -0.1405907951295376,
+                "p99": -0.11810332879424097
+              },
+              "action_6": {
+                "max": 1.0,
+                "p50": -0.12005836516618729,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_7": {
+                "max": 1.0,
+                "p50": -1.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_8": {
+                "max": 1.0,
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_9": {
+                "max": 1.0,
+                "p50": 0.8812491595745087,
+                "p95": 1.0,
+                "p99": 1.0
+              }
             },
             "raw_lambda_n_m_s": {
               "joint1": {
@@ -5732,9 +6432,60 @@
             "counterfactual_cat_p02": {
               "activation_windows": 0,
               "active_reads": 0,
+              "attribution": {
+                "active_reads": 0,
+                "adjacent_active_read_winner_switches": 0,
+                "all_active_joint_reads": {
+                  "joint1": 0,
+                  "joint2": 0,
+                  "joint3": 0,
+                  "joint4": 0,
+                  "joint5": 0,
+                  "joint6": 0
+                },
+                "co_violation_joint_count": {
+                  "max": null,
+                  "p50": null,
+                  "p95": null,
+                  "p99": null
+                },
+                "co_violation_reads": 0,
+                "impulse_winner_reads": 0,
+                "responsible_joint_reads": {
+                  "joint1": 0,
+                  "joint2": 0,
+                  "joint3": 0,
+                  "joint4": 0,
+                  "joint5": 0,
+                  "joint6": 0
+                },
+                "tie_active_reads": 0,
+                "velocity_masked_active_reads": 0
+              },
+              "combined_delta_exact_max": true,
               "combined_delta_max": 0.0,
               "delta_impulse_active_mean": 0.0,
               "delta_impulse_max": 0.0,
+              "deltas": {
+                "combined_delta": {
+                  "max": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0
+                },
+                "delta_impulse": {
+                  "max": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0
+                },
+                "delta_velocity": {
+                  "max": 0.0,
+                  "p50": 0.0,
+                  "p95": 0.0,
+                  "p99": 0.0
+                }
+              },
               "event_pressure_all_observed_summary": {
                 "max": null,
                 "median": null,
@@ -5757,6 +6508,95 @@
               "tie_reads": 0,
               "velocity_mask_share": 0.0,
               "velocity_masked_reads": 0
+            },
+            "episode_duration_ms": {
+              "completed_environments": 64,
+              "duration_ms": {
+                "max": 160.0,
+                "p50": 160.0,
+                "p95": 160.0,
+                "p99": 160.0
+              },
+              "right_censored_environments": 0,
+              "unit": "native observed initial-episode prefix"
+            },
+            "impact_progress": {
+              "available": false,
+              "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+            },
+            "policy_action": {
+              "action_0": {
+                "max": 1.0,
+                "p50": -1.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_1": {
+                "max": 1.0,
+                "p50": 0.8587841093540192,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_10": {
+                "max": 1.0,
+                "p50": 0.1372162476181984,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_11": {
+                "max": -1.0,
+                "p50": -1.0,
+                "p95": -1.0,
+                "p99": -1.0
+              },
+              "action_2": {
+                "max": 1.0,
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_3": {
+                "max": 1.0,
+                "p50": 1.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_4": {
+                "max": 1.0,
+                "p50": 0.025151334702968597,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_5": {
+                "max": -0.10332178324460983,
+                "p50": -0.9375559389591217,
+                "p95": -0.1405907951295376,
+                "p99": -0.11810332879424097
+              },
+              "action_6": {
+                "max": 1.0,
+                "p50": -0.12005836516618729,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_7": {
+                "max": 1.0,
+                "p50": -1.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_8": {
+                "max": 1.0,
+                "p50": 0.0,
+                "p95": 1.0,
+                "p99": 1.0
+              },
+              "action_9": {
+                "max": 1.0,
+                "p50": 0.8812491595745087,
+                "p95": 1.0,
+                "p99": 1.0
+              }
             },
             "raw_lambda_n_m_s": {
               "joint1": {
@@ -6968,9 +7808,60 @@
               "counterfactual_cat_p02": {
                 "activation_windows": 0,
                 "active_reads": 0,
+                "attribution": {
+                  "active_reads": 0,
+                  "adjacent_active_read_winner_switches": 0,
+                  "all_active_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 0,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "co_violation_joint_count": {
+                    "max": null,
+                    "p50": null,
+                    "p95": null,
+                    "p99": null
+                  },
+                  "co_violation_reads": 0,
+                  "impulse_winner_reads": 0,
+                  "responsible_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 0,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "tie_active_reads": 0,
+                  "velocity_masked_active_reads": 0
+                },
+                "combined_delta_exact_max": true,
                 "combined_delta_max": 0.5,
                 "delta_impulse_active_mean": 0.0,
                 "delta_impulse_max": 0.0,
+                "deltas": {
+                  "combined_delta": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_impulse": {
+                    "max": 0.0,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_velocity": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  }
+                },
                 "event_pressure_all_observed_summary": {
                   "max": null,
                   "median": null,
@@ -6993,6 +7884,95 @@
                 "tie_reads": 0,
                 "velocity_mask_share": 0.0,
                 "velocity_masked_reads": 0
+              },
+              "episode_duration_ms": {
+                "completed_environments": 4096,
+                "duration_ms": {
+                  "max": 120.0,
+                  "p50": 120.0,
+                  "p95": 120.0,
+                  "p99": 120.0
+                },
+                "right_censored_environments": 0,
+                "unit": "native observed initial-episode prefix"
+              },
+              "impact_progress": {
+                "available": false,
+                "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+              },
+              "policy_action": {
+                "action_0": {
+                  "max": 1.0,
+                  "p50": 0.07235145568847656,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_1": {
+                  "max": 1.0,
+                  "p50": 0.7364546060562134,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_10": {
+                  "max": 1.0,
+                  "p50": 0.28202688694000244,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_11": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": -1.0,
+                  "p99": -0.8157419562339783
+                },
+                "action_2": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_3": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_4": {
+                  "max": 1.0,
+                  "p50": -0.9397468566894531,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_5": {
+                  "max": 1.0,
+                  "p50": 0.6689243018627167,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_6": {
+                  "max": 1.0,
+                  "p50": -0.6611582338809967,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_7": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_8": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_9": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                }
               },
               "raw_lambda_n_m_s": {
                 "joint1": {
@@ -8073,9 +9053,60 @@
               "counterfactual_cat_p02": {
                 "activation_windows": 13,
                 "active_reads": 13,
+                "attribution": {
+                  "active_reads": 13,
+                  "adjacent_active_read_winner_switches": 0,
+                  "all_active_joint_reads": {
+                    "joint1": 1,
+                    "joint2": 0,
+                    "joint3": 0,
+                    "joint4": 0,
+                    "joint5": 2,
+                    "joint6": 11
+                  },
+                  "co_violation_joint_count": {
+                    "max": 2.0,
+                    "p50": 1.0,
+                    "p95": 1.3999999999999986,
+                    "p99": 1.879999999999999
+                  },
+                  "co_violation_reads": 1,
+                  "impulse_winner_reads": 13,
+                  "responsible_joint_reads": {
+                    "joint1": 1,
+                    "joint2": 0,
+                    "joint3": 0,
+                    "joint4": 0,
+                    "joint5": 1,
+                    "joint6": 11
+                  },
+                  "tie_active_reads": 0,
+                  "velocity_masked_active_reads": 0
+                },
+                "combined_delta_exact_max": true,
                 "combined_delta_max": 0.5,
                 "delta_impulse_active_mean": 0.03824781744709,
                 "delta_impulse_max": 0.2,
+                "deltas": {
+                  "combined_delta": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_impulse": {
+                    "max": 0.2,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_velocity": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  }
+                },
                 "event_pressure_all_observed_summary": {
                   "max": 0.2,
                   "median": 0.005780660136,
@@ -8098,6 +9129,95 @@
                 "tie_reads": 0,
                 "velocity_mask_share": 0.0,
                 "velocity_masked_reads": 0
+              },
+              "episode_duration_ms": {
+                "completed_environments": 4096,
+                "duration_ms": {
+                  "max": 120.0,
+                  "p50": 120.0,
+                  "p95": 120.0,
+                  "p99": 120.0
+                },
+                "right_censored_environments": 0,
+                "unit": "native observed initial-episode prefix"
+              },
+              "impact_progress": {
+                "available": false,
+                "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+              },
+              "policy_action": {
+                "action_0": {
+                  "max": 1.0,
+                  "p50": 0.07235145568847656,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_1": {
+                  "max": 1.0,
+                  "p50": 0.7364546060562134,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_10": {
+                  "max": 1.0,
+                  "p50": 0.28202688694000244,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_11": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": -1.0,
+                  "p99": -0.8157419562339783
+                },
+                "action_2": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_3": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_4": {
+                  "max": 1.0,
+                  "p50": -0.9397468566894531,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_5": {
+                  "max": 1.0,
+                  "p50": 0.6689243018627167,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_6": {
+                  "max": 1.0,
+                  "p50": -0.6611582338809967,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_7": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_8": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_9": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                }
               },
               "raw_lambda_n_m_s": {
                 "joint1": {
@@ -9178,9 +10298,60 @@
               "counterfactual_cat_p02": {
                 "activation_windows": 0,
                 "active_reads": 0,
+                "attribution": {
+                  "active_reads": 0,
+                  "adjacent_active_read_winner_switches": 0,
+                  "all_active_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 0,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "co_violation_joint_count": {
+                    "max": null,
+                    "p50": null,
+                    "p95": null,
+                    "p99": null
+                  },
+                  "co_violation_reads": 0,
+                  "impulse_winner_reads": 0,
+                  "responsible_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 0,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "tie_active_reads": 0,
+                  "velocity_masked_active_reads": 0
+                },
+                "combined_delta_exact_max": true,
                 "combined_delta_max": 0.5,
                 "delta_impulse_active_mean": 0.0,
                 "delta_impulse_max": 0.0,
+                "deltas": {
+                  "combined_delta": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_impulse": {
+                    "max": 0.0,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_velocity": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  }
+                },
                 "event_pressure_all_observed_summary": {
                   "max": null,
                   "median": null,
@@ -9203,6 +10374,95 @@
                 "tie_reads": 0,
                 "velocity_mask_share": 0.0,
                 "velocity_masked_reads": 0
+              },
+              "episode_duration_ms": {
+                "completed_environments": 4096,
+                "duration_ms": {
+                  "max": 120.0,
+                  "p50": 120.0,
+                  "p95": 120.0,
+                  "p99": 120.0
+                },
+                "right_censored_environments": 0,
+                "unit": "native observed initial-episode prefix"
+              },
+              "impact_progress": {
+                "available": false,
+                "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+              },
+              "policy_action": {
+                "action_0": {
+                  "max": 1.0,
+                  "p50": 0.07235145568847656,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_1": {
+                  "max": 1.0,
+                  "p50": 0.7364546060562134,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_10": {
+                  "max": 1.0,
+                  "p50": 0.28202688694000244,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_11": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": -1.0,
+                  "p99": -0.8157419562339783
+                },
+                "action_2": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_3": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_4": {
+                  "max": 1.0,
+                  "p50": -0.9397468566894531,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_5": {
+                  "max": 1.0,
+                  "p50": 0.6689243018627167,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_6": {
+                  "max": 1.0,
+                  "p50": -0.6611582338809967,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_7": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_8": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_9": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                }
               },
               "raw_lambda_n_m_s": {
                 "joint1": {
@@ -10285,9 +11545,60 @@
               "counterfactual_cat_p02": {
                 "activation_windows": 4085,
                 "active_reads": 4322,
+                "attribution": {
+                  "active_reads": 4322,
+                  "adjacent_active_read_winner_switches": 2,
+                  "all_active_joint_reads": {
+                    "joint1": 1260,
+                    "joint2": 4081,
+                    "joint3": 6,
+                    "joint4": 35,
+                    "joint5": 411,
+                    "joint6": 3378
+                  },
+                  "co_violation_joint_count": {
+                    "max": 6.0,
+                    "p50": 2.0,
+                    "p95": 4.0,
+                    "p99": 4.0
+                  },
+                  "co_violation_reads": 3545,
+                  "impulse_winner_reads": 4321,
+                  "responsible_joint_reads": {
+                    "joint1": 1,
+                    "joint2": 4037,
+                    "joint3": 0,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 284
+                  },
+                  "tie_active_reads": 0,
+                  "velocity_masked_active_reads": 1
+                },
+                "combined_delta_exact_max": true,
                 "combined_delta_max": 0.5,
                 "delta_impulse_active_mean": 0.18600807626530758,
                 "delta_impulse_max": 0.2,
+                "deltas": {
+                  "combined_delta": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.2,
+                    "p99": 0.2
+                  },
+                  "delta_impulse": {
+                    "max": 0.2,
+                    "p50": 0.0,
+                    "p95": 0.2,
+                    "p99": 0.2
+                  },
+                  "delta_velocity": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  }
+                },
                 "event_pressure_all_observed_summary": {
                   "max": 0.428266458931,
                   "median": 0.2,
@@ -10310,6 +11621,95 @@
                 "tie_reads": 0,
                 "velocity_mask_share": 0.00023137436372049977,
                 "velocity_masked_reads": 1
+              },
+              "episode_duration_ms": {
+                "completed_environments": 4096,
+                "duration_ms": {
+                  "max": 420.0,
+                  "p50": 160.0,
+                  "p95": 160.0,
+                  "p99": 160.0
+                },
+                "right_censored_environments": 0,
+                "unit": "native observed initial-episode prefix"
+              },
+              "impact_progress": {
+                "available": false,
+                "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+              },
+              "policy_action": {
+                "action_0": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_1": {
+                  "max": 1.0,
+                  "p50": 0.8531327843666077,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_10": {
+                  "max": 1.0,
+                  "p50": 0.23686635494232178,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_11": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": -1.0,
+                  "p99": -0.5492429018020639
+                },
+                "action_2": {
+                  "max": 1.0,
+                  "p50": -0.39193129539489746,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_3": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_4": {
+                  "max": 1.0,
+                  "p50": -0.17853981256484985,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_5": {
+                  "max": 1.0,
+                  "p50": -0.7779244780540466,
+                  "p95": 0.02943680696189402,
+                  "p99": 0.3494501268863673
+                },
+                "action_6": {
+                  "max": 1.0,
+                  "p50": -0.0022652149200439453,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_7": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_8": {
+                  "max": 1.0,
+                  "p50": -0.43063390254974365,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_9": {
+                  "max": 1.0,
+                  "p50": 0.9096361994743347,
+                  "p95": 1.0,
+                  "p99": 1.0
+                }
               },
               "raw_lambda_n_m_s": {
                 "joint1": {
@@ -11390,9 +12790,60 @@
               "counterfactual_cat_p02": {
                 "activation_windows": 6,
                 "active_reads": 6,
+                "attribution": {
+                  "active_reads": 6,
+                  "adjacent_active_read_winner_switches": 0,
+                  "all_active_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 6,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "co_violation_joint_count": {
+                    "max": 1.0,
+                    "p50": 1.0,
+                    "p95": 1.0,
+                    "p99": 1.0
+                  },
+                  "co_violation_reads": 0,
+                  "impulse_winner_reads": 6,
+                  "responsible_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 6,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "tie_active_reads": 0,
+                  "velocity_masked_active_reads": 0
+                },
+                "combined_delta_exact_max": true,
                 "combined_delta_max": 0.5,
                 "delta_impulse_active_mean": 0.15590007962965113,
                 "delta_impulse_max": 0.2,
+                "deltas": {
+                  "combined_delta": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_impulse": {
+                    "max": 0.2,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_velocity": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  }
+                },
                 "event_pressure_all_observed_summary": {
                   "max": 0.2,
                   "median": 0.1780632571755,
@@ -11415,6 +12866,95 @@
                 "tie_reads": 0,
                 "velocity_mask_share": 0.0,
                 "velocity_masked_reads": 0
+              },
+              "episode_duration_ms": {
+                "completed_environments": 4096,
+                "duration_ms": {
+                  "max": 420.0,
+                  "p50": 160.0,
+                  "p95": 160.0,
+                  "p99": 160.0
+                },
+                "right_censored_environments": 0,
+                "unit": "native observed initial-episode prefix"
+              },
+              "impact_progress": {
+                "available": false,
+                "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+              },
+              "policy_action": {
+                "action_0": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_1": {
+                  "max": 1.0,
+                  "p50": 0.8531327843666077,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_10": {
+                  "max": 1.0,
+                  "p50": 0.23686635494232178,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_11": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": -1.0,
+                  "p99": -0.5492429018020639
+                },
+                "action_2": {
+                  "max": 1.0,
+                  "p50": -0.39193129539489746,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_3": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_4": {
+                  "max": 1.0,
+                  "p50": -0.17853981256484985,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_5": {
+                  "max": 1.0,
+                  "p50": -0.7779244780540466,
+                  "p95": 0.02943680696189402,
+                  "p99": 0.3494501268863673
+                },
+                "action_6": {
+                  "max": 1.0,
+                  "p50": -0.0022652149200439453,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_7": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_8": {
+                  "max": 1.0,
+                  "p50": -0.43063390254974365,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_9": {
+                  "max": 1.0,
+                  "p50": 0.9096361994743347,
+                  "p95": 1.0,
+                  "p99": 1.0
+                }
               },
               "raw_lambda_n_m_s": {
                 "joint1": {
@@ -12495,9 +14035,60 @@
               "counterfactual_cat_p02": {
                 "activation_windows": 1,
                 "active_reads": 1,
+                "attribution": {
+                  "active_reads": 1,
+                  "adjacent_active_read_winner_switches": 0,
+                  "all_active_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 1,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "co_violation_joint_count": {
+                    "max": 1.0,
+                    "p50": 1.0,
+                    "p95": 1.0,
+                    "p99": 1.0
+                  },
+                  "co_violation_reads": 0,
+                  "impulse_winner_reads": 1,
+                  "responsible_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 1,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "tie_active_reads": 0,
+                  "velocity_masked_active_reads": 0
+                },
+                "combined_delta_exact_max": true,
                 "combined_delta_max": 0.5,
                 "delta_impulse_active_mean": 0.2,
                 "delta_impulse_max": 0.2,
+                "deltas": {
+                  "combined_delta": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_impulse": {
+                    "max": 0.2,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_velocity": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  }
+                },
                 "event_pressure_all_observed_summary": {
                   "max": 0.2,
                   "median": 0.2,
@@ -12520,6 +14111,95 @@
                 "tie_reads": 0,
                 "velocity_mask_share": 0.0,
                 "velocity_masked_reads": 0
+              },
+              "episode_duration_ms": {
+                "completed_environments": 4096,
+                "duration_ms": {
+                  "max": 420.0,
+                  "p50": 160.0,
+                  "p95": 160.0,
+                  "p99": 160.0
+                },
+                "right_censored_environments": 0,
+                "unit": "native observed initial-episode prefix"
+              },
+              "impact_progress": {
+                "available": false,
+                "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+              },
+              "policy_action": {
+                "action_0": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_1": {
+                  "max": 1.0,
+                  "p50": 0.8531327843666077,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_10": {
+                  "max": 1.0,
+                  "p50": 0.23686635494232178,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_11": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": -1.0,
+                  "p99": -0.5492429018020639
+                },
+                "action_2": {
+                  "max": 1.0,
+                  "p50": -0.39193129539489746,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_3": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_4": {
+                  "max": 1.0,
+                  "p50": -0.17853981256484985,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_5": {
+                  "max": 1.0,
+                  "p50": -0.7779244780540466,
+                  "p95": 0.02943680696189402,
+                  "p99": 0.3494501268863673
+                },
+                "action_6": {
+                  "max": 1.0,
+                  "p50": -0.0022652149200439453,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_7": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_8": {
+                  "max": 1.0,
+                  "p50": -0.43063390254974365,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_9": {
+                  "max": 1.0,
+                  "p50": 0.9096361994743347,
+                  "p95": 1.0,
+                  "p99": 1.0
+                }
               },
               "raw_lambda_n_m_s": {
                 "joint1": {
@@ -13730,9 +15410,60 @@
               "counterfactual_cat_p02": {
                 "activation_windows": 0,
                 "active_reads": 0,
+                "attribution": {
+                  "active_reads": 0,
+                  "adjacent_active_read_winner_switches": 0,
+                  "all_active_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 0,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "co_violation_joint_count": {
+                    "max": null,
+                    "p50": null,
+                    "p95": null,
+                    "p99": null
+                  },
+                  "co_violation_reads": 0,
+                  "impulse_winner_reads": 0,
+                  "responsible_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 0,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "tie_active_reads": 0,
+                  "velocity_masked_active_reads": 0
+                },
+                "combined_delta_exact_max": true,
                 "combined_delta_max": 0.5,
                 "delta_impulse_active_mean": 0.0,
                 "delta_impulse_max": 0.0,
+                "deltas": {
+                  "combined_delta": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_impulse": {
+                    "max": 0.0,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_velocity": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  }
+                },
                 "event_pressure_all_observed_summary": {
                   "max": null,
                   "median": null,
@@ -13755,6 +15486,95 @@
                 "tie_reads": 0,
                 "velocity_mask_share": 0.0,
                 "velocity_masked_reads": 0
+              },
+              "episode_duration_ms": {
+                "completed_environments": 4096,
+                "duration_ms": {
+                  "max": 120.0,
+                  "p50": 120.0,
+                  "p95": 120.0,
+                  "p99": 120.0
+                },
+                "right_censored_environments": 0,
+                "unit": "native observed initial-episode prefix"
+              },
+              "impact_progress": {
+                "available": false,
+                "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+              },
+              "policy_action": {
+                "action_0": {
+                  "max": 1.0,
+                  "p50": 0.23683476448059082,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_1": {
+                  "max": 1.0,
+                  "p50": 0.7458927929401398,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_10": {
+                  "max": 1.0,
+                  "p50": 0.2923952043056488,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_11": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": -1.0,
+                  "p99": -0.8239326477050781
+                },
+                "action_2": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_3": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_4": {
+                  "max": 1.0,
+                  "p50": -0.94886314868927,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_5": {
+                  "max": 1.0,
+                  "p50": 0.6753160655498505,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_6": {
+                  "max": 1.0,
+                  "p50": -0.6935872733592987,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_7": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_8": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_9": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                }
               },
               "raw_lambda_n_m_s": {
                 "joint1": {
@@ -14835,9 +16655,60 @@
               "counterfactual_cat_p02": {
                 "activation_windows": 11,
                 "active_reads": 11,
+                "attribution": {
+                  "active_reads": 11,
+                  "adjacent_active_read_winner_switches": 0,
+                  "all_active_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 0,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 11
+                  },
+                  "co_violation_joint_count": {
+                    "max": 1.0,
+                    "p50": 1.0,
+                    "p95": 1.0,
+                    "p99": 1.0
+                  },
+                  "co_violation_reads": 0,
+                  "impulse_winner_reads": 11,
+                  "responsible_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 0,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 11
+                  },
+                  "tie_active_reads": 0,
+                  "velocity_masked_active_reads": 0
+                },
+                "combined_delta_exact_max": true,
                 "combined_delta_max": 0.5,
                 "delta_impulse_active_mean": 0.03707413188401292,
                 "delta_impulse_max": 0.2,
+                "deltas": {
+                  "combined_delta": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_impulse": {
+                    "max": 0.2,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_velocity": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  }
+                },
                 "event_pressure_all_observed_summary": {
                   "max": 0.2,
                   "median": 0.007914277768,
@@ -14860,6 +16731,95 @@
                 "tie_reads": 0,
                 "velocity_mask_share": 0.0,
                 "velocity_masked_reads": 0
+              },
+              "episode_duration_ms": {
+                "completed_environments": 4096,
+                "duration_ms": {
+                  "max": 120.0,
+                  "p50": 120.0,
+                  "p95": 120.0,
+                  "p99": 120.0
+                },
+                "right_censored_environments": 0,
+                "unit": "native observed initial-episode prefix"
+              },
+              "impact_progress": {
+                "available": false,
+                "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+              },
+              "policy_action": {
+                "action_0": {
+                  "max": 1.0,
+                  "p50": 0.23683476448059082,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_1": {
+                  "max": 1.0,
+                  "p50": 0.7458927929401398,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_10": {
+                  "max": 1.0,
+                  "p50": 0.2923952043056488,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_11": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": -1.0,
+                  "p99": -0.8239326477050781
+                },
+                "action_2": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_3": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_4": {
+                  "max": 1.0,
+                  "p50": -0.94886314868927,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_5": {
+                  "max": 1.0,
+                  "p50": 0.6753160655498505,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_6": {
+                  "max": 1.0,
+                  "p50": -0.6935872733592987,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_7": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_8": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_9": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                }
               },
               "raw_lambda_n_m_s": {
                 "joint1": {
@@ -15940,9 +17900,60 @@
               "counterfactual_cat_p02": {
                 "activation_windows": 0,
                 "active_reads": 0,
+                "attribution": {
+                  "active_reads": 0,
+                  "adjacent_active_read_winner_switches": 0,
+                  "all_active_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 0,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "co_violation_joint_count": {
+                    "max": null,
+                    "p50": null,
+                    "p95": null,
+                    "p99": null
+                  },
+                  "co_violation_reads": 0,
+                  "impulse_winner_reads": 0,
+                  "responsible_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 0,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "tie_active_reads": 0,
+                  "velocity_masked_active_reads": 0
+                },
+                "combined_delta_exact_max": true,
                 "combined_delta_max": 0.5,
                 "delta_impulse_active_mean": 0.0,
                 "delta_impulse_max": 0.0,
+                "deltas": {
+                  "combined_delta": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_impulse": {
+                    "max": 0.0,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_velocity": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  }
+                },
                 "event_pressure_all_observed_summary": {
                   "max": null,
                   "median": null,
@@ -15965,6 +17976,95 @@
                 "tie_reads": 0,
                 "velocity_mask_share": 0.0,
                 "velocity_masked_reads": 0
+              },
+              "episode_duration_ms": {
+                "completed_environments": 4096,
+                "duration_ms": {
+                  "max": 120.0,
+                  "p50": 120.0,
+                  "p95": 120.0,
+                  "p99": 120.0
+                },
+                "right_censored_environments": 0,
+                "unit": "native observed initial-episode prefix"
+              },
+              "impact_progress": {
+                "available": false,
+                "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+              },
+              "policy_action": {
+                "action_0": {
+                  "max": 1.0,
+                  "p50": 0.23683476448059082,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_1": {
+                  "max": 1.0,
+                  "p50": 0.7458927929401398,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_10": {
+                  "max": 1.0,
+                  "p50": 0.2923952043056488,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_11": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": -1.0,
+                  "p99": -0.8239326477050781
+                },
+                "action_2": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_3": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_4": {
+                  "max": 1.0,
+                  "p50": -0.94886314868927,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_5": {
+                  "max": 1.0,
+                  "p50": 0.6753160655498505,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_6": {
+                  "max": 1.0,
+                  "p50": -0.6935872733592987,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_7": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_8": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_9": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                }
               },
               "raw_lambda_n_m_s": {
                 "joint1": {
@@ -17047,9 +19147,60 @@
               "counterfactual_cat_p02": {
                 "activation_windows": 4090,
                 "active_reads": 4299,
+                "attribution": {
+                  "active_reads": 4299,
+                  "adjacent_active_read_winner_switches": 1,
+                  "all_active_joint_reads": {
+                    "joint1": 1207,
+                    "joint2": 4081,
+                    "joint3": 5,
+                    "joint4": 26,
+                    "joint5": 398,
+                    "joint6": 3326
+                  },
+                  "co_violation_joint_count": {
+                    "max": 5.0,
+                    "p50": 2.0,
+                    "p95": 4.0,
+                    "p99": 4.0
+                  },
+                  "co_violation_reads": 3500,
+                  "impulse_winner_reads": 4297,
+                  "responsible_joint_reads": {
+                    "joint1": 2,
+                    "joint2": 4030,
+                    "joint3": 0,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 267
+                  },
+                  "tie_active_reads": 0,
+                  "velocity_masked_active_reads": 2
+                },
+                "combined_delta_exact_max": true,
                 "combined_delta_max": 0.5,
                 "delta_impulse_active_mean": 0.17159283376845275,
                 "delta_impulse_max": 0.2,
+                "deltas": {
+                  "combined_delta": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.2,
+                    "p99": 0.2
+                  },
+                  "delta_impulse": {
+                    "max": 0.2,
+                    "p50": 0.0,
+                    "p95": 0.2,
+                    "p99": 0.2
+                  },
+                  "delta_velocity": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  }
+                },
                 "event_pressure_all_observed_summary": {
                   "max": 0.36,
                   "median": 0.2,
@@ -17072,6 +19223,95 @@
                 "tie_reads": 0,
                 "velocity_mask_share": 0.00046522447080716444,
                 "velocity_masked_reads": 2
+              },
+              "episode_duration_ms": {
+                "completed_environments": 4096,
+                "duration_ms": {
+                  "max": 180.0,
+                  "p50": 160.0,
+                  "p95": 160.0,
+                  "p99": 160.0
+                },
+                "right_censored_environments": 0,
+                "unit": "native observed initial-episode prefix"
+              },
+              "impact_progress": {
+                "available": false,
+                "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+              },
+              "policy_action": {
+                "action_0": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_1": {
+                  "max": 1.0,
+                  "p50": 0.8531696200370789,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_10": {
+                  "max": 1.0,
+                  "p50": 0.2461293339729309,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_11": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": -1.0,
+                  "p99": -0.5676216030120854
+                },
+                "action_2": {
+                  "max": 1.0,
+                  "p50": -0.45207440853118896,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_3": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_4": {
+                  "max": 1.0,
+                  "p50": -0.17893242835998535,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_5": {
+                  "max": 1.0,
+                  "p50": -0.7689207792282104,
+                  "p95": 0.027205453813075174,
+                  "p99": 0.3824993371963498
+                },
+                "action_6": {
+                  "max": 1.0,
+                  "p50": -0.009288717061281204,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_7": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_8": {
+                  "max": 1.0,
+                  "p50": -0.4892164468765259,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_9": {
+                  "max": 1.0,
+                  "p50": 0.9158617258071899,
+                  "p95": 1.0,
+                  "p99": 1.0
+                }
               },
               "raw_lambda_n_m_s": {
                 "joint1": {
@@ -18152,9 +20392,60 @@
               "counterfactual_cat_p02": {
                 "activation_windows": 5,
                 "active_reads": 5,
+                "attribution": {
+                  "active_reads": 5,
+                  "adjacent_active_read_winner_switches": 0,
+                  "all_active_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 5,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "co_violation_joint_count": {
+                    "max": 1.0,
+                    "p50": 1.0,
+                    "p95": 1.0,
+                    "p99": 1.0
+                  },
+                  "co_violation_reads": 0,
+                  "impulse_winner_reads": 5,
+                  "responsible_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 5,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "tie_active_reads": 0,
+                  "velocity_masked_active_reads": 0
+                },
+                "combined_delta_exact_max": true,
                 "combined_delta_max": 0.5,
                 "delta_impulse_active_mean": 0.06802545938644029,
                 "delta_impulse_max": 0.2,
+                "deltas": {
+                  "combined_delta": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_impulse": {
+                    "max": 0.2,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_velocity": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  }
+                },
                 "event_pressure_all_observed_summary": {
                   "max": 0.2,
                   "median": 0.038105550654,
@@ -18177,6 +20468,95 @@
                 "tie_reads": 0,
                 "velocity_mask_share": 0.0,
                 "velocity_masked_reads": 0
+              },
+              "episode_duration_ms": {
+                "completed_environments": 4096,
+                "duration_ms": {
+                  "max": 180.0,
+                  "p50": 160.0,
+                  "p95": 160.0,
+                  "p99": 160.0
+                },
+                "right_censored_environments": 0,
+                "unit": "native observed initial-episode prefix"
+              },
+              "impact_progress": {
+                "available": false,
+                "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+              },
+              "policy_action": {
+                "action_0": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_1": {
+                  "max": 1.0,
+                  "p50": 0.8531696200370789,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_10": {
+                  "max": 1.0,
+                  "p50": 0.2461293339729309,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_11": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": -1.0,
+                  "p99": -0.5676216030120854
+                },
+                "action_2": {
+                  "max": 1.0,
+                  "p50": -0.45207440853118896,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_3": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_4": {
+                  "max": 1.0,
+                  "p50": -0.17893242835998535,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_5": {
+                  "max": 1.0,
+                  "p50": -0.7689207792282104,
+                  "p95": 0.027205453813075174,
+                  "p99": 0.3824993371963498
+                },
+                "action_6": {
+                  "max": 1.0,
+                  "p50": -0.009288717061281204,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_7": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_8": {
+                  "max": 1.0,
+                  "p50": -0.4892164468765259,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_9": {
+                  "max": 1.0,
+                  "p50": 0.9158617258071899,
+                  "p95": 1.0,
+                  "p99": 1.0
+                }
               },
               "raw_lambda_n_m_s": {
                 "joint1": {
@@ -19257,9 +21637,60 @@
               "counterfactual_cat_p02": {
                 "activation_windows": 0,
                 "active_reads": 0,
+                "attribution": {
+                  "active_reads": 0,
+                  "adjacent_active_read_winner_switches": 0,
+                  "all_active_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 0,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "co_violation_joint_count": {
+                    "max": null,
+                    "p50": null,
+                    "p95": null,
+                    "p99": null
+                  },
+                  "co_violation_reads": 0,
+                  "impulse_winner_reads": 0,
+                  "responsible_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 0,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "tie_active_reads": 0,
+                  "velocity_masked_active_reads": 0
+                },
+                "combined_delta_exact_max": true,
                 "combined_delta_max": 0.5,
                 "delta_impulse_active_mean": 0.0,
                 "delta_impulse_max": 0.0,
+                "deltas": {
+                  "combined_delta": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_impulse": {
+                    "max": 0.0,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_velocity": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  }
+                },
                 "event_pressure_all_observed_summary": {
                   "max": null,
                   "median": null,
@@ -19282,6 +21713,95 @@
                 "tie_reads": 0,
                 "velocity_mask_share": 0.0,
                 "velocity_masked_reads": 0
+              },
+              "episode_duration_ms": {
+                "completed_environments": 4096,
+                "duration_ms": {
+                  "max": 180.0,
+                  "p50": 160.0,
+                  "p95": 160.0,
+                  "p99": 160.0
+                },
+                "right_censored_environments": 0,
+                "unit": "native observed initial-episode prefix"
+              },
+              "impact_progress": {
+                "available": false,
+                "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+              },
+              "policy_action": {
+                "action_0": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_1": {
+                  "max": 1.0,
+                  "p50": 0.8531696200370789,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_10": {
+                  "max": 1.0,
+                  "p50": 0.2461293339729309,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_11": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": -1.0,
+                  "p99": -0.5676216030120854
+                },
+                "action_2": {
+                  "max": 1.0,
+                  "p50": -0.45207440853118896,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_3": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_4": {
+                  "max": 1.0,
+                  "p50": -0.17893242835998535,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_5": {
+                  "max": 1.0,
+                  "p50": -0.7689207792282104,
+                  "p95": 0.027205453813075174,
+                  "p99": 0.3824993371963498
+                },
+                "action_6": {
+                  "max": 1.0,
+                  "p50": -0.009288717061281204,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_7": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_8": {
+                  "max": 1.0,
+                  "p50": -0.4892164468765259,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_9": {
+                  "max": 1.0,
+                  "p50": 0.9158617258071899,
+                  "p95": 1.0,
+                  "p99": 1.0
+                }
               },
               "raw_lambda_n_m_s": {
                 "joint1": {
@@ -20492,9 +23012,60 @@
               "counterfactual_cat_p02": {
                 "activation_windows": 0,
                 "active_reads": 0,
+                "attribution": {
+                  "active_reads": 0,
+                  "adjacent_active_read_winner_switches": 0,
+                  "all_active_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 0,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "co_violation_joint_count": {
+                    "max": null,
+                    "p50": null,
+                    "p95": null,
+                    "p99": null
+                  },
+                  "co_violation_reads": 0,
+                  "impulse_winner_reads": 0,
+                  "responsible_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 0,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "tie_active_reads": 0,
+                  "velocity_masked_active_reads": 0
+                },
+                "combined_delta_exact_max": true,
                 "combined_delta_max": 0.5,
                 "delta_impulse_active_mean": 0.0,
                 "delta_impulse_max": 0.0,
+                "deltas": {
+                  "combined_delta": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_impulse": {
+                    "max": 0.0,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_velocity": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  }
+                },
                 "event_pressure_all_observed_summary": {
                   "max": null,
                   "median": null,
@@ -20517,6 +23088,95 @@
                 "tie_reads": 0,
                 "velocity_mask_share": 0.0,
                 "velocity_masked_reads": 0
+              },
+              "episode_duration_ms": {
+                "completed_environments": 4096,
+                "duration_ms": {
+                  "max": 140.0,
+                  "p50": 120.0,
+                  "p95": 120.0,
+                  "p99": 120.0
+                },
+                "right_censored_environments": 0,
+                "unit": "native observed initial-episode prefix"
+              },
+              "impact_progress": {
+                "available": false,
+                "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+              },
+              "policy_action": {
+                "action_0": {
+                  "max": 1.0,
+                  "p50": 0.25148648023605347,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_1": {
+                  "max": 1.0,
+                  "p50": 0.7417460978031158,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_10": {
+                  "max": 1.0,
+                  "p50": 0.27750401198863983,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_11": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": -1.0,
+                  "p99": -0.8339598536491394
+                },
+                "action_2": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_3": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_4": {
+                  "max": 1.0,
+                  "p50": -0.9508851766586304,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_5": {
+                  "max": 1.0,
+                  "p50": 0.6740489602088928,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_6": {
+                  "max": 1.0,
+                  "p50": -0.719107449054718,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_7": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_8": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_9": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                }
               },
               "raw_lambda_n_m_s": {
                 "joint1": {
@@ -21597,9 +24257,60 @@
               "counterfactual_cat_p02": {
                 "activation_windows": 11,
                 "active_reads": 11,
+                "attribution": {
+                  "active_reads": 11,
+                  "adjacent_active_read_winner_switches": 0,
+                  "all_active_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 0,
+                    "joint4": 0,
+                    "joint5": 1,
+                    "joint6": 10
+                  },
+                  "co_violation_joint_count": {
+                    "max": 1.0,
+                    "p50": 1.0,
+                    "p95": 1.0,
+                    "p99": 1.0
+                  },
+                  "co_violation_reads": 0,
+                  "impulse_winner_reads": 11,
+                  "responsible_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 0,
+                    "joint4": 0,
+                    "joint5": 1,
+                    "joint6": 10
+                  },
+                  "tie_active_reads": 0,
+                  "velocity_masked_active_reads": 0
+                },
+                "combined_delta_exact_max": true,
                 "combined_delta_max": 0.5,
                 "delta_impulse_active_mean": 0.05742092696908183,
                 "delta_impulse_max": 0.2,
+                "deltas": {
+                  "combined_delta": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_impulse": {
+                    "max": 0.2,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_velocity": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  }
+                },
                 "event_pressure_all_observed_summary": {
                   "max": 0.2,
                   "median": 0.01947913945,
@@ -21622,6 +24333,95 @@
                 "tie_reads": 0,
                 "velocity_mask_share": 0.0,
                 "velocity_masked_reads": 0
+              },
+              "episode_duration_ms": {
+                "completed_environments": 4096,
+                "duration_ms": {
+                  "max": 140.0,
+                  "p50": 120.0,
+                  "p95": 120.0,
+                  "p99": 120.0
+                },
+                "right_censored_environments": 0,
+                "unit": "native observed initial-episode prefix"
+              },
+              "impact_progress": {
+                "available": false,
+                "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+              },
+              "policy_action": {
+                "action_0": {
+                  "max": 1.0,
+                  "p50": 0.25148648023605347,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_1": {
+                  "max": 1.0,
+                  "p50": 0.7417460978031158,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_10": {
+                  "max": 1.0,
+                  "p50": 0.27750401198863983,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_11": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": -1.0,
+                  "p99": -0.8339598536491394
+                },
+                "action_2": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_3": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_4": {
+                  "max": 1.0,
+                  "p50": -0.9508851766586304,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_5": {
+                  "max": 1.0,
+                  "p50": 0.6740489602088928,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_6": {
+                  "max": 1.0,
+                  "p50": -0.719107449054718,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_7": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_8": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_9": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                }
               },
               "raw_lambda_n_m_s": {
                 "joint1": {
@@ -22702,9 +25502,60 @@
               "counterfactual_cat_p02": {
                 "activation_windows": 0,
                 "active_reads": 0,
+                "attribution": {
+                  "active_reads": 0,
+                  "adjacent_active_read_winner_switches": 0,
+                  "all_active_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 0,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "co_violation_joint_count": {
+                    "max": null,
+                    "p50": null,
+                    "p95": null,
+                    "p99": null
+                  },
+                  "co_violation_reads": 0,
+                  "impulse_winner_reads": 0,
+                  "responsible_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 0,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "tie_active_reads": 0,
+                  "velocity_masked_active_reads": 0
+                },
+                "combined_delta_exact_max": true,
                 "combined_delta_max": 0.5,
                 "delta_impulse_active_mean": 0.0,
                 "delta_impulse_max": 0.0,
+                "deltas": {
+                  "combined_delta": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_impulse": {
+                    "max": 0.0,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_velocity": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  }
+                },
                 "event_pressure_all_observed_summary": {
                   "max": null,
                   "median": null,
@@ -22727,6 +25578,95 @@
                 "tie_reads": 0,
                 "velocity_mask_share": 0.0,
                 "velocity_masked_reads": 0
+              },
+              "episode_duration_ms": {
+                "completed_environments": 4096,
+                "duration_ms": {
+                  "max": 140.0,
+                  "p50": 120.0,
+                  "p95": 120.0,
+                  "p99": 120.0
+                },
+                "right_censored_environments": 0,
+                "unit": "native observed initial-episode prefix"
+              },
+              "impact_progress": {
+                "available": false,
+                "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+              },
+              "policy_action": {
+                "action_0": {
+                  "max": 1.0,
+                  "p50": 0.25148648023605347,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_1": {
+                  "max": 1.0,
+                  "p50": 0.7417460978031158,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_10": {
+                  "max": 1.0,
+                  "p50": 0.27750401198863983,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_11": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": -1.0,
+                  "p99": -0.8339598536491394
+                },
+                "action_2": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_3": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_4": {
+                  "max": 1.0,
+                  "p50": -0.9508851766586304,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_5": {
+                  "max": 1.0,
+                  "p50": 0.6740489602088928,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_6": {
+                  "max": 1.0,
+                  "p50": -0.719107449054718,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_7": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_8": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_9": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                }
               },
               "raw_lambda_n_m_s": {
                 "joint1": {
@@ -23809,9 +26749,60 @@
               "counterfactual_cat_p02": {
                 "activation_windows": 4091,
                 "active_reads": 4309,
+                "attribution": {
+                  "active_reads": 4309,
+                  "adjacent_active_read_winner_switches": 2,
+                  "all_active_joint_reads": {
+                    "joint1": 1213,
+                    "joint2": 4081,
+                    "joint3": 4,
+                    "joint4": 17,
+                    "joint5": 407,
+                    "joint6": 3390
+                  },
+                  "co_violation_joint_count": {
+                    "max": 5.0,
+                    "p50": 2.0,
+                    "p95": 4.0,
+                    "p99": 4.0
+                  },
+                  "co_violation_reads": 3560,
+                  "impulse_winner_reads": 4307,
+                  "responsible_joint_reads": {
+                    "joint1": 1,
+                    "joint2": 4021,
+                    "joint3": 0,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 287
+                  },
+                  "tie_active_reads": 0,
+                  "velocity_masked_active_reads": 2
+                },
+                "combined_delta_exact_max": true,
                 "combined_delta_max": 0.5,
                 "delta_impulse_active_mean": 0.18676461491049562,
                 "delta_impulse_max": 0.2,
+                "deltas": {
+                  "combined_delta": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.2,
+                    "p99": 0.2
+                  },
+                  "delta_impulse": {
+                    "max": 0.2,
+                    "p50": 0.0,
+                    "p95": 0.2,
+                    "p99": 0.2
+                  },
+                  "delta_velocity": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  }
+                },
                 "event_pressure_all_observed_summary": {
                   "max": 0.36,
                   "median": 0.2,
@@ -23834,6 +26825,95 @@
                 "tie_reads": 0,
                 "velocity_mask_share": 0.0004641448131817127,
                 "velocity_masked_reads": 2
+              },
+              "episode_duration_ms": {
+                "completed_environments": 4096,
+                "duration_ms": {
+                  "max": 160.0,
+                  "p50": 160.0,
+                  "p95": 160.0,
+                  "p99": 160.0
+                },
+                "right_censored_environments": 0,
+                "unit": "native observed initial-episode prefix"
+              },
+              "impact_progress": {
+                "available": false,
+                "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+              },
+              "policy_action": {
+                "action_0": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_1": {
+                  "max": 1.0,
+                  "p50": 0.8545074760913849,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_10": {
+                  "max": 1.0,
+                  "p50": 0.2299378663301468,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_11": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": -1.0,
+                  "p99": -0.5557954454421996
+                },
+                "action_2": {
+                  "max": 1.0,
+                  "p50": -0.4768329858779907,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_3": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_4": {
+                  "max": 1.0,
+                  "p50": -0.15885858237743378,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_5": {
+                  "max": 1.0,
+                  "p50": -0.7782029509544373,
+                  "p95": 0.035252597182989114,
+                  "p99": 0.4046570631861691
+                },
+                "action_6": {
+                  "max": 1.0,
+                  "p50": -0.03289773315191269,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_7": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_8": {
+                  "max": 1.0,
+                  "p50": -0.4064697027206421,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_9": {
+                  "max": 1.0,
+                  "p50": 0.9125165939331055,
+                  "p95": 1.0,
+                  "p99": 1.0
+                }
               },
               "raw_lambda_n_m_s": {
                 "joint1": {
@@ -24914,9 +27994,60 @@
               "counterfactual_cat_p02": {
                 "activation_windows": 4,
                 "active_reads": 4,
+                "attribution": {
+                  "active_reads": 4,
+                  "adjacent_active_read_winner_switches": 0,
+                  "all_active_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 4,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "co_violation_joint_count": {
+                    "max": 1.0,
+                    "p50": 1.0,
+                    "p95": 1.0,
+                    "p99": 1.0
+                  },
+                  "co_violation_reads": 0,
+                  "impulse_winner_reads": 4,
+                  "responsible_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 4,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "tie_active_reads": 0,
+                  "velocity_masked_active_reads": 0
+                },
+                "combined_delta_exact_max": true,
                 "combined_delta_max": 0.5,
                 "delta_impulse_active_mean": 0.11059005448213073,
                 "delta_impulse_max": 0.2,
+                "deltas": {
+                  "combined_delta": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_impulse": {
+                    "max": 0.2,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_velocity": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  }
+                },
                 "event_pressure_all_observed_summary": {
                   "max": 0.2,
                   "median": 0.1040308105845,
@@ -24939,6 +28070,95 @@
                 "tie_reads": 0,
                 "velocity_mask_share": 0.0,
                 "velocity_masked_reads": 0
+              },
+              "episode_duration_ms": {
+                "completed_environments": 4096,
+                "duration_ms": {
+                  "max": 160.0,
+                  "p50": 160.0,
+                  "p95": 160.0,
+                  "p99": 160.0
+                },
+                "right_censored_environments": 0,
+                "unit": "native observed initial-episode prefix"
+              },
+              "impact_progress": {
+                "available": false,
+                "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+              },
+              "policy_action": {
+                "action_0": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_1": {
+                  "max": 1.0,
+                  "p50": 0.8545074760913849,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_10": {
+                  "max": 1.0,
+                  "p50": 0.2299378663301468,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_11": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": -1.0,
+                  "p99": -0.5557954454421996
+                },
+                "action_2": {
+                  "max": 1.0,
+                  "p50": -0.4768329858779907,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_3": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_4": {
+                  "max": 1.0,
+                  "p50": -0.15885858237743378,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_5": {
+                  "max": 1.0,
+                  "p50": -0.7782029509544373,
+                  "p95": 0.035252597182989114,
+                  "p99": 0.4046570631861691
+                },
+                "action_6": {
+                  "max": 1.0,
+                  "p50": -0.03289773315191269,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_7": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_8": {
+                  "max": 1.0,
+                  "p50": -0.4064697027206421,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_9": {
+                  "max": 1.0,
+                  "p50": 0.9125165939331055,
+                  "p95": 1.0,
+                  "p99": 1.0
+                }
               },
               "raw_lambda_n_m_s": {
                 "joint1": {
@@ -26019,9 +29239,60 @@
               "counterfactual_cat_p02": {
                 "activation_windows": 1,
                 "active_reads": 1,
+                "attribution": {
+                  "active_reads": 1,
+                  "adjacent_active_read_winner_switches": 0,
+                  "all_active_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 1,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "co_violation_joint_count": {
+                    "max": 1.0,
+                    "p50": 1.0,
+                    "p95": 1.0,
+                    "p99": 1.0
+                  },
+                  "co_violation_reads": 0,
+                  "impulse_winner_reads": 1,
+                  "responsible_joint_reads": {
+                    "joint1": 0,
+                    "joint2": 0,
+                    "joint3": 1,
+                    "joint4": 0,
+                    "joint5": 0,
+                    "joint6": 0
+                  },
+                  "tie_active_reads": 0,
+                  "velocity_masked_active_reads": 0
+                },
+                "combined_delta_exact_max": true,
                 "combined_delta_max": 0.5,
                 "delta_impulse_active_mean": 0.2,
                 "delta_impulse_max": 0.2,
+                "deltas": {
+                  "combined_delta": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_impulse": {
+                    "max": 0.2,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  },
+                  "delta_velocity": {
+                    "max": 0.5,
+                    "p50": 0.0,
+                    "p95": 0.0,
+                    "p99": 0.0
+                  }
+                },
                 "event_pressure_all_observed_summary": {
                   "max": 0.2,
                   "median": 0.2,
@@ -26044,6 +29315,95 @@
                 "tie_reads": 0,
                 "velocity_mask_share": 0.0,
                 "velocity_masked_reads": 0
+              },
+              "episode_duration_ms": {
+                "completed_environments": 4096,
+                "duration_ms": {
+                  "max": 160.0,
+                  "p50": 160.0,
+                  "p95": 160.0,
+                  "p99": 160.0
+                },
+                "right_censored_environments": 0,
+                "unit": "native observed initial-episode prefix"
+              },
+              "impact_progress": {
+                "available": false,
+                "reason": "the frozen evaluator trace does not emit an impact_progress reward-term field"
+              },
+              "policy_action": {
+                "action_0": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_1": {
+                  "max": 1.0,
+                  "p50": 0.8545074760913849,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_10": {
+                  "max": 1.0,
+                  "p50": 0.2299378663301468,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_11": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": -1.0,
+                  "p99": -0.5557954454421996
+                },
+                "action_2": {
+                  "max": 1.0,
+                  "p50": -0.4768329858779907,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_3": {
+                  "max": 1.0,
+                  "p50": 1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_4": {
+                  "max": 1.0,
+                  "p50": -0.15885858237743378,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_5": {
+                  "max": 1.0,
+                  "p50": -0.7782029509544373,
+                  "p95": 0.035252597182989114,
+                  "p99": 0.4046570631861691
+                },
+                "action_6": {
+                  "max": 1.0,
+                  "p50": -0.03289773315191269,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_7": {
+                  "max": 1.0,
+                  "p50": -1.0,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_8": {
+                  "max": 1.0,
+                  "p50": -0.4064697027206421,
+                  "p95": 1.0,
+                  "p99": 1.0
+                },
+                "action_9": {
+                  "max": 1.0,
+                  "p50": 0.9125165939331055,
+                  "p95": 1.0,
+                  "p99": 1.0
+                }
               },
               "raw_lambda_n_m_s": {
                 "joint1": {

@@ -83,6 +83,17 @@ def test_population_cross_analysis_reuses_survey_and_reports_required_descriptor
   assert result["true_velocity_risk"]["limit_rad_s"] == survey.VELOCITY_LIMIT_RAD_S
   assert result["classification"]["boundary_compliance"] is False
   assert result["classification"]["partial_compliance"] is True
+  assert set(result["counterfactual_cat_p02"]["deltas"]) == {
+    "delta_velocity",
+    "delta_impulse",
+    "combined_delta",
+  }
+  assert result["counterfactual_cat_p02"]["attribution"]["responsible_joint_reads"][
+    "joint1"
+  ] == 4
+  assert result["episode_duration_ms"]["unit"] == "native observed initial-episode prefix"
+  assert tuple(result["policy_action"]) == tuple(f"action_{index}" for index in range(12))
+  assert result["impact_progress"]["available"] is False
 
 
 def test_assembly_requires_separate_fixed_and_three_stochastic_populations():

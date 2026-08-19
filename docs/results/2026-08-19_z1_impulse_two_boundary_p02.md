@@ -22,13 +22,13 @@ All eight frozen traces are finite, use live `imp_max_p=0`, have identically zer
 | uniform-0.9 / 2 | 6 (J3) | J3 1.155 | .178/.200 | .0073 | 4096/4096 | .4490 |
 | uniform-0.9 / 2026081701 | 5 (J3) | J3 1.067 | .038/.176 | .0073 | 4096/4096 | .4490 |
 | uniform-0.9 / 2026081702 | 4 (J3) | J3 1.140 | .104/.188 | .0093 | 4096/4096 | .4492 |
-| joint-stress / 2 | 13 (J1:1, J5:2, J6:11) | J6 2.016 | .006/.200 | .0044 | 4096/4096 | .3887 |
+| joint-stress / 2 | 13 responsible (J1:1, J5:1, J6:11; J5 all-active:2) | J6 2.016 | .006/.200 | .0044 | 4096/4096 | .3887 |
 | joint-stress / 2026081701 | 11 (J6) | J6 1.655 | .008/.153 | .0032 | 4096/4096 | .3887 |
 | joint-stress / 2026081702 | 11 (J5:1, J6:10) | J6 1.350 | .019/.200 | .0029 | 4096/4096 | .3888 |
 
-Counterfactually applying the other arm's strict vector to uniform yields 4,322/4,299/4,309 violating reads, concentrated at J2 and J6. Joint-stress has zero violations under uniform-0.9 and provisional project caps in all three populations; uniform has one/zero/one provisional-cap read. Raw Lambda therefore accompanies utilization in the bank: the cap denominator changes which channels bind. The machine-readable result includes raw per-joint Lambda p50/p95/p99/max, every cap geometry, utilization/margin/segment endpoint, responsible/all-active attribution, event/read and censoring descriptors, velocity tails, task output, VIC gains, and actions.
+Counterfactually applying the other arm's strict vector to uniform yields 4,322/4,299/4,309 violating reads, concentrated at J2 and J6. Joint-stress has zero violations under uniform-0.9 and provisional project caps in all three populations; uniform has one/zero/one provisional-cap read. Raw Lambda therefore accompanies utilization in the bank: the cap denominator changes which channels bind. The machine-readable result includes raw per-joint Lambda p50/p95/p99/max, every cap geometry, utilization/margin/segment endpoint, separate counterfactual velocity/impulse/combined deltas, responsible/all-active/co-violation/winner-switching attribution, event/read and censoring descriptors, velocity tails, task output, episode duration, VIC gains, and actions. `impact_progress` was not emitted in the frozen trace and is explicitly marked unavailable rather than inferred.
 
-Associated physical-contact prefixes have median observed duration 28–30 ms for uniform and 20 ms for joint-stress; censored prefixes remain. Neither duration nor the pressure survival product is a unique physical-event dose.
+Associated physical-contact prefixes have median observed duration 28–30 ms for uniform and 18/20/20 ms for joint-stress (stochastic seed order 2/2026081701/2026081702); censored prefixes remain. Neither duration nor the pressure survival product is a unique physical-event dose.
 
 ## Interpretation and boundary
 
@@ -38,4 +38,4 @@ This one-seed project-cap experiment does not establish hard constraint satisfac
 
 ## Artifact ledger
 
-The deterministic [analysis.json](assets/2026-08-19_z1_impulse_two_boundary_p02/analysis.json) has SHA-256 `b7a10a1c5d309aa2f3c215a3d5367b05ee01cd1a48045ce5186c28e61fc72cfa`. Its adjacent [`SHA256SUMS`](assets/2026-08-19_z1_impulse_two_boundary_p02/SHA256SUMS) binds the analysis, exact analyzer source, and this record.
+The deterministic [analysis.json](assets/2026-08-19_z1_impulse_two_boundary_p02/analysis.json) has SHA-256 `7b1752f7ac853a1533347685980bedce86306442dfc62629828d2646b2d8fff8`. Its adjacent [`SHA256SUMS`](assets/2026-08-19_z1_impulse_two_boundary_p02/SHA256SUMS) binds the analysis, exact analyzer source, and this record.
