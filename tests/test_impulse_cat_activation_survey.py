@@ -34,6 +34,10 @@ BRIDGE_TARGET_SHA = "57000e958bbafa2c62929652d3b76fd6ed571c9867bee3735c14baf0ca5
 DOSE_P01_SHA = "92f1d97c8ff1476cb26c0b648478a0bc3c522e4e1eb7087389fb8e0d6bf73f86"
 DOSE_P03_SHA = "4c0a665fffc077d488630a28b258c1593050f969b4f6227147c3594097dc4efd"
 DOSE_P025_SHA = "5efc45c11c02dd400ad7d417bcdeefe9d271038ab43007f08a2820ceca0e744d"
+JOINT_STRESS_ITER300_SHA = "38678071034a79de96b45bcd0ece5b18b80aa6aebd6af1aaf4215f084619cc8d"
+JOINT_STRESS_ITER400_SHA = "6ff5ae3e9b197b6255617c53823c935e7348387d0728e6409dac403e905c67ad"
+JOINT_STRESS_ITER450_SHA = "a80b4e7b3279e3283581e207d32ce6d6810827978449c92e4289d8a2b50fdfb3"
+JOINT_STRESS_ITER499_SHA = "509cc26a2e521a935bcbc8c342040c95c7d2e3d7fc105a52d5d9450518bd2ec7"
 
 
 def _install_fake_population_runtime(monkeypatch, events):
@@ -157,7 +161,11 @@ def test_evaluation_checkpoint_roles_are_exact_and_fail_closed(tmp_path, monkeyp
     "dose_p03_target": DOSE_P03_SHA,
     "dose_p025_exploratory": DOSE_P025_SHA,
     "p02_uniform09": "a99593b263a74944d60ac412bb1da733a36a29a1cd9f4eeeaed89906372595df",
-    "p02_joint_stress": "509cc26a2e521a935bcbc8c342040c95c7d2e3d7fc105a52d5d9450518bd2ec7",
+    "p02_joint_stress": JOINT_STRESS_ITER499_SHA,
+    "p02_joint_stress_iter300": JOINT_STRESS_ITER300_SHA,
+    "p02_joint_stress_iter400": JOINT_STRESS_ITER400_SHA,
+    "p02_joint_stress_iter450": JOINT_STRESS_ITER450_SHA,
+    "p02_joint_stress_iter499": JOINT_STRESS_ITER499_SHA,
   }
   with pytest.raises(TypeError):
     survey.EVALUATION_CHECKPOINTS["unexpected_role"] = CONTROL_SHA
@@ -174,6 +182,10 @@ def test_two_boundary_roles_bind_exact_checkpoint_and_training_cap_identities():
   assert dict(survey.TWO_BOUNDARY_P02_TRAINING_CAPS_N_M_S) == {
     "p02_uniform09": (0.738, 1.476, 0.738, 0.738, 0.738, 0.738),
     "p02_joint_stress": (0.369, 0.246, 0.738, 0.369, 0.246, 0.0164),
+    "p02_joint_stress_iter300": (0.369, 0.246, 0.738, 0.369, 0.246, 0.0164),
+    "p02_joint_stress_iter400": (0.369, 0.246, 0.738, 0.369, 0.246, 0.0164),
+    "p02_joint_stress_iter450": (0.369, 0.246, 0.738, 0.369, 0.246, 0.0164),
+    "p02_joint_stress_iter499": (0.369, 0.246, 0.738, 0.369, 0.246, 0.0164),
   }
   assert survey.EVALUATION_CHECKPOINTS["p02_uniform09"] == (
     "a99593b263a74944d60ac412bb1da733a36a29a1cd9f4eeeaed89906372595df"
@@ -192,6 +204,31 @@ def test_two_boundary_roles_bind_exact_checkpoint_and_training_cap_identities():
     )
   with pytest.raises(ValueError, match="six finite numeric values"):
     survey.validate_training_cap_identity("p02_joint_stress", [0.369, float("nan")])
+
+
+@pytest.mark.parametrize(
+  ("role", "basename", "expected_sha"),
+  (
+    ("p02_joint_stress_iter300", "model_300.pt", JOINT_STRESS_ITER300_SHA),
+    ("p02_joint_stress_iter400", "model_400.pt", JOINT_STRESS_ITER400_SHA),
+    ("p02_joint_stress_iter450", "model_450.pt", JOINT_STRESS_ITER450_SHA),
+    ("p02_joint_stress_iter499", "model_499.pt", JOINT_STRESS_ITER499_SHA),
+  ),
+)
+def test_joint_stress_checkpoint_roles_bind_exact_iteration_basename_and_hash(
+  tmp_path, monkeypatch, role, basename, expected_sha
+):
+  """A late checkpoint cannot be relabelled as a different training iteration."""
+  checkpoint = tmp_path / basename
+  checkpoint.write_bytes(role.encode())
+  monkeypatch.setattr(survey, "_sha256", lambda _: expected_sha)
+
+  assert survey.validate_checkpoint_role(checkpoint, role) == expected_sha
+  wrong_basename = tmp_path / "model_499.pt"
+  wrong_basename.write_bytes(b"wrong iteration")
+  if basename != "model_499.pt":
+    with pytest.raises(ValueError, match="checkpoint basename"):
+      survey.validate_checkpoint_role(wrong_basename, role)
 
 
 def test_environment_rng_consumption_cannot_advance_policy_action_noise():
@@ -272,6 +309,26 @@ def test_evaluation_roles_derive_identical_rng_streams_from_one_base_seed():
       action=30_000_043,
     ),
     "p02_joint_stress": survey.EvaluationRngSeeds(
+      reset=10_000_021,
+      observation=20_000_035,
+      action=30_000_043,
+    ),
+    "p02_joint_stress_iter300": survey.EvaluationRngSeeds(
+      reset=10_000_021,
+      observation=20_000_035,
+      action=30_000_043,
+    ),
+    "p02_joint_stress_iter400": survey.EvaluationRngSeeds(
+      reset=10_000_021,
+      observation=20_000_035,
+      action=30_000_043,
+    ),
+    "p02_joint_stress_iter450": survey.EvaluationRngSeeds(
+      reset=10_000_021,
+      observation=20_000_035,
+      action=30_000_043,
+    ),
+    "p02_joint_stress_iter499": survey.EvaluationRngSeeds(
       reset=10_000_021,
       observation=20_000_035,
       action=30_000_043,

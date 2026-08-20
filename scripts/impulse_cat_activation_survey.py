@@ -63,6 +63,18 @@ EVALUATION_CHECKPOINTS: Mapping[str, str] = MappingProxyType(
     "dose_p025_exploratory": "5efc45c11c02dd400ad7d417bcdeefe9d271038ab43007f08a2820ceca0e744d",
     "p02_uniform09": "a99593b263a74944d60ac412bb1da733a36a29a1cd9f4eeeaed89906372595df",
     "p02_joint_stress": "509cc26a2e521a935bcbc8c342040c95c7d2e3d7fc105a52d5d9450518bd2ec7",
+    "p02_joint_stress_iter300": "38678071034a79de96b45bcd0ece5b18b80aa6aebd6af1aaf4215f084619cc8d",
+    "p02_joint_stress_iter400": "6ff5ae3e9b197b6255617c53823c935e7348387d0728e6409dac403e905c67ad",
+    "p02_joint_stress_iter450": "a80b4e7b3279e3283581e207d32ce6d6810827978449c92e4289d8a2b50fdfb3",
+    "p02_joint_stress_iter499": "509cc26a2e521a935bcbc8c342040c95c7d2e3d7fc105a52d5d9450518bd2ec7",
+  }
+)
+EVALUATION_CHECKPOINT_BASENAMES: Mapping[str, str] = MappingProxyType(
+  {
+    "p02_joint_stress_iter300": "model_300.pt",
+    "p02_joint_stress_iter400": "model_400.pt",
+    "p02_joint_stress_iter450": "model_450.pt",
+    "p02_joint_stress_iter499": "model_499.pt",
   }
 )
 TWO_BOUNDARY_P02_TRAINING_CAPS_N_M_S: Mapping[str, tuple[float, ...]] = (
@@ -70,6 +82,10 @@ TWO_BOUNDARY_P02_TRAINING_CAPS_N_M_S: Mapping[str, tuple[float, ...]] = (
     {
       "p02_uniform09": (0.738, 1.476, 0.738, 0.738, 0.738, 0.738),
       "p02_joint_stress": (0.369, 0.246, 0.738, 0.369, 0.246, 0.0164),
+      "p02_joint_stress_iter300": (0.369, 0.246, 0.738, 0.369, 0.246, 0.0164),
+      "p02_joint_stress_iter400": (0.369, 0.246, 0.738, 0.369, 0.246, 0.0164),
+      "p02_joint_stress_iter450": (0.369, 0.246, 0.738, 0.369, 0.246, 0.0164),
+      "p02_joint_stress_iter499": (0.369, 0.246, 0.738, 0.369, 0.246, 0.0164),
     }
   )
 )
@@ -160,8 +176,13 @@ def _install_evaluator_rng_streams(
 
 
 def validate_checkpoint_role(checkpoint: Path, role: str) -> str:
-  if checkpoint.name != "model_499.pt" or role not in EVALUATION_CHECKPOINTS:
-    raise ValueError("post-training evaluation requires a known role and model_499.pt")
+  if role not in EVALUATION_CHECKPOINTS:
+    raise ValueError("post-training evaluation requires a known checkpoint role")
+  expected_basename = EVALUATION_CHECKPOINT_BASENAMES.get(role, "model_499.pt")
+  if checkpoint.name != expected_basename:
+    raise ValueError(
+      f"checkpoint basename for {role} must be {expected_basename}, got {checkpoint.name}"
+    )
   actual = _sha256(checkpoint.resolve(strict=True))
   if actual != EVALUATION_CHECKPOINTS[role]:
     raise RuntimeError("role/checkpoint SHA-256 mismatch")
