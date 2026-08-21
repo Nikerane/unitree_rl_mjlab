@@ -20,6 +20,7 @@ Design constraints honoured here:
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 import torch
@@ -62,17 +63,21 @@ class SingleStrikeReference:
     # nail height read phi≈0.93 ("strike nearly complete") and the monotone
     # latch made the aliasing irreversible — poison for the T2 imitation prior.
     axis_tol: float = 0.05,
+    *,
+    horizontal_detour_m: float = 0.0,
   ):
     self.num_envs = num_envs
     self.device = device
     self.overshoot = float(overshoot)
     self.descent_speed = float(descent_speed)
     self.axis_tol = float(axis_tol)
+    self.horizontal_detour_m = float(horizontal_detour_m)
 
     self._head0 = torch.zeros(num_envs, 3, device=device)
     self._target = torch.zeros(num_envs, 3, device=device)
     self._phi = torch.zeros(num_envs, device=device)
     self._anchored = torch.zeros(num_envs, dtype=torch.bool, device=device)
+    self._route_sign = torch.zeros(num_envs, dtype=torch.int8, device=device)
 
   # -- anchoring ------------------------------------------------------------
 
@@ -175,12 +180,45 @@ class SingleStrikeReference:
     """Latched phase as committed by the last update() — non-mutating read."""
     return self._phi.clone()
 
+  def set_route_signs(self, signs: torch.Tensor) -> None:
+    """Force one route sign per environment for deterministic playback."""
+    valid = (signs == -1) | (signs == 0) | (signs == 1)
+    if signs.shape != (self.num_envs,) or not bool(valid.all()):
+      raise ValueError(
+        "route signs must have shape (num_envs,) with values in {-1, 0, +1}"
+      )
+    self._route_sign.copy_(signs.to(device=self.device, dtype=self._route_sign.dtype))
+
+  def sample_route_signs(self, env_ids: torch.Tensor) -> None:
+    """Sample R-/R0/R+ only for environments entering a new episode."""
+    sampled = (
+      torch.randint(0, 3, (len(env_ids),), device=self.device, dtype=torch.int8)
+      - 1
+    )
+    self._route_sign[env_ids] = sampled
+
+  def route_signs(self) -> torch.Tensor:
+    """Return a defensive copy of the reset-stable route assignments."""
+    return self._route_sign.clone()
+
   # -- waypoints --------------------------------------------------------------
 
   def waypoint(self, phi: torch.Tensor) -> torch.Tensor:
     """Reference head position at phase phi. Shape (num_envs, 3)."""
     t = phi.clamp(0.0, 1.0).unsqueeze(-1)
-    return self._head0 * (1.0 - t) + self._target * t
+    direct = self._head0 * (1.0 - t) + self._target * t
+    if self.horizontal_detour_m == 0.0:
+      return direct
+    phase = t.squeeze(-1)
+    active = (phase > 0.0) & (phase < 0.5)
+    amplitude = torch.where(
+      active,
+      self.horizontal_detour_m * torch.sin(2.0 * math.pi * phase).square(),
+      torch.zeros_like(phase),
+    )
+    routed = direct.clone()
+    routed[:, 0] += self._route_sign.to(dtype=routed.dtype) * amplitude
+    return routed
 
   # -- scripted playback --------------------------------------------------------
 
@@ -197,7 +235,9 @@ class SingleStrikeReference:
     frac = (k_t.unsqueeze(-1) * self.descent_speed / length).clamp(0.0, 1.0)
     # Lerp form (not head0 + frac*axis) so the clamped endpoint equals the
     # target bit-exactly (fuzz finding: the additive form was 1 ulp off).
-    return self._head0 * (1.0 - frac) + self._target * frac
+    if self.horizontal_detour_m == 0.0:
+      return self._head0 * (1.0 - frac) + self._target * frac
+    return self.waypoint(frac.squeeze(-1))
 
 
 def get_strike_reference(env: "ManagerBasedRlEnv", **kwargs) -> SingleStrikeReference:
@@ -222,3 +262,14 @@ def get_strike_reference(env: "ManagerBasedRlEnv", **kwargs) -> SingleStrikeRefe
           "directly if you need different parameters."
         )
   return ref
+
+
+def sample_strike_route_signs(
+  env: "ManagerBasedRlEnv",
+  env_ids: torch.Tensor,
+  horizontal_detour_m: float,
+) -> None:
+  """Reset event that samples one cached horizontal route per requested env."""
+  ref = get_strike_reference(env, horizontal_detour_m=horizontal_detour_m)
+  ref.reset(env_ids)
+  ref.sample_route_signs(env_ids)

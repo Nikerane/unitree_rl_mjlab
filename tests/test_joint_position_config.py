@@ -31,6 +31,7 @@ from src.tasks.hammer.config.z1.joint_position_contract import (
 )
 from src.tasks.hammer.mdp.trackability import joint_trackability_cost
 from src.tasks.hammer.mdp.rewards import ImitationPriorTerm, action_rate_penalty
+from src.tasks.hammer.mdp.references import sample_strike_route_signs
 from src.tasks.hammer.mdp.variable_impedance import (
     JointStiffnessActionCfg,
     expand_variable_impedance_model_fields,
@@ -52,8 +53,18 @@ VIC_TT_TASK = (
     "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-"
     "JointPosition-VariableImpedance-TT"
 )
+HORIZONTAL_ANNEALED_TASK = f"{VIC_TT_TASK}-HorizontalRoutes-Annealed"
+HORIZONTAL_PERSISTENT_TASK = f"{VIC_TT_TASK}-HorizontalRoutes-Persistent"
 JOINT_POLICY_TASKS = frozenset(
-    (FIC0_TASK, FICTT_TASK, DIRECT_FIC0_TASK, DIRECT_FICTT_TASK, VIC_TT_TASK)
+    (
+        FIC0_TASK,
+        FICTT_TASK,
+        DIRECT_FIC0_TASK,
+        DIRECT_FICTT_TASK,
+        VIC_TT_TASK,
+        HORIZONTAL_ANNEALED_TASK,
+        HORIZONTAL_PERSISTENT_TASK,
+    )
 )
 FIC_CONTROLLED_DROP_I_REF_N_S = 0.2799950838088989
 ARTIFACT = (
@@ -288,6 +299,106 @@ def test_victt_is_the_exact_approved_delta_from_direct_fictt(play: bool) -> None
         reconstructed.observations[group_name].terms["actions"].params.clear()
     reconstructed.rewards["action_rate"].params.clear()
     assert _canonicalize(reconstructed) == fictt_tree
+
+
+@pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
+def test_horizontal_route_victt_pair_has_one_shared_frozen_treatment(play: bool) -> None:
+    """Route/cap/plant drift or a policy-visible coordinate would confound the pair."""
+    assert {HORIZONTAL_ANNEALED_TASK, HORIZONTAL_PERSISTENT_TASK}.issubset(
+        set(list_tasks())
+    )
+    annealed = load_env_cfg(HORIZONTAL_ANNEALED_TASK, play=play)
+    persistent = load_env_cfg(HORIZONTAL_PERSISTENT_TASK, play=play)
+    historical = _load_victt(play=play)
+
+    assert tuple(annealed.actions) == tuple(persistent.actions) == (
+        "joint_position",
+        "joint_stiffness",
+    )
+    assert tuple(annealed.observations["actor"].terms) == tuple(
+        historical.observations["actor"].terms
+    )
+    assert tuple(annealed.observations["critic"].terms) == tuple(
+        historical.observations["critic"].terms
+    )
+    assert tuple(annealed.events)[0] == "sample_strike_route_signs"
+    route_event = annealed.events["sample_strike_route_signs"]
+    assert route_event.func is sample_strike_route_signs
+    assert route_event.mode == "reset"
+    assert route_event.params == {"horizontal_detour_m": 0.020}
+    for cfg in (annealed, persistent):
+        for group_name in ("actor", "critic"):
+            for term_name in ("strike_phase", "strike_ref_error"):
+                assert (
+                    cfg.observations[group_name]
+                    .terms[term_name]
+                    .params["horizontal_detour_m"]
+                    == pytest.approx(0.020)
+                )
+        assert cfg.rewards["r_imit"].params["horizontal_detour_m"] == pytest.approx(
+            0.020
+        )
+        cat = cfg.metrics["cat_soft"].params
+        assert tuple(cat["imp_limit"]) == (
+            0.369,
+            0.246,
+            0.738,
+            0.369,
+            0.246,
+            0.0164,
+        )
+        assert cat["imp_max_p"] == pytest.approx(0.2)
+        task_id = (
+            HORIZONTAL_PERSISTENT_TASK
+            if cfg is persistent
+            else HORIZONTAL_ANNEALED_TASK
+        )
+        assert _canonicalize(load_rl_cfg(task_id)) == _canonicalize(
+            load_rl_cfg(VIC_TT_TASK)
+        )
+
+    assert annealed.rewards["r_imit"].weight == pytest.approx(0.1)
+    assert persistent.rewards["r_imit"].weight == pytest.approx(0.2)
+    assert annealed.rewards["r_imit"].params["sigma"] == pytest.approx(0.05)
+    assert persistent.rewards["r_imit"].params["sigma"] == pytest.approx(0.05)
+    if play:
+        assert not annealed.curriculum
+        assert not persistent.curriculum
+    else:
+        assert annealed.curriculum["r_imit_anneal"].params["stages"] == [
+            {"step": 0, "weight": 0.10},
+            {"step": 1200, "weight": 0.08},
+            {"step": 2400, "weight": 0.06},
+            {"step": 3600, "weight": 0.04},
+            {"step": 4800, "weight": 0.02},
+            {"step": 6000, "weight": 0.00},
+        ]
+        assert not persistent.curriculum
+
+    normalized = copy.deepcopy(annealed)
+    normalized.rewards["r_imit"].weight = 0.2
+    normalized.curriculum = persistent.curriculum
+    assert _canonicalize(normalized) == _canonicalize(persistent)
+
+
+def test_horizontal_routes_do_not_retrofit_the_historical_victt_registration() -> None:
+    historical = _load_victt()
+    assert "sample_strike_route_signs" not in historical.events
+    for group_name in ("actor", "critic"):
+        for term_name in ("strike_phase", "strike_ref_error"):
+            assert "horizontal_detour_m" not in historical.observations[group_name].terms[
+                term_name
+            ].params
+    assert "horizontal_detour_m" not in historical.rewards["r_imit"].params
+    assert historical.metrics["cat_soft"].params["imp_max_p"] == 0.0
+    assert tuple(historical.metrics["cat_soft"].params["imp_limit"]) == (
+        1.64,
+        3.28,
+        1.64,
+        1.64,
+        1.64,
+        1.64,
+    )
 
 
 @pytest.mark.integration

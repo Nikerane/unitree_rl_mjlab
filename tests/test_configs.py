@@ -657,6 +657,8 @@ class TestCartesianGuidelineStudy:
             self._DIRECT_FIC0,
             self._DIRECT_FICTT,
             self._VIC_TT,
+            self._VIC_TT + "-HorizontalRoutes-Annealed",
+            self._VIC_TT + "-HorizontalRoutes-Persistent",
         }
 
     @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))

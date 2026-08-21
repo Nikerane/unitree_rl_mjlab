@@ -76,6 +76,7 @@ def strike_phase(
   env: ManagerBasedRlEnv,
   robot_cfg: SceneEntityCfg,
   nail_cfg: SceneEntityCfg,
+  horizontal_detour_m: float = 0.0,
 ) -> torch.Tensor:
   """Phase of the direct scripted single-strike reference. Shape: (B, 1).
 
@@ -86,7 +87,7 @@ def strike_phase(
   nail_entity: Entity = env.scene[nail_cfg.name]
   head_w = robot.data.site_pos_w[:, robot_cfg.site_ids].squeeze(1)
   nail_top_w = nail_entity.data.site_pos_w[:, nail_cfg.site_ids].squeeze(1)
-  ref = get_strike_reference(env)
+  ref = get_strike_reference(env, horizontal_detour_m=horizontal_detour_m)
   phi = ref.update(head_w, nail_top_w, env.episode_length_buf)
   return phi.unsqueeze(-1)
 
@@ -95,6 +96,7 @@ def strike_ref_error(
   env: ManagerBasedRlEnv,
   robot_cfg: SceneEntityCfg,
   nail_cfg: SceneEntityCfg,
+  horizontal_detour_m: float = 0.0,
 ) -> torch.Tensor:
   """Vector from the hammer head to the current direct-strike waypoint.
 
@@ -104,7 +106,7 @@ def strike_ref_error(
   nail_entity: Entity = env.scene[nail_cfg.name]
   head_w = robot.data.site_pos_w[:, robot_cfg.site_ids].squeeze(1)
   nail_top_w = nail_entity.data.site_pos_w[:, nail_cfg.site_ids].squeeze(1)
-  ref = get_strike_reference(env)
+  ref = get_strike_reference(env, horizontal_detour_m=horizontal_detour_m)
   phi = ref.update(head_w, nail_top_w, env.episode_length_buf)
   return ref.waypoint(phi) - head_w
 

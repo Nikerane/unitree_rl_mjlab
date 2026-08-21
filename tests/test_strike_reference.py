@@ -11,7 +11,11 @@ from types import SimpleNamespace
 
 import torch
 
-from src.tasks.hammer.mdp.references import SingleStrikeReference, get_strike_reference
+from src.tasks.hammer.mdp import references as reference_mdp
+from src.tasks.hammer.mdp.references import (
+    SingleStrikeReference,
+    get_strike_reference,
+)
 
 
 B = 3
@@ -165,6 +169,46 @@ def test_playback_advances_along_the_direct_segment_at_descent_speed():
     assert torch.equal(ref.playback_target(99), _target())
 
 
+def test_horizontal_routes_use_the_frozen_world_x_detour_only():
+    ref = _ref(horizontal_detour_m=0.020)
+    ref.update(HEAD0, NAIL, _steps(0))
+    ref.set_route_signs(torch.tensor([-1, 0, 1]))
+
+    phi = torch.tensor([0.25, 0.25, 0.25])
+    waypoint = ref.waypoint(phi)
+    direct = torch.tensor([[0.50, 0.00, 0.163]]).repeat(B, 1)
+    expected = direct + torch.tensor(
+        [[-0.020, 0.0, 0.0], [0.0, 0.0, 0.0], [0.020, 0.0, 0.0]]
+    )
+    assert torch.allclose(waypoint, expected, atol=1e-7, rtol=0.0)
+
+    for phase in (0.0, 0.125, 0.5, 0.75, 1.0):
+        routed = ref.waypoint(torch.full((B,), phase))
+        straight = (HEAD0 * (1.0 - phase)) + (_target() * phase)
+        assert torch.equal(routed[:, 1:], straight[:, 1:])
+    assert torch.equal(ref.waypoint(torch.zeros(B)), HEAD0)
+    assert torch.equal(ref.waypoint(torch.ones(B)), _target())
+    assert torch.equal(ref.waypoint(torch.full((B,), 0.5))[:, 0], HEAD0[:, 0])
+    assert torch.equal(
+        ref.waypoint(torch.full((B,), 0.75)),
+        (HEAD0 * 0.25) + (_target() * 0.75),
+    )
+
+
+def test_zero_horizontal_amplitude_is_bit_identical_to_direct_reference():
+    direct = _ref()
+    routed = _ref(horizontal_detour_m=0.0)
+    direct.update(HEAD0, NAIL, _steps(0))
+    routed.update(HEAD0, NAIL, _steps(0))
+    routed.set_route_signs(torch.tensor([-1, 0, 1]))
+
+    for phase in (0.0, 0.125, 0.25, 0.5, 0.75, 1.0):
+        phi = torch.full((B,), phase)
+        assert torch.equal(routed.waypoint(phi), direct.waypoint(phi))
+    for step in range(direct.playback_length() + 3):
+        assert torch.equal(routed.playback_target(step), direct.playback_target(step))
+
+
 _ROBOT_CFG = SimpleNamespace(name="robot", site_ids=[0])
 _NAIL_CFG = SimpleNamespace(name="nail_block", site_ids=[0])
 
@@ -193,3 +237,29 @@ def test_observations_anchor_and_stay_stationary_without_spatial_progress():
 def test_get_strike_reference_is_cached_per_env():
     env = _stub_env()
     assert get_strike_reference(env) is get_strike_reference(env)
+
+
+def test_reset_event_samples_only_requested_envs_and_signs_stay_episode_stable():
+    env = _stub_env()
+    ref = get_strike_reference(env, horizontal_detour_m=0.020)
+    ref.set_route_signs(torch.tensor([1, 1, 1]))
+
+    torch.manual_seed(20260821)
+    reference_mdp.sample_strike_route_signs(
+        env, torch.tensor([0, 2]), horizontal_detour_m=0.020
+    )
+    sampled = ref.route_signs()
+    assert get_strike_reference(env, horizontal_detour_m=0.020) is ref
+    assert torch.equal(sampled, torch.tensor([-1, 1, -1], dtype=torch.int8))
+
+    ref.update(HEAD0, NAIL, _steps(0))
+    ref.update(HEAD0, NAIL, _steps(9))
+    ref.waypoint(torch.full((B,), 0.25))
+    assert torch.equal(ref.route_signs(), sampled)
+
+    reference_mdp.sample_strike_route_signs(
+        env, torch.tensor([1]), horizontal_detour_m=0.020
+    )
+    resampled = ref.route_signs()
+    assert torch.equal(resampled[[0, 2]], sampled[[0, 2]])
+    assert torch.equal(resampled, torch.tensor([-1, 0, -1], dtype=torch.int8))

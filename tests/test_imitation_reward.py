@@ -218,3 +218,34 @@ def test_per_env_latch_independence():
     r = term(env, **_PARAMS)
     assert float(r[0]) == 0.0   # env 0 latched off
     assert float(r[1]) > 0.0    # env 1 still tracking
+
+
+def test_horizontal_observation_and_imitation_share_one_cached_route_reference():
+    from src.tasks.hammer.mdp.observations import strike_phase, strike_ref_error
+
+    env, robot, nail, sensor = _make_env()
+    term = ImitationPriorTerm(cfg=None, env=env)
+    _set(robot, nail, head=(0.0, 0.0, 0.20))
+    ref = get_strike_reference(env, horizontal_detour_m=0.020)
+    ref.set_route_signs(torch.tensor([1]))
+
+    strike_phase(
+        env,
+        robot_cfg=_ROBOT_CFG,
+        nail_cfg=_NAIL_CFG,
+        horizontal_detour_m=0.020,
+    )
+    routed = ref.waypoint(torch.tensor([0.25]))
+    robot.data.site_pos_w[:, 0, :] = routed
+    env.episode_length_buf[:] = 1
+
+    error = strike_ref_error(
+        env,
+        robot_cfg=_ROBOT_CFG,
+        nail_cfg=_NAIL_CFG,
+        horizontal_detour_m=0.020,
+    )
+    reward = term(env, **_PARAMS, horizontal_detour_m=0.020)
+    assert torch.allclose(error, torch.zeros(1, 3), atol=1e-7, rtol=0.0)
+    assert float(reward) == pytest.approx(1.0, abs=1e-6)
+    assert get_strike_reference(env, horizontal_detour_m=0.020) is ref

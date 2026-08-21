@@ -249,6 +249,20 @@ def test_reference_provenance_tracks_actual_constructor_defaults(
     assert lambda_feasibility._reference_controller_digest() != original_digest
 
 
+def test_direct_reference_provenance_rejects_nonzero_horizontal_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.tasks.hammer.mdp.references import SingleStrikeReference
+
+    keyword_defaults = dict(SingleStrikeReference.__init__.__kwdefaults__ or {})
+    keyword_defaults["horizontal_detour_m"] = 0.020
+    monkeypatch.setattr(
+        SingleStrikeReference.__init__, "__kwdefaults__", keyword_defaults
+    )
+    with pytest.raises(RuntimeError, match="horizontal_detour_m.*0.0"):
+        lambda_feasibility._reference_controller_spec()
+
+
 def test_playback_verdict_explicitly_defers_full_rate_certification(
     playback_script: ModuleType,
 ) -> None:
@@ -261,6 +275,71 @@ def test_playback_verdict_explicitly_defers_full_rate_certification(
     main_source = inspect.getsource(playback_script.main)
     assert "CONTROL_RATE_FEASIBILITY_SCOPE" in main_source
     assert "legal finite state" not in main_source
+
+
+def test_horizontal_playback_requires_three_productive_routes_and_shared_geometry(
+    playback_script: ModuleType,
+) -> None:
+    from src.tasks.hammer.mdp.references import SingleStrikeReference
+
+    head = torch.tensor([[0.50, 0.00, 0.20]])
+    nail = torch.tensor([[0.50, 0.00, 0.102]])
+    ref = SingleStrikeReference(
+        1,
+        "cpu",
+        overshoot=0.05,
+        descent_speed=0.03,
+        horizontal_detour_m=0.020,
+    )
+    ref.update(head, nail, torch.zeros(1, dtype=torch.long))
+    tapes = {
+        sign: playback_script.route_target_tape(ref, sign)
+        for sign in (-1, 0, 1)
+    }
+    results = {
+        sign: {"drove_nail": True, "sampled_feasible": True}
+        for sign in (-1, 0, 1)
+    }
+
+    assert playback_script.horizontal_route_geometry_matches(tapes)
+    assert playback_script.horizontal_route_qualification_passes(results, tapes)
+    assert torch.equal(tapes[-1][:, :, 2], tapes[0][:, :, 2])
+    assert torch.equal(tapes[0][:, :, 2], tapes[1][:, :, 2])
+    assert torch.equal(tapes[-1][0], tapes[0][0])
+    assert torch.equal(tapes[0][0], tapes[1][0])
+    assert torch.equal(tapes[-1][-1], tapes[0][-1])
+    assert torch.equal(tapes[0][-1], tapes[1][-1])
+
+    failed_results = dict(results)
+    failed_results[1] = {"drove_nail": False, "sampled_feasible": False}
+    assert not playback_script.horizontal_route_qualification_passes(
+        failed_results, tapes
+    )
+    assert not playback_script.horizontal_route_qualification_passes(
+        {sign: results[sign] for sign in (-1, 0)}, tapes
+    )
+    drifted_tapes = {sign: tape.clone() for sign, tape in tapes.items()}
+    drifted_tapes[1][1, 0, 2] += 0.001
+    assert not playback_script.horizontal_route_geometry_matches(drifted_tapes)
+
+
+def test_horizontal_playback_orchestrator_runs_each_route_exactly_once(
+    playback_script: ModuleType,
+) -> None:
+    calls: list[int] = []
+    tape = torch.tensor(
+        [[[0.50, 0.00, 0.20]], [[0.50, 0.00, 0.05]]], dtype=torch.float32
+    )
+
+    def run_route(sign: int):
+        calls.append(sign)
+        return {"drove_nail": True, "sampled_feasible": True}, tape.clone()
+
+    passed, results, tapes = playback_script.qualify_horizontal_routes(run_route)
+    assert passed
+    assert calls == [-1, 0, 1]
+    assert tuple(results) == (-1, 0, 1)
+    assert tuple(tapes) == (-1, 0, 1)
 
 
 def test_measured_contact_duration_cannot_rederive_the_frozen_cap(
@@ -286,7 +365,12 @@ def test_measured_contact_duration_cannot_rederive_the_frozen_cap(
 
 
 def test_active_scientific_scripts_have_no_retired_reference_or_probe_controls() -> None:
-    allowed_reference_keywords = {"overshoot", "descent_speed", "axis_tol"}
+    allowed_reference_keywords = {
+        "overshoot",
+        "descent_speed",
+        "axis_tol",
+        "horizontal_detour_m",
+    }
     forbidden_assignments = {
         "APPROACH_HEIGHTS",
         "HEIGHTS",
