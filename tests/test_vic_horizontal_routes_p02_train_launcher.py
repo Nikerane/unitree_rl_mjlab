@@ -83,6 +83,7 @@ def _env(tmp_path: Path, task_id: int) -> dict[str, str]:
     "  fail) exit 9 ;;\n"
     "  empty) exit 0 ;;\n"
     "  invalid) printf 'not-a-digest  %s\\n' \"$1\"; exit 0 ;;\n"
+    "  uppercase) printf 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  %s\\n' \"$1\"; exit 0 ;;\n"
     f"  *) exec \"{real_sha256sum}\" \"$@\" ;;\n"
     "esac\n"
   )
@@ -558,13 +559,25 @@ def test_horizontal_route_launcher_rejects_postflight_provenance_drift(
   assert "Z1_VIC_HORIZONTAL_ROUTES_P02_TRAIN_PASS" not in result.stdout
 
 
-@pytest.mark.parametrize("mode", ("fail", "empty", "invalid"))
+@pytest.mark.parametrize("mode", ("fail", "empty", "invalid", "uppercase"))
 def test_horizontal_route_launcher_rejects_failed_or_malformed_checkpoint_hash(
   tmp_path: Path, mode: str
 ) -> None:
   """Breaks if a failed, absent, or non-lowercase digest can be emitted as provenance."""
   env = _env(tmp_path / mode, 0)
   env["BAD_SHA256_MODE"] = mode
+  if mode == "uppercase":
+    probe = subprocess.run(
+      [
+        str(Path(env["HOME"]) / "bin/sha256sum"),
+        str(Path(env["RUN_ROOT"]) / "marker"),
+      ],
+      env=env,
+      capture_output=True,
+      text=True,
+      check=True,
+    )
+    assert re.fullmatch(r"[0-9A-F]{64}  .+\n", probe.stdout)
 
   result = _run(env)
 

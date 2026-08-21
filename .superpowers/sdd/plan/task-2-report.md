@@ -130,3 +130,61 @@ production file changed.
   monitoring evidence.
 - The Slurm output/error parent must be created before submission because Slurm
   opens those files before the job script can run.
+
+## Fix round 1 — exact uppercase SHA-256 fixture
+
+The review finding was test-only: the hash failure test claimed to cover a
+non-lowercase digest, but its fake `sha256sum` had no uppercase mode. An unknown
+mode therefore fell through to the real valid lowercase hasher and did not exercise
+the launcher's lowercase-only guard.
+
+### RED evidence
+
+First, only `uppercase` was added to the parameterized failure modes; the fake
+hasher was deliberately left unchanged.
+
+```text
+PYTEST_ADDOPTS='-p no:cacheprovider' \
+  /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -m pytest -q \
+  tests/test_vic_horizontal_routes_p02_train_launcher.py -k uppercase
+```
+
+Result: **1 failed, 55 deselected** in 3.03 seconds. The unknown mode fell through
+to the real lowercase digest, the launcher exited `0`, and the assertion expecting
+exit `2` failed. This directly witnessed the pre-fix coverage hole.
+
+The test was then tightened to prove its boundary input is exactly 64 uppercase
+hexadecimal characters. Before the fake mode existed, the same command again
+failed **1 failed, 55 deselected** in 0.46 seconds because the real lowercase digest
+did not match the independent `[0-9A-F]{64}` fixture assertion.
+
+### GREEN evidence
+
+The fake now returns exactly 64 `A` characters followed by the standard filename
+field. The selected uppercase case passed **1/1** with 55 deselected in 3.18 seconds:
+the fixture-shape assertion passed, the real launcher exited `2`, reported
+`checkpoint SHA-256 validation failed`, and emitted no PASS line.
+
+Focused hash matrix:
+
+```text
+PYTEST_ADDOPTS='-p no:cacheprovider' \
+  /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -m pytest -q \
+  tests/test_vic_horizontal_routes_p02_train_launcher.py::test_horizontal_route_launcher_rejects_failed_or_malformed_checkpoint_hash
+```
+
+Result: **4 passed, 0 failed** in 9.34 seconds.
+
+Full new-launcher suite:
+
+```text
+PYTEST_ADDOPTS='-p no:cacheprovider' \
+  /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -m pytest -q \
+  tests/test_vic_horizontal_routes_p02_train_launcher.py
+```
+
+Result: **56 passed, 0 failed** in 87.29 seconds.
+
+The production launcher was not changed. Its guard remains exactly
+`^[0-9a-f]{64}$`, so uppercase hexadecimal output remains fail-closed. No Vega,
+push, submission, training, evaluator, or model action occurred.
