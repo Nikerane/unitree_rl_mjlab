@@ -175,6 +175,29 @@ def _install_evaluator_rng_streams(
   return reset_stream, observation_stream
 
 
+def _install_forced_route_sign(env: Any, *, ref: Any, route_sign: int) -> None:
+  """Preserve the reset sampler's RNG consumption, then overwrite its route label."""
+  if type(route_sign) is not int or route_sign not in (-1, 0, 1):
+    raise ValueError("forced route sign must be one of -1, 0, +1")
+  original_reset_idx = env._reset_idx
+
+  def reset_idx(env_ids=None):
+    result = original_reset_idx(env_ids)
+    import torch
+
+    ids = (
+      torch.arange(env.num_envs, device=env.device, dtype=torch.long)
+      if env_ids is None
+      else env_ids
+    )
+    signs = ref.route_signs()
+    signs[ids] = route_sign
+    ref.set_route_signs(signs)
+    return result
+
+  env._reset_idx = reset_idx
+
+
 def validate_checkpoint_role(checkpoint: Path, role: str) -> str:
   if role not in EVALUATION_CHECKPOINTS:
     raise ValueError("post-training evaluation requires a known checkpoint role")
@@ -435,7 +458,14 @@ class _LiveSurveyRecorder:
     "vic_kd",
   )
 
-  def __init__(self, env: Any):
+  _ROUTE_SCALAR_FIELDS = ("route_sign", "strike_phase", "imitation_eligible")
+  _ROUTE_VECTOR_FIELDS = (
+    "hammer_head_pos_w",
+    "assigned_reference_waypoint_w",
+    "straight_reference_waypoint_w",
+  )
+
+  def __init__(self, env: Any, *, route_telemetry: bool = False):
     import torch
 
     from mjlab.envs.mdp.actions.actions import JointPositionAction
@@ -530,6 +560,36 @@ class _LiveSurveyRecorder:
     self._control["policy_action"] = []
     self._control["done"] = []
     self._control["episode_id"] = []
+    self._route_reference = None
+    self._route_imitation_term = None
+    self._route_robot = None
+    self._route_head_site_ids = None
+    if route_telemetry:
+      from src.tasks.hammer.mdp.references import get_strike_reference
+      from src.tasks.hammer.mdp.rewards import ImitationPriorTerm
+
+      imitation_cfg = env.reward_manager.get_term_cfg("r_imit")
+      imitation_term = imitation_cfg.func
+      if type(imitation_term) is not ImitationPriorTerm:
+        raise RuntimeError("route survey requires the exact live ImitationPriorTerm")
+      detour = imitation_cfg.params.get("horizontal_detour_m")
+      if detour != 0.020:
+        raise RuntimeError("route survey requires the frozen 0.020 m detour")
+      robot_cfg = imitation_cfg.params.get("robot_cfg")
+      site_ids = None if robot_cfg is None else robot_cfg.site_ids
+      if site_ids is None or len(site_ids) != 1:
+        raise RuntimeError("route survey requires one resolved hammer-head site")
+      if imitation_term._contacted.shape != (env.num_envs,):
+        raise RuntimeError("route survey imitation gate shape drift")
+      self._route_reference = get_strike_reference(
+        env, horizontal_detour_m=float(detour)
+      )
+      self._route_imitation_term = imitation_term
+      self._route_robot = env.scene[robot_cfg.name]
+      self._route_head_site_ids = site_ids
+      self._control.update(
+        {name: [] for name in (*self._ROUTE_SCALAR_FIELDS, *self._ROUTE_VECTOR_FIELDS)}
+      )
     self._substep_contact: list[Any] = []
     self._substep_rolling: list[Any] = []
     self._substep_episode_id: list[Any] = []
@@ -597,6 +657,29 @@ class _LiveSurveyRecorder:
         )
       for name, value in task_values.items():
         self._control[name].append(value.detach().clone())
+      if self._route_reference is not None:
+        head = self._route_robot.data.site_pos_w[
+          :, self._route_head_site_ids
+        ].squeeze(1)
+        phase = self._route_reference.preview(head, env.episode_length_buf)
+        signs = self._route_reference.route_signs()
+        assigned = self._route_reference.waypoint(phase)
+        amplitude = 0.020 * torch.sin(2.0 * torch.pi * phase).square()
+        amplitude = torch.where(
+          (phase > 0.0) & (phase < 0.5), amplitude, torch.zeros_like(amplitude)
+        )
+        straight = assigned.clone()
+        straight[:, 0] -= signs.to(dtype=straight.dtype) * amplitude
+        route_values = {
+          "route_sign": signs,
+          "strike_phase": phase,
+          "imitation_eligible": ~self._route_imitation_term._contacted,
+          "hammer_head_pos_w": head,
+          "assigned_reference_waypoint_w": assigned,
+          "straight_reference_waypoint_w": straight,
+        }
+        for name, value in route_values.items():
+          self._control[name].append(value.detach().clone())
       self._control["policy_action"].append(policy_action.detach().clone())
       self._control["done"].append(done)
       self._control["episode_id"].append(self._episode_id.detach().clone())
@@ -657,6 +740,22 @@ class _LiveSurveyRecorder:
       )
     if trace["active_limit_per_joint"].shape != (len(JOINT_NAMES),):
       raise RuntimeError("live active impulse threshold does not have shape (6,)")
+    if self._route_reference is not None:
+      for name in self._ROUTE_SCALAR_FIELDS:
+        if trace[name].shape != scalar_shape:
+          raise RuntimeError(
+            f"live route field {name} has shape {trace[name].shape}, expected {scalar_shape}"
+          )
+      for name in self._ROUTE_VECTOR_FIELDS:
+        if trace[name].shape != (*scalar_shape, 3):
+          raise RuntimeError(
+            f"live route field {name} has shape {trace[name].shape}, "
+            f"expected {(*scalar_shape, 3)}"
+          )
+      if trace["imitation_eligible"].dtype != np.bool_:
+        raise RuntimeError("live route imitation eligibility must be boolean")
+      if not np.isin(trace["route_sign"], (-1, 0, 1)).all():
+        raise RuntimeError("live route sign left {-1, 0, +1}")
     expected_limit = np.asarray(
       PROVISIONAL_CAPS_N_M_S, dtype=trace["active_limit_per_joint"].dtype
     )
@@ -697,6 +796,12 @@ class _LiveSurveyRecorder:
         raise RuntimeError(f"live survey field {name} contains a non-finite value")
     return trace
 
+  @property
+  def route_reference(self):
+    if self._route_reference is None:
+      raise RuntimeError("route telemetry is not enabled")
+    return self._route_reference
+
 
 def _sha256(path: Path) -> str:
   digest = hashlib.sha256()
@@ -720,7 +825,11 @@ def _initial_population_sha256(env: Any) -> str:
 
 
 def _prepare_survey_measurement_config(
-  env_cfg: Any, provisional_caps: tuple[float, ...]
+  env_cfg: Any,
+  provisional_caps: tuple[float, ...],
+  *,
+  source_imp_max_p: float = 0.0,
+  source_imp_limit_n_m_s: tuple[float, ...] | None = None,
 ) -> dict[str, object]:
   """Fail closed on every live setting assumed by the offline impulse-CaT replay."""
   from src.tasks.hammer.mdp.impulse_bound import SubstepImpulseAccumulator
@@ -729,7 +838,7 @@ def _prepare_survey_measurement_config(
   expected_cat = {
     "use_vel": True,
     "use_impulse": True,
-    "imp_max_p": 0.0,
+    "imp_max_p": source_imp_max_p,
     "imp_seed": IMPULSE_SEED,
     "tau": CAT_TAU,
     "min_p": CAT_MIN_P,
@@ -744,6 +853,12 @@ def _prepare_survey_measurement_config(
       )
   if tuple(provisional_caps) != PROVISIONAL_CAPS_N_M_S:
     raise RuntimeError("survey provisional threshold snapshot drifted from project configuration")
+  if source_imp_limit_n_m_s is not None:
+    configured_limit = params.get("imp_limit")
+    if not isinstance(configured_limit, (list, tuple)) or tuple(configured_limit) != tuple(
+      source_imp_limit_n_m_s
+    ):
+      raise RuntimeError("frozen survey source impulse-limit identity drifted")
   impulse_term = env_cfg.metrics["substep_impulse"]
   if impulse_term.func is not SubstepImpulseAccumulator:
     raise RuntimeError("survey substep_impulse.func is not SubstepImpulseAccumulator")
@@ -778,8 +893,9 @@ def _prepare_survey_measurement_config(
 
   # Measurement-only override: with imp_max_p=0 this changes margins/utilization but cannot change
   # physics, actions, rewards, PPO data, or aggregate delta.
+  params["imp_max_p"] = 0.0
   params["imp_limit"] = list(provisional_caps)
-  return {
+  protocol = {
     "cat_replay": {
       "tau": CAT_TAU,
       "min_p": CAT_MIN_P,
@@ -796,6 +912,22 @@ def _prepare_survey_measurement_config(
     "impulse_window_substeps": IMPULSE_WINDOW_SUBSTEPS,
     "contact_row_diagnostic_enabled": False,
   }
+  if source_imp_max_p != 0.0 or (
+    source_imp_limit_n_m_s is not None
+    and tuple(source_imp_limit_n_m_s) != tuple(provisional_caps)
+  ):
+    protocol["training_config"] = {
+      "imp_max_p": float(source_imp_max_p),
+      "imp_limit_n_m_s": [
+        float(value)
+        for value in (
+          provisional_caps
+          if source_imp_limit_n_m_s is None
+          else source_imp_limit_n_m_s
+        )
+      ],
+    }
+  return protocol
 
 
 def _run_population(
@@ -807,6 +939,10 @@ def _run_population(
   rng_seeds: EvaluationRngSeeds,
   steps: int | None,
   stochastic: bool,
+  task_id: str = VIC_TASK,
+  source_imp_max_p: float = 0.0,
+  source_imp_limit_n_m_s: tuple[float, ...] = PROVISIONAL_CAPS_N_M_S,
+  forced_route_sign: int | None = None,
 ) -> tuple[dict[str, np.ndarray], dict[str, object]]:
   """Run a frozen policy without calling storage collection, an optimizer, or a learner update."""
   if rng_seeds != EvaluationRngSeeds.from_evaluation_seed(seed):
@@ -823,25 +959,39 @@ def _run_population(
   import src.tasks  # noqa: F401
   from src.tasks.hammer.config.z1.env_cfgs import PROVISIONAL_IMP_J_LIMIT
 
-  env_cfg = load_env_cfg(VIC_TASK, play=False)
-  agent_cfg = load_rl_cfg(VIC_TASK)
+  env_cfg = load_env_cfg(task_id, play=False)
+  agent_cfg = load_rl_cfg(task_id)
   env_cfg.scene.num_envs = num_envs
   env_cfg.seed = seed
   env_cfg.auto_reset = steps is not None
   if tuple(PROVISIONAL_IMP_J_LIMIT) != PROVISIONAL_CAPS_N_M_S:
     raise RuntimeError("survey provisional threshold snapshot drifted from project configuration")
-  measurement_protocol = _prepare_survey_measurement_config(
-    env_cfg, tuple(PROVISIONAL_IMP_J_LIMIT)
-  )
+  if source_imp_max_p == 0.0 and tuple(source_imp_limit_n_m_s) == tuple(
+    PROVISIONAL_CAPS_N_M_S
+  ):
+    measurement_protocol = _prepare_survey_measurement_config(
+      env_cfg, tuple(PROVISIONAL_IMP_J_LIMIT)
+    )
+  else:
+    measurement_protocol = _prepare_survey_measurement_config(
+      env_cfg,
+      tuple(PROVISIONAL_IMP_J_LIMIT),
+      source_imp_max_p=source_imp_max_p,
+      source_imp_limit_n_m_s=source_imp_limit_n_m_s,
+    )
   if agent_cfg.num_steps_per_env != TRAINING_LIKE_STEPS:
     raise RuntimeError("registered PPO rollout length is no longer 24 control steps")
 
   torch.manual_seed(seed)
   env = ManagerBasedRlEnv(cfg=env_cfg, device=device, render_mode=None)
-  recorder = _LiveSurveyRecorder(env)
+  recorder = (
+    _LiveSurveyRecorder(env)
+    if forced_route_sign is None
+    else _LiveSurveyRecorder(env, route_telemetry=True)
+  )
   wrapped = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
   try:
-    runner_cls = load_runner_cls(VIC_TASK) or MjlabOnPolicyRunner
+    runner_cls = load_runner_cls(task_id) or MjlabOnPolicyRunner
     runner = runner_cls(wrapped, asdict(agent_cfg), device=device)
     runner.load(str(checkpoint), load_cfg={"actor": True}, strict=True, map_location=device)
     policy = runner.get_inference_policy(device=device)
@@ -851,6 +1001,10 @@ def _run_population(
         env,
         reset_seed=rng_seeds.reset,
         observation_seed=rng_seeds.observation,
+      )
+    if forced_route_sign is not None:
+      _install_forced_route_sign(
+        env, ref=recorder.route_reference, route_sign=forced_route_sign
       )
     observations, _ = wrapped.reset()
     population_hash = _initial_population_sha256(env)
@@ -908,6 +1062,14 @@ def _run_population(
       "rng_streams": asdict(rng_seeds),
       **measurement_protocol,
     }
+    if forced_route_sign is not None:
+      metadata.update(
+        {
+          "task": task_id,
+          "forced_route_sign": forced_route_sign,
+          "actor_only_checkpoint_load": True,
+        }
+      )
   finally:
     wrapped.close()
   return trace, metadata
