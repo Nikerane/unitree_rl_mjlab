@@ -43,6 +43,7 @@ the code disagree, the checked-out code wins; fix the doc.
 | `docs/research/reward-design/IMPULSE_CAP_PROVENANCE.md` | Current threshold provenance: why the historical `2x` conversion is retired; banked, provisional no-`2x`, and uniform-`0.9` diagnostic identities |
 | `docs/research/reward-design/FAITHFUL_SOFT_CAT_IMPL_PLAN.md` | Faithful soft `γ(1−δ)` CaT: design, Decisions 1–7, file map, phases + the CaT conceptual deep-dive appendix |
 | `docs/research/reward-design/CONSTRAINED_RL_LANDSCAPE.md` | Why soft-CaT over Lagrangian/CMDP (constraint-TYPE argument) + the joint-velocity-bound research appendix |
+| `docs/research/reward-design/TRAJECTORY_GENERATION_LANDSCAPE.md` | Primary-source trajectory landscape and bounded design recommendation: nail-frame endpoint-constrained splines, physical start-plane resets, impact-state/speed semantics, and causal controls; research only, no implementation or training authorization |
 | `docs/research/reward-design/LITERATURE.md` | Merged annotated bibliography (reward design, hammering RL, impact/tracking RL) |
 | `docs/research/reward-design/OPEN_QUESTIONS.md` | Open vs resolved experiment questions (Q1–Q12) |
 | `docs/research/reward-design/NAIL_PRECISION_CURRICULUM.md` | Idea capture: shrink-the-nail-head precision curriculum (not specced) |
