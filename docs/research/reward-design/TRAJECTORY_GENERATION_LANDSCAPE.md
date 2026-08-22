@@ -14,6 +14,7 @@ The literature supports the first three conclusions below; the fourth is a proje
 2. **For a complete impact controller, split the reference at physical contact.** Plan overlapping ante- and post-impact branches and select between them using the contact event. Extend the executable ante branch slightly past the nominal nail state so a late contact does not exhaust the reference; do not demand physical velocity or acceleration continuity through an impulse. The first trajectory-conditioning pilot can remain ante-impact-only because the current imitation term already stops at contact.
 3. **A start plane must move the physical reset, not merely the reference.** Sample reachable hammer-head start poses in a plane perpendicular to the nail axis, solve and qualify corresponding robot configurations, then anchor the curve at the realized start.
 4. **For three designed routes and a small start plane, a deterministic constrained spline is the highest-ROI first method.** DMPs, ProMPs, KMPs, and task-parameterized models become attractive when trajectories must be learned from several demonstrations or adapted over a much larger family. They are not necessary for the first causal experiment.
+5. **The broader autonomous-driving, UAV, and manipulator literature strengthens this choice rather than replacing it.** Its most transferable pattern is: express motion in a task-aligned frame, generate a small interpretable family of smooth paths, enforce whole-curve constraints where useful, and parameterize speed separately. Car-specific clothoids, large state lattices, and general obstacle optimizers are background methods, not the default hammer generator.
 
 The recommended sequence is: bank the current negative pilot result; qualify a deterministic spline family on CPU; test start variation and route variation separately; expose route intent from the first action; only then train a small factorial pilot. Curriculum learning and domain randomization come later.
 
@@ -26,7 +27,7 @@ This review asked:
 - How should pre- and post-impact references be joined?
 - What does a defensible “starting-point plane” experiment mean for the Z1?
 
-The search prioritized peer-reviewed primary papers and official author/publisher copies. It covered robot hammering, table-tennis striking, impact-aware trajectory optimization and reference spreading, deterministic splines, DMPs, ProMPs, KMPs, and task-parameterized movement models. The direct 2026 hammering paper supplied by the user was inspected locally in full. Secondary surveys were used only to find primary papers.
+The search prioritized peer-reviewed primary papers and official author/publisher copies. It covered robot hammering, table-tennis striking, impact-aware trajectory optimization and reference spreading, deterministic splines, DMPs, ProMPs, KMPs, task-parameterized movement models, autonomous-driving and mobile-robot trajectory generation, UAV polynomial/B-spline planners, whole-curve corridor methods, and manipulator path timing. The direct 2026 hammering paper supplied by the user was inspected locally in full. Secondary surveys were used only as gateways to primary papers.
 
 No primary paper located in this search studies exactly the same combination as this thesis: a single online-RL variable-impedance hammer policy, active per-joint impulse CaT, a prescribed multi-route family, and a two-dimensional start-plane distribution. The recommendation below is therefore a synthesis of adjacent primary evidence plus project-specific engineering constraints, not a copied published recipe.
 
@@ -108,6 +109,63 @@ Konno et al. optimize a whole-body humanoid impact state using an impact model, 
 
 Impact-time mismatch makes ordinary time-indexed tracking ill posed near contact. Reference-spreading work instead defines compatible, overlapping ante- and post-impact references, switches according to contact state, and uses position-dominant interim behavior when velocity feedback is unreliable. The time-invariant formulation uses state-based vector fields and has been experimentally validated over hundreds of impacts. This supports our spatial phase and an event-split reference with a late-contact continuation; it does not require us to copy the full model-based controller into RL. [Biemond et al. 2013](https://doi.org/10.1109/TAC.2012.2223351), [van Steen et al. 2023](https://doi.org/10.23919/ACC55779.2023.10156028), [van Steen et al. 2024](https://arxiv.org/abs/2411.09870)
 
+### 2.7 What trajectory-generation work in other fields adds
+
+This extension deliberately extracts only **trajectory-generation mechanisms**. Perception, behavior prediction, feedback control, and vehicle-specific dynamics are outside the comparison unless they impose a mathematical condition on the generated curve or its timing.
+
+Terminology is kept strict: a **path** `c(s)` is geometric; a **time law** `s(t)` says how quickly it is traversed; and the resulting **trajectory** is `x(t)=c(s(t))`. State lattices search over candidate paths, while CHOMP and TrajOpt refine initialized paths or trajectories; they are included only as adjacent generation methods, not treated as equivalent representations.
+
+#### Autonomous driving and mobile robots
+
+Werling et al. generate road trajectories in a Frenet frame: progress along the road and lateral displacement are represented separately, candidate longitudinal/lateral polynomials are constructed for terminal states, and candidates are scored. Apollo's EM planner later operationalized a related industrial pattern: search over candidate paths, refine the selected path with spline optimization, and optimize speed separately. The transferable idea is not a road or lane model; it is a **task-attached coordinate system and a compact candidate family**. For the hammer, the analogous coordinates are progress along the nail axis plus one or two transverse route offsets in the nail frame. [Werling et al. 2010](https://doi.org/10.1109/ROBOT.2010.5509799), [Fan et al. 2018](https://arxiv.org/abs/1807.08048)
+
+State-lattice work constructs a finite graph whose edges are already feasible motion primitives connecting complete states, rather than searching arbitrary point sequences and smoothing them afterward. This is useful precedent for qualifying a small bank of left/straight/right hammer curves before learning. A large lattice is unnecessary for three routes, and automotive polynomial spirals or clothoids encode nonholonomic steering/curvature constraints that the Z1 hammer head does not share. [Pivtoraiko, Knepper, and Kelly 2009](https://doi.org/10.1002/rob.20285), [McNaughton et al. 2011](https://doi.org/10.1109/ICRA.2011.5980223), [Fraichard and Scheuer 2004](https://doi.org/10.1109/TRO.2004.833789)
+
+The precise transfer is therefore:
+
+- define a nail-relative frame;
+- keep axial progress separate from transverse route shape;
+- generate only a small, interpretable set of boundary-conditioned candidates;
+- qualify each candidate before exposing it to the policy.
+
+#### UAV polynomial, Bézier, and B-spline trajectories
+
+Mellinger and Kumar and, more generally, Richter et al. generate piecewise polynomial trajectories through waypoints while constraining endpoint derivatives. Richter et al. formulate many segments in a sparse, numerically stable quadratic program and separately allocate time to each segment. These are strong precedents for a multi-span hammer curve with exact start/contact conditions plus interior route freedom. Minimum snap was chosen in a quadrotor differential-flatness formulation; it is **not evidence that snap is the correct hammer objective**. The hammer objective could instead regularize jerk, acceleration, curvature, or joint realizability after comparison. [Mellinger and Kumar 2011](https://doi.org/10.1109/ICRA.2011.5980409), [Richter, Bry, and Roy 2016](https://doi.org/10.1007/978-3-319-28872-7_37)
+
+Uniform B-splines provide local support: moving one control point changes only a local part of the curve, which is attractive for a larger route family. Bernstein/Bézier safe-corridor work contributes a different property: because a Bézier segment lies in the convex hull of its controls, constraining all controls to a convex corridor constrains the complete **position curve**, rather than only sampled points. Velocity, acceleration, or jerk bounds require separate constraints on the corresponding derivative control polygons through the hodograph property. For this fixture that could certify clearance tubes and, when explicitly added, derivative bounds between the start and nail. Dynamic-obstacle replanning and 3-D map construction do not transfer. [Usenko et al. 2017](https://doi.org/10.1109/IROS.2017.8202160), [Gao et al. 2018](https://doi.org/10.1109/ICRA.2018.8462878)
+
+#### Path timing and state-to-state generation
+
+Kunz and Stilman state the key distinction directly: first choose a differentiable geometric path, then convert it into a time-parameterized trajectory that respects velocity and acceleration bounds. TOPP-RA extends this path-parameterization problem with a reachability formulation. Ruckig solves a simpler but complementary problem: jerk-limited state-to-state timing with arbitrary target position, velocity, and acceleration. It could generate a scalar phase law or a short boundary splice with nonzero terminal velocity, but it does not create a curved route. These papers do not choose the hammer route and do not enforce impact impulse; they show how to keep the two design questions separate:
+
+\[
+\text{geometry } c_r(s) \quad\text{and}\quad \text{timing } s(t),
+\qquad
+v_{\mathrm{impact}}=c_r'(s_I)\,\dot{s}(t_I).
+\]
+
+A spline that passes exactly through the nail still does not specify a useful strike unless its phase law gives a predeclared nonzero incoming speed. Conversely, retiming cannot repair a bad geometric route. For joint-limit timing, the Cartesian hammer curve must first be mapped to a continuous, single-IK-branch differentiable path `q(s)`; TOPP does not perform that mapping. [Kunz and Stilman 2012](https://doi.org/10.15607/RSS.2012.VIII.027), [Pham and Pham 2018](https://doi.org/10.1109/TRO.2018.2819195), [Berscheid and Kroeger 2021](https://doi.org/10.15607/RSS.2021.XVII.015)
+
+#### General trajectory optimizers
+
+CHOMP, STOMP, and TrajOpt optimize an initialized trajectory for smoothness, obstacle clearance, or other costs. Direct collocation optimizes states and controls under dynamics. Modern sparse polynomial optimizers such as GCOPTER/MINCO jointly optimize interior waypoints and segment durations while retaining corridor constraints. These are important gateway families when a hand-parameterized curve cannot satisfy workspace, collision, or joint constraints. They are not the highest-ROI first generator here: the fixture has one known contact target, a small route family, and no evidence yet that a constrained spline is infeasible. Starting with a large nonlinear optimizer would make the scientific treatment harder to interpret. [CHOMP](https://doi.org/10.1177/0278364913488805), [STOMP](https://doi.org/10.1109/ICRA.2011.5980280), [TrajOpt](https://doi.org/10.1177/0278364914528132), [GCOPTER](https://doi.org/10.1109/TRO.2022.3160022), [Kelly 2017](https://doi.org/10.1137/16M1062569)
+
+#### Cross-domain generator distilled for the Z1
+
+The common transferable pipeline is:
+
+```text
+nail frame
+    -> compact route parameters (start u,v; route r; contact tangent)
+    -> endpoint-constrained multi-span polynomial/Bézier/B-spline c_r(s)
+    -> whole-curve and joint-realizability qualification
+    -> separate monotone phase/speed law s(t)
+```
+
+This does **not** introduce another controller or learned planner. It only makes the reference trajectory well defined. How the existing policy receives the route command is a separate experiment-design question covered later in this note. For the first generator, use deterministic multi-span polynomial or Bézier geometry. Use a clamped B-spline when the number of internal route controls grows; use TOPP-style timing only if a simple predeclared phase law cannot meet velocity/acceleration requirements; use CHOMP/TrajOpt/direct collocation only if obstacles or joint feasibility defeat the compact generator.
+
+The most useful reading order for this trajectory-only question is: [Gasparetto et al.'s path/trajectory overview](https://doi.org/10.1007/978-3-319-14705-5_1) for the map; [Richter, Bry, and Roy](https://doi.org/10.1007/978-3-319-28872-7_37) for practical multi-segment polynomial construction; [Kunz and Stilman](https://doi.org/10.15607/RSS.2012.VIII.027) for geometry-versus-timing; [Werling et al.](https://doi.org/10.1109/ROBOT.2010.5509799) for task-aligned candidate generation; and [Gao et al.](https://doi.org/10.1109/ICRA.2018.8462878) for whole-curve Bézier constraints. [Paden et al.](https://doi.org/10.1109/TIV.2016.2578706) is a broader vehicle-literature gateway that also includes control; [Kelly 2017](https://doi.org/10.1137/16M1062569) is an optional advanced tutorial if later work requires full trajectory optimization. The mechanism claims above remain grounded in the cited primary papers.
+
 ## 3. Method comparison for this thesis
 
 | Family | Exact nail and incoming velocity | Different starts | Internal route control | Post-impact handling | Data/engineering | Best use here |
@@ -120,6 +178,12 @@ Impact-time mismatch makes ordinary time-indexed tracking ill posed near contact
 | TP-GMM/KMP | Task-frame adaptation | Yes | Rich contextual constraints | Must be designed explicitly | High; needs demonstrations | Later nail-pose/context generalization |
 | Free-time/hybrid trajectory optimization | Yes; can optimize impact time | Yes | Full optimization | Explicit hybrid modes | High/model dependent | Qualification or future generator, not first RL reference |
 | Time-invariant reference spreading | Impact-consistent reference fields | Robust to state/timing variation | Not a route-learning method | Strongest impact transition treatment | High if copied fully | Design principle for event splitting/spatial reference |
+| Frenet/candidate-polynomial generation | Exact terminal state when encoded in the candidate | Recompute in task frame | Yes, through sampled terminal/via parameters | Not an impact method | Low–medium | Nail-frame axial/lateral decomposition and compact route bank |
+| Multi-segment minimum-derivative polynomial | Exact boundary derivatives and internal waypoints | Re-solve boundary conditions | Yes | Must be event-split for impact | Low–medium | Strong cross-domain basis for the first deterministic family |
+| Bernstein/Bézier corridor optimization | Exact endpoints; whole segment lies in control-point hull | Re-solve controls/corridor | Yes | Must be event-split for impact | Medium | Whole-curve clearance/derivative bounds when needed |
+| TOPP/TOPP-RA path parameterization | Does not choose the contact geometry | Re-time a qualified differentiable joint path | No | Not an impact model | Medium | Separate phase/speed law after route geometry and a continuous IK branch are fixed |
+| Ruckig jerk-limited state-to-state generation | Exact target position/velocity/acceleration | Native arbitrary initial state | No internal route control | Not an impact model | Low | Scalar phase law or short boundary splice, not route geometry |
+| CHOMP/STOMP/TrajOpt/direct collocation | Depends on explicit constraints | Strong | Strong but initialization/local-optimum dependent | Can model modes only if added | High | Escalation only when compact splines fail qualification |
 
 ## 4. A defensible starting-point plane
 
@@ -380,6 +444,20 @@ Do **not** copy the paper's single quintic verbatim, do not call a virtual refer
 | [Rijnen, Saccon, and Nijmeijer 2020](https://doi.org/10.1109/TCST.2019.2898953) | Physical impact-triggered switching between extended ante/post reference branches | One-DoF tracking/control, not route generation |
 | [van Steen et al. 2023](https://doi.org/10.23919/ACC55779.2023.10156028) and [2024](https://arxiv.org/abs/2411.09870) | Ante/post reference fields, impact switching, time-invariant state-based execution | Full method needs an impact model/controller; here it supplies design principles |
 | [Sidiropoulos and Doulgeri 2024](https://doi.org/10.1007/s10846-024-02051-0) | DMP adaptation under initial/final and dynamic via-point constraints | General manipulation evidence, not striking-specific validation |
+| [Werling et al. 2010](https://doi.org/10.1109/ROBOT.2010.5509799) | Task-aligned Frenet coordinates; separate longitudinal/lateral polynomial candidate generation | Road/lane and vehicle assumptions do not transfer |
+| [Fan et al. 2018](https://arxiv.org/abs/1807.08048) | Industrial path/speed separation; candidate search followed by spline refinement | Full autonomous-driving stack, not a manipulator recipe |
+| [Pivtoraiko, Knepper, and Kelly 2009](https://doi.org/10.1002/rob.20285) | Finite library of feasible state-connecting motion primitives | Large lattice and nonholonomic vehicle constraints are unnecessary here |
+| [McNaughton et al. 2011](https://doi.org/10.1109/ICRA.2011.5980223) | Task-conformal spatiotemporal lattice and smooth motion primitives | Automotive timing/road topology; far larger search than three routes need |
+| [Mellinger and Kumar 2011](https://doi.org/10.1109/ICRA.2011.5980409) | Piecewise polynomial waypoint trajectory with derivative constraints | Minimum snap is quadrotor-motivated, not universally optimal |
+| [Richter, Bry, and Roy 2016](https://doi.org/10.1007/978-3-319-28872-7_37) | Sparse multi-segment polynomial optimization and segment-time allocation | Quadrotor flatness/actuation assumptions do not transfer |
+| [Usenko et al. 2017](https://doi.org/10.1109/IROS.2017.8202160) | Uniform B-spline local support and efficient local reshaping | Replanning/obstacle-map system is outside this task; exact contact still needs explicit constraints |
+| [Gao et al. 2018](https://doi.org/10.1109/ICRA.2018.8462878) | Bernstein convex-hull property for whole-curve corridor and derivative constraints | UAV safe-corridor planner; corridor construction is likely unnecessary initially |
+| [Kunz and Stilman 2012](https://doi.org/10.15607/RSS.2012.VIII.027) | Explicit separation of geometric path from feasible timing | Joint velocity/acceleration timing only; no impact objective |
+| [Pham and Pham 2018](https://doi.org/10.1109/TRO.2018.2819195) | Reachability-based time-optimal path parameterization under constraints | Retimes a fixed path; cannot choose route geometry or guarantee impulse safety |
+| [Berscheid and Kroeger 2021](https://doi.org/10.15607/RSS.2021.XVII.015) | Jerk-limited generation from arbitrary initial to arbitrary target `p/v/a` | State-to-state timing/splicing only; no curved-route or impact model |
+| [Wang et al. 2022, GCOPTER](https://doi.org/10.1109/TRO.2022.3160022) | Sparse joint optimization of polynomial waypoints, durations, and corridor constraints | More general optimization machinery than the first three-route experiment needs |
+| [Zucker et al. 2013, CHOMP](https://doi.org/10.1177/0278364913488805) | Smoothness/obstacle functional optimization over trajectories | General local optimization is unnecessary for the first fixed-scene family |
+| [Schulman et al. 2014, TrajOpt](https://doi.org/10.1177/0278364914528132) | Sequential convex trajectory optimization and continuous-time collision checking | Higher implementation/interpretation cost than a compact spline |
 
 ## Search protocol and limitations
 
@@ -394,10 +472,14 @@ Searches were run on 2026-08-22 using combinations of:
 - `task-parameterized movement nail frame start goal coordinate system`;
 - `impact-aware trajectory optimization contact timing compliance`;
 - `reference spreading impact ante post time invariant spatial phase`;
+- `autonomous driving Frenet trajectory generation polynomial candidate lattice`;
+- `UAV minimum snap polynomial B-spline Bernstein safe corridor trajectory generation`;
+- `manipulator path parameterization TOPP velocity acceleration trajectory`;
+- `CHOMP STOMP TrajOpt direct collocation trajectory generation`;
 - exact-title and DOI queries for every retained paper.
 
 The review intentionally covers seminal work from 1985 onward because the foundational spline and movement-primitive mechanisms are older than the current RL literature. Results across papers are not directly comparable, and no retained paper compares Bézier, B-spline, DMP, ProMP, and hybrid optimization under one impact task. “Exact” in this note refers to the mathematical reference constraints; controller bandwidth, discretization, compliance, and contact uncertainty prevent an exact curve from guaranteeing exact physical contact.
 
 ## AI disclosure
 
-This note was prepared with repository code inspection, direct inspection of the user-supplied six-page IEEE paper, primary-source web searches, and parallel research agents separated into impact-trajectory, movement-primitive/start-plane, and repository-ground-truth streams. Source claims were checked against official publisher, author, institutional, or arXiv pages. Technical recommendations and the `beta/gamma` deformation are explicitly marked as synthesis rather than attributed to a paper. Sanitized aggregate design summaries were also sent to Kimi K3 and DeepSeek V4 Pro for advisory critiques after the primary-source synthesis; a GLM-5.2 call returned no model content. They received no raw traces, checkpoints, repository paths/hashes, credentials, or personal information, and their opinions were not treated as source evidence. No model training, simulation run, or trajectory code implementation was performed for this review.
+This note was prepared with repository code inspection, direct inspection of the user-supplied six-page IEEE paper, primary-source web searches, and parallel research agents separated into impact-trajectory, movement-primitive/start-plane, autonomous-driving/mobile, UAV/manipulator, foundational-method verification, and repository-ground-truth streams. Source claims were checked against official publisher, author, institutional, proceedings, or arXiv pages. Technical recommendations and the `beta/gamma` deformation are explicitly marked as synthesis rather than attributed to a paper. Sanitized aggregate design summaries were also sent to Kimi K3 and DeepSeek V4 Pro for advisory critiques after the first primary-source synthesis; a GLM-5.2 call returned no model content. They received no raw traces, checkpoints, repository paths/hashes, credentials, or personal information, and their opinions were not treated as source evidence. No model training, simulation run, or trajectory code implementation was performed for this review.
