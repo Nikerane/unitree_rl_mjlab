@@ -90,10 +90,9 @@ def tracking_metrics(
 
   initial_precontact = (episode_id == 0) & eligible
   core = initial_precontact & (phase >= CORE_PHASE_MIN) & (phase <= CORE_PHASE_MAX)
-  assigned_error = np.linalg.norm(head - assigned, axis=2)
-  core_errors = assigned_error[core]
   envs = scalar_shape[1]
   closest_counts = {label: 0 for label in ROUTE_LABEL_BY_SIGN.values()}
+  assigned_rmses: list[float] = []
   margins: list[float] = []
   responses: list[float] = []
   episode_records: list[dict[str, object]] = []
@@ -134,14 +133,23 @@ def tracking_metrics(
       closest_counts[ROUTE_LABEL_BY_SIGN[closest_sign]] += 1
       correct += closest_sign == forced_sign
     assigned_index = forced_sign + 1
+    if not np.allclose(
+      assigned[mask, env_id], candidates[:, assigned_index], rtol=1e-6, atol=1e-7
+    ):
+      raise ValueError("assigned reference waypoint differs from the forced route")
+    assigned_residual = head[mask, env_id] - assigned[mask, env_id]
+    assigned_rmse = float(
+      np.sqrt(np.mean(np.sum(assigned_residual * assigned_residual, axis=1)))
+    )
     next_best = float(np.min(np.delete(rmses, assigned_index)))
-    margin = next_best - float(rmses[assigned_index])
+    margin = next_best - assigned_rmse
     response = float(np.median(head[mask, env_id, 0] - straight[mask, env_id, 0]))
+    assigned_rmses.append(assigned_rmse)
     margins.append(margin)
     responses.append(response)
     record.update(
       {
-        "assigned_rmse_m": float(rmses[assigned_index]),
+        "assigned_rmse_m": assigned_rmse,
         "next_best_rmse_m": next_best,
         "assigned_vs_next_rmse_margin_m": margin,
         "median_horizontal_response_m": response,
@@ -153,9 +161,10 @@ def tracking_metrics(
     )
     episode_records.append(record)
 
-  error_summary = _finite_quantiles(core_errors)
+  episode_errors = np.asarray(assigned_rmses, dtype=np.float64)
+  error_summary = _finite_quantiles(episode_errors)
   error_summary["rmse"] = (
-    float(np.sqrt(np.mean(core_errors * core_errors))) if core_errors.size else None
+    float(np.sqrt(np.mean(episode_errors * episode_errors))) if episode_errors.size else None
   )
   coverage = episodes_with_core / envs if envs else 0.0
   correct_fraction = correct / episodes_with_core if episodes_with_core else None

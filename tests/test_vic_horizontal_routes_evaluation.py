@@ -224,6 +224,24 @@ def test_tracking_core_marks_no_precontact_core_progress_instead_of_claiming_tra
   assert result["episode_route_classification"]["correct_fraction"] is None
 
 
+def test_assigned_reference_error_weights_initial_episodes_not_controller_reads():
+  trace = _route_trace(1, (0.012, 0.020))
+  trace = {
+    name: np.concatenate((value, value[:1]), axis=0)
+    for name, value in trace.items()
+  }
+  trace["imitation_eligible"][1:, 0] = False
+
+  result = analysis.tracking_metrics(trace, forced_sign=1)
+
+  # The two episode RMSEs are 8 mm and 0 mm, even though they contribute one and
+  # three eligible controller reads respectively.
+  errors = result["assigned_reference_error_m"]
+  assert errors["p50"] == pytest.approx(0.004)
+  assert errors["p95"] == pytest.approx(0.0076)
+  assert errors["rmse"] == pytest.approx(np.sqrt((0.008**2 + 0.0**2) / 2.0))
+
+
 def test_equal_candidate_rmse_is_ambiguous_and_incorrect():
   trace = _route_trace(1, (0.010, 0.010))
 
