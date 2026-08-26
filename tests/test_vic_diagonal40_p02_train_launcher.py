@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 
@@ -47,6 +48,47 @@ def reset_joints_to_strike_route_starts(): pass
 reset_joints_to_strike_route_starts.__module__ = "src.tasks.hammer.mdp.references"
 def expand_variable_impedance_model_fields(): pass
 expand_variable_impedance_model_fields.__module__ = "src.tasks.hammer.mdp.variable_impedance"
+def joint_pos_rel(): pass
+joint_pos_rel.__module__ = "mjlab.envs.mdp.observations"
+def joint_vel_rel(): pass
+joint_vel_rel.__module__ = "mjlab.envs.mdp.observations"
+def ee_pos_b(): pass
+ee_pos_b.__module__ = "src.tasks.hammer.mdp.observations"
+def ee_vel_b(): pass
+ee_vel_b.__module__ = "src.tasks.hammer.mdp.observations"
+def hammer_head_pos_b(): pass
+hammer_head_pos_b.__module__ = "src.tasks.hammer.mdp.observations"
+def hammer_head_vel_b(): pass
+hammer_head_vel_b.__module__ = "src.tasks.hammer.mdp.observations"
+def nail_top_pos_w(): pass
+nail_top_pos_w.__module__ = "src.tasks.hammer.mdp.observations"
+def nail_depth(): pass
+nail_depth.__module__ = "src.tasks.hammer.mdp.observations"
+def strike_phase(): pass
+strike_phase.__module__ = "src.tasks.hammer.mdp.observations"
+def strike_ref_error(): pass
+strike_ref_error.__module__ = "src.tasks.hammer.mdp.observations"
+def last_action(): pass
+last_action.__module__ = "mjlab.envs.mdp.observations"
+def ImitationPriorTerm(): pass
+ImitationPriorTerm.__module__ = "src.tasks.hammer.mdp.rewards"
+class JointPositionActionCfg:
+  def __init__(self):
+    self.entity_name = "robot"
+    self.clip = {{"joint1": (-2.61799, 2.61799), "joint2": (0.0, 2.96706), "joint3": (-2.87979, 0.0), "joint4": (-1.51844, 1.51844), "joint5": (-1.3439, 1.3439), "joint6": (-2.79253, 2.79253)}}
+    self.transmission_type = "joint"
+    self.actuator_names = ("joint1", "joint2", "joint3", "joint4", "joint5", "joint6")
+    self.scale = {{"joint1": 0.05570376467774623, "joint2": 0.5878274488449098, "joint3": 0.14464383006095885, "joint4": 0.22881677627563476, "joint5": 0.05571571884909646, "joint6": 0.05516456842422486}}
+    self.offset = 0.0
+    self.preserve_order = True
+    self.use_default_offset = True
+JointPositionActionCfg.__module__ = "mjlab.envs.mdp.actions.actions"
+class JointStiffnessActionCfg:
+  def __init__(self):
+    self.entity_name = "robot"; self.clip = None
+    self.joint_names = ("joint1", "joint2", "joint3", "joint4", "joint5", "joint6")
+    self.C = 1.25
+JointStiffnessActionCfg.__module__ = "src.tasks.hammer.mdp.variable_impedance"
 ROWS = {ROWS!r}
 def diagonal40_cfg(task):
   if task != {TASK!r}: raise RuntimeError("wrong task")
@@ -58,7 +100,8 @@ def diagonal40_cfg(task):
   if mode == "impulse_caps": cat_params["imp_limit"][-1] = 0.02
   if mode == "missing_identity_field": cat_params.pop("use_vel")
   cfg = Cfg()
-  cfg.actions = {{"joint_position": object(), "joint_stiffness": object()}}
+  cfg.actions = {{"joint_position": JointPositionActionCfg(), "joint_stiffness": JointStiffnessActionCfg()}}
+  if mode == "action_config": cfg.actions["joint_stiffness"].C = 2.0
   cfg.events = {{
     "sample_strike_route_signs": Term(func=sample_strike_route_signs, mode="reset", params={{"horizontal_detour_m": 0.0, "followthrough_mode": "strike_axis"}}),
     "reset_robot_joints": Term(func=reset_joints_by_offset, mode="reset", params={{"position_range": (0.0, 0.0), "velocity_range": (0.0, 0.0), "asset_cfg": {{"name": "robot", "joint_names": [".*"], "site_names": None, "preserve_order": False}}}}),
@@ -66,10 +109,24 @@ def diagonal40_cfg(task):
     "reset_nail": Term(func=reset_joints_by_offset, mode="reset", params={{"position_range": (0.0, 0.0), "velocity_range": (0.0, 0.0), "asset_cfg": {{"name": "nail_block", "joint_names": ["nail_slide"], "site_names": None, "preserve_order": False}}}}),
     "expand_variable_impedance_model_fields": Term(func=expand_variable_impedance_model_fields, mode="startup", params={{}}),
   }}
-  names = ["joint_pos", "joint_vel", "ee_pos", "ee_vel", "head_pos", "head_vel", "nail_top_pos", "nail_depth", "strike_phase", "strike_ref_error", "actions"]
-  terms = {{name: Term(params={{"followthrough_mode": "strike_axis"}} if name in ("strike_phase", "strike_ref_error") else {{}}) for name in names}}
+  asset = lambda name, joints=None, sites=None: {{"name": name, "joint_names": joints, "site_names": sites, "preserve_order": False}}
+  terms = {{
+    "joint_pos": Term(func=joint_pos_rel), "joint_vel": Term(func=joint_vel_rel),
+    "ee_pos": Term(func=ee_pos_b, params={{"asset_cfg": asset("robot", sites=["ee_center_site"])}}),
+    "ee_vel": Term(func=ee_vel_b, params={{"asset_cfg": asset("robot", sites=["ee_center_site"])}}),
+    "head_pos": Term(func=hammer_head_pos_b, params={{"asset_cfg": asset("robot", sites=["hammer_head_site"])}}),
+    "head_vel": Term(func=hammer_head_vel_b, params={{"asset_cfg": asset("robot", sites=["hammer_head_site"])}}),
+    "nail_top_pos": Term(func=nail_top_pos_w, params={{"asset_cfg": asset("nail_block", sites=["nail_top"])}}),
+    "nail_depth": Term(func=nail_depth, params={{"asset_cfg": asset("nail_block", joints=["nail_slide"])}}),
+    "strike_phase": Term(func=strike_phase, params={{"robot_cfg": asset("robot", sites=["hammer_head_site"]), "nail_cfg": asset("nail_block", sites=["nail_top"]), "followthrough_mode": "strike_axis"}}),
+    "strike_ref_error": Term(func=strike_ref_error, params={{"robot_cfg": asset("robot", sites=["hammer_head_site"]), "nail_cfg": asset("nail_block", sites=["nail_top"]), "followthrough_mode": "strike_axis"}}),
+    "actions": Term(func=last_action, params={{"action_name": "joint_position"}}),
+  }}
+  if mode == "observation_function": terms["strike_phase"].func = lambda: None
   cfg.observations = {{"actor": Group(terms.copy()), "critic": Group(terms.copy())}}
-  cfg.rewards = {{"r_imit": Term(weight=0.2, params={{"sigma": 0.05, "followthrough_mode": "strike_axis"}}), "delivered_impulse": Term(weight=4.0), "impact_progress": Term(weight=8.0)}}
+  cfg.rewards = {{"r_imit": Term(func=ImitationPriorTerm, weight=0.2, params={{"sensor_name": "hammer_nail_contact", "robot_cfg": asset("robot", sites=["hammer_head_site"]), "nail_cfg": asset("nail_block", sites=["nail_top"]), "sigma": 0.05, "followthrough_mode": "strike_axis"}}), "delivered_impulse": Term(weight=4.0), "impact_progress": Term(weight=8.0)}}
+  if mode == "imitation_reference": cfg.rewards["r_imit"].params["followthrough_mode"] = "vertical"
+  if mode == "imitation_detour": cfg.rewards["r_imit"].params["horizontal_detour_m"] = 0.02
   cfg.curriculum = {{}}
   cfg.metrics = {{"cat_soft": Term(params=cat_params)}}
   return cfg
@@ -81,6 +138,23 @@ def load_env_cfg(task):
   return cfg
 registry.load_env_cfg = load_env_cfg
 ''')
+  real_git = shutil.which("git")
+  assert real_git is not None
+  fake_git = Path(env["HOME"]) / "bin/git"
+  fake_git.write_text(
+    "#!/bin/sh\n"
+    "if [ \"${3:-}\" = status ]; then\n"
+    "  count_file=\"$HOME/git-status-count\"\n"
+    "  count=$(cat \"$count_file\" 2>/dev/null || printf 0)\n"
+    "  count=$((count + 1))\n"
+    "  printf '%s\\n' \"$count\" > \"$count_file\"\n"
+    "  case \"${GIT_STATUS_FAILURE:-}:$count\" in\n"
+    "    initial_code:1|initial_asset:2|postflight_code:3|postflight_asset:4) exit 9 ;;\n"
+    "  esac\n"
+    "fi\n"
+    f"exec {real_git!s} \"$@\"\n"
+  )
+  fake_git.chmod(0o755)
   return env
 
 
@@ -122,6 +196,17 @@ def test_diagonal40_launcher_runs_only_the_frozen_treatment(
   assert identity["route_joint_positions_rad"] == ROWS
   assert identity["event_names"][:3] == ["sample_strike_route_signs", "reset_robot_joints", "reset_strike_route_joints"]
   assert identity["actions"] == ["joint_position", "joint_stiffness"]
+  assert identity["action_configs"]["joint_stiffness"]["params"]["C"] == 1.25
+  assert identity["imitation_reference"]["function"] == "src.tasks.hammer.mdp.rewards.ImitationPriorTerm"
+  assert identity["imitation_reference"]["params"]["followthrough_mode"] == "strike_axis"
+  assert identity["observations"]["actor"]["strike_phase"] == {
+    "function": "src.tasks.hammer.mdp.observations.strike_phase",
+    "params": {
+      "followthrough_mode": "strike_axis",
+      "nail_cfg": {"joint_names": None, "name": "nail_block", "preserve_order": False, "site_names": ["nail_top"]},
+      "robot_cfg": {"joint_names": None, "name": "robot", "preserve_order": False, "site_names": ["hammer_head_site"]},
+    },
+  }
   assert identity["schedule"] == {"r_imit_weight": 0.2, "r_imit_sigma": 0.05, "r_imit_anneal": None}
   assert re.search(r" identity_sha256=[0-9a-f]{64} serialized=", config_line)
   assert (Path(env["HOME"]) / "preflight-loads").read_text().splitlines() == [TASK, TASK]
@@ -172,21 +257,52 @@ def test_diagonal40_launcher_rejects_args_provenance_and_collision(tmp_path: Pat
   env = _env(tmp_path / "dirty")
   (Path(env["RUN_ROOT"]) / "dirty").write_text("no\\n")
   assert _run(monkeypatch, env).returncode == 2
+  env = _env(tmp_path / "asset-dirty")
+  (Path(env["ASSET_REPO"]) / "dirty").write_text("no\\n")
+  assert _run(monkeypatch, env).returncode == 2
   env = _env(tmp_path / "revision")
   env["EXPECTED_CODE_REVISION"] = "0" * 40
+  assert _run(monkeypatch, env).returncode == 2
+  env = _env(tmp_path / "asset-revision")
+  env["EXPECTED_ASSET_REVISION"] = "0" * 40
+  assert _run(monkeypatch, env).returncode == 2
+  env = _env(tmp_path / "noncanonical")
+  other_assets = tmp_path / "other-assets"
+  qualified._repo(other_assets)
+  env["ASSET_REPO"] = str(other_assets)
   assert _run(monkeypatch, env).returncode == 2
   env = _env(tmp_path / "collision")
   assert _run(monkeypatch, env).returncode == 0
   assert _run(monkeypatch, env).returncode == 2
 
 
-@pytest.mark.parametrize("mode", ("pose_rows", "impulse_caps", "velocity_disabled", "missing_identity_field", "repeated_drift"))
+@pytest.mark.parametrize("mode", ("pose_rows", "impulse_caps", "velocity_disabled", "missing_identity_field", "repeated_drift", "imitation_reference", "imitation_detour", "observation_function", "action_config"))
 def test_diagonal40_launcher_rejects_config_identity_drift(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
   env = _env(tmp_path)
   env["PREFLIGHT_MODE"] = mode
   result = _run(monkeypatch, env)
   assert result.returncode == 2
   assert "serialized config preflight failed" in result.stdout
+
+
+@pytest.mark.parametrize(
+  ("mode", "message"),
+  (
+    ("initial_code", "code repository status check failed"),
+    ("initial_asset", "asset repository status check failed"),
+    ("postflight_code", "postflight code status check failed"),
+    ("postflight_asset", "postflight asset status check failed"),
+  ),
+)
+def test_diagonal40_launcher_rejects_git_status_command_failures(
+  tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str, message: str
+) -> None:
+  """A failed status subprocess must not collapse to an apparently clean tree."""
+  env = _env(tmp_path)
+  env["GIT_STATUS_FAILURE"] = mode
+  result = _run(monkeypatch, env)
+  assert result.returncode == 2
+  assert message in result.stdout
 
 
 @pytest.mark.parametrize("mode", ("missing", "wrong_iter", "nonfinite", "extra"))
