@@ -2853,8 +2853,13 @@ def _reference_controller_spec() -> dict[str, object]:
     constructor = inspect.signature(SingleStrikeReference)
     parameter_names = ("overshoot", "descent_speed", "axis_tol")
     horizontal_parameter = "horizontal_detour_m"
+    followthrough_parameter = "followthrough_mode"
     actual_names = tuple(constructor.parameters)[2:]
-    expected_names = (*parameter_names, horizontal_parameter)
+    expected_names = (
+        *parameter_names,
+        horizontal_parameter,
+        followthrough_parameter,
+    )
     if actual_names != expected_names:
         raise RuntimeError(
             "SingleStrikeReference constructor parameters drifted: "
@@ -2865,6 +2870,13 @@ def _reference_controller_spec() -> dict[str, object]:
         raise RuntimeError(
             "SingleStrikeReference horizontal_detour_m default must remain 0.0 "
             f"for the banked direct-reference provenance, got {horizontal_default!r}"
+        )
+    followthrough_default = constructor.parameters[followthrough_parameter].default
+    if followthrough_default != "vertical":
+        raise RuntimeError(
+            "SingleStrikeReference followthrough_mode default must remain "
+            "'vertical' for the banked direct-reference provenance, got "
+            f"{followthrough_default!r}"
         )
     parameters: dict[str, object] = {}
     for name in parameter_names:

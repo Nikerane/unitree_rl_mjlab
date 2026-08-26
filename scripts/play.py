@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 import torch
 import tyro
 
@@ -17,6 +18,80 @@ from mjlab.utils.os import get_wandb_checkpoint_path
 from mjlab.utils.torch import configure_torch_backends
 from mjlab.utils.wrappers import VideoRecorder
 from mjlab.viewer import NativeMujocoViewer, ViserPlayViewer
+
+from src.tasks.hammer.mdp.references import SingleStrikeReference
+
+
+REFERENCE_LINE_COLOR = (230, 30, 15)
+REFERENCE_LINE_WIDTH = 1.5
+REFERENCE_LINE_POINTS = 65
+
+
+class ReferenceLineViewer(ViserPlayViewer):
+  """Viser playback with a thin, reset-aware commanded-reference overlay."""
+
+  def __init__(self, *args, reference: SingleStrikeReference, **kwargs) -> None:
+    super().__init__(*args, **kwargs)
+    self.reference = reference
+    self._reference_line = None
+    self._reference_segments: np.ndarray | None = None
+
+  def _line_segments(self) -> np.ndarray:
+    env_id = int(self._scene.env_idx)
+    points = (
+      self.reference.reference_polyline(env_id, REFERENCE_LINE_POINTS)
+      .detach()
+      .cpu()
+      .numpy()
+      .astype(np.float64)
+    )
+    offset = np.asarray(
+      getattr(self._scene, "_scene_offset", np.zeros(3)), dtype=np.float64
+    ).reshape(3)
+    points += offset[None, :]
+    return np.stack([points[:-1], points[1:]], axis=1).astype(np.float32)
+
+  def setup(self) -> None:
+    super().setup()
+    segments = self._line_segments()
+    self._reference_line = self._server.scene.add_line_segments(
+      "/reference_path",
+      points=segments,
+      colors=REFERENCE_LINE_COLOR,
+      line_width=REFERENCE_LINE_WIDTH,
+    )
+    self._reference_segments = segments.copy()
+    with self._server.gui.add_folder("Reference"):
+      toggle = self._server.gui.add_checkbox("Show reference path", True)
+
+    @toggle.on_update
+    def _(_event) -> None:
+      self._reference_line.visible = toggle.value
+
+  def refresh_reference_line(self) -> bool:
+    """Refresh after a reset/env switch; return whether the geometry changed."""
+    if self._reference_line is None:
+      return False
+    segments = self._line_segments()
+    if self._reference_segments is not None and np.array_equal(
+      segments, self._reference_segments
+    ):
+      return False
+    self._reference_line.points = segments
+    self._reference_segments = segments.copy()
+    return True
+
+  def sync_env_to_viewer(self) -> None:
+    super().sync_env_to_viewer()
+    self.refresh_reference_line()
+
+
+def build_viser_play_viewer(env, policy, show_reference_line: bool):
+  """Build the standard viewer or the hammer reference-overlay variant."""
+  reference = getattr(env.unwrapped, "_strike_reference", None)
+  if show_reference_line and isinstance(reference, SingleStrikeReference):
+    return ReferenceLineViewer(env, policy, reference=reference)
+  return ViserPlayViewer(env, policy)
 
 
 @dataclass(frozen=True)
@@ -32,6 +107,8 @@ class PlayConfig:
   video_width: int | None = None
   camera: int | str | None = None
   viewer: Literal["auto", "native", "viser"] = "auto"
+  show_reference_line: bool = True
+  """Show the commanded hammer reference as a thin red line in Viser playback."""
   no_terminations: bool = False
   """Disable all termination conditions (useful for viewing motions with dummy agents)."""
 
@@ -170,7 +247,7 @@ def run_play(task_id: str, cfg: PlayConfig):
   if resolved_viewer == "native":
     NativeMujocoViewer(env, policy).run()
   elif resolved_viewer == "viser":
-    ViserPlayViewer(env, policy).run()
+    build_viser_play_viewer(env, policy, cfg.show_reference_line).run()
   else:
     raise RuntimeError(f"Unsupported viewer backend: {resolved_viewer}")
 

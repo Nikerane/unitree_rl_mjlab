@@ -21,7 +21,7 @@ Design constraints honoured here:
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import torch
 
@@ -40,7 +40,9 @@ class SingleStrikeReference:
     self,
     num_envs: int,
     device: str | torch.device,
-    # Strike target this far below nail_top (hammer FOLLOW-THROUGH).
+    # Follow-through distance.  ``vertical`` places the target this far below
+    # nail_top; ``strike_axis`` extends the reset-head -> nail ray by this
+    # distance so an offset-start straight guide crosses the nail exactly.
     # 0.035 -> 0.15 (2026-07-13, adversarial review F3): the old value was
     # calibrated as "overshoot = desired drive depth" — an ENDPOINT-SERVO
     # model in which playback reached depth by holding the final waypoint and
@@ -65,6 +67,7 @@ class SingleStrikeReference:
     axis_tol: float = 0.05,
     *,
     horizontal_detour_m: float = 0.0,
+    followthrough_mode: Literal["vertical", "strike_axis"] = "vertical",
   ):
     self.num_envs = num_envs
     self.device = device
@@ -72,6 +75,11 @@ class SingleStrikeReference:
     self.descent_speed = float(descent_speed)
     self.axis_tol = float(axis_tol)
     self.horizontal_detour_m = float(horizontal_detour_m)
+    if followthrough_mode not in ("vertical", "strike_axis"):
+      raise ValueError(
+        "followthrough_mode must be either 'vertical' or 'strike_axis'"
+      )
+    self.followthrough_mode = followthrough_mode
 
     self._head0 = torch.zeros(num_envs, 3, device=device)
     self._target = torch.zeros(num_envs, 3, device=device)
@@ -97,12 +105,25 @@ class SingleStrikeReference:
     nail_top_w: torch.Tensor,
   ) -> None:
     self._head0[mask] = head_w[mask]
-    target = nail_top_w[mask].clone()
-    target[:, 2] -= self.overshoot
-    # A low realized reset must never turn the direct strike into an upward
-    # command. Preserve the nail-derived x/y follow-through while clamping its
-    # height to the frozen reset head.
-    target[:, 2] = torch.minimum(target[:, 2], head_w[mask][:, 2])
+    nail = nail_top_w[mask]
+    head = head_w[mask]
+    if self.followthrough_mode == "strike_axis":
+      # Extend the realized reset-head -> nail ray beyond contact.  With an
+      # offset reset, a vertically lowered target would make the straight
+      # segment pass beside the nail; the ray extension keeps the nail exactly
+      # on the one-segment guide while retaining nonzero motion through it.
+      incoming = nail - head
+      length = incoming.norm(dim=-1, keepdim=True)
+      direction = incoming / length.clamp_min(1e-18)
+      target = nail + self.overshoot * direction
+      target = torch.where(length > 1e-18, target, head)
+    else:
+      target = nail.clone()
+      target[:, 2] -= self.overshoot
+      # A low realized reset must never turn the direct strike into an upward
+      # command. Preserve the nail-derived x/y follow-through while clamping its
+      # height to the frozen reset head.
+      target[:, 2] = torch.minimum(target[:, 2], head[:, 2])
     self._target[mask] = target
     self._phi[mask] = 0.0
     self._anchored[mask] = True
@@ -220,6 +241,45 @@ class SingleStrikeReference:
     routed[:, 0] += self._route_sign.to(dtype=routed.dtype) * amplitude
     return routed
 
+  def reference_polyline(
+    self,
+    env_id: int = 0,
+    num_points: int = 65,
+  ) -> torch.Tensor:
+    """Sample one environment's commanded route without changing reference state.
+
+    The returned ``(num_points, 3)`` tensor is in world coordinates and includes
+    both endpoints.  It is intended for visualization and diagnostics; sampling
+    never advances phase, changes route assignment, or re-anchors the reference.
+    """
+    if not 0 <= env_id < self.num_envs:
+      raise IndexError(f"env_id {env_id} is outside [0, {self.num_envs})")
+    if num_points < 2:
+      raise ValueError("num_points must be at least 2")
+    if not bool(self._anchored[env_id]):
+      raise RuntimeError("reference must be anchored before sampling its polyline")
+
+    phases = torch.linspace(
+      0.0,
+      1.0,
+      num_points,
+      device=self._head0.device,
+      dtype=self._head0.dtype,
+    )
+    t = phases.unsqueeze(-1)
+    head0 = self._head0[env_id]
+    target = self._target[env_id]
+    points = head0 * (1.0 - t) + target * t
+    if self.horizontal_detour_m != 0.0:
+      active = (phases > 0.0) & (phases < 0.5)
+      amplitude = torch.where(
+        active,
+        self.horizontal_detour_m * torch.sin(2.0 * math.pi * phases).square(),
+        torch.zeros_like(phases),
+      )
+      points[:, 0] += self._route_sign[env_id].to(points.dtype) * amplitude
+    return points
+
   # -- scripted playback --------------------------------------------------------
 
   def playback_length(self) -> int:
@@ -268,8 +328,57 @@ def sample_strike_route_signs(
   env: "ManagerBasedRlEnv",
   env_ids: torch.Tensor,
   horizontal_detour_m: float,
+  followthrough_mode: Literal["vertical", "strike_axis"] = "vertical",
 ) -> None:
-  """Reset event that samples one cached horizontal route per requested env."""
-  ref = get_strike_reference(env, horizontal_detour_m=horizontal_detour_m)
+  """Reset event that samples one cached strike route per requested env."""
+  ref = get_strike_reference(
+    env,
+    horizontal_detour_m=horizontal_detour_m,
+    followthrough_mode=followthrough_mode,
+  )
   ref.reset(env_ids)
   ref.sample_route_signs(env_ids)
+
+
+def reset_joints_to_strike_route_starts(
+  env: "ManagerBasedRlEnv",
+  env_ids: torch.Tensor,
+  *,
+  route_joint_positions: tuple[tuple[float, ...], ...],
+  asset_cfg,
+) -> None:
+  """Write the cached R-/R0/R+ arm pose for each resetting environment.
+
+  The route sampler must run first in the same reset event sequence.  Keeping
+  sampling and state writing separate preserves the ordinary reset manager
+  ordering while making partial resets select only their already-cached rows.
+  """
+  ref = getattr(env, "_strike_reference", None)
+  if not isinstance(ref, SingleStrikeReference):
+    raise RuntimeError("strike route signs must be sampled before joint reset")
+
+  joint_ids = asset_cfg.joint_ids
+  poses = torch.as_tensor(
+    route_joint_positions,
+    dtype=torch.float32,
+    device=env.device,
+  )
+  expected_shape = (3, len(joint_ids))
+  if poses.shape != expected_shape or not bool(torch.isfinite(poses).all()):
+    raise ValueError(
+      "route_joint_positions must be a finite "
+      f"{expected_shape} R-/R0/R+ table"
+    )
+
+  signs = ref.route_signs()[env_ids].to(dtype=torch.long)
+  valid = (signs >= -1) & (signs <= 1)
+  if not bool(valid.all()):
+    raise ValueError("cached strike route signs must lie in {-1, 0, +1}")
+  joint_pos = poses[signs + 1]
+  joint_vel = torch.zeros_like(joint_pos)
+  env.scene[asset_cfg.name].write_joint_state_to_sim(
+    joint_pos,
+    joint_vel,
+    joint_ids=joint_ids,
+    env_ids=env_ids,
+  )

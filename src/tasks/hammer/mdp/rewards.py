@@ -586,6 +586,7 @@ class ImitationPriorTerm(ManagerTermBase):
     nail_cfg: SceneEntityCfg = _DEFAULT_NAIL_CFG,
     sigma: float = 0.05,
     horizontal_detour_m: float = 0.0,
+    followthrough_mode: str = "vertical",
   ) -> torch.Tensor:
     """Returns shape (B,)."""
     robot: Entity = env.scene[robot_cfg.name]
@@ -595,7 +596,11 @@ class ImitationPriorTerm(ManagerTermBase):
     head_w = robot.data.site_pos_w[:, robot_cfg.site_ids].squeeze(1)
     nail_top_w = nail.data.site_pos_w[:, nail_cfg.site_ids].squeeze(1)
 
-    ref = get_strike_reference(env, horizontal_detour_m=horizontal_detour_m)
+    ref = get_strike_reference(
+      env,
+      horizontal_detour_m=horizontal_detour_m,
+      followthrough_mode=followthrough_mode,
+    )
     # PURE READ, CURRENT KINEMATICS (2026-07-14, R2-F1 fix): preview() computes
     # the instantaneous phase from the reward-time head but WRITES NOTHING —
     # the obs pass (strike_phase / strike_ref_error -> ref.update) remains the

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 import torch
 
 from src.tasks.hammer.mdp import references as reference_mdp
@@ -45,6 +46,61 @@ def test_reference_is_the_reset_head_to_follow_through_segment():
     midpoint = torch.tensor([[0.50, 0.00, 0.126]]).repeat(B, 1)
     assert torch.allclose(ref.waypoint(torch.full((B,), 0.5)), midpoint, atol=1e-6)
     assert torch.equal(ref.waypoint(torch.ones(B)), _target())
+
+
+def test_strike_axis_followthrough_is_one_straight_line_through_the_nail():
+    starts = torch.tensor(
+        [
+            [-0.03, 0.00, 0.14],
+            [0.00, 0.00, 0.15],
+            [0.03, 0.00, 0.14],
+        ]
+    )
+    nail = torch.tensor([[0.00, 0.00, 0.10]]).repeat(B, 1)
+    expected = torch.tensor(
+        [
+            [
+                [-0.03, 0.00, 0.14],
+                [-0.015, 0.00, 0.12],
+                [0.00, 0.00, 0.10],
+                [0.015, 0.00, 0.08],
+                [0.03, 0.00, 0.06],
+            ],
+            [
+                [0.00, 0.00, 0.15],
+                [0.00, 0.00, 0.125],
+                [0.00, 0.00, 0.10],
+                [0.00, 0.00, 0.075],
+                [0.00, 0.00, 0.05],
+            ],
+            [
+                [0.03, 0.00, 0.14],
+                [0.015, 0.00, 0.12],
+                [0.00, 0.00, 0.10],
+                [-0.015, 0.00, 0.08],
+                [-0.03, 0.00, 0.06],
+            ],
+        ]
+    )
+    ref = SingleStrikeReference(
+        B,
+        "cpu",
+        overshoot=0.05,
+        followthrough_mode="strike_axis",
+    )
+    ref.update(starts, nail, _steps(0))
+
+    phases = (0.0, 0.25, 0.5, 0.75, 1.0)
+    for index, phase in enumerate(phases):
+        waypoint = ref.waypoint(torch.full((B,), phase))
+        torch.testing.assert_close(waypoint, expected[:, index], rtol=0.0, atol=1e-7)
+    for env_id in range(B):
+        torch.testing.assert_close(
+            ref.reference_polyline(env_id=env_id, num_points=5),
+            expected[env_id],
+            rtol=0.0,
+            atol=1e-7,
+        )
 
 
 def test_waypoints_never_rise_above_the_frozen_reset_head():
@@ -209,6 +265,48 @@ def test_zero_horizontal_amplitude_is_bit_identical_to_direct_reference():
         assert torch.equal(routed.playback_target(step), direct.playback_target(step))
 
 
+def test_reference_polyline_samples_the_commanded_route_without_mutating_state():
+    ref = _ref(horizontal_detour_m=0.020)
+    ref.update(HEAD0, NAIL, _steps(0))
+    ref.set_route_signs(torch.tensor([-1, 0, 1]))
+    state_before = {
+        "head0": ref._head0.clone(),
+        "target": ref._target.clone(),
+        "phi": ref._phi.clone(),
+        "anchored": ref._anchored.clone(),
+        "route_sign": ref._route_sign.clone(),
+    }
+
+    path = ref.reference_polyline(env_id=2, num_points=5)
+
+    assert path.shape == (5, 3)
+    assert torch.equal(path[0], HEAD0[2])
+    assert torch.equal(path[-1], _target()[2])
+    assert path[1, 0] == pytest.approx(float(HEAD0[2, 0] + 0.020))
+    assert torch.equal(ref._head0, state_before["head0"])
+    assert torch.equal(ref._target, state_before["target"])
+    assert torch.equal(ref._phi, state_before["phi"])
+    assert torch.equal(ref._anchored, state_before["anchored"])
+    assert torch.equal(ref._route_sign, state_before["route_sign"])
+
+
+def test_reference_polyline_uses_the_new_live_anchor_after_reset():
+    ref = _ref()
+    ref.update(HEAD0, NAIL, _steps(0))
+    first = ref.reference_polyline(env_id=0, num_points=3)
+
+    shifted_head = HEAD0.clone()
+    shifted_nail = NAIL.clone()
+    shifted_head[0, 1] += 0.04
+    shifted_nail[0, 1] += 0.04
+    ref.reset(torch.tensor([0]))
+    ref.update(shifted_head, shifted_nail, torch.tensor([0, 1, 1]))
+    second = ref.reference_polyline(env_id=0, num_points=3)
+
+    assert torch.equal(first[:, 1], torch.zeros(3))
+    assert torch.equal(second[:, 1], torch.full((3,), 0.04))
+
+
 _ROBOT_CFG = SimpleNamespace(name="robot", site_ids=[0])
 _NAIL_CFG = SimpleNamespace(name="nail_block", site_ids=[0])
 
@@ -263,3 +361,56 @@ def test_reset_event_samples_only_requested_envs_and_signs_stay_episode_stable()
     resampled = ref.route_signs()
     assert torch.equal(resampled[[0, 2]], sampled[[0, 2]])
     assert torch.equal(resampled, torch.tensor([-1, 0, -1], dtype=torch.int8))
+
+
+def test_route_start_reset_writes_the_joint_pose_selected_by_cached_sign():
+    class RecordingRobot:
+        def __init__(self):
+            self.calls = []
+
+        def write_joint_state_to_sim(
+            self, joint_pos, joint_vel, *, joint_ids, env_ids
+        ):
+            self.calls.append(
+                (
+                    joint_pos.clone(),
+                    joint_vel.clone(),
+                    tuple(joint_ids),
+                    env_ids.clone(),
+                )
+            )
+
+    ref = SingleStrikeReference(B, "cpu", followthrough_mode="strike_axis")
+    ref.set_route_signs(torch.tensor([-1, 0, 1]))
+    robot = RecordingRobot()
+    env = SimpleNamespace(
+        num_envs=B,
+        device="cpu",
+        scene={"robot": robot},
+        _strike_reference=ref,
+    )
+    asset_cfg = SimpleNamespace(name="robot", joint_ids=list(range(6)))
+    route_joint_positions = (
+        (0.0, 1.1, -0.1, -1.0, 0.0, 1.5),
+        (0.0, 1.2, -0.2, -1.0, 0.0, 1.5),
+        (0.0, 1.3, -0.3, -1.0, 0.0, 1.5),
+    )
+
+    reference_mdp.reset_joints_to_strike_route_starts(
+        env,
+        torch.tensor([0, 2]),
+        route_joint_positions=route_joint_positions,
+        asset_cfg=asset_cfg,
+    )
+
+    assert len(robot.calls) == 1
+    joint_pos, joint_vel, joint_ids, env_ids = robot.calls[0]
+    torch.testing.assert_close(
+        joint_pos,
+        torch.tensor([route_joint_positions[0], route_joint_positions[2]]),
+        rtol=0.0,
+        atol=0.0,
+    )
+    assert torch.count_nonzero(joint_vel) == 0
+    assert joint_ids == tuple(range(6))
+    assert torch.equal(env_ids, torch.tensor([0, 2]))

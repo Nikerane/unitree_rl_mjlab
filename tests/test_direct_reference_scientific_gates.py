@@ -263,6 +263,20 @@ def test_direct_reference_provenance_rejects_nonzero_horizontal_default(
         lambda_feasibility._reference_controller_spec()
 
 
+def test_direct_reference_provenance_rejects_nonhistorical_followthrough_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.tasks.hammer.mdp.references import SingleStrikeReference
+
+    keyword_defaults = dict(SingleStrikeReference.__init__.__kwdefaults__ or {})
+    keyword_defaults["followthrough_mode"] = "strike_axis"
+    monkeypatch.setattr(
+        SingleStrikeReference.__init__, "__kwdefaults__", keyword_defaults
+    )
+    with pytest.raises(RuntimeError, match="followthrough_mode.*vertical"):
+        lambda_feasibility._reference_controller_spec()
+
+
 def test_playback_verdict_explicitly_defers_full_rate_certification(
     playback_script: ModuleType,
 ) -> None:

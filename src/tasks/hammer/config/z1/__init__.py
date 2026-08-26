@@ -11,7 +11,10 @@ from src.tasks.hammer.config.z1.env_cfgs import (
 )
 from src.tasks.hammer.config.z1.joint_position_contract import JOINT_NAMES
 from src.tasks.hammer.mdp.rewards import FirstStrikeBoundedImpactRewardTerm
-from src.tasks.hammer.mdp.references import sample_strike_route_signs
+from src.tasks.hammer.mdp.references import (
+    reset_joints_to_strike_route_starts,
+    sample_strike_route_signs,
+)
 from src.tasks.hammer.mdp.trackability import joint_trackability_cost
 from src.tasks.hammer.config.z1.rl_cfg import z1_hammer_ppo_runner_cfg
 from src.tasks.hammer.rl.runner import HammerOnPolicyRunner
@@ -392,6 +395,16 @@ _HORIZONTAL_ROUTE_IMPULSE_CAPS = [
     0.0164,
 ]
 
+# Full-pose IK on the qualified L6 hammer model (2026-08-26), ordered R-/R0/R+.
+# The side rows realize world-X offsets -/+20 mm while preserving nominal
+# hammer orientation (worst double-precision deviation 2.1e-6 degrees), keep
+# every joint at least 0.3198 rad from its limit, and have no reset contact.
+_DIAGONAL_START_JOINT_POSITIONS_RAD = (
+    (0.0, 1.549360913, -0.372460482, -1.198600431, -0.0013, 1.5544),
+    (0.0, 1.606, -0.4301, -1.1976, -0.0013, 1.5544),
+    (0.0, 1.658994499, -0.491428010, -1.189266489, -0.0013, 1.5544),
+)
+
 
 def _horizontal_routes_variable_impedance_env_cfg(
     *, play: bool, persistent_imitation: bool
@@ -424,6 +437,47 @@ def _horizontal_routes_variable_impedance_env_cfg(
     return cfg
 
 
+def _diagonal_starts_variable_impedance_env_cfg(*, play: bool):
+    """Build the physical R-/R0/R+ start diagnostic with straight guides."""
+    cfg = _direct_reference_joint_position_variable_impedance_env_cfg(play=play)
+    ordered_events = {}
+    for name, event in cfg.events.items():
+        ordered_events[name] = event
+        if name == "reset_robot_joints":
+            ordered_events["reset_strike_route_joints"] = EventTermCfg(
+                func=reset_joints_to_strike_route_starts,
+                mode="reset",
+                params={
+                    "route_joint_positions": _DIAGONAL_START_JOINT_POSITIONS_RAD,
+                    "asset_cfg": SceneEntityCfg(
+                        "robot", joint_names=JOINT_NAMES
+                    ),
+                },
+            )
+    cfg.events = {
+        "sample_strike_route_signs": EventTermCfg(
+            func=sample_strike_route_signs,
+            mode="reset",
+            params={
+                "horizontal_detour_m": 0.0,
+                "followthrough_mode": "strike_axis",
+            },
+        ),
+        **ordered_events,
+    }
+    for group in cfg.observations.values():
+        for term_name in ("strike_phase", "strike_ref_error"):
+            group.terms[term_name].params["followthrough_mode"] = "strike_axis"
+    cfg.rewards["r_imit"].params["followthrough_mode"] = "strike_axis"
+    cfg.rewards["r_imit"].weight = 0.2
+    cfg.curriculum.pop("r_imit_anneal", None)
+    cfg.metrics["cat_soft"].params["imp_limit"] = list(
+        _HORIZONTAL_ROUTE_IMPULSE_CAPS
+    )
+    cfg.metrics["cat_soft"].params["imp_max_p"] = 0.2
+    return cfg
+
+
 register_mjlab_task(
     task_id=(
         "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
@@ -431,6 +485,17 @@ register_mjlab_task(
     ),
     env_cfg=_joint_position_fixed_env_cfg(play=False, trackability=False),
     play_env_cfg=_joint_position_fixed_env_cfg(play=True, trackability=False),
+    rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+    runner_cls=HammerOnPolicyRunner,
+)
+
+register_mjlab_task(
+    task_id=(
+        "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-"
+        "JointPosition-VariableImpedance-TT-DiagonalStarts-Persistent"
+    ),
+    env_cfg=_diagonal_starts_variable_impedance_env_cfg(play=False),
+    play_env_cfg=_diagonal_starts_variable_impedance_env_cfg(play=True),
     rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
     runner_cls=HammerOnPolicyRunner,
 )

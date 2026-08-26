@@ -32,6 +32,7 @@ from src.tasks.hammer.config.z1.joint_position_contract import (
 from src.tasks.hammer.mdp.trackability import joint_trackability_cost
 from src.tasks.hammer.mdp.rewards import ImitationPriorTerm, action_rate_penalty
 from src.tasks.hammer.mdp.references import sample_strike_route_signs
+from src.tasks.hammer.mdp.references import reset_joints_to_strike_route_starts
 from src.tasks.hammer.mdp.variable_impedance import (
     JointStiffnessActionCfg,
     expand_variable_impedance_model_fields,
@@ -55,6 +56,7 @@ VIC_TT_TASK = (
 )
 HORIZONTAL_ANNEALED_TASK = f"{VIC_TT_TASK}-HorizontalRoutes-Annealed"
 HORIZONTAL_PERSISTENT_TASK = f"{VIC_TT_TASK}-HorizontalRoutes-Persistent"
+DIAGONAL_PERSISTENT_TASK = f"{VIC_TT_TASK}-DiagonalStarts-Persistent"
 JOINT_POLICY_TASKS = frozenset(
     (
         FIC0_TASK,
@@ -64,6 +66,7 @@ JOINT_POLICY_TASKS = frozenset(
         VIC_TT_TASK,
         HORIZONTAL_ANNEALED_TASK,
         HORIZONTAL_PERSISTENT_TASK,
+        DIAGONAL_PERSISTENT_TASK,
     )
 )
 FIC_CONTROLLED_DROP_I_REF_N_S = 0.2799950838088989
@@ -399,6 +402,123 @@ def test_horizontal_routes_do_not_retrofit_the_historical_victt_registration() -
         1.64,
         1.64,
     )
+
+
+@pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
+def test_diagonal_start_task_uses_real_route_poses_and_strike_axis_reference(
+    play: bool,
+) -> None:
+    assert DIAGONAL_PERSISTENT_TASK in set(list_tasks())
+    cfg = load_env_cfg(DIAGONAL_PERSISTENT_TASK, play=play)
+
+    event_names = tuple(cfg.events)
+    assert event_names[:4] == (
+        "sample_strike_route_signs",
+        "reset_robot_joints",
+        "reset_strike_route_joints",
+        "reset_nail",
+    )
+    sampler = cfg.events["sample_strike_route_signs"]
+    assert sampler.func is sample_strike_route_signs
+    assert sampler.params == {
+        "horizontal_detour_m": 0.0,
+        "followthrough_mode": "strike_axis",
+    }
+    route_reset = cfg.events["reset_strike_route_joints"]
+    assert route_reset.func is reset_joints_to_strike_route_starts
+    assert route_reset.params["asset_cfg"].joint_names == JOINT_NAMES
+    expected_poses = (
+        (0.0, 1.549360913, -0.372460482, -1.198600431, -0.0013, 1.5544),
+        (0.0, 1.606, -0.4301, -1.1976, -0.0013, 1.5544),
+        (0.0, 1.658994499, -0.491428010, -1.189266489, -0.0013, 1.5544),
+    )
+    assert route_reset.params["route_joint_positions"] == expected_poses
+
+    for group_name in ("actor", "critic"):
+        for term_name in ("strike_phase", "strike_ref_error"):
+            term = cfg.observations[group_name].terms[term_name]
+            assert term.params["followthrough_mode"] == "strike_axis"
+            assert term.params.get("horizontal_detour_m", 0.0) == 0.0
+    assert cfg.rewards["r_imit"].params["followthrough_mode"] == "strike_axis"
+    assert cfg.rewards["r_imit"].params.get("horizontal_detour_m", 0.0) == 0.0
+    assert cfg.rewards["r_imit"].weight == pytest.approx(0.2)
+    assert "r_imit_anneal" not in cfg.curriculum
+    assert cfg.metrics["cat_soft"].params["imp_max_p"] == pytest.approx(0.2)
+    assert tuple(cfg.metrics["cat_soft"].params["imp_limit"]) == (
+        0.369,
+        0.246,
+        0.738,
+        0.369,
+        0.246,
+        0.0164,
+    )
+    assert _canonicalize(load_rl_cfg(DIAGONAL_PERSISTENT_TASK)) == _canonicalize(
+        load_rl_cfg(VIC_TT_TASK)
+    )
+
+
+@pytest.mark.integration
+def test_diagonal_start_live_reset_anchors_each_straight_guide_to_its_real_pose():
+    from mjlab.envs import ManagerBasedRlEnv
+    from src.assets.robots.unitree_z1.z1_constants import HAMMER_HEAD_SITE_NAME
+    import warp as wp
+
+    cfg = load_env_cfg(DIAGONAL_PERSISTENT_TASK, play=True)
+    cfg.scene.num_envs = 24
+    env = ManagerBasedRlEnv(cfg, device="cpu")
+    try:
+        env.reset(seed=20260826)
+        ref = env._strike_reference
+        signs = ref.route_signs().to(torch.long)
+        assert set(signs.tolist()) == {-1, 0, 1}
+
+        robot = env.scene["robot"]
+        head_ids, _ = robot.find_sites((HAMMER_HEAD_SITE_NAME,))
+        head = robot.data.site_pos_w[:, head_ids].squeeze(1)
+        expected_x = 0.500001967 + signs.to(head.dtype) * 0.020
+        torch.testing.assert_close(head[:, 0], expected_x, rtol=0.0, atol=2e-6)
+        torch.testing.assert_close(
+            head[:, 1],
+            torch.full_like(head[:, 1], -0.000482925),
+            rtol=0.0,
+            atol=2e-6,
+        )
+        torch.testing.assert_close(
+            head[:, 2],
+            torch.full_like(head[:, 2], 0.250002325),
+            rtol=0.0,
+            atol=2e-6,
+        )
+        assert not bool((env.scene["hammer_nail_contact"].data.found > 0).any())
+        assert int(wp.to_torch(env.sim.wp_data.nacon)[0]) == 0
+
+        head_quat = robot.data.site_quat_w[:, head_ids].squeeze(1)
+        center_quat = head_quat[signs == 0][0]
+        cosine = torch.abs(head_quat @ center_quat).clamp(max=1.0)
+        orientation_error = 2.0 * torch.acos(cosine)
+        assert float(orientation_error.max()) < 1e-4
+
+        position_term = env.action_manager.get_term("joint_position")
+        joint_ids = position_term.target_ids
+        joint_pos = robot.data.joint_pos[:, joint_ids]
+        limits = robot.data.joint_pos_limits[:, joint_ids]
+        margin = torch.minimum(joint_pos - limits[..., 0], limits[..., 1] - joint_pos)
+        assert float(margin.min()) > 0.319
+
+        nail = env.scene["nail_block"]
+        nail_ids, _ = nail.find_sites(("nail_top",))
+        nail_top = nail.data.site_pos_w[:, nail_ids].squeeze(1)
+        for env_id in range(env.num_envs):
+            path = ref.reference_polyline(env_id=env_id, num_points=9)
+            torch.testing.assert_close(path[0], head[env_id], rtol=0.0, atol=0.0)
+            axis = path[-1] - path[0]
+            nail_delta = nail_top[env_id] - path[0]
+            fraction = torch.dot(nail_delta, axis) / torch.dot(axis, axis)
+            residual = nail_delta - fraction * axis
+            assert 0.0 < float(fraction) < 1.0
+            assert float(residual.norm()) < 1e-6
+    finally:
+        env.close()
 
 
 @pytest.mark.integration
