@@ -89,6 +89,10 @@ class JointStiffnessActionCfg:
     self.joint_names = ("joint1", "joint2", "joint3", "joint4", "joint5", "joint6")
     self.C = 1.25
 JointStiffnessActionCfg.__module__ = "src.tasks.hammer.mdp.variable_impedance"
+class UniformNoiseCfg:
+  def __init__(self, n_min, n_max):
+    self.operation = "add"; self.n_min = n_min; self.n_max = n_max
+UniformNoiseCfg.__module__ = "mjlab.utils.noise.noise_cfg"
 ROWS = {ROWS!r}
 def diagonal40_cfg(task):
   if task != {TASK!r}: raise RuntimeError("wrong task")
@@ -110,20 +114,36 @@ def diagonal40_cfg(task):
     "expand_variable_impedance_model_fields": Term(func=expand_variable_impedance_model_fields, mode="startup", params={{}}),
   }}
   asset = lambda name, joints=None, sites=None: {{"name": name, "joint_names": joints, "site_names": sites, "preserve_order": False}}
+  def observation_term(func, params=None, noise=None):
+    result = Term(func=func, params=params)
+    result.noise = noise; result.clip = None; result.scale = None
+    result.delay_min_lag = 0; result.delay_max_lag = 0; result.delay_per_env = True
+    result.delay_hold_prob = 0.0; result.delay_update_period = 0; result.delay_per_env_phase = True
+    result.history_length = 0; result.flatten_history_dim = True
+    return result
+  n = UniformNoiseCfg
   terms = {{
-    "joint_pos": Term(func=joint_pos_rel), "joint_vel": Term(func=joint_vel_rel),
-    "ee_pos": Term(func=ee_pos_b, params={{"asset_cfg": asset("robot", sites=["ee_center_site"])}}),
-    "ee_vel": Term(func=ee_vel_b, params={{"asset_cfg": asset("robot", sites=["ee_center_site"])}}),
-    "head_pos": Term(func=hammer_head_pos_b, params={{"asset_cfg": asset("robot", sites=["hammer_head_site"])}}),
-    "head_vel": Term(func=hammer_head_vel_b, params={{"asset_cfg": asset("robot", sites=["hammer_head_site"])}}),
-    "nail_top_pos": Term(func=nail_top_pos_w, params={{"asset_cfg": asset("nail_block", sites=["nail_top"])}}),
-    "nail_depth": Term(func=nail_depth, params={{"asset_cfg": asset("nail_block", joints=["nail_slide"])}}),
-    "strike_phase": Term(func=strike_phase, params={{"robot_cfg": asset("robot", sites=["hammer_head_site"]), "nail_cfg": asset("nail_block", sites=["nail_top"]), "followthrough_mode": "strike_axis"}}),
-    "strike_ref_error": Term(func=strike_ref_error, params={{"robot_cfg": asset("robot", sites=["hammer_head_site"]), "nail_cfg": asset("nail_block", sites=["nail_top"]), "followthrough_mode": "strike_axis"}}),
-    "actions": Term(func=last_action, params={{"action_name": "joint_position"}}),
+    "joint_pos": observation_term(joint_pos_rel, noise=n(-0.01, 0.01)), "joint_vel": observation_term(joint_vel_rel, noise=n(-1.5, 1.5)),
+    "ee_pos": observation_term(ee_pos_b, {{"asset_cfg": asset("robot", sites=["ee_center_site"])}}, n(-0.005, 0.005)),
+    "ee_vel": observation_term(ee_vel_b, {{"asset_cfg": asset("robot", sites=["ee_center_site"])}}, n(-0.01, 0.01)),
+    "head_pos": observation_term(hammer_head_pos_b, {{"asset_cfg": asset("robot", sites=["hammer_head_site"])}}, n(-0.005, 0.005)),
+    "head_vel": observation_term(hammer_head_vel_b, {{"asset_cfg": asset("robot", sites=["hammer_head_site"])}}, n(-0.01, 0.01)),
+    "nail_top_pos": observation_term(nail_top_pos_w, {{"asset_cfg": asset("nail_block", sites=["nail_top"])}}, n(-0.002, 0.002)),
+    "nail_depth": observation_term(nail_depth, {{"asset_cfg": asset("nail_block", joints=["nail_slide"])}}, n(-0.001, 0.001)),
+    "strike_phase": observation_term(strike_phase, {{"robot_cfg": asset("robot", sites=["hammer_head_site"]), "nail_cfg": asset("nail_block", sites=["nail_top"]), "followthrough_mode": "strike_axis"}}),
+    "strike_ref_error": observation_term(strike_ref_error, {{"robot_cfg": asset("robot", sites=["hammer_head_site"]), "nail_cfg": asset("nail_block", sites=["nail_top"]), "followthrough_mode": "strike_axis"}}),
+    "actions": observation_term(last_action, {{"action_name": "joint_position"}}),
   }}
   if mode == "observation_function": terms["strike_phase"].func = lambda: None
-  cfg.observations = {{"actor": Group(terms.copy()), "critic": Group(terms.copy())}}
+  actor, critic = Group(terms.copy()), Group(terms.copy())
+  for group, corrupt in ((actor, True), (critic, False)):
+    group.concatenate_terms = True; group.concatenate_dim = -1; group.enable_corruption = corrupt
+    group.history_length = None; group.flatten_history_dim = True
+    group.nan_policy = "disabled"; group.nan_check_per_term = True
+  if mode == "observation_order": actor.terms = dict(reversed(tuple(actor.terms.items())))
+  if mode == "observation_noise": actor.terms["joint_pos"].noise.n_max = 0.02
+  if mode == "observation_corruption": actor.enable_corruption = False
+  cfg.observations = {{"actor": actor, "critic": critic}}
   cfg.rewards = {{"r_imit": Term(func=ImitationPriorTerm, weight=0.2, params={{"sensor_name": "hammer_nail_contact", "robot_cfg": asset("robot", sites=["hammer_head_site"]), "nail_cfg": asset("nail_block", sites=["nail_top"]), "sigma": 0.05, "followthrough_mode": "strike_axis"}}), "delivered_impulse": Term(weight=4.0), "impact_progress": Term(weight=8.0)}}
   if mode == "imitation_reference": cfg.rewards["r_imit"].params["followthrough_mode"] = "vertical"
   if mode == "imitation_detour": cfg.rewards["r_imit"].params["horizontal_detour_m"] = 0.02
@@ -199,14 +219,18 @@ def test_diagonal40_launcher_runs_only_the_frozen_treatment(
   assert identity["action_configs"]["joint_stiffness"]["params"]["C"] == 1.25
   assert identity["imitation_reference"]["function"] == "src.tasks.hammer.mdp.rewards.ImitationPriorTerm"
   assert identity["imitation_reference"]["params"]["followthrough_mode"] == "strike_axis"
-  assert identity["observations"]["actor"]["strike_phase"] == {
-    "function": "src.tasks.hammer.mdp.observations.strike_phase",
-    "params": {
-      "followthrough_mode": "strike_axis",
-      "nail_cfg": {"joint_names": None, "name": "nail_block", "preserve_order": False, "site_names": ["nail_top"]},
-      "robot_cfg": {"joint_names": None, "name": "robot", "preserve_order": False, "site_names": ["hammer_head_site"]},
-    },
+  actor_observations = identity["observations"]["actor"]
+  assert [term["name"] for term in actor_observations["terms"]] == [
+    "joint_pos", "joint_vel", "ee_pos", "ee_vel", "head_pos", "head_vel",
+    "nail_top_pos", "nail_depth", "strike_phase", "strike_ref_error", "actions",
+  ]
+  assert actor_observations["settings"]["enable_corruption"] is True
+  assert identity["observations"]["critic"]["settings"]["enable_corruption"] is False
+  assert actor_observations["terms"][0]["noise"] == {
+    "class": "mjlab.utils.noise.noise_cfg.UniformNoiseCfg",
+    "params": {"n_max": 0.01, "n_min": -0.01, "operation": "add"},
   }
+  assert actor_observations["terms"][8]["function"] == "src.tasks.hammer.mdp.observations.strike_phase"
   assert identity["schedule"] == {"r_imit_weight": 0.2, "r_imit_sigma": 0.05, "r_imit_anneal": None}
   assert re.search(r" identity_sha256=[0-9a-f]{64} serialized=", config_line)
   assert (Path(env["HOME"]) / "preflight-loads").read_text().splitlines() == [TASK, TASK]
@@ -276,7 +300,7 @@ def test_diagonal40_launcher_rejects_args_provenance_and_collision(tmp_path: Pat
   assert _run(monkeypatch, env).returncode == 2
 
 
-@pytest.mark.parametrize("mode", ("pose_rows", "impulse_caps", "velocity_disabled", "missing_identity_field", "repeated_drift", "imitation_reference", "imitation_detour", "observation_function", "action_config"))
+@pytest.mark.parametrize("mode", ("pose_rows", "impulse_caps", "velocity_disabled", "missing_identity_field", "repeated_drift", "imitation_reference", "imitation_detour", "observation_function", "observation_order", "observation_noise", "observation_corruption", "action_config"))
 def test_diagonal40_launcher_rejects_config_identity_drift(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str) -> None:
   env = _env(tmp_path)
   env["PREFLIGHT_MODE"] = mode
