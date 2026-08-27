@@ -449,9 +449,14 @@ def _horizontal_routes_variable_impedance_env_cfg(
 
 
 def _diagonal_starts_variable_impedance_env_cfg(
-    *, play: bool, route_joint_positions: tuple[tuple[float, ...], ...]
+    *,
+    play: bool,
+    route_joint_positions: tuple[tuple[float, ...], ...],
+    fixed_route_sign: int | None = None,
 ):
     """Build the physical R-/R0/R+ start diagnostic with straight guides."""
+    if fixed_route_sign is not None and fixed_route_sign not in (-1, 0, 1):
+        raise ValueError("fixed_route_sign must be one of {-1, 0, +1}")
     cfg = _direct_reference_joint_position_variable_impedance_env_cfg(play=play)
     ordered_events = {}
     for name, event in cfg.events.items():
@@ -467,14 +472,17 @@ def _diagonal_starts_variable_impedance_env_cfg(
                     ),
                 },
             )
+    sampler_params = {
+        "horizontal_detour_m": 0.0,
+        "followthrough_mode": "strike_axis",
+    }
+    if fixed_route_sign is not None:
+        sampler_params["fixed_route_sign"] = fixed_route_sign
     cfg.events = {
         "sample_strike_route_signs": EventTermCfg(
             func=sample_strike_route_signs,
             mode="reset",
-            params={
-                "horizontal_detour_m": 0.0,
-                "followthrough_mode": "strike_axis",
-            },
+            params=sampler_params,
         ),
         **ordered_events,
     }
@@ -501,6 +509,33 @@ register_mjlab_task(
     rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
     runner_cls=HammerOnPolicyRunner,
 )
+
+for _suffix, _route_joint_positions, _fixed_route_sign in (
+    ("M40mm", _DIAGONAL_STARTS_40MM_JOINT_POSITIONS_RAD, -1),
+    ("M20mm", _DIAGONAL_START_JOINT_POSITIONS_RAD, -1),
+    ("0mm", _DIAGONAL_STARTS_40MM_JOINT_POSITIONS_RAD, 0),
+    ("P20mm", _DIAGONAL_START_JOINT_POSITIONS_RAD, 1),
+    ("P40mm", _DIAGONAL_STARTS_40MM_JOINT_POSITIONS_RAD, 1),
+):
+    register_mjlab_task(
+        task_id=(
+            "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-"
+            "JointPosition-VariableImpedance-TT-DiagonalFixedStart"
+            f"{_suffix}-Persistent"
+        ),
+        env_cfg=_diagonal_starts_variable_impedance_env_cfg(
+            play=False,
+            route_joint_positions=_route_joint_positions,
+            fixed_route_sign=_fixed_route_sign,
+        ),
+        play_env_cfg=_diagonal_starts_variable_impedance_env_cfg(
+            play=True,
+            route_joint_positions=_route_joint_positions,
+            fixed_route_sign=_fixed_route_sign,
+        ),
+        rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+        runner_cls=HammerOnPolicyRunner,
+    )
 
 register_mjlab_task(
     task_id=(

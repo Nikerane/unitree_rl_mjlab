@@ -59,6 +59,13 @@ HORIZONTAL_ANNEALED_TASK = f"{VIC_TT_TASK}-HorizontalRoutes-Annealed"
 HORIZONTAL_PERSISTENT_TASK = f"{VIC_TT_TASK}-HorizontalRoutes-Persistent"
 DIAGONAL_PERSISTENT_TASK = f"{VIC_TT_TASK}-DiagonalStarts-Persistent"
 DIAGONAL_40MM_PERSISTENT_TASK = f"{VIC_TT_TASK}-DiagonalStarts40mm-Persistent"
+DIAGONAL_FIXED_START_TASKS = {
+    -40: f"{VIC_TT_TASK}-DiagonalFixedStartM40mm-Persistent",
+    -20: f"{VIC_TT_TASK}-DiagonalFixedStartM20mm-Persistent",
+    0: f"{VIC_TT_TASK}-DiagonalFixedStart0mm-Persistent",
+    20: f"{VIC_TT_TASK}-DiagonalFixedStartP20mm-Persistent",
+    40: f"{VIC_TT_TASK}-DiagonalFixedStartP40mm-Persistent",
+}
 JOINT_POLICY_TASKS = frozenset(
     (
         FIC0_TASK,
@@ -70,6 +77,7 @@ JOINT_POLICY_TASKS = frozenset(
         HORIZONTAL_PERSISTENT_TASK,
         DIAGONAL_PERSISTENT_TASK,
         DIAGONAL_40MM_PERSISTENT_TASK,
+        *DIAGONAL_FIXED_START_TASKS.values(),
     )
 )
 FIC_CONTROLLED_DROP_I_REF_N_S = 0.2799950838088989
@@ -77,6 +85,11 @@ DIAGONAL_STARTS_40MM = (
     (0.0, 1.487947605122, -0.319221074008, -1.190426531114, -0.0013, 1.5544),
     (0.0, 1.606, -0.4301, -1.1976, -0.0013, 1.5544),
     (0.0, 1.709237021603, -0.555950051788, -1.174986969814, -0.0013, 1.5544),
+)
+DIAGONAL_STARTS_20MM = (
+    (0.0, 1.549360913, -0.372460482, -1.198600431, -0.0013, 1.5544),
+    (0.0, 1.606, -0.4301, -1.1976, -0.0013, 1.5544),
+    (0.0, 1.658994499, -0.491428010, -1.189266489, -0.0013, 1.5544),
 )
 DIAGONAL_HOLD_ACTIONS = {
     -1: (0.0, -0.200828254223, 0.766565144062, 0.031350057572, 0.0, 0.0),
@@ -532,6 +545,58 @@ def test_diagonal_start_40mm_task_uses_qualified_poses_and_strike_axis_reference
     )
 
 
+@pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
+@pytest.mark.parametrize("offset_mm", (-40, -20, 0, 20, 40))
+def test_fixed_diagonal_specialists_freeze_one_start_and_keep_shared_action_mapping(
+    offset_mm: int,
+    play: bool,
+) -> None:
+    task_id = DIAGONAL_FIXED_START_TASKS[offset_mm]
+    assert task_id in set(list_tasks())
+    cfg = load_env_cfg(task_id, play=play)
+
+    route_table = (
+        DIAGONAL_STARTS_40MM if abs(offset_mm) in (0, 40) else DIAGONAL_STARTS_20MM
+    )
+    route_sign = 0 if offset_mm == 0 else (-1 if offset_mm < 0 else 1)
+    expected_pose = route_table[route_sign + 1]
+
+    sampler = cfg.events["sample_strike_route_signs"]
+    assert sampler.func is sample_strike_route_signs
+    assert sampler.params == {
+        "horizontal_detour_m": 0.0,
+        "followthrough_mode": "strike_axis",
+        "fixed_route_sign": route_sign,
+    }
+    route_reset = cfg.events["reset_strike_route_joints"]
+    assert route_reset.func is reset_joints_to_strike_route_starts
+    assert route_reset.params["route_joint_positions"] == route_table
+
+    action = cfg.actions["joint_position"]
+    assert isinstance(action, JointPositionActionCfg)
+    assert action.use_default_offset is True
+    assert action.offset == 0.0
+    robot_init = cfg.scene.entities["robot"].init_state.joint_pos
+    assert tuple(robot_init[name] for name in JOINT_NAMES) == DIAGONAL_STARTS_20MM[1]
+    assert tuple(cfg.actions) == ("joint_position", "joint_stiffness")
+
+    assert cfg.rewards["r_imit"].weight == pytest.approx(0.2)
+    assert cfg.rewards["r_imit"].params["followthrough_mode"] == "strike_axis"
+    assert "r_imit_anneal" not in cfg.curriculum
+    assert cfg.metrics["cat_soft"].params["imp_max_p"] == pytest.approx(0.2)
+    assert tuple(cfg.metrics["cat_soft"].params["imp_limit"]) == (
+        0.369,
+        0.246,
+        0.738,
+        0.369,
+        0.246,
+        0.0164,
+    )
+    assert _canonicalize(load_rl_cfg(task_id)) == _canonicalize(
+        load_rl_cfg(VIC_TT_TASK)
+    )
+
+
 @pytest.mark.integration
 def test_diagonal_start_live_reset_anchors_each_straight_guide_to_its_real_pose():
     from mjlab.envs import ManagerBasedRlEnv
@@ -728,6 +793,66 @@ def test_diagonal_start_40mm_actual_action_holds_each_forced_reset_pose(sign: in
         assert int(wp.to_torch(env.sim.wp_data.nacon)[0]) == 0
         assert float((joint_after - joint_before).abs().max()) < 1e-6
         assert float((head_after - head_before).norm(dim=-1).max()) < 1e-6
+    finally:
+        env.close()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("offset_mm", (-40, -20, 0, 20, 40))
+def test_fixed_diagonal_specialist_keeps_the_shared_action_mapping(
+    offset_mm: int,
+) -> None:
+    """Only reset/reference changes; raw zero retains the common centre target."""
+    from mjlab.envs import ManagerBasedRlEnv
+    from src.assets.robots.unitree_z1.z1_constants import HAMMER_HEAD_SITE_NAME
+    import warp as wp
+
+    cfg = load_env_cfg(DIAGONAL_FIXED_START_TASKS[offset_mm], play=True)
+    cfg.scene.num_envs = 1
+    env = ManagerBasedRlEnv(cfg, device="cpu")
+    try:
+        env.reset(seed=20260827)
+        expected_sign = 0 if offset_mm == 0 else (-1 if offset_mm < 0 else 1)
+        assert env._strike_reference.route_signs().tolist() == [expected_sign]
+
+        robot = env.scene["robot"]
+        position_term = env.action_manager.get_term("joint_position")
+        joint_ids = position_term.target_ids
+        joint_before = robot.data.joint_pos[:, joint_ids].clone()
+        route_table = (
+            DIAGONAL_STARTS_40MM
+            if abs(offset_mm) in (0, 40)
+            else DIAGONAL_STARTS_20MM
+        )
+        expected_pose = torch.tensor(
+            route_table[expected_sign + 1], dtype=torch.float32, device=env.device
+        ).unsqueeze(0)
+        torch.testing.assert_close(joint_before, expected_pose, rtol=0.0, atol=1e-7)
+        head_ids, _ = robot.find_sites((HAMMER_HEAD_SITE_NAME,))
+        head_before = robot.data.site_pos_w[:, head_ids].squeeze(1).clone()
+        assert float(head_before[0, 0]) == pytest.approx(
+            0.500001967 + offset_mm / 1000.0,
+            abs=2e-6,
+        )
+
+        action = torch.zeros((1, 12), dtype=torch.float32, device=env.device)
+        env.action_manager.process_action(action)
+        env.action_manager.apply_action()
+        common_centre = torch.tensor(
+            DIAGONAL_STARTS_20MM[1], dtype=torch.float32, device=env.device
+        ).unsqueeze(0)
+        torch.testing.assert_close(
+            robot.data.joint_pos_target[:, joint_ids], common_centre, rtol=0.0, atol=1e-7
+        )
+
+        _, _, terminated, truncated, _ = env.step(action)
+        head_after = robot.data.site_pos_w[:, head_ids].squeeze(1)
+        assert not bool(terminated.any())
+        assert not bool(truncated.any())
+        assert not bool((env.scene["hammer_nail_contact"].data.found > 0).any())
+        assert int(wp.to_torch(env.sim.wp_data.nacon)[0]) == 0
+        assert bool(torch.isfinite(robot.data.joint_pos[:, joint_ids]).all())
+        assert bool(torch.isfinite(head_after).all())
     finally:
         env.close()
 

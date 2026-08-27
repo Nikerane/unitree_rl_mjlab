@@ -363,6 +363,41 @@ def test_reset_event_samples_only_requested_envs_and_signs_stay_episode_stable()
     assert torch.equal(resampled, torch.tensor([-1, 0, -1], dtype=torch.int8))
 
 
+@pytest.mark.parametrize("fixed_sign", (-1, 0, 1))
+def test_reset_event_can_fix_one_route_without_changing_rng_consumption(fixed_sign):
+    fixed_env = _stub_env()
+    fixed_ref = get_strike_reference(
+        fixed_env, horizontal_detour_m=0.0, followthrough_mode="strike_axis"
+    )
+    env_ids = torch.tensor([0, 2])
+
+    torch.manual_seed(20260827)
+    reference_mdp.sample_strike_route_signs(
+        fixed_env,
+        env_ids,
+        horizontal_detour_m=0.0,
+        followthrough_mode="strike_axis",
+        fixed_route_sign=fixed_sign,
+    )
+    fixed_next_draw = torch.randint(0, 2**16, (8,))
+
+    sampled_env = _stub_env()
+    torch.manual_seed(20260827)
+    reference_mdp.sample_strike_route_signs(
+        sampled_env,
+        env_ids,
+        horizontal_detour_m=0.0,
+        followthrough_mode="strike_axis",
+    )
+    sampled_next_draw = torch.randint(0, 2**16, (8,))
+
+    assert torch.equal(
+        fixed_ref.route_signs()[env_ids],
+        torch.full((2,), fixed_sign, dtype=torch.int8),
+    )
+    assert torch.equal(fixed_next_draw, sampled_next_draw)
+
+
 def test_route_start_reset_writes_the_joint_pose_selected_by_cached_sign():
     class RecordingRobot:
         def __init__(self):

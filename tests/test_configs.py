@@ -661,6 +661,11 @@ class TestCartesianGuidelineStudy:
             self._VIC_TT + "-HorizontalRoutes-Persistent",
             self._VIC_TT + "-DiagonalStarts-Persistent",
             self._VIC_TT + "-DiagonalStarts40mm-Persistent",
+            self._VIC_TT + "-DiagonalFixedStartM40mm-Persistent",
+            self._VIC_TT + "-DiagonalFixedStartM20mm-Persistent",
+            self._VIC_TT + "-DiagonalFixedStart0mm-Persistent",
+            self._VIC_TT + "-DiagonalFixedStartP20mm-Persistent",
+            self._VIC_TT + "-DiagonalFixedStartP40mm-Persistent",
         }
 
     @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))

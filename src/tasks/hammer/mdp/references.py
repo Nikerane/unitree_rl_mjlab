@@ -329,8 +329,16 @@ def sample_strike_route_signs(
   env_ids: torch.Tensor,
   horizontal_detour_m: float,
   followthrough_mode: Literal["vertical", "strike_axis"] = "vertical",
+  fixed_route_sign: int | None = None,
 ) -> None:
-  """Reset event that samples one cached strike route per requested env."""
+  """Reset event that samples one cached strike route per requested env.
+
+  A fixed specialist still consumes the ordinary route-sampler draw before its
+  selected sign is overwritten, keeping subsequent reset randomization matched
+  with the mixed-route treatments.
+  """
+  if fixed_route_sign is not None and fixed_route_sign not in (-1, 0, 1):
+    raise ValueError("fixed_route_sign must be one of {-1, 0, +1}")
   ref = get_strike_reference(
     env,
     horizontal_detour_m=horizontal_detour_m,
@@ -338,6 +346,10 @@ def sample_strike_route_signs(
   )
   ref.reset(env_ids)
   ref.sample_route_signs(env_ids)
+  if fixed_route_sign is not None:
+    signs = ref.route_signs()
+    signs[env_ids] = fixed_route_sign
+    ref.set_route_signs(signs)
 
 
 def reset_joints_to_strike_route_starts(
