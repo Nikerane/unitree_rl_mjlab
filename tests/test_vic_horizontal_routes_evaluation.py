@@ -147,6 +147,52 @@ def test_live_recorder_emits_exact_route_and_imitation_gate_telemetry():
     env.close()
 
 
+@pytest.mark.integration
+def test_live_recorder_emits_straight_fixed_start_reference_telemetry():
+  """The shared survey recorder must measure a zero-detour specialist verbatim."""
+  from mjlab.envs import ManagerBasedRlEnv
+  from mjlab.tasks.registry import load_env_cfg
+
+  import mjlab.tasks  # noqa: F401
+  import src.tasks  # noqa: F401
+
+  task = (
+    "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Track-Vel-Delivered4-"
+    "JointPosition-VariableImpedance-TT-DiagonalFixedStartM40mm-Persistent"
+  )
+  cfg = load_env_cfg(task, play=False)
+  cfg.scene.num_envs = 2
+  cfg.auto_reset = True
+  survey._prepare_survey_measurement_config(
+    cfg,
+    survey.PROVISIONAL_CAPS_N_M_S,
+    source_imp_max_p=0.2,
+    source_imp_limit_n_m_s=CAPS,
+  )
+  env = ManagerBasedRlEnv(cfg=cfg, device="cpu", render_mode=None)
+  try:
+    recorder = survey._LiveSurveyRecorder(env, route_telemetry=True)
+    env.reset(seed=20260827)
+    env.step(torch.zeros((2, 12), device=env.device))
+    trace = recorder.numpy_trace()
+
+    np.testing.assert_array_equal(trace["route_sign"], -1)
+    np.testing.assert_allclose(
+      trace["assigned_reference_waypoint_w"],
+      trace["straight_reference_waypoint_w"],
+      rtol=0.0,
+      atol=0.0,
+    )
+    assert trace["first_strike_started"].shape == (1, 2)
+    assert trace["first_strike_finalized"].shape == (1, 2)
+    assert trace["first_strike_precontact_nail_axial_velocity_m_s"].shape == (1, 2)
+    assert np.isfinite(
+      trace["first_strike_precontact_nail_axial_velocity_m_s"]
+    ).all()
+  finally:
+    env.close()
+
+
 def _route_trace(sign: int, head_x: tuple[float, float]) -> dict[str, np.ndarray]:
   steps, envs = 2, 2
   phase = np.full((steps, envs), 0.25, dtype=np.float32)

@@ -145,6 +145,36 @@ def _run_fake_population(*, stochastic, rng_seeds):
   )
 
 
+def test_population_can_record_reference_without_forcing_a_route(monkeypatch):
+  events = []
+  _install_fake_population_runtime(monkeypatch, events)
+  base_recorder = survey._LiveSurveyRecorder
+
+  class ReferenceRecorder(base_recorder):
+    def __init__(self, env, *, route_telemetry=False):
+      assert route_telemetry is True
+      super().__init__(env)
+
+  monkeypatch.setattr(survey, "_LiveSurveyRecorder", ReferenceRecorder)
+
+  _, protocol = survey._run_population(
+    checkpoint=Path("unused-model_499.pt"),
+    device="cpu",
+    num_envs=1,
+    seed=2,
+    rng_seeds=survey.EvaluationRngSeeds.from_evaluation_seed(2),
+    steps=1,
+    stochastic=False,
+    task_id="fixed-specialist",
+    route_telemetry=True,
+  )
+
+  assert protocol["task"] == "fixed-specialist"
+  assert protocol["route_telemetry"] is True
+  assert protocol["forced_route_sign"] is None
+  assert protocol["actor_only_checkpoint_load"] is True
+
+
 def test_evaluation_checkpoint_roles_are_exact_and_fail_closed(tmp_path, monkeypatch):
   checkpoint = tmp_path / "model_499.pt"
   checkpoint.write_bytes(b"control")

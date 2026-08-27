@@ -448,8 +448,11 @@ class _LiveSurveyRecorder:
     "timeout",
     "nail_depth_m",
     "delivered_total_n_s",
+    "first_strike_started",
+    "first_strike_finalized",
     "first_strike_productive",
     "first_strike_delivered_n_s",
+    "first_strike_precontact_nail_axial_velocity_m_s",
   )
   _TASK_JOINT_FIELDS = (
     "substep_peak_qv_per_joint",
@@ -564,6 +567,7 @@ class _LiveSurveyRecorder:
     self._route_imitation_term = None
     self._route_robot = None
     self._route_head_site_ids = None
+    self._route_detour_m = None
     if route_telemetry:
       from src.tasks.hammer.mdp.references import get_strike_reference
       from src.tasks.hammer.mdp.rewards import ImitationPriorTerm
@@ -572,9 +576,12 @@ class _LiveSurveyRecorder:
       imitation_term = imitation_cfg.func
       if type(imitation_term) is not ImitationPriorTerm:
         raise RuntimeError("route survey requires the exact live ImitationPriorTerm")
-      detour = imitation_cfg.params.get("horizontal_detour_m")
-      if detour != 0.020:
-        raise RuntimeError("route survey requires the frozen 0.020 m detour")
+      detour = float(imitation_cfg.params.get("horizontal_detour_m", 0.0))
+      followthrough_mode = imitation_cfg.params.get("followthrough_mode", "vertical")
+      if detour not in (0.0, 0.020):
+        raise RuntimeError("route survey detour must be 0.0 or the frozen 0.020 m")
+      if followthrough_mode not in ("vertical", "strike_axis"):
+        raise RuntimeError("route survey follow-through mode is invalid")
       robot_cfg = imitation_cfg.params.get("robot_cfg")
       site_ids = None if robot_cfg is None else robot_cfg.site_ids
       if site_ids is None or len(site_ids) != 1:
@@ -582,11 +589,14 @@ class _LiveSurveyRecorder:
       if imitation_term._contacted.shape != (env.num_envs,):
         raise RuntimeError("route survey imitation gate shape drift")
       self._route_reference = get_strike_reference(
-        env, horizontal_detour_m=float(detour)
+        env,
+        horizontal_detour_m=detour,
+        followthrough_mode=followthrough_mode,
       )
       self._route_imitation_term = imitation_term
       self._route_robot = env.scene[robot_cfg.name]
       self._route_head_site_ids = site_ids
+      self._route_detour_m = detour
       self._control.update(
         {name: [] for name in (*self._ROUTE_SCALAR_FIELDS, *self._ROUTE_VECTOR_FIELDS)}
       )
@@ -628,8 +638,13 @@ class _LiveSurveyRecorder:
         "timeout": env.reset_time_outs,
         "nail_depth_m": nail_depth.clamp(0.0, NAIL_GOAL_DEPTH),
         "delivered_total_n_s": self._delivered.delivered,
+        "first_strike_started": self._first_strike.started,
+        "first_strike_finalized": self._first_strike.finalized,
         "first_strike_productive": self._first_strike.productive,
         "first_strike_delivered_n_s": self._first_strike.delivered,
+        "first_strike_precontact_nail_axial_velocity_m_s": (
+          self._first_strike.v_precontact
+        ),
         "substep_peak_qv_per_joint": self._velocity.peak_qv_joint,
         "vic_p": stiffness.p,
         "vic_kp": stiffness.kp,
@@ -664,7 +679,7 @@ class _LiveSurveyRecorder:
         phase = self._route_reference.preview(head, env.episode_length_buf)
         signs = self._route_reference.route_signs()
         assigned = self._route_reference.waypoint(phase)
-        amplitude = 0.020 * torch.sin(2.0 * torch.pi * phase).square()
+        amplitude = self._route_detour_m * torch.sin(2.0 * torch.pi * phase).square()
         amplitude = torch.where(
           (phase > 0.0) & (phase < 0.5), amplitude, torch.zeros_like(amplitude)
         )
@@ -943,6 +958,7 @@ def _run_population(
   source_imp_max_p: float = 0.0,
   source_imp_limit_n_m_s: tuple[float, ...] = PROVISIONAL_CAPS_N_M_S,
   forced_route_sign: int | None = None,
+  route_telemetry: bool = False,
 ) -> tuple[dict[str, np.ndarray], dict[str, object]]:
   """Run a frozen policy without calling storage collection, an optimizer, or a learner update."""
   if rng_seeds != EvaluationRngSeeds.from_evaluation_seed(seed):
@@ -985,9 +1001,9 @@ def _run_population(
   torch.manual_seed(seed)
   env = ManagerBasedRlEnv(cfg=env_cfg, device=device, render_mode=None)
   recorder = (
-    _LiveSurveyRecorder(env)
-    if forced_route_sign is None
-    else _LiveSurveyRecorder(env, route_telemetry=True)
+    _LiveSurveyRecorder(env, route_telemetry=True)
+    if route_telemetry or forced_route_sign is not None
+    else _LiveSurveyRecorder(env)
   )
   wrapped = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
   try:
@@ -1062,11 +1078,12 @@ def _run_population(
       "rng_streams": asdict(rng_seeds),
       **measurement_protocol,
     }
-    if forced_route_sign is not None:
+    if route_telemetry or forced_route_sign is not None:
       metadata.update(
         {
           "task": task_id,
           "forced_route_sign": forced_route_sign,
+          "route_telemetry": True,
           "actor_only_checkpoint_load": True,
         }
       )
