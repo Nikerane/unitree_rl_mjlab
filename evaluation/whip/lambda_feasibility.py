@@ -2859,12 +2859,15 @@ def _reference_controller_spec() -> dict[str, object]:
         *parameter_names,
         horizontal_parameter,
         followthrough_parameter,
+        "path_shape",
     )
     if actual_names != expected_names:
         raise RuntimeError(
             "SingleStrikeReference constructor parameters drifted: "
             f"expected {expected_names}, got {actual_names}"
         )
+    if constructor.parameters["path_shape"].default != "straight":
+        raise RuntimeError("path_shape default must remain straight for banked provenance")
     horizontal_default = constructor.parameters[horizontal_parameter].default
     if horizontal_default != 0.0:
         raise RuntimeError(

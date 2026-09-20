@@ -78,6 +78,8 @@ def strike_phase(
   nail_cfg: SceneEntityCfg,
   horizontal_detour_m: float = 0.0,
   followthrough_mode: str = "vertical",
+  path_shape: str = "straight",
+  overshoot: float = 0.15,
 ) -> torch.Tensor:
   """Phase of the direct scripted single-strike reference. Shape: (B, 1).
 
@@ -92,6 +94,8 @@ def strike_phase(
     env,
     horizontal_detour_m=horizontal_detour_m,
     followthrough_mode=followthrough_mode,
+    path_shape=path_shape,
+    overshoot=overshoot,
   )
   phi = ref.update(head_w, nail_top_w, env.episode_length_buf)
   return phi.unsqueeze(-1)
@@ -103,6 +107,8 @@ def strike_ref_error(
   nail_cfg: SceneEntityCfg,
   horizontal_detour_m: float = 0.0,
   followthrough_mode: str = "vertical",
+  path_shape: str = "straight",
+  overshoot: float = 0.15,
 ) -> torch.Tensor:
   """Vector from the hammer head to the current direct-strike waypoint.
 
@@ -116,6 +122,8 @@ def strike_ref_error(
     env,
     horizontal_detour_m=horizontal_detour_m,
     followthrough_mode=followthrough_mode,
+    path_shape=path_shape,
+    overshoot=overshoot,
   )
   phi = ref.update(head_w, nail_top_w, env.episode_length_buf)
   return ref.waypoint(phi) - head_w

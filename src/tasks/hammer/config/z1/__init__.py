@@ -283,6 +283,22 @@ register_mjlab_task(
     runner_cls=HammerOnPolicyRunner,
 )
 
+def _quintic_pilot_env_cfg(*, play: bool):
+    """Single left-start quintic pilot; preserve the specialist control recipe."""
+    cfg = _diagonal_starts_variable_impedance_env_cfg(
+        play=play, route_joint_positions=_DIAGONAL_START_JOINT_POSITIONS_RAD,
+        fixed_route_sign=-1,
+    )
+    consumers = [cfg.events['sample_strike_route_signs'].params,
+                 cfg.rewards['r_imit'].params]
+    for group in cfg.observations.values():
+        consumers.extend(group.terms[name].params
+                         for name in ('strike_phase', 'strike_ref_error'))
+    for params in consumers:
+        params.update(path_shape='quintic', overshoot=.02, followthrough_mode='vertical')
+    return cfg
+
+
 register_mjlab_task(
     task_id=(
         "Unitree-Z1-Hammer-CaT-Impulse-Event-Linear-Guideline-"
@@ -773,6 +789,14 @@ register_mjlab_task(
     task_id="Unitree-Z1-Hammer-CaT-Impulse-NoTerm",
     env_cfg=z1_hammer_env_cfg(cat_impulse=True, no_terminate=True),
     play_env_cfg=z1_hammer_env_cfg(play=True, cat_impulse=True),
+    rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+    runner_cls=HammerOnPolicyRunner,
+)
+
+register_mjlab_task(
+    task_id='Unitree-Z1-Hammer-Quintic-M20-Pilot',
+    env_cfg=_quintic_pilot_env_cfg(play=False),
+    play_env_cfg=_quintic_pilot_env_cfg(play=True),
     rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
     runner_cls=HammerOnPolicyRunner,
 )

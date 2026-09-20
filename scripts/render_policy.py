@@ -286,7 +286,9 @@ def build_wave1_substep_trace(
 
 
 def _reference_polyline_m(reference, device: str) -> np.ndarray:
-  """Return the direct-reference analytical endpoints of the anchored segment."""
+  """Preserve curved guides; legacy straight guides need only two endpoints."""
+  if getattr(reference, 'path_shape', 'straight') == 'quintic':
+    return reference.reference_polyline().detach().cpu().numpy().astype(np.float64)
   return np.stack(
     [
       reference.waypoint(torch.tensor([phi], device=device))

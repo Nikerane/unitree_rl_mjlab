@@ -68,6 +68,7 @@ class SingleStrikeReference:
     *,
     horizontal_detour_m: float = 0.0,
     followthrough_mode: Literal["vertical", "strike_axis"] = "vertical",
+    path_shape: Literal["straight", "quintic"] = "straight",
   ):
     self.num_envs = num_envs
     self.device = device
@@ -75,6 +76,11 @@ class SingleStrikeReference:
     self.descent_speed = float(descent_speed)
     self.axis_tol = float(axis_tol)
     self.horizontal_detour_m = float(horizontal_detour_m)
+    if path_shape not in ("straight", "quintic"):
+      raise ValueError("unknown path_shape")
+    if path_shape == "quintic" and (horizontal_detour_m != 0 or followthrough_mode != "vertical"):
+      raise ValueError("quintic requires vertical followthrough and no detour")
+    self.path_shape = path_shape
     if followthrough_mode not in ("vertical", "strike_axis"):
       raise ValueError(
         "followthrough_mode must be either 'vertical' or 'strike_axis'"
@@ -83,6 +89,7 @@ class SingleStrikeReference:
 
     self._head0 = torch.zeros(num_envs, 3, device=device)
     self._target = torch.zeros(num_envs, 3, device=device)
+    self._nail = torch.zeros(num_envs, 3, device=device)
     self._phi = torch.zeros(num_envs, device=device)
     self._anchored = torch.zeros(num_envs, dtype=torch.bool, device=device)
     self._route_sign = torch.zeros(num_envs, dtype=torch.int8, device=device)
@@ -107,6 +114,9 @@ class SingleStrikeReference:
     self._head0[mask] = head_w[mask]
     nail = nail_top_w[mask]
     head = head_w[mask]
+    if self.path_shape == "quintic" and not bool((head[:, 2] > nail[:, 2]).all()):
+      raise ValueError("quintic requires a start above the nail")
+    self._nail[mask] = nail
     if self.followthrough_mode == "strike_axis":
       # Extend the realized reset-head -> nail ray beyond contact.  With an
       # offset reset, a vertically lowered target would make the straight
@@ -139,6 +149,11 @@ class SingleStrikeReference:
     can never drift (R2-F1 fix discipline)."""
     # Projection onto the finite reset-head -> follow-through segment.  The
     # closest-point residual enforces axis_tol even beyond either endpoint.
+    if self.path_shape == "quintic":
+      height = self._head0[:, 2] - self._target[:, 2]
+      phase = ((self._head0[:, 2] - head_w[:, 2]) / height.clamp_min(1e-18)).clamp(0, 1)
+      close = (head_w - self.waypoint(phase)).norm(dim=-1) <= self.axis_tol
+      return torch.where(close & (height > 0), phase, torch.zeros_like(phase))
     axis = self._target - self._head0
     length_sq = (axis * axis).sum(-1)
     safe_length_sq = length_sq.clamp_min(1e-18)
@@ -224,9 +239,20 @@ class SingleStrikeReference:
 
   # -- waypoints --------------------------------------------------------------
 
+  @staticmethod
+  def _quintic_points(head, nail, target, t):
+    """Height-indexed single quintic to nail, then vertical continuation."""
+    z = head[..., 2:3] * (1 - t) + target[..., 2:3] * t
+    u = ((head[..., 2:3] - z) / (head[..., 2:3] - nail[..., 2:3]).clamp_min(1e-18)).clamp(0, 1)
+    h = u**3 * (10 + u * (-15 + 6*u))
+    xy = head[..., :2] * (1-h) + nail[..., :2] * h
+    return torch.cat((xy, z), dim=-1)
+
   def waypoint(self, phi: torch.Tensor) -> torch.Tensor:
     """Reference head position at phase phi. Shape (num_envs, 3)."""
     t = phi.clamp(0.0, 1.0).unsqueeze(-1)
+    if self.path_shape == "quintic":
+      return self._quintic_points(self._head0, self._nail, self._target, t)
     direct = self._head0 * (1.0 - t) + self._target * t
     if self.horizontal_detour_m == 0.0:
       return direct
@@ -269,6 +295,8 @@ class SingleStrikeReference:
     t = phases.unsqueeze(-1)
     head0 = self._head0[env_id]
     target = self._target[env_id]
+    if self.path_shape == "quintic":
+      return self._quintic_points(head0, self._nail[env_id], target, t)
     points = head0 * (1.0 - t) + target * t
     if self.horizontal_detour_m != 0.0:
       active = (phases > 0.0) & (phases < 0.5)
@@ -293,6 +321,8 @@ class SingleStrikeReference:
     axis = self._target - self._head0
     length = axis.norm(dim=-1, keepdim=True).clamp(min=1e-9)
     frac = (k_t.unsqueeze(-1) * self.descent_speed / length).clamp(0.0, 1.0)
+    if self.path_shape == "quintic":
+      return self.waypoint(frac.squeeze(-1))
     # Lerp form (not head0 + frac*axis) so the clamped endpoint equals the
     # target bit-exactly (fuzz finding: the additive form was 1 ulp off).
     if self.horizontal_detour_m == 0.0:
@@ -330,6 +360,8 @@ def sample_strike_route_signs(
   horizontal_detour_m: float,
   followthrough_mode: Literal["vertical", "strike_axis"] = "vertical",
   fixed_route_sign: int | None = None,
+  path_shape: str = "straight",
+  overshoot: float = 0.15,
 ) -> None:
   """Reset event that samples one cached strike route per requested env.
 
@@ -343,6 +375,8 @@ def sample_strike_route_signs(
     env,
     horizontal_detour_m=horizontal_detour_m,
     followthrough_mode=followthrough_mode,
+    path_shape=path_shape,
+    overshoot=overshoot,
   )
   ref.reset(env_ids)
   ref.sample_route_signs(env_ids)

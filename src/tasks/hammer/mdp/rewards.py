@@ -587,6 +587,8 @@ class ImitationPriorTerm(ManagerTermBase):
     sigma: float = 0.05,
     horizontal_detour_m: float = 0.0,
     followthrough_mode: str = "vertical",
+    path_shape: str = "straight",
+    overshoot: float = 0.15,
   ) -> torch.Tensor:
     """Returns shape (B,)."""
     robot: Entity = env.scene[robot_cfg.name]
@@ -600,6 +602,8 @@ class ImitationPriorTerm(ManagerTermBase):
       env,
       horizontal_detour_m=horizontal_detour_m,
       followthrough_mode=followthrough_mode,
+      path_shape=path_shape,
+      overshoot=overshoot,
     )
     # PURE READ, CURRENT KINEMATICS (2026-07-14, R2-F1 fix): preview() computes
     # the instantaneous phase from the reward-time head but WRITES NOTHING —

@@ -666,6 +666,7 @@ class TestCartesianGuidelineStudy:
             self._VIC_TT + "-DiagonalFixedStart0mm-Persistent",
             self._VIC_TT + "-DiagonalFixedStartP20mm-Persistent",
             self._VIC_TT + "-DiagonalFixedStartP40mm-Persistent",
+            "Unitree-Z1-Hammer-Quintic-M20-Pilot",
         }
 
     @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))
