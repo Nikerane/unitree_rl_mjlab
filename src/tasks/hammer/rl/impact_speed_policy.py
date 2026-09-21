@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import torch
 from torch import nn
 from tensordict import TensorDict
@@ -100,3 +102,41 @@ class ImpactSpeedModel(MLPModel):
                 raise ValueError("raw pending flag must be binary")
             self.distribution.activity_mask = torch.cat((torch.ones_like(raw[..., :12]), pending), dim=-1)
         return super().get_latent(obs, masks, hidden_state)
+
+
+def _require_zero_pending_input(model: ImpactSpeedModel) -> None:
+    """Qualification must not have learned a response to the unseen pending=1 flag."""
+    if not isinstance(model, ImpactSpeedModel):
+        raise ValueError("impact speed transfer requires an ImpactSpeedModel")
+    first = next((layer for layer in model.mlp if isinstance(layer, nn.Linear)), None)
+    if first is None or first.in_features != 42 or first.weight.shape[1] != 42:
+        raise ValueError("impact speed transfer requires a 42-input first linear layer")
+    if bool(torch.count_nonzero(first.weight[:, 41])):
+        raise ValueError("qualification pending input column must be zero before transfer")
+
+
+def initialize_selector_for_autonomy(actor: ImpactSpeedModel, *, initial_std: float = 1.0) -> None:
+    """Start the autonomous selector at midpoint mean, without changing learned control."""
+    _require_zero_pending_input(actor)
+    final = next((layer for layer in reversed(actor.mlp) if isinstance(layer, nn.Linear)), None)
+    if final is None or final.out_features != 13 or final.bias is None:
+        raise ValueError("impact speed transfer requires a 13-output final linear layer")
+    distribution = actor.distribution
+    if (
+        not isinstance(distribution, ImpactSpeedGaussian)
+        or distribution.std_type != "scalar"
+        or not isinstance(getattr(distribution, "std_param", None), nn.Parameter)
+        or distribution.std_param.shape != (13,)
+        or not distribution.std_param.requires_grad
+    ):
+        raise ValueError("selector transfer requires a learnable scalar std_param distribution")
+    if (
+        not math.isfinite(initial_std)
+        or initial_std <= 0
+        or not distribution.std_range[0] <= initial_std <= distribution.std_range[1]
+    ):
+        raise ValueError("initial_std must be finite, positive, and inside the distribution range")
+    with torch.no_grad():
+        final.weight[12].zero_()
+        final.bias[12].zero_()
+        distribution.std_param[12].fill_(initial_std)

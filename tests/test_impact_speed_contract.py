@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from tensordict import TensorDict
 
 from mjlab.envs import ManagerBasedRlEnv
 
@@ -257,14 +258,93 @@ def test_missing_checkpoint_metadata_is_rejected_before_weights_load(live_runner
         torch.testing.assert_close(value, actor_before[name])
 
 
+def test_external_qualification_transfer_preserves_weights_but_starts_fresh_optimizer(live_env, tmp_path, monkeypatch):
+    speed = live_env.action_manager.get_term("strike_speed")
+    with monkeypatch.context() as patch:
+        patch.setattr(speed.cfg, "mode", "external")
+        patch.setattr(speed.state, "mode", "external")
+        source = HammerOnPolicyRunner(wrap_impact_speed_env(live_env, 1.0), _runner_cfg())
+        source.alg.actor.obs_normalizer.update(torch.ones(8, 42))
+        source.alg.critic.obs_normalizer.update(torch.ones(8, 42) * 2)
+        for parameter in source.alg.actor.parameters():
+            parameter.grad = torch.zeros_like(parameter)
+        source.alg.optimizer.step()
+        source.alg.optimizer.zero_grad()
+        assert source.alg.optimizer.state
+        for state in source.alg.optimizer.state.values():
+            if "exp_avg" in state:
+                state["exp_avg"].fill_(0.125)
+        assert any(torch.count_nonzero(state["exp_avg"]) for state in source.alg.optimizer.state.values() if "exp_avg" in state)
+        with torch.no_grad():
+            source.alg.actor.mlp[-1].weight[12].fill_(0.2)
+            source.alg.actor.mlp[-1].bias[12].fill_(0.7)
+            source.alg.actor.distribution.std_param[12].fill_(0.4)
+        payload = source.alg.save()
+        payload.update(iter=17, infos={"impact_speed_contract": _contract().build_impact_speed_metadata(live_env, 1.0)})
+        path = tmp_path / "qualified.pt"
+        torch.save(payload, path)
+    values = torch.zeros(2, 42)
+    values[:, -1] = torch.tensor([0.0, 1.0])
+    observations = TensorDict({"actor": values, "critic": values}, batch_size=[2])
+    prior_control = source.alg.actor(observations)[:, :12].detach().clone()
+    prior_values = source.alg.critic(observations).detach().clone()
+    target = HammerOnPolicyRunner(wrap_impact_speed_env(live_env, 1.0), _runner_cfg())
+    with pytest.raises(ValueError, match="metadata mismatch"):
+        target.load(str(path))
+
+    target.load_qualification_checkpoint(str(path))
+
+    assert target.current_learning_iteration == 0
+    assert not target.alg.optimizer.state
+    torch.testing.assert_close(target.alg.actor(observations)[:, :12], prior_control)
+    torch.testing.assert_close(target.alg.critic(observations), prior_values)
+    torch.testing.assert_close(target.alg.actor.obs_normalizer.physical.mean, source.alg.actor.obs_normalizer.physical.mean)
+    torch.testing.assert_close(target.alg.critic.obs_normalizer.physical.mean, source.alg.critic.obs_normalizer.physical.mean)
+    torch.testing.assert_close(target.alg.actor.obs_normalizer(observations["actor"])[:, -1], values[:, -1])
+    assert torch.count_nonzero(target.alg.actor.mlp[-1].weight[12]) == 0
+    assert target.alg.actor.mlp[-1].bias[12].item() == 0
+    assert target.alg.actor.distribution.std_param[12].item() == 1
+    target.alg.actor(observations, stochastic_output=True)
+    actions = torch.zeros(2, 13)
+    actions[1, 12] = 1
+    (-target.alg.actor.get_output_log_prob(actions).sum()).backward()
+    assert target.alg.actor.mlp[-1].bias.grad[12].abs().item() > 0
+    saved = tmp_path / "autonomous.pt"
+    target.save(str(saved))
+    infos = torch.load(saved, weights_only=False)["infos"]
+    assert infos["impact_speed_contract"]["speed_mode"] == "policy"
+    assert infos["impact_speed_phase_transition"] == {
+        "from_mode": "external", "to_mode": "policy", "selector_initialization": "zero_mean_unit_std",
+        "source_checkpoint": str(path.resolve()),
+    }
+    resumed = HammerOnPolicyRunner(wrap_impact_speed_env(live_env, 1.0), _runner_cfg())
+    resumed.load(str(saved))
+    saved_again = tmp_path / "resumed.pt"
+    resumed.save(str(saved_again))
+    assert torch.load(saved_again, weights_only=False)["infos"]["impact_speed_phase_transition"] == infos["impact_speed_phase_transition"]
+    for model_name in ("actor", "critic"):
+        invalid = deepcopy(payload)
+        invalid[f"{model_name}_state_dict"]["mlp.0.weight"][:, -1] = 0.1
+        invalid_path = tmp_path / f"qualified_learned_{model_name}_pending.pt"
+        torch.save(invalid, invalid_path)
+        candidate = HammerOnPolicyRunner(wrap_impact_speed_env(live_env, 1.0), _runner_cfg())
+        with pytest.raises(ValueError, match="pending"):
+            candidate.load_qualification_checkpoint(str(invalid_path))
+
+
 def test_empty_real_checkpoint_still_contains_contract(live_runner, tmp_path, capsys):
     path = tmp_path / "empty.pt"
-    old_infos = {"impact_speed_rollout_telemetry": {"stale": True}, "caller": "retained"}
+    old_infos = {
+        "impact_speed_rollout_telemetry": {"stale": True},
+        "impact_speed_phase_transition": {"stale": True},
+        "caller": "retained",
+    }
     live_runner.save(str(path), old_infos)
     assert "[WARN] ONNX export failed" not in capsys.readouterr().out
     infos = torch.load(path, weights_only=False)["infos"]
     assert infos["impact_speed_contract"]["schema_version"] == "impact_speed_v1"
     assert "impact_speed_rollout_telemetry" not in infos
+    assert "impact_speed_phase_transition" not in infos
     assert infos["caller"] == "retained"
     assert old_infos["impact_speed_rollout_telemetry"] == {"stale": True}
 

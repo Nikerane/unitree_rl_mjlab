@@ -19,6 +19,7 @@ from mjlab.utils.os import dump_yaml, get_checkpoint_path
 from mjlab.utils.torch import configure_torch_backends
 from mjlab.utils.wrappers import VideoRecorder
 from src.tasks.hammer.rl.impact_speed_wrapper import (
+  IMPACT_SPEED_ACTION_SIGNATURE,
   configure_impact_speed_experiment,
   wrap_impact_speed_env,
 )
@@ -38,6 +39,7 @@ class TrainConfig:
   speed_bounds: tuple[float, float] | None = None
   speed_cost: float | None = None
   speed_mode: Literal["policy", "external"] | None = None
+  qualification_checkpoint: str | None = None
 
   @staticmethod
   def from_task(task_id: str) -> "TrainConfig":
@@ -46,7 +48,28 @@ class TrainConfig:
     return TrainConfig(env=env_cfg, agent=agent_cfg)
 
 
+def qualification_checkpoint_path(task_id: str, cfg: TrainConfig) -> Path | None:
+  """Resolve the explicit external-to-autonomous transfer, if requested."""
+  if cfg.qualification_checkpoint is None:
+    return None
+  if cfg.agent.resume:
+    raise ValueError("qualification checkpoint transfer cannot be combined with ordinary resume")
+  if (
+    task_id != "Unitree-Z1-Hammer-Quintic-M20-ImpactSpeed"
+    or tuple(cfg.env.actions) != IMPACT_SPEED_ACTION_SIGNATURE
+  ):
+    raise ValueError("qualification checkpoint transfer requires the experimental impact speed task")
+  mode = cfg.speed_mode or cfg.env.actions["strike_speed"].mode
+  if mode != "policy":
+    raise ValueError("qualification checkpoint transfer requires policy destination mode")
+  path = Path(cfg.qualification_checkpoint).expanduser().resolve()
+  if not path.is_file():
+    raise FileNotFoundError(f"qualification checkpoint not found: {path}")
+  return path
+
+
 def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
+  qualification_path = qualification_checkpoint_path(task_id, cfg)
   configure_impact_speed_experiment(
     cfg.env, bounds=cfg.speed_bounds, cost=cfg.speed_cost, mode=cfg.speed_mode
   )
@@ -139,6 +162,13 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
   if resume_path is not None:
     print(f"[INFO]: Loading model checkpoint from: {resume_path}")
     runner.load(str(resume_path))
+  elif qualification_path is not None:
+    from src.tasks.hammer.rl.runner import HammerOnPolicyRunner
+
+    if not isinstance(runner, HammerOnPolicyRunner):
+      raise ValueError("qualification checkpoint transfer requires HammerOnPolicyRunner")
+    print(f"[INFO]: Transferring qualified weights from: {qualification_path}")
+    runner.load_qualification_checkpoint(str(qualification_path))
 
   # Only write config files from rank 0 to avoid race conditions.
   if rank == 0:
@@ -154,6 +184,7 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
 
 def launch_training(task_id: str, args: TrainConfig | None = None):
   args = args or TrainConfig.from_task(task_id)
+  qualification_checkpoint_path(task_id, args)
 
   # Create log directory once before launching workers.
   log_root_path = Path("logs") / "rsl_rl" / args.agent.experiment_name

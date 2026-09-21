@@ -33,6 +33,10 @@ from src.tasks.hammer.rl.impact_speed_contract import (
     validate_impact_speed_metadata,
     validate_impact_speed_models,
 )
+from src.tasks.hammer.rl.impact_speed_policy import (
+    _require_zero_pending_input,
+    initialize_selector_for_autonomy,
+)
 
 
 _JOINT_POSITION_CONTRACT_PATH = (
@@ -746,6 +750,7 @@ class HammerOnPolicyRunner(MjlabOnPolicyRunner):
   env: RslRlVecEnvWrapper
 
   def __init__(self, env, train_cfg: dict, log_dir=None, device="cpu"):
+    self._impact_speed_phase_transition = None
     if "strike_speed" in env.unwrapped.action_manager.active_terms:
       # Grouped model tensors cannot reveal a semantically swapped goal/pending.
       # Check the live managers before the base runner can construct its models.
@@ -761,7 +766,36 @@ class HammerOnPolicyRunner(MjlabOnPolicyRunner):
       checkpoint = torch.load(path, map_location=map_location, weights_only=False)
       infos = checkpoint.get("infos") or {}
       validate_impact_speed_metadata(infos.get("impact_speed_contract"), expected)
-    return super().load(path, load_cfg, strict, map_location)
+    infos = super().load(path, load_cfg, strict, map_location)
+    if "strike_speed" in self.env.unwrapped.action_manager.active_terms:
+      self._impact_speed_phase_transition = (infos or {}).get("impact_speed_phase_transition")
+    return infos
+
+  def load_qualification_checkpoint(self, path: str) -> None:
+    """Transfer qualified weights into a fresh autonomous runner, not its optimizer."""
+    if "strike_speed" not in self.env.unwrapped.action_manager.active_terms:
+      raise ValueError("qualification transfer requires the impact speed experiment")
+    expected = build_impact_speed_metadata(self.env.unwrapped, self.env.clip_actions)
+    if expected["speed_mode"] != "policy":
+      raise ValueError("qualification transfer requires policy destination mode")
+    validate_impact_speed_models(self.alg.actor, self.alg.critic)
+    if self.current_learning_iteration != 0 or self.alg.optimizer.state:
+      raise ValueError("qualification transfer requires a fresh runner and optimizer")
+    checkpoint = torch.load(path, map_location=self.device, weights_only=False)
+    infos = checkpoint.get("infos") or {}
+    saved = infos.get("impact_speed_contract")
+    if not isinstance(saved, dict) or saved.get("speed_mode") != "external":
+      raise ValueError("qualification checkpoint must be in external mode")
+    validate_impact_speed_metadata(saved, expected, allow_phase_transfer=True)
+    self.alg.load(checkpoint, {"actor": True, "critic": True}, strict=True)
+    _require_zero_pending_input(self.alg.critic)
+    initialize_selector_for_autonomy(self.alg.actor)
+    self._impact_speed_phase_transition = {
+      "from_mode": "external",
+      "to_mode": "policy",
+      "selector_initialization": "zero_mean_unit_std",
+      "source_checkpoint": str(Path(path).resolve()),
+    }
 
   def save(self, path: str, infos=None):
     action_terms = tuple(self.env.unwrapped.action_manager.active_terms)
@@ -770,6 +804,10 @@ class HammerOnPolicyRunner(MjlabOnPolicyRunner):
       validate_impact_speed_models(self.alg.actor, self.alg.critic)
       infos = {} if infos is None else dict(infos)
       infos["impact_speed_contract"] = metadata
+      if self._impact_speed_phase_transition is not None:
+        infos["impact_speed_phase_transition"] = dict(self._impact_speed_phase_transition)
+      else:
+        infos.pop("impact_speed_phase_transition", None)
       telemetry = summarize_impact_speed_rollout(
         self.alg.storage, tuple(metadata["speed_bounds_mps"])
       )
