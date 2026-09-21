@@ -10,6 +10,9 @@ from typing import TYPE_CHECKING, Literal
 import torch
 
 from mjlab.managers.action_manager import ActionTerm, ActionTermCfg
+from mjlab.managers.manager_base import ManagerTermBase, ManagerTermBaseCfg
+
+from src.tasks.hammer.mdp.first_strike import _ENV_FIRST_STRIKE_ATTR
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -124,3 +127,84 @@ def impact_speed_goal(env: ManagerBasedRlEnv) -> torch.Tensor:
 
 def impact_speed_pending(env: ManagerBasedRlEnv) -> torch.Tensor:
   return env.action_manager.get_term("strike_speed").state.pending[:, None]
+
+
+IMPACT_SPEED_OUTCOME_KEY = "impact_speed_outcome"
+
+
+def consume_speed_cost(
+  state: ImpactSpeedState,
+  *,
+  finalized: torch.Tensor,
+  started: torch.Tensor,
+  measured_mps: torch.Tensor | None,
+  done: torch.Tensor,
+) -> torch.Tensor:
+  """Charge the first finalized strike or reset-boundary failure once per world.
+
+  ``started`` is supplied for the caller's miss/incomplete label. Both failures
+  have the same unit cost. A measured speed is required only for a new event.
+  """
+  shape = state.goal_mps.shape
+  if any(not isinstance(x, torch.Tensor) or x.shape != shape or x.dtype != torch.bool
+         for x in (finalized, started, done)):
+    raise ValueError("finalized, started, and done must be boolean per-world tensors")
+  eligible = ~state.cost_consumed
+  event = eligible & finalized
+  failure = eligible & ~finalized & done
+  if measured_mps is None:
+    if bool(event.any()):
+      raise ValueError("finalized speed measurement is missing")
+    measured = torch.zeros_like(state.goal_mps)
+  else:
+    if measured_mps.shape != shape or not torch.is_floating_point(measured_mps):
+      raise ValueError("measured speed must be a floating per-world tensor")
+    if bool((event & ~torch.isfinite(measured_mps)).any()):
+      raise ValueError("finalized speed measurement must be finite")
+    measured = torch.where(event, measured_mps, state.goal_mps)
+  lo, hi = state.bounds
+  error = ((measured - state.goal_mps) / (hi - lo)).square().clamp_max(1)
+  cost = torch.where(event, error, torch.zeros_like(error))
+  cost = torch.where(failure, torch.ones_like(cost), cost)
+  state.cost_consumed |= event | failure
+  return cost
+
+
+class ImpactSpeedCost(ManagerTermBase):
+  """Event-unit speed cost exposed as a rate for dt-scaled RewardManager."""
+
+  def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv):
+    super().__init__(env)
+    del cfg
+
+  def __call__(self, env: ManagerBasedRlEnv, **params) -> torch.Tensor:
+    del params
+    tracker = getattr(env, _ENV_FIRST_STRIKE_ATTR, None)
+    if tracker is None:
+      raise RuntimeError("ImpactSpeedCost requires the first-strike tracker")
+    state = env.action_manager.get_term("strike_speed").state
+    done = env.reset_buf.bool()
+    eligible = ~state.cost_consumed
+    event = eligible & tracker.finalized
+    failure = eligible & ~tracker.finalized & done
+    measured = tracker.v_precontact
+    cost = consume_speed_cost(
+      state, finalized=tracker.finalized, started=tracker.started,
+      measured_mps=measured, done=done,
+    )
+    # Reward computation precedes auto-reset. Clone all transition evidence now:
+    # tracker and speed state are cleared for reset worlds before step() returns.
+    env.extras[IMPACT_SPEED_OUTCOME_KEY] = {
+      "charged": (event | failure).clone(),
+      "finalized": event.clone(),
+      "valid_measured": event.clone(),
+      "started": tracker.started.clone(),
+      "miss": (failure & ~tracker.started).clone(),
+      "incomplete": (failure & tracker.started).clone(),
+      "done": done.clone(),
+      "productive": (event & tracker.productive).clone(),
+      "goal_mps": state.goal_mps.clone(),
+      "measured_mps": torch.where(event, measured, torch.full_like(measured, float("nan"))).clone(),
+      "cost": cost.clone(),
+    }
+    return cost / env.step_dt

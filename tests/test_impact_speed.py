@@ -9,9 +9,12 @@ import pytest
 import torch
 
 from mjlab.managers.action_manager import ActionManager
+from mjlab.managers.reward_manager import RewardManager, RewardTermCfg
 from src.tasks.hammer.mdp.impact_speed import (
     ImpactSpeedActionCfg,
+    ImpactSpeedCost,
     ImpactSpeedState,
+    consume_speed_cost,
     impact_speed_goal,
     impact_speed_pending,
 )
@@ -124,3 +127,93 @@ def test_action_cfg_requires_explicit_bounds():
     env = SimpleNamespace(num_envs=1, device="cpu", scene={"robot": object()})
     with pytest.raises(ValueError, match="bounds"):
         ImpactSpeedActionCfg(entity_name="robot", mode="policy").build(env)
+
+
+def test_speed_cost_outcomes_and_second_read_are_exactly_once():
+    state = ImpactSpeedState(5, "cpu", (0.2, 0.8), "policy")
+    state.goal_mps[:] = 0.5
+    finalized = torch.tensor([True, False, False, False, True])
+    started = torch.tensor([True, True, False, False, True])
+    done = torch.tensor([True, True, True, False, False])
+    measured = torch.tensor([0.8, float("nan"), float("nan"), float("nan"), 0.2])
+    expected = torch.tensor([0.25, 1.0, 1.0, 0.0, 0.25])
+    actual = consume_speed_cost(state, finalized=finalized, started=started, measured_mps=measured, done=done)
+    torch.testing.assert_close(actual, expected)
+    assert state.cost_consumed.tolist() == [True, True, True, False, True]
+    second = consume_speed_cost(state, finalized=finalized, started=started, measured_mps=measured, done=done)
+    torch.testing.assert_close(second, torch.zeros(5))
+
+
+@pytest.mark.parametrize("bad", [None, float("nan"), float("inf"), -float("inf")])
+def test_finalized_speed_measurement_is_required_and_finite(bad):
+    state = ImpactSpeedState(1, "cpu", (0.2, 0.8), "policy")
+    measured = None if bad is None else torch.tensor([bad])
+    with pytest.raises(ValueError, match="measurement|measured"):
+        consume_speed_cost(state, finalized=torch.tensor([True]), started=torch.tensor([True]), measured_mps=measured, done=torch.tensor([True]))
+    assert not state.cost_consumed.item()
+
+
+def test_finalized_nonproductive_event_still_charges_speed_error():
+    state = ImpactSpeedState(1, "cpu", (0.2, 0.8), "policy")
+    state.goal_mps[:] = 0.5
+    # Productivity is intentionally absent from the cost API; a finalized first strike is charged.
+    value = consume_speed_cost(state, finalized=torch.tensor([True]), started=torch.tensor([True]), measured_mps=torch.tensor([0.8]), done=torch.tensor([False]))
+    torch.testing.assert_close(value, torch.tensor([0.25]))
+
+
+def test_event_charge_is_independent_of_control_dt():
+    for dt in (0.01, 0.02, 0.04):
+        raw = torch.tensor([0.25]) / dt
+        coefficient = 0.4
+        torch.testing.assert_close(raw * (-coefficient) * dt, torch.tensor([-0.1]))
+
+
+@pytest.mark.parametrize("dt", [0.01, 0.02, 0.04])
+def test_actual_reward_manager_scales_speed_event_once(dt):
+    state = ImpactSpeedState(1, "cpu", (0.2, 0.8), "policy")
+    state.goal_mps[:] = 0.5
+    tracker = SimpleNamespace(finalized=torch.tensor([True]), started=torch.tensor([True]), productive=torch.tensor([False]), v_precontact=torch.tensor([0.8]))
+    env = SimpleNamespace(num_envs=1, device="cpu", step_dt=dt, reset_buf=torch.tensor([True]), extras={}, action_manager=SimpleNamespace(get_term=lambda name: SimpleNamespace(state=state)))
+    env.reward_manager = RewardManager({"speed_goal": RewardTermCfg(func=ImpactSpeedCost, weight=-0.4)}, env, scale_by_dt=True)
+    env._hammer_first_strike = tracker  # Metrics terms are constructed after reward terms.
+    torch.testing.assert_close(env.reward_manager.compute(dt), torch.tensor([-0.1]))
+    outcome = env.extras["impact_speed_outcome"]
+    assert outcome["finalized"].tolist() == [True]
+    torch.testing.assert_close(env.reward_manager.compute(dt), torch.tensor([0.0]))
+    tracker.finalized[:] = False
+    tracker.v_precontact[:] = 0.0
+    state.reset(None)
+    assert outcome["finalized"].tolist() == [True]
+    torch.testing.assert_close(outcome["goal_mps"], torch.tensor([0.5]))
+    torch.testing.assert_close(outcome["measured_mps"], torch.tensor([0.8]))
+
+
+def test_terminal_snapshot_distinguishes_miss_incomplete_and_measured_event():
+    state = ImpactSpeedState(3, "cpu", (0.2, 0.8), "policy")
+    state.goal_mps[:] = torch.tensor([0.3, 0.4, 0.5])
+    tracker = SimpleNamespace(
+        finalized=torch.tensor([False, False, True]),
+        started=torch.tensor([False, True, True]),
+        productive=torch.tensor([False, False, False]),
+        v_precontact=torch.tensor([0.0, 0.0, 0.8]),
+    )
+    env = SimpleNamespace(
+        num_envs=3, device="cpu", step_dt=0.02, reset_buf=torch.tensor([True, True, True]),
+        extras={}, action_manager=SimpleNamespace(get_term=lambda name: SimpleNamespace(state=state)),
+        _hammer_first_strike=tracker,
+    )
+    rate = ImpactSpeedCost(RewardTermCfg(func=ImpactSpeedCost, weight=-0.4), env)(env)
+    torch.testing.assert_close(rate, torch.tensor([50.0, 50.0, 12.5]))
+    outcome = env.extras["impact_speed_outcome"]
+    assert outcome["charged"].tolist() == [True, True, True]
+    assert outcome["valid_measured"].tolist() == [False, False, True]
+    assert outcome["miss"].tolist() == [True, False, False]
+    assert outcome["incomplete"].tolist() == [False, True, False]
+    assert outcome["finalized"].tolist() == [False, False, True]
+    torch.testing.assert_close(outcome["cost"], torch.tensor([1.0, 1.0, 0.25]))
+    assert torch.isnan(outcome["measured_mps"][:2]).all()
+    state.reset(None)
+    tracker.finalized[:] = False
+    tracker.v_precontact[:] = -100.0
+    torch.testing.assert_close(outcome["goal_mps"], torch.tensor([0.3, 0.4, 0.5]))
+    torch.testing.assert_close(outcome["measured_mps"][2:], torch.tensor([0.8]))

@@ -18,6 +18,7 @@ from src.tasks.hammer.cat.hook import (
   WINNER_VELOCITY,
   CatSoftHook,
   _NEG_TERMS,
+  _OPTIONAL_NEG_TERMS,
 )
 from src.tasks.hammer.cat.keys import CAT_DELTA_KEY, CAT_R_POS_KEY
 from src.tasks.hammer.mdp.impulse_bound import _ENV_SUBSTEP_IMPULSE_ATTR
@@ -130,6 +131,23 @@ def test_r_pos_excludes_negative_terms_and_is_dt_scaled():
   _hook()(env)
   # r_total_rate=4.1, r_neg_rate=-5.9 -> r_pos_rate=10.0 -> *dt
   assert torch.allclose(env.extras[CAT_R_POS_KEY], torch.full((B,), 10.0 * dt), atol=1e-6)
+
+
+def test_speed_goal_is_a_known_negative_excluded_from_positive_return():
+  active = ["approach", "speed_goal", "action_rate"]
+  step = torch.tensor([[4.0, -2.0, -0.5]])
+  weights = {"approach": 1.0, "speed_goal": -0.4, "action_rate": -0.01}
+  rm = SimpleNamespace(
+    _step_reward=step, active_terms=active,
+    get_term_cfg=lambda name: SimpleNamespace(weight=weights[name]), _scale_by_dt=True,
+  )
+  env = SimpleNamespace(
+    scene={"robot": SimpleNamespace(data=SimpleNamespace(joint_vel=torch.zeros(1, 6)))},
+    reward_manager=rm, step_dt=0.02, extras={},
+  )
+  _hook()(env)
+  torch.testing.assert_close(env.extras[CAT_R_POS_KEY], torch.tensor([0.08]))
+  assert _OPTIONAL_NEG_TERMS == ("speed_goal",)
 
 
 def test_r_pos_equals_reward_minus_negatives_identity():

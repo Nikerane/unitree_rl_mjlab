@@ -43,6 +43,9 @@ if TYPE_CHECKING:
 # fixed-joint treatments (action_rate=-0.01, joint_pos_limits=-10, r_tt=-1). ``r_tt`` emits a
 # positive raw cost; its negative reward weight must ride through CaT unscaled.
 _NEG_TERMS: tuple[str, ...] = ("action_rate", "joint_pos_limits", "r_tt")
+# Keep the legacy tuple stable: the frozen FIC evaluator checks its historical identity.
+# Experimental costs are explicitly allowed when present, never inferred by sign alone.
+_OPTIONAL_NEG_TERMS: tuple[str, ...] = ("speed_goal",)
 
 # Where the velocity margin |q̇_j| is sampled. "control_rate" is the shipped signal (post-decimation
 # joint_vel — it ALIASES the within-window strike spike). "substep" reads the per-joint 500 Hz peak
@@ -217,17 +220,18 @@ class CatSoftHook(ManagerTermBase):
         )
       if rm._step_reward.shape[1] != len(rm.active_terms):
         raise RuntimeError("CatSoftHook: reward_manager._step_reward column count != #active_terms.")
-      self._neg_idx = [rm.active_terms.index(n) for n in _NEG_TERMS if n in rm.active_terms]
+      self._neg_idx = [rm.active_terms.index(n) for n in (*_NEG_TERMS, *_OPTIONAL_NEG_TERMS) if n in rm.active_terms]
     # MF-3 guard, re-validated EVERY call (2026-07-19 audit F4): any negative-weight reward term NOT in
     # _NEG_TERMS would be silently discounted by (1-δ) under scale-positives -- the penalty-evasion
     # exploit Decision 1 exists to prevent. Originally this ran ONCE (inside the _neg_idx is None block),
     # so a reward_curriculum that ramps a positive term's weight negative AFTER the first call would slip
     # through with a stale _neg_idx. A ~8-term weight scan per step is negligible; fail loud if one appears.
     for n in rm.active_terms:
-      if rm.get_term_cfg(n).weight < 0 and n not in _NEG_TERMS:
+      if rm.get_term_cfg(n).weight < 0 and n not in (*_NEG_TERMS, *_OPTIONAL_NEG_TERMS):
         raise RuntimeError(
           f"CatSoftHook: reward term '{n}' has negative weight {rm.get_term_cfg(n).weight} but is "
-          f"not in _NEG_TERMS {_NEG_TERMS}; scale-positives would discount it by (1-δ) "
+          f"not in the known negative terms {(*_NEG_TERMS, *_OPTIONAL_NEG_TERMS)}; "
+          f"scale-positives would discount it by (1-δ) "
           f"(penalty-evasion exploit, Decision 1). Add it to _NEG_TERMS."
         )
     return self._neg_idx
