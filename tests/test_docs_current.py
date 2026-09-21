@@ -162,7 +162,7 @@ def test_index_points_to_current_fic_baseline_and_vic_prototype_routes():
     missing = [ref for ref in required_refs if f"`{ref}`" not in text]
     assert not missing, "Current FIC/VIC paths missing from index:\n" + "\n".join(missing)
 
-    assert "# Docs index — current truth map (2026-08-18)" in text
+    assert "# Docs index — current truth map (2026-09-21)" in text
     assert "the checked-out code wins" in text
     route = next(
         line for line in text.splitlines() if line.startswith("**Current GPU route:**")

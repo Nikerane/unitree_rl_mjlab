@@ -1,6 +1,7 @@
 # Results & analysis log
 
 Empirical analyses of training runs and diagnostic experiments — **one Markdown file per campaign/run**. This is the *canonical* home for "what a run showed." The plan docs (`../VEGA_TRAINING_PLAN.md`) stay focused on *what to run* and link here for findings.
+Explicitly labeled proposed run records may be indexed here for provenance; they are not empirical results or launch approvals.
 
 **File convention:** `YYYY-MM-DD_<run-name>.md`. Suggested structure for each:
 
@@ -16,6 +17,8 @@ Empirical analyses of training runs and diagnostic experiments — **one Markdow
 
 | Date | Run | Headline | File |
 |---|---|---|---|
+| 2026-09-21 | Z1 impact-speed software plumbing (no training) | 115 new and 409 legacy/safety tests, three baseline scripts, 145 config tests and a 64-transition native CPU smoke passed; broad historical suite remains incomplete and no physical range/coefficient is qualified. | [2026-09-21_z1_impact_speed_plumbing.md](2026-09-21_z1_impact_speed_plumbing.md) |
+| 2026-09-21 | Proposed Z1 impact-speed E1 qualification (**not run**) | Incomplete run record: baseline/checkpoint selection, reset hash, physical interval, coefficient sweep, seeds and budget remain NO-GO fields. | [2026-09-21_z1_impact_speed_qualification_proposal.md](2026-09-21_z1_impact_speed_qualification_proposal.md) |
 | 2026-08-19 | Z1 two-boundary impulse-CaT p=.2 diagnostic | Same-dose VIC policies respond differently to diagnostic cap geometries: uniform-0.9 has a sparse J3 tail, joint-stress a sparse chiefly-J6 tail; this is geometry sensitivity, not hard enforcement or a hardware claim. | [2026-08-19_z1_impulse_two_boundary_p02.md](2026-08-19_z1_impulse_two_boundary_p02.md) |
 | 2026-08-18 | Z1 provisional-cap impulse-CaT compact dose curve | All tested doses formally FAIL the strict every-population gate: p=.1 is too weak, p=.3 is not monotonically better, and p=.2 is strongest tested but repeat-sensitive. Before training seeds, the bounded next proposal is an unapproved replay-only 10-repeat execution-nondeterminism envelope. | [2026-08-18_z1_impulse_cat_dose_curve.md](2026-08-18_z1_impulse_cat_dose_curve.md) |
 | 2026-08-15 | Z1 impulse soft-CaT Step 1 (`41272370`, `41272362_[0-1]`) | The provisional no-`2x` boundary is nonbinding in the 64-world mean-policy population but binds 593/98,304 training-like reads, almost entirely at J3; impulse wins nearly every active soft-OR comparison, but terminal censoring leaves complete-event dose unresolved, and the uniform-`0.9` training pair is diagnostic plumbing only. | [2026-08-15_z1_impulse_cat_step1.md](2026-08-15_z1_impulse_cat_step1.md) |

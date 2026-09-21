@@ -1,4 +1,4 @@
-# Docs index — current truth map (2026-08-18)
+# Docs index — current truth map (2026-09-21)
 
 **Authority rule: code > this index > the living docs it lists.** `docs/archive/**` and dated
 records are historical evidence — never act on them without checking here first. When a doc and
@@ -30,6 +30,10 @@ the code disagree, the checked-out code wins; fix the doc.
 | `docs/results/2026-08-18_z1_impulse_p02_bridge.md` | Banked one-training-seed bridge screen: every stochastic population passes the preregistered impulse, velocity, joint-tail, utility, delivered-impulse, identity, and finiteness gates; independent training-seed confirmation remains unrun |
 | `docs/superpowers/specs/2026-08-18-z1-impulse-cat-dose-curve-design.md` | Approved compact provisional-cap dose screen at `p=.1/.2/.3`; one training seed, no optimal-dose claim |
 | `docs/superpowers/plans/2026-08-18-z1-impulse-cat-dose-curve.md` | Executed guarded two-dose training, four-policy frozen evaluation, and separate-population analysis plan |
+| `docs/superpowers/specs/2026-09-21-policy-selected-impact-speed-design.md` | Approved single-policy impact-speed-selection design; numeric physical bounds, coefficient, checkpoint and campaign remain evidence-gated |
+| `docs/superpowers/plans/2026-09-21-policy-selected-impact-speed.md` | Software implementation and staged qualification plan; GPU qualification is not launch-approved |
+| `docs/results/2026-09-21_z1_impact_speed_plumbing.md` | Dated CPU/software regression, native smoke, export, review-provenance and limitation record for the experimental 13-output task |
+| `docs/results/2026-09-21_z1_impact_speed_qualification_proposal.md` | Proposed, incomplete E1 qualification run record; unresolved physical interval, coefficient sweep, baseline selection and budget block launch |
 | `docs/results/2026-08-18_z1_impulse_cat_dose_curve.md` | Current dose result: p=.1 is too weak; p=.3 is not monotonically better; p=.2 is the strongest tested policy instance but not a formal PASS; before training seeds, the bounded next proposal is an unapproved replay-only 10-repeat execution-nondeterminism envelope |
 | `docs/results/2026-08-19_z1_impulse_two_boundary_p02.md` | One-seed same-dose geometry diagnostic: uniform-0.9 has a sparse J3 own-boundary tail and joint-stress a sparse chiefly-J6 tail; no hard-enforcement or hardware claim |
 | `docs/research/reward-design/Z1_IMPULSE_CAT_DOSE_CURVE_REVIEW_PACKET.md` | Sanitized bounded packet asking whether to confirm p=.2 at independent training seeds rather than increase dose |
@@ -99,6 +103,7 @@ Dated research records kept in place (bannered, bodies frozen):
 - 2026-08-18 — the user authorized the simplified bridge, and its zero-learning preflight passed on the frozen seed-2 traces: the provisional caps were nonbinding in fixed-64 but bound `35/30/35` stochastic reads, offline `p=0.2` impulse pressure won every active read with zero velocity masks/ties, and the historical target-minus-control native/prefix p95/p99 directions were all negative (`docs/results/2026-08-18_z1_impulse_p02_bridge_preflight.md`)
 - 2026-08-18 — the single authorized provisional-cap `p=0.2` target and frozen log-only-control evaluation completed without retry. All three 4,096-world stochastic populations passed every preregistered gate separately: target provisional-cap violations were `0/0/0`, impulse p95/p99 tails fell, true velocity risk also fell, task utility was retained, and the delivered-impulse lower bounds were about `0.995`. This is a one-training-seed native-observed screen, not a hard clamp, hardware result, optimal-dose claim, or training-seed confirmation (`docs/results/2026-08-18_z1_impulse_p02_bridge.md`)
 - 2026-08-18 — the compact p=.1/.2/.3 dose evaluation supersedes the earlier p=.2 formal-PASS interpretation without altering its historical record. Under identical declared population/RNG identities, one control environment crossed the contact/termination boundary across A100 executions: p=.2 now passes/fails/passes and therefore fails the strict every-population gate by 0.0001171875 in one CI-high. p=.1 is too weak; p=.3 is not monotonically better; p=.2 is the strongest tested policy instance but not a formal PASS. Before training seeds, the bounded next proposal is an unapproved replay-only 10-repeat execution-nondeterminism envelope, not an optimal-dose claim or authorization (`docs/results/2026-08-18_z1_impulse_cat_dose_curve.md`)
+- 2026-09-21 — a separate quintic-M20 experimental task adds a one-shot policy-selected hammer-speed goal to the native Z1 joint-target/impedance policy. CPU software tests, the existing baseline gates, and a 64-transition no-learning native smoke passed; no physical speed interval, event coefficient, trained checkpoint or GPU qualification was frozen (`docs/results/2026-09-21_z1_impact_speed_plumbing.md`).
 
 ## 4. Code entry map (`src/tasks/hammer/` — suggested read order)
 
@@ -106,6 +111,8 @@ Dated research records kept in place (bannered, bodies frozen):
 |---|---|---|
 | 1 | `src/tasks/hammer/config/z1/env_cfgs.py` | Arm wiring: flags (`cat_soft`, `cat_impulse`, …) → env config; where the impulse metrics/hook are attached |
 | — | `src/tasks/hammer/mdp/variable_impedance.py` | VIC-TT native gain map and ordered six-joint stiffness action; writes expanded MuJoCo gain/bias fields without changing force limits |
+| — | `src/tasks/hammer/mdp/impact_speed.py`, `src/tasks/hammer/rl/impact_speed_policy.py` | Experimental one-shot speed latch, event cost, 13-output masked actor, and fixed-scale goal/pending inputs; old tasks are unchanged |
+| — | `src/tasks/hammer/rl/impact_speed_contract.py`, `src/tasks/hammer/rl/impact_speed_wrapper.py` | Separate checkpoint/export identity and finite raw-action guard for the experimental task |
 | 2 | `src/tasks/hammer/hammer_env_cfg.py` | Base task: scene, DiffIK action space, the 7-term reward, terminations, live weights |
 | 3 | `src/tasks/hammer/nail_block.py` | Nail asset loader + goal-depth / success-threshold constants (the physics XML incl. frictionloss lives in the sibling-repo scene it loads) |
 | 4 | `src/tasks/hammer/mdp/rewards.py` | Reward terms incl. `ImpactProgressTerm`, `DeliveredImpulseTerm`, imitation prior |
@@ -131,7 +138,21 @@ Dated research records kept in place (bannered, bodies frozen):
 **Completed Step-1 diagnostic authorization:** The frozen-checkpoint no-learning survey (`41272370`) and the one authorized matched Vega activation canary (`41272362_[0-1]`) both completed without retry. The canary used the uniform `0.9` diagnostic boundary and `imp_max_p=0.0` versus `0.5`, with velocity CaT active and all other treatment choices fixed. It is engineering plumbing evidence, not the scientific comparison and not a hardware-limit claim; see `docs/results/2026-08-15_z1_impulse_cat_step1.md` and `docs/research/reward-design/IMPULSE_CAP_PROVENANCE.md`.
 **Completed 500-iteration diagnostic authorization (2026-08-15 to 2026-08-17):** The one authorized uniform-`0.9` extension and its matched evaluation completed without retry/requeue. It establishes a one-training-seed simulation result, not a provisional-boundary dose, hard clamp, hardware-safety result, or independent-seed claim. The native verdict and compact evidence are in `docs/results/2026-08-17_z1_impulse_diag90_500_evaluation.md`; the separate release/window-flush shadow in `docs/superpowers/plans/2026-08-17-z1-impulse-diag90-release-window-flush-shadow.md` is not launch-authorized.
 **Current VIC prototype route:** Native Z1 VIC-TT implementation and qualification are banked under `docs/superpowers/specs/2026-08-13-z1-native-vic-design.md` and `docs/superpowers/plans/2026-08-13-z1-native-vic.md`. The one seed-2 engineering canary authorized by `docs/superpowers/specs/2026-08-13-z1-vic-canary-design.md` and `docs/superpowers/plans/2026-08-13-z1-vic-canary.md` is complete and banked in `docs/results/2026-08-14_z1_vic_seed2_canary.md`; that plan authorizes no additional seeds or formal FIC–VIC comparison.
-**Entry scripts:** `scripts/train.py` · `scripts/play.py` ·
+**Experimental impact-speed usage (not a training launch):** Task ID
+`Unitree-Z1-Hammer-Quintic-M20-ImpactSpeed` is inspectable but intentionally cannot
+construct an environment without explicit positive physical `--speed-bounds` and
+positive `--speed-cost`; training/play additionally accept `--speed-mode` (`external`
+or `policy`). The new `scripts/evaluate_impact_speed.py` requires task, bounds,
+cost, seed, world count, mode and fresh output directory. Modes are `external`,
+`policy`, `intervention` and `smoke`; all except `smoke` require a matching
+experimental checkpoint, while external/intervention require three ordered
+`--goals`. `smoke` runs 64 native transitions with an untrained actor and no
+learning. The `(0.2, 0.8)` m/s bounds and `0.4` coefficient in the dated smoke
+are arithmetic fixtures, **not** physical calibration. Do not launch training
+from them. See the [plumbing result](results/2026-09-21_z1_impact_speed_plumbing.md)
+and [unfrozen qualification proposal](results/2026-09-21_z1_impact_speed_qualification_proposal.md).
+
+**Entry scripts:** `scripts/train.py` · `scripts/play.py` · `scripts/evaluate_impact_speed.py` ·
 `scripts/impulse_cat_activation_survey.py` (frozen-checkpoint Step-1 no-learning binding/attribution survey) ·
 `scripts/analyze_vic_impulse_diag90_500_evaluation.py` (deterministic paired initial-episode bootstrap and compact result banker) ·
 `scripts/preflight_vic_impulse_p02_bridge.py` (frozen-trace `p=0.2` attribution and exposure-direction gate) ·

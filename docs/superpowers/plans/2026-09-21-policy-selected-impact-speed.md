@@ -282,7 +282,7 @@ def test_ignored_goal_does_not_pass_responsiveness():
 
 **Files:** update experimental usage in `docs/README.md` and add a dated result record only for checks actually run. No GPU launch script in this task.
 
-- [ ] Run the new suite and unchanged regression set:
+- [x] Run the new suite and unchanged regression set (115 new + 409 legacy/safety tests; exact commands/results in `docs/results/2026-09-21_z1_impact_speed_plumbing.md`):
 
 ```sh
 python -m pytest tests/test_impact_speed.py tests/test_impact_speed_policy.py tests/test_impact_speed_contract.py tests/test_impact_speed_evaluation.py -q
@@ -293,10 +293,10 @@ python docs/research/reward-design/verify_contact_sensor.py
 python docs/research/reward-design/verify_reward_setup.py
 ```
 
-- [ ] Confirm validation phases A–M pass. These scripts validate existing baseline contracts; also run the new experimental smoke with an explicitly recorded arithmetic smoke range/cost, clearly **not** a physical reachability qualification. Record commands, runtime, failures and export status. Never silently skip unavailable GPU/native simulation gates.
+- [x] Confirm validation phases A–M pass. These scripts validate existing baseline contracts; also run the new experimental smoke with an explicitly recorded arithmetic smoke range/cost, clearly **not** a physical reachability qualification. Record commands, runtime, failures and export status. Never silently skip unavailable GPU/native simulation gates. Dated evidence records all three baseline gates, native CPU smoke, PT/ONNX ReferenceEvaluator export and absent onnxruntime; GPU qualification was not attempted.
 - [ ] Have fresh reviewers inspect the whole branch for semantic drift, lost guards and excess scope. Resolve findings with targeted tests. Update plan checkboxes only from evidence.
 - [ ] Freeze a separate proposed qualification run record containing actual baseline/checkpoint hash, reset library hash, candidate physical range and derivation, coefficient sweep in event-return units, active safety caps/dose, seeds, budget and go/no-go criteria from the approved spec. Do not fill this record with invented values. Its preparation is the next task after plumbing, not a reason to default silently.
-- [ ] Stop before GPU qualification for review of that run record. Proposed later sequence remains E1 externally sampled goals → E2 policy-selected goals → causal interventions → three curves → matched-seed comparison. Failure of responsiveness stops progression; no automatic planner switch, timing constraint, extra dense reward or larger training budget.
+- [x] Stop before GPU qualification for review of that run record. Proposed later sequence remains E1 externally sampled goals → E2 policy-selected goals → causal interventions → three curves → matched-seed comparison. Failure of responsiveness stops progression; no automatic planner switch, timing constraint, extra dense reward or larger training budget. The separate 2026-09-21 proposal is explicitly NO-GO with unresolved fields; this checkbox records the stop, not launch approval.
 - [ ] Final handoff includes implemented commit, tests actually passed, remaining blockers and the smallest next experiment. No claim of optimal impedance, exact velocity control, three-curve generalization or hardware safety follows from plumbing tests.
 
 ## Plan self-review and user handoff
