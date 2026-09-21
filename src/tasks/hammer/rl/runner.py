@@ -27,6 +27,12 @@ from src.tasks.hammer.mdp.variable_impedance import (
     JointStiffnessAction,
     expand_variable_impedance_model_fields,
 )
+from src.tasks.hammer.rl.impact_speed_contract import (
+    build_impact_speed_metadata,
+    summarize_impact_speed_rollout,
+    validate_impact_speed_metadata,
+    validate_impact_speed_models,
+)
 
 
 _JOINT_POSITION_CONTRACT_PATH = (
@@ -219,7 +225,9 @@ def _require_banked_vic_position_action(
         raise ValueError("VIC metadata requires the banked joint-position contract")
 
 
-def _joint_observation_metadata(env) -> dict[str, object]:
+def _joint_observation_metadata(
+    env, *, scalar_tail: tuple[str, ...] = ()
+) -> dict[str, object]:
     """Resolve one of the two qualified joint-policy schemas from live managers."""
     observation_manager = env.observation_manager
     active_terms = observation_manager.active_terms
@@ -240,10 +248,15 @@ def _joint_observation_metadata(env) -> dict[str, object]:
     if len(actor_dim) != 1:
         raise ValueError("joint metadata requires flat actor and critic observations")
 
-    schema = _GUIDANCE_SCHEMAS.get(actor_terms)
+    base_terms = actor_terms
+    if scalar_tail:
+        if actor_terms[-len(scalar_tail):] != scalar_tail:
+            raise ValueError("joint observation tail has the wrong semantic order")
+        base_terms = actor_terms[:-len(scalar_tail)]
+    schema = _GUIDANCE_SCHEMAS.get(base_terms)
     if schema is None:
         raise ValueError("unsupported joint observation schema")
-    expected_width = schema["width"]
+    expected_width = schema["width"] + len(scalar_tail)
     if actor_dim != (expected_width,):
         raise ValueError(
             f"joint metadata requires observation width {expected_width} for "
@@ -294,15 +307,17 @@ def _vic_controller_metadata(
     robot: Entity,
     position_action: JointPositionAction,
     contract: JointPositionContract,
+    *,
+    action_term_dims: tuple[int, ...] = (6, 6),
 ) -> dict[str, object]:
     """Validate and serialize the immutable live VIC controller seams."""
     _require_banked_vic_actuators(env, contract)
     _require_banked_vic_position_action(position_action, contract)
     action_dims = list(env.action_manager.action_term_dim)
-    if action_dims != [len(JOINT_NAMES), len(JOINT_NAMES)]:
-        raise ValueError("VIC metadata requires action dimensions [6, 6]")
-    if env.action_manager.total_action_dim != 2 * len(JOINT_NAMES):
-        raise ValueError("VIC metadata requires exactly twelve action dimensions")
+    if action_dims != list(action_term_dims):
+        raise ValueError(f"VIC metadata requires action dimensions {list(action_term_dims)}")
+    if env.action_manager.total_action_dim != sum(action_term_dims):
+        raise ValueError(f"VIC metadata requires exactly {sum(action_term_dims)} action dimensions")
 
     stiffness = env.action_manager.get_term("joint_stiffness")
     if not isinstance(stiffness, JointStiffnessAction):
@@ -406,6 +421,8 @@ def _vic_controller_metadata(
 
 def _get_hammer_metadata(env, run_path: str, *, raw_policy_clip: float) -> dict:
     action_terms = tuple(env.action_manager.active_terms)
+    if "strike_speed" in action_terms:
+        return {"run_path": run_path, **build_impact_speed_metadata(env, raw_policy_clip)}
     qualified_signatures = (
         ("ik_hammer_head",),
         ("joint_position",),
@@ -439,6 +456,24 @@ def _get_hammer_metadata(env, run_path: str, *, raw_policy_clip: float) -> dict:
             "joint_names": list(robot.joint_names),
             "observation_names": env.observation_manager.active_terms["actor"],
         }
+    metadata = _joint_position_metadata(
+        env, run_path, raw_policy_clip=raw_policy_clip,
+        observation_metadata=_joint_observation_metadata(env),
+    )
+    if not is_vic:
+        return metadata
+    contract = load_joint_position_contract(_JOINT_POSITION_CONTRACT_PATH)
+    controller_metadata = _vic_controller_metadata(env, robot, action, contract)
+    return _with_vic_metadata(env, metadata, controller_metadata)
+
+
+def _joint_position_metadata(
+    env, run_path: str, *, raw_policy_clip: float, observation_metadata: dict
+) -> dict:
+    """Shared physical joint-control provenance; callers own the schema identity."""
+    action_term = "joint_position"
+    action = env.action_manager.get_term(action_term)
+    robot = env.scene["robot"]
     if not isinstance(action, JointPositionAction):
         raise ValueError(f"unsupported action type for hammer ONNX metadata: {type(action).__name__}")
     if action_term != "joint_position":
@@ -485,7 +520,6 @@ def _get_hammer_metadata(env, run_path: str, *, raw_policy_clip: float) -> dict:
     if not torch.isfinite(clips).all() or not torch.all(clips[:, :, 0] < clips[:, :, 1]):
         raise ValueError("joint physical clips must be finite increasing intervals")
     contract = load_joint_position_contract(_JOINT_POSITION_CONTRACT_PATH)
-    observation_metadata = _joint_observation_metadata(env)
 
     delivered_i_ref = env.reward_manager.get_term_cfg(
         "delivered_impulse"
@@ -527,19 +561,20 @@ def _get_hammer_metadata(env, run_path: str, *, raw_policy_clip: float) -> dict:
         "r_tt_enabled": r_tt_enabled,
         "r_tt_k_tt": r_tt_k_tt,
     }
-    if not is_vic:
-        return metadata
+    return metadata
 
-    controller_metadata = _vic_controller_metadata(env, robot, action, contract)
+
+def _with_vic_metadata(env, metadata: dict, controller_metadata: dict) -> dict:
+    """Promote common joint provenance to an explicitly validated VIC schema."""
     nominal_actuator_signature = metadata.pop("fixed_actuator_signature")
     metadata.pop("action_term")
     metadata.update(
         {
             "action_type": "joint_position_variable_impedance",
-            "action_terms": list(action_terms),
+            "action_terms": list(env.action_manager.active_terms),
             "action_term_dims": list(env.action_manager.action_term_dim),
             "action_dim": env.action_manager.total_action_dim,
-            "position_action_dim": action.action_dim,
+            "position_action_dim": env.action_manager.get_term("joint_position").action_dim,
             "nominal_actuator_signature": nominal_actuator_signature,
             **controller_metadata,
         }
@@ -606,6 +641,17 @@ def _summarize_vic_rollout_telemetry(
     """Return JSON-safe gain telemetry from the latest qualified VIC rollout."""
     if action_terms != ("joint_position", "joint_stiffness"):
         raise ValueError("VIC rollout telemetry requires the exact ordered action pair")
+    return _summarize_gain_rollout(
+        storage, action_terms=action_terms, raw_action_clip=raw_action_clip,
+        action_dim=12, distribution_param_count=2, schema_version=1,
+    )
+
+
+def _summarize_gain_rollout(
+    storage, *, action_terms: tuple[str, ...], raw_action_clip: float,
+    action_dim: int, distribution_param_count: int, schema_version: int | str,
+) -> dict[str, object] | None:
+    """Shared six-gain statistics; schema-specific callers declare storage widths."""
     if (
         isinstance(raw_action_clip, bool)
         or not isinstance(raw_action_clip, (int, float))
@@ -617,15 +663,15 @@ def _summarize_vic_rollout_telemetry(
     distribution_params = storage.distribution_params
     if distribution_params is None:
         return None
-    if not isinstance(distribution_params, tuple) or len(distribution_params) != 2:
-        raise ValueError("VIC rollout telemetry requires Gaussian mean and std")
+    if not isinstance(distribution_params, tuple) or len(distribution_params) != distribution_param_count:
+        raise ValueError("VIC rollout telemetry requires the declared Gaussian parameter tuple")
 
     actions = storage.actions
-    means, exploration_std = distribution_params
+    means, exploration_std = distribution_params[:2]
     expected_shape = (
         storage.num_transitions_per_env,
         storage.num_envs,
-        2 * len(JOINT_NAMES),
+        action_dim,
     )
     if (
         not isinstance(actions, torch.Tensor)
@@ -637,7 +683,7 @@ def _summarize_vic_rollout_telemetry(
         or expected_shape[0] <= 0
         or expected_shape[1] <= 0
     ):
-        raise ValueError("VIC rollout telemetry requires aligned nonempty 12D storage")
+        raise ValueError(f"VIC rollout telemetry requires aligned nonempty {action_dim}D storage")
     if not (
         torch.isfinite(actions).all()
         and torch.isfinite(means).all()
@@ -658,7 +704,7 @@ def _summarize_vic_rollout_telemetry(
     mean_raw = _gain_population(means)
     std_raw = _gain_population(exploration_std)
     telemetry: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": schema_version,
         "source": "cat_rollout_storage",
         "action_terms": list(action_terms),
         "joint_names": list(JOINT_NAMES),
@@ -699,9 +745,40 @@ def _summarize_vic_rollout_telemetry(
 class HammerOnPolicyRunner(MjlabOnPolicyRunner):
   env: RslRlVecEnvWrapper
 
+  def __init__(self, env, train_cfg: dict, log_dir=None, device="cpu"):
+    if "strike_speed" in env.unwrapped.action_manager.active_terms:
+      # Grouped model tensors cannot reveal a semantically swapped goal/pending.
+      # Check the live managers before the base runner can construct its models.
+      build_impact_speed_metadata(env.unwrapped, env.clip_actions)
+    super().__init__(env, train_cfg, log_dir, device)
+    if "strike_speed" in env.unwrapped.action_manager.active_terms:
+      validate_impact_speed_models(self.alg.actor, self.alg.critic)
+
+  def load(self, path: str, load_cfg=None, strict=True, map_location=None):
+    if "strike_speed" in self.env.unwrapped.action_manager.active_terms:
+      expected = build_impact_speed_metadata(self.env.unwrapped, self.env.clip_actions)
+      validate_impact_speed_models(self.alg.actor, self.alg.critic)
+      checkpoint = torch.load(path, map_location=map_location, weights_only=False)
+      infos = checkpoint.get("infos") or {}
+      validate_impact_speed_metadata(infos.get("impact_speed_contract"), expected)
+    return super().load(path, load_cfg, strict, map_location)
+
   def save(self, path: str, infos=None):
     action_terms = tuple(self.env.unwrapped.action_manager.active_terms)
-    if action_terms == ("joint_position", "joint_stiffness"):
+    if "strike_speed" in action_terms:
+      metadata = build_impact_speed_metadata(self.env.unwrapped, self.env.clip_actions)
+      validate_impact_speed_models(self.alg.actor, self.alg.critic)
+      infos = {} if infos is None else dict(infos)
+      infos["impact_speed_contract"] = metadata
+      telemetry = summarize_impact_speed_rollout(
+        self.alg.storage, tuple(metadata["speed_bounds_mps"])
+      )
+      if telemetry is not None:
+        infos["impact_speed_rollout_telemetry"] = telemetry
+      else:
+        # Resuming callers may pass old infos; do not relabel old rollout data.
+        infos.pop("impact_speed_rollout_telemetry", None)
+    elif action_terms == ("joint_position", "joint_stiffness"):
       storage = self.alg.storage
       configured_steps = self.cfg.get("num_steps_per_env")
       storage_steps = getattr(storage, "num_transitions_per_env", None)
@@ -729,7 +806,8 @@ class HammerOnPolicyRunner(MjlabOnPolicyRunner):
         infos["vic_rollout_telemetry"] = telemetry
     super().save(path, infos)
     policy_dir, filename, onnx_path = self._get_export_paths(path)
-    is_wandb = self.logger.logger_type == "wandb"
+    # The logger backend is initialized by learn(); a pre-rollout save is valid.
+    is_wandb = getattr(self.logger, "logger_type", self.cfg.get("logger")) == "wandb"
     if is_wandb:
       import wandb  # lazy: a tensorboard run (the Lightning default) must not require wandb installed
       run_name = wandb.run.name if wandb.run else "local"
