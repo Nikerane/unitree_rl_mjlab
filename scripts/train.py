@@ -11,13 +11,17 @@ from typing import Literal, cast
 import tyro
 
 from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
-from mjlab.rl import MjlabOnPolicyRunner, RslRlBaseRunnerCfg, RslRlVecEnvWrapper
+from mjlab.rl import MjlabOnPolicyRunner, RslRlBaseRunnerCfg
 from mjlab.tasks.registry import list_tasks, load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
 from mjlab.utils.gpu import select_gpus
 from mjlab.utils.os import dump_yaml, get_checkpoint_path
 from mjlab.utils.torch import configure_torch_backends
 from mjlab.utils.wrappers import VideoRecorder
+from src.tasks.hammer.rl.impact_speed_wrapper import (
+  configure_impact_speed_experiment,
+  wrap_impact_speed_env,
+)
 
 
 @dataclass(frozen=True)
@@ -31,6 +35,9 @@ class TrainConfig:
   enable_nan_guard: bool = False
   torchrunx_log_dir: str | None = None
   gpu_ids: list[int] | Literal["all"] | None = field(default_factory=lambda: [0])
+  speed_bounds: tuple[float, float] | None = None
+  speed_cost: float | None = None
+  speed_mode: Literal["policy", "external"] | None = None
 
   @staticmethod
   def from_task(task_id: str) -> "TrainConfig":
@@ -40,6 +47,9 @@ class TrainConfig:
 
 
 def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
+  configure_impact_speed_experiment(
+    cfg.env, bounds=cfg.speed_bounds, cost=cfg.speed_cost, mode=cfg.speed_mode
+  )
   cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
   if cuda_visible == "":
     device = "cpu"
@@ -113,7 +123,7 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
     )
     print("[INFO] Recording videos during training.")
 
-  env = RslRlVecEnvWrapper(env, clip_actions=cfg.agent.clip_actions)
+  env = wrap_impact_speed_env(env, clip_actions=cfg.agent.clip_actions)
 
   agent_cfg = asdict(cfg.agent)
   env_cfg = asdict(cfg.env)

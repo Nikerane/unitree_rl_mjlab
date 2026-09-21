@@ -16,6 +16,7 @@ _ARM_JOINT_NAMES = ("joint1", "joint2", "joint3", "joint4", "joint5", "joint6")
 _QUALIFIED_ACTION_SIGNATURES = (
   ("joint_position",),
   ("joint_position", "joint_stiffness"),
+  ("joint_position", "joint_stiffness", "strike_speed"),
 )
 
 
@@ -44,7 +45,8 @@ def _validated_joint_state(
   if active_terms not in _QUALIFIED_ACTION_SIGNATURES:
     raise ValueError(
       "joint trackability requires exactly ('joint_position',) or "
-      "('joint_position', 'joint_stiffness') in that order"
+      "('joint_position', 'joint_stiffness'), or "
+      "('joint_position', 'joint_stiffness', 'strike_speed') in that order"
     )
   action_term = env.action_manager.get_term("joint_position")
   if tuple(action_term.target_names) != _ARM_JOINT_NAMES:

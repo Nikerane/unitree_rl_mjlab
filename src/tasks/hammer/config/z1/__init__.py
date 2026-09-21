@@ -2,6 +2,7 @@
 
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
+from mjlab.managers.observation_manager import ObservationTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.tasks.registry import register_mjlab_task
 from src.tasks.hammer.config.z1.env_cfgs import (
@@ -16,7 +17,16 @@ from src.tasks.hammer.mdp.references import (
     sample_strike_route_signs,
 )
 from src.tasks.hammer.mdp.trackability import joint_trackability_cost
-from src.tasks.hammer.config.z1.rl_cfg import z1_hammer_ppo_runner_cfg
+from src.tasks.hammer.mdp.impact_speed import (
+    ImpactSpeedActionCfg,
+    ImpactSpeedCost,
+    impact_speed_goal,
+    impact_speed_pending,
+)
+from src.tasks.hammer.config.z1.rl_cfg import (
+    z1_hammer_ppo_runner_cfg,
+    z1_impact_speed_ppo_runner_cfg,
+)
 from src.tasks.hammer.rl.runner import HammerOnPolicyRunner
 
 register_mjlab_task(
@@ -296,6 +306,19 @@ def _quintic_pilot_env_cfg(*, play: bool):
                          for name in ('strike_phase', 'strike_ref_error'))
     for params in consumers:
         params.update(path_shape='quintic', overshoot=.02, followthrough_mode='vertical')
+    return cfg
+
+
+def _impact_speed_env_cfg(*, play: bool):
+    """Experimental speed-selection extension; numbers remain deliberately unset."""
+    cfg = _quintic_pilot_env_cfg(play=play)
+    cfg.actions["strike_speed"] = ImpactSpeedActionCfg(
+        entity_name="robot", bounds=None, mode="policy"
+    )
+    for group in cfg.observations.values():
+        group.terms["impact_speed_goal"] = ObservationTermCfg(func=impact_speed_goal)
+        group.terms["impact_speed_pending"] = ObservationTermCfg(func=impact_speed_pending)
+    cfg.rewards["speed_goal"] = RewardTermCfg(func=ImpactSpeedCost, weight=0.0)
     return cfg
 
 
@@ -798,5 +821,13 @@ register_mjlab_task(
     env_cfg=_quintic_pilot_env_cfg(play=False),
     play_env_cfg=_quintic_pilot_env_cfg(play=True),
     rl_cfg=z1_hammer_ppo_runner_cfg(cat_soft=True),
+    runner_cls=HammerOnPolicyRunner,
+)
+
+register_mjlab_task(
+    task_id="Unitree-Z1-Hammer-Quintic-M20-ImpactSpeed",
+    env_cfg=_impact_speed_env_cfg(play=False),
+    play_env_cfg=_impact_speed_env_cfg(play=True),
+    rl_cfg=z1_impact_speed_ppo_runner_cfg(),
     runner_cls=HammerOnPolicyRunner,
 )

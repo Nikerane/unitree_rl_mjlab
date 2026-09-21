@@ -168,6 +168,12 @@ def test_event_charge_is_independent_of_control_dt():
         torch.testing.assert_close(raw * (-coefficient) * dt, torch.tensor([-0.1]))
 
 
+@pytest.mark.parametrize("weight", [0.0, 0.4, float("nan")])
+def test_speed_cost_cannot_build_without_negative_coefficient(weight):
+    with pytest.raises(ValueError, match="negative"):
+        ImpactSpeedCost(RewardTermCfg(func=ImpactSpeedCost, weight=weight), SimpleNamespace())
+
+
 @pytest.mark.parametrize("dt", [0.01, 0.02, 0.04])
 def test_actual_reward_manager_scales_speed_event_once(dt):
     state = ImpactSpeedState(1, "cpu", (0.2, 0.8), "policy")

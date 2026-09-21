@@ -174,8 +174,8 @@ class ImpactSpeedCost(ManagerTermBase):
   """Event-unit speed cost exposed as a rate for dt-scaled RewardManager."""
 
   def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv):
+    validate_speed_goal_weight(cfg.weight)
     super().__init__(env)
-    del cfg
 
   def __call__(self, env: ManagerBasedRlEnv, **params) -> torch.Tensor:
     del params
@@ -208,3 +208,13 @@ class ImpactSpeedCost(ManagerTermBase):
       "cost": cost.clone(),
     }
     return cost / env.step_dt
+
+
+def validate_speed_goal_weight(weight: float) -> None:
+  if (
+    isinstance(weight, bool)
+    or not isinstance(weight, Real)
+    or not math.isfinite(float(weight))
+    or weight >= 0
+  ):
+    raise ValueError("speed_goal weight must be an explicit finite negative coefficient")

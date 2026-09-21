@@ -11,7 +11,7 @@ import torch
 import tyro
 
 from mjlab.envs import ManagerBasedRlEnv
-from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
+from mjlab.rl import MjlabOnPolicyRunner
 from mjlab.tasks.registry import list_tasks, load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
 from mjlab.utils.os import get_wandb_checkpoint_path
@@ -20,6 +20,10 @@ from mjlab.utils.wrappers import VideoRecorder
 from mjlab.viewer import NativeMujocoViewer, ViserPlayViewer
 
 from src.tasks.hammer.mdp.references import SingleStrikeReference
+from src.tasks.hammer.rl.impact_speed_wrapper import (
+  configure_impact_speed_experiment,
+  wrap_impact_speed_env,
+)
 
 
 REFERENCE_LINE_COLOR = (230, 30, 15)
@@ -111,6 +115,9 @@ class PlayConfig:
   """Show the commanded hammer reference as a thin red line in Viser playback."""
   no_terminations: bool = False
   """Disable all termination conditions (useful for viewing motions with dummy agents)."""
+  speed_bounds: tuple[float, float] | None = None
+  speed_cost: float | None = None
+  speed_mode: Literal["policy", "external"] | None = None
 
   # Internal flag used by demo script.
   _demo_mode: tyro.conf.Suppress[bool] = False
@@ -123,6 +130,9 @@ def run_play(task_id: str, cfg: PlayConfig):
 
   env_cfg = load_env_cfg(task_id, play=True)
   agent_cfg = load_rl_cfg(task_id)
+  configure_impact_speed_experiment(
+    env_cfg, bounds=cfg.speed_bounds, cost=cfg.speed_cost, mode=cfg.speed_mode
+  )
 
   DUMMY_MODE = cfg.agent in {"zero", "random"}
   TRAINED_MODE = not DUMMY_MODE
@@ -209,7 +219,7 @@ def run_play(task_id: str, cfg: PlayConfig):
       disable_logger=True,
     )
 
-  env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
+  env = wrap_impact_speed_env(env, clip_actions=agent_cfg.clip_actions)
   if DUMMY_MODE:
     action_shape: tuple[int, ...] = env.unwrapped.action_space.shape
     if cfg.agent == "zero":

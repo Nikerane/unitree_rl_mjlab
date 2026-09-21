@@ -38,6 +38,9 @@ from src.tasks.hammer.mdp.variable_impedance import (
     JointStiffnessActionCfg,
     expand_variable_impedance_model_fields,
 )
+from src.tasks.hammer.mdp.impact_speed import ImpactSpeedActionCfg, ImpactSpeedCost
+from src.tasks.hammer.config.z1 import _impact_speed_env_cfg, _quintic_pilot_env_cfg
+from src.tasks.hammer.config.z1.rl_cfg import z1_impact_speed_ppo_runner_cfg
 
 
 PARENT_TASK = (
@@ -79,6 +82,7 @@ JOINT_POLICY_TASKS = frozenset(
         DIAGONAL_40MM_PERSISTENT_TASK,
         *DIAGONAL_FIXED_START_TASKS.values(),
         "Unitree-Z1-Hammer-Quintic-M20-Pilot",
+        "Unitree-Z1-Hammer-Quintic-M20-ImpactSpeed",
     )
 )
 FIC_CONTROLLED_DROP_I_REF_N_S = 0.2799950838088989
@@ -101,6 +105,53 @@ ARTIFACT = (
     Path(__file__).resolve().parents[1]
     / "src/tasks/hammer/config/z1/data/z1_joint_position_stage1.json"
 )
+
+
+@pytest.mark.parametrize("play", [False, True])
+def test_impact_speed_is_additive_to_quintic_pilot(play: bool) -> None:
+    old = _quintic_pilot_env_cfg(play=play)
+    new = _impact_speed_env_cfg(play=play)
+    assert tuple(new.actions) == (*old.actions, "strike_speed")
+    for name in old.actions:
+        assert type(new.actions[name]) is type(old.actions[name])
+        assert repr(new.actions[name]) == repr(old.actions[name])
+    assert isinstance(new.actions["strike_speed"], ImpactSpeedActionCfg)
+    assert new.actions["strike_speed"].bounds is None
+    assert new.actions["strike_speed"].mode == "policy"
+    for group in ("actor", "critic"):
+        baseline = old.observations[group].terms
+        extension = new.observations[group].terms
+        assert tuple(extension) == (*baseline, "impact_speed_goal", "impact_speed_pending")
+        for name in baseline:
+            assert repr(extension[name]) == repr(baseline[name])
+        assert extension["actions"].params == {"action_name": "joint_position"}
+    assert tuple(new.rewards) == (*old.rewards, "speed_goal")
+    for name in old.rewards:
+        assert repr(new.rewards[name]) == repr(old.rewards[name])
+    assert new.rewards["action_rate"].params == {"action_name": "joint_position"}
+    assert new.rewards["speed_goal"].func is ImpactSpeedCost
+    assert new.rewards["speed_goal"].weight == 0.0
+    for section in ("events", "terminations", "metrics", "curriculum"):
+        assert repr(getattr(new, section)) == repr(getattr(old, section))
+    assert new.scene.num_envs == old.scene.num_envs
+    assert tuple(new.scene.entities) == tuple(old.scene.entities)
+    assert tuple(new.scene.sensors) == tuple(old.scene.sensors)
+    legacy_again = _quintic_pilot_env_cfg(play=play)
+    assert tuple(legacy_again.actions) == tuple(old.actions)
+    assert tuple(legacy_again.rewards) == tuple(old.rewards)
+
+
+def test_impact_speed_rl_changes_only_actor_critic_class_and_distribution() -> None:
+    old = load_rl_cfg("Unitree-Z1-Hammer-Quintic-M20-Pilot")
+    new = z1_impact_speed_ppo_runner_cfg()
+    expected_model = "src.tasks.hammer.rl.impact_speed_policy:ImpactSpeedModel"
+    expected_dist = "src.tasks.hammer.rl.impact_speed_policy:ImpactSpeedGaussian"
+    assert new.actor.class_name == new.critic.class_name == expected_model
+    assert new.actor.distribution_cfg["class_name"] == expected_dist
+    old.actor.class_name = expected_model
+    old.critic.class_name = expected_model
+    old.actor.distribution_cfg["class_name"] = expected_dist
+    assert repr(new) == repr(old)
 
 
 def _force_diagonal_start_sign(env, env_ids: torch.Tensor, *, sign: int) -> None:

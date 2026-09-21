@@ -56,3 +56,15 @@ def z1_hammer_ppo_runner_cfg(cat_soft: bool = False) -> RslRlOnPolicyRunnerCfg:
     # action_rate penalty's assumed scale.
     clip_actions=1.0,
   )
+
+
+def z1_impact_speed_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
+  """Keep pilot PPO/CaT settings while selecting the masked 13D model."""
+  cfg = z1_hammer_ppo_runner_cfg(cat_soft=True)
+  model = "src.tasks.hammer.rl.impact_speed_policy:ImpactSpeedModel"
+  cfg.actor.class_name = model
+  cfg.critic.class_name = model
+  cfg.actor.distribution_cfg["class_name"] = (
+    "src.tasks.hammer.rl.impact_speed_policy:ImpactSpeedGaussian"
+  )
+  return cfg

@@ -92,14 +92,23 @@ def test_reader_accepts_exact_ordered_variable_impedance_action_signature() -> N
     )
 
 
+def test_reader_accepts_only_ordered_impact_speed_extension() -> None:
+    env, arm_cfg = _reader_env(
+        active_terms=("joint_position", "joint_stiffness", "strike_speed")
+    )
+    torch.testing.assert_close(joint_target_squared_error(env, arm_cfg), torch.tensor([0.06]))
+
+
 @pytest.mark.parametrize(
     "active_terms",
     (
         ("joint_stiffness", "joint_position"),
         ("joint_position", "renamed_stiffness"),
         ("joint_position", "joint_stiffness", "extra"),
+        ("joint_position", "strike_speed", "joint_stiffness"),
+        ("joint_position", "joint_stiffness", "strike_speed", "extra"),
     ),
-    ids=("reversed", "renamed", "extra"),
+    ids=("reversed", "renamed", "extra", "speed-reordered", "speed-plus-extra"),
 )
 def test_reader_rejects_every_other_multi_action_signature(
     active_terms: tuple[str, ...],
