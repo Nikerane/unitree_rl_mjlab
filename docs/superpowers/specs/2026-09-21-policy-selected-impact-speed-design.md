@@ -1,6 +1,6 @@
 # Policy-selected impact speed: direct-control design
 
-Date: 2026-09-21. Status: written design for user review, with staged task breakdown; not an executable implementation plan or authorization to train.
+Date: 2026-09-21. Status: user-approved architecture; implementation plan in preparation. The review corrections below preserve option A. No training is authorized by this document alone.
 
 ## 1. Agreed purpose
 
@@ -125,4 +125,17 @@ Three independent review lanes examined installed PPO/controller integration, sc
 
 This design intentionally gates physical bounds and cost calibration on baseline evidence rather than inventing robot-specific numbers. It is not ready for a large training launch until those recorded gates pass. Review cannot guarantee zero errors; regression, small qualification runs and causal interventions provide successive checks.
 
-Next: user reviews this written design, particularly the short externally sampled-goal qualification stage. Then produce the executable file-by-file implementation plan with concrete test commands and subagent assignments. Subagent-driven execution is already the user's chosen method; do not ask them to choose it again. No production implementation or training was performed for this document.
+The user approved this written design, including the proposed qualification stage. Next produce and review the executable file-by-file implementation plan with concrete test commands and subagent assignments. Subagent-driven execution is already the user's chosen method; do not ask them to choose it again. No production implementation or training was performed for this document.
+
+## 10. Post-approval implementation review corrections
+
+Three fresh Astra Ultra reviewers inspected the installed code independently. These corrections supersede ambiguous implementation details above without changing the selected architecture:
+
+- **Normalize the old forty features only.** Both new bounded coordinates (normalized goal and pending flag) pass through unchanged from initial qualification onward, in actor and critic and exports. Otherwise qualification's constant pending=0 learns zero variance and autonomous pending=1 becomes 100 under the installed normalizer. Initialize each model's pending-input weight column to zero from the outset, so a previously untrained column cannot inject an arbitrary first-step disturbance. It remains trainable in autonomy.
+- **Reject non-finite raw actions before wrapper clipping.** Positive infinity becomes +1 under the existing wrapper. A small experimental wrapper must check raw actions before delegating to the existing clipping/step method; direct action-term calls also check their inputs.
+- **Give the action term sole goal-reset ownership.** Reset events run before action-manager reset. External goals are sampled in the term's reset, not an event that a later reset would erase. Latch in `process_actions`, never the repeatedly invoked substep `apply_actions`.
+- **Define event cost in actual reward units.** Emit `cost / env.step_dt` with reward weight `-coefficient`, so the manager's dt multiplication produces exactly one `-coefficient * cost`. Classify it explicitly as negative for CaT. Finalized events take precedence over simultaneous termination, including nonproductive finalized events. Do not reuse the existing productive-only reward-consumption helper unchanged.
+- **Keep experimental checkpoint telemetry explicit.** Save the three distribution tensors and 13D action semantics under a new schema; save contract metadata inside PT checkpoint `infos` as well as ONNX. Old two-tensor/12D validation remains strict.
+- **Treat delayed failure costs cautiously.** A late timeout cost is heavily discounted, and current timeout bootstrapping treats truncation as a continuing cutoff. Preserve existing CaT/timeout rules for this first implementation, explicitly label the auxiliary timeout charge a reset-boundary shaping cost (not a true-terminal Bellman penalty), and report discounted cost/first-contact timing/paired misses. If waiting dominates qualification, stop for a scoped objective/deadline decision instead of silently changing episode duration or adding dense velocity tracking.
+
+The first executable plan should deliver software plumbing and qualification tools, not an unfrozen training campaign. Numeric physical bounds, cost sweep, baseline checkpoint and matched reset evidence must be frozen in a separate run record before GPU qualification. The mathematical concept remains supported; these reviews do not establish learning success or guarantee absence of bugs.
