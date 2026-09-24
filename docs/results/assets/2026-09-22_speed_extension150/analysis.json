@@ -1,0 +1,300 @@
+{
+  "arms": [
+    {
+      "arm": 1,
+      "coefficient": 0.8493676,
+      "checkpoint_sha256": "0a613a46e43e6c73ce6cbcb8633e9deae30d471225d1fad53c9d81d8a955ed0d",
+      "conditions": [
+        {
+          "goal_mps": 1.5,
+          "paired": true,
+          "hits": 128,
+          "complete": 128,
+          "valid_speed": 128,
+          "timeouts": 0,
+          "incomplete": 0,
+          "median_speed_mps": 1.6210395693778992,
+          "median_absolute_speed_error_mps": 0.12103956937789917,
+          "p95_absolute_speed_error_mps": 0.19605591297149658,
+          "excluded_later_episode_rows": 101,
+          "median_tracking_rms_mm": 15.542203330061398,
+          "tracking_limit_mm": 21.622820119425768,
+          "median_delivered_impulse_ns": 0.28464755415916443,
+          "median_contact_time_s": 0.18000000715255737,
+          "joint_cap_max": [
+            0.617844625540219,
+            0.747230661109211,
+            0.41528768978790864,
+            0.4954017436278222,
+            0.6137200729633735,
+            2.0256990612280075
+          ],
+          "joint_exceedance_episodes": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            122
+          ],
+          "max_cat_delta": 0.5,
+          "median_event_cost": 0.025395670775037633,
+          "median_discounted_cost": 0.023199383264413117,
+          "passed_per_goal_gate": false
+        },
+        {
+          "goal_mps": 1.85,
+          "paired": true,
+          "hits": 128,
+          "complete": 128,
+          "valid_speed": 128,
+          "timeouts": 0,
+          "incomplete": 0,
+          "median_speed_mps": 1.9201542735099792,
+          "median_absolute_speed_error_mps": 0.07015427350997916,
+          "p95_absolute_speed_error_mps": 0.1412242591381072,
+          "excluded_later_episode_rows": 0,
+          "median_tracking_rms_mm": 15.94934182661255,
+          "tracking_limit_mm": 21.622820119425768,
+          "median_delivered_impulse_ns": 0.3118707984685898,
+          "median_contact_time_s": 0.17800000309944153,
+          "joint_cap_max": [
+            0.6318035810620481,
+            0.7881298055493735,
+            0.4657659184965015,
+            0.5231130575422995,
+            0.6503932844332563,
+            2.071488557792291
+          ],
+          "joint_exceedance_episodes": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            128
+          ],
+          "max_cat_delta": 0.5,
+          "median_event_cost": 0.008531159409570135,
+          "median_discounted_cost": 0.007793361261674672,
+          "passed_per_goal_gate": false
+        },
+        {
+          "goal_mps": 2.2,
+          "paired": true,
+          "hits": 128,
+          "complete": 128,
+          "valid_speed": 128,
+          "timeouts": 0,
+          "incomplete": 0,
+          "median_speed_mps": 2.2114813327789307,
+          "median_absolute_speed_error_mps": 0.030422520637512385,
+          "p95_absolute_speed_error_mps": 0.07950176000595074,
+          "excluded_later_episode_rows": 0,
+          "median_tracking_rms_mm": 16.246172301960577,
+          "tracking_limit_mm": 21.622820119425768,
+          "median_delivered_impulse_ns": 0.3494821935892105,
+          "median_contact_time_s": 0.17800000309944153,
+          "joint_cap_max": [
+            0.7223487707980604,
+            0.9114577518246039,
+            0.5660702381030654,
+            0.648161583153536,
+            0.725810363040707,
+            2.2348829704086954
+          ],
+          "joint_exceedance_episodes": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            128
+          ],
+          "max_cat_delta": 0.5,
+          "median_event_cost": 0.0016043570169032785,
+          "median_discounted_cost": 0.001465607806062548,
+          "passed_per_goal_gate": true
+        }
+      ],
+      "high_low_contrast": {
+        "seed": 2026092101,
+        "bootstrap_samples": 2000,
+        "common_valid_pairs": 128,
+        "paired_speed_difference": 0.5914626689627767,
+        "ci95": [
+          0.5822695324430243,
+          0.6005119448062033
+        ],
+        "responsive": true,
+        "coverage": {
+          "low": {
+            "episodes": 128,
+            "hits": 128,
+            "available": 128,
+            "misses": 0
+          },
+          "high": {
+            "episodes": 128,
+            "hits": 128,
+            "available": 128,
+            "misses": 0
+          }
+        },
+        "interpretation": "common-valid speed contrast only; inspect miss coverage; not a qualification gate",
+        "low_goal_mps": 1.5,
+        "high_goal_mps": 2.2
+      },
+      "screen_pass": false
+    },
+    {
+      "arm": 2,
+      "coefficient": 2.8312253,
+      "checkpoint_sha256": "7989f97da445cc5ab43ec1bea0936163013699514c8375995a1a00f3fd46a232",
+      "conditions": [
+        {
+          "goal_mps": 1.5,
+          "paired": true,
+          "hits": 128,
+          "complete": 128,
+          "valid_speed": 128,
+          "timeouts": 0,
+          "incomplete": 0,
+          "median_speed_mps": 1.5313196778297424,
+          "median_absolute_speed_error_mps": 0.07718175649642944,
+          "p95_absolute_speed_error_mps": 0.3306461691856383,
+          "excluded_later_episode_rows": 123,
+          "median_tracking_rms_mm": 10.353991205026038,
+          "tracking_limit_mm": 21.622820119425768,
+          "median_delivered_impulse_ns": 0.3292398005723953,
+          "median_contact_time_s": 0.2460000067949295,
+          "joint_cap_max": [
+            0.7601817287403717,
+            1.1016365473832541,
+            0.3987581426212135,
+            0.4911186087745315,
+            0.8154533258298549,
+            2.8286054276111647
+          ],
+          "joint_exceedance_episodes": [
+            0,
+            3,
+            0,
+            0,
+            0,
+            128
+          ],
+          "max_cat_delta": 0.5,
+          "median_event_cost": 0.03441987214406915,
+          "median_discounted_cost": 0.030357289403889525,
+          "passed_per_goal_gate": false
+        },
+        {
+          "goal_mps": 1.85,
+          "paired": true,
+          "hits": 128,
+          "complete": 128,
+          "valid_speed": 128,
+          "timeouts": 0,
+          "incomplete": 0,
+          "median_speed_mps": 1.9024423956871033,
+          "median_absolute_speed_error_mps": 0.08055601119995126,
+          "p95_absolute_speed_error_mps": 0.2929590582847595,
+          "excluded_later_episode_rows": 121,
+          "median_tracking_rms_mm": 10.550141225473602,
+          "tracking_limit_mm": 21.622820119425768,
+          "median_delivered_impulse_ns": 0.36055392026901245,
+          "median_contact_time_s": 0.25,
+          "joint_cap_max": [
+            1.1006399060329448,
+            1.2413946593680032,
+            0.6810836998750847,
+            0.870535851817144,
+            1.101915429278118,
+            2.724830197488389
+          ],
+          "joint_exceedance_episodes": [
+            3,
+            12,
+            0,
+            0,
+            2,
+            127
+          ],
+          "max_cat_delta": 0.5,
+          "median_event_cost": 0.037495307616786704,
+          "median_discounted_cost": 0.033235273431862285,
+          "passed_per_goal_gate": false
+        },
+        {
+          "goal_mps": 2.2,
+          "paired": true,
+          "hits": 128,
+          "complete": 128,
+          "valid_speed": 128,
+          "timeouts": 0,
+          "incomplete": 0,
+          "median_speed_mps": 2.1859928369522095,
+          "median_absolute_speed_error_mps": 0.0854282855987547,
+          "p95_absolute_speed_error_mps": 0.24054379463195769,
+          "excluded_later_episode_rows": 125,
+          "median_tracking_rms_mm": 18.32444850529754,
+          "tracking_limit_mm": 21.622820119425768,
+          "median_delivered_impulse_ns": 0.3811082988977432,
+          "median_contact_time_s": 0.242000013589859,
+          "joint_cap_max": [
+            1.2222801443684068,
+            1.3695826859978157,
+            0.9674068065839732,
+            0.9627758972043914,
+            1.1880133694749537,
+            3.290248171585362
+          ],
+          "joint_exceedance_episodes": [
+            15,
+            52,
+            0,
+            0,
+            9,
+            121
+          ],
+          "max_cat_delta": 0.5,
+          "median_event_cost": 0.042178808246347815,
+          "median_discounted_cost": 0.03738665753657823,
+          "passed_per_goal_gate": false
+        }
+      ],
+      "high_low_contrast": {
+        "seed": 2026092101,
+        "bootstrap_samples": 2000,
+        "common_valid_pairs": 128,
+        "paired_speed_difference": 0.6967663206160069,
+        "ci95": [
+          0.6622089935699478,
+          0.7296433627838269
+        ],
+        "responsive": true,
+        "coverage": {
+          "low": {
+            "episodes": 128,
+            "hits": 128,
+            "available": 128,
+            "misses": 0
+          },
+          "high": {
+            "episodes": 128,
+            "hits": 128,
+            "available": 128,
+            "misses": 0
+          }
+        },
+        "interpretation": "common-valid speed contrast only; inspect miss coverage; not a qualification gate",
+        "low_goal_mps": 1.5,
+        "high_goal_mps": 2.2
+      },
+      "screen_pass": false
+    }
+  ],
+  "selected_arm": null,
+  "caveat": "Single-seed screening only. No physical safety, optimum, or held-out qualification claim."
+}

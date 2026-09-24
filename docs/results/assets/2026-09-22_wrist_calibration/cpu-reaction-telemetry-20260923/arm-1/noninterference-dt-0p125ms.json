@@ -1,0 +1,194 @@
+{
+  "status": "passed",
+  "arm": 1,
+  "device": "cpu",
+  "dt": 0.000125,
+  "reference": "/cephhome/eunikhilr/campaigns/z1-wrist-calibration-20260922.7DPuER/cpu-timestep-20260923/arm-1/dt-0p125ms",
+  "telemetry": "/cephhome/eunikhilr/campaigns/z1-wrist-calibration-20260922.7DPuER/cpu-reaction-telemetry-20260923/arm-1/dt-0p125ms",
+  "observed_substeps": 2240,
+  "accumulator_config": {
+    "subtract_baseline": true,
+    "window_substeps": 400,
+    "decimation": 160,
+    "joint_names": [
+      "joint1",
+      "joint2",
+      "joint3",
+      "joint4",
+      "joint5",
+      "joint6"
+    ]
+  },
+  "engineering_gate": {
+    "status": "passed",
+    "failures": [],
+    "first_budget_violation": {},
+    "max_absolute_error_per_component": {
+      "qpos": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "qvel": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "velocity": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "reaction": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "delivered_native": 0.0
+    },
+    "budgets": {
+      "reaction": [
+        0.001845,
+        0.00123,
+        0.00369,
+        0.001845,
+        0.00123,
+        8.200000000000001e-05
+      ],
+      "delivered_native": 0.001,
+      "velocity": [
+        0.015707500000000003,
+        0.015707500000000003,
+        0.015707500000000003,
+        0.015707500000000003,
+        0.015707500000000003,
+        0.015707500000000003
+      ],
+      "qpos": [
+        0.0001,
+        0.0001,
+        0.0001,
+        0.0001,
+        0.0001,
+        0.0001,
+        0.0001,
+        0.0001
+      ],
+      "qvel": [
+        0.005,
+        0.005,
+        0.005,
+        0.005,
+        0.005,
+        0.005,
+        0.005,
+        0.005
+      ]
+    },
+    "exact_channels": [
+      "native_target",
+      "ctrl",
+      "encoder_bias",
+      "contact",
+      "finalized",
+      "reason"
+    ],
+    "cap_classification_flips": {
+      "reaction": {
+        "full_horizon": [],
+        "source_terminal_prefix": []
+      },
+      "velocity": {
+        "full_horizon": [],
+        "source_terminal_prefix": []
+      }
+    },
+    "scope": "full 0.28 s same-dt trace; caps also checked through each source-native terminal prefix",
+    "rtol": 0,
+    "attribution_allowed": true
+  },
+  "exact_original_substeps": {
+    "status": "passed",
+    "mismatch_count": {
+      "actuator_force": 0,
+      "contact": 0,
+      "contact_match_overflow": 0,
+      "ctrl": 0,
+      "delivered_native": 0,
+      "encoder_bias": 0,
+      "finalized": 0,
+      "force_axial": 0,
+      "global_capacity_overflow": 0,
+      "nail_depth": 0,
+      "native_target": 0,
+      "onset_s": 0,
+      "overflow": 0,
+      "point_slot_overflow": 0,
+      "qpos": 0,
+      "qvel": 0,
+      "reaction": 0,
+      "reason": 0,
+      "velocity": 0
+    },
+    "max_absolute_error": {
+      "actuator_force": 0.0,
+      "contact": 0.0,
+      "contact_match_overflow": 0.0,
+      "ctrl": 0.0,
+      "delivered_native": 0.0,
+      "encoder_bias": 0.0,
+      "finalized": 0.0,
+      "force_axial": 0.0,
+      "global_capacity_overflow": 0.0,
+      "nail_depth": 0.0,
+      "native_target": 0.0,
+      "onset_s": 0.0,
+      "overflow": 0.0,
+      "point_slot_overflow": 0.0,
+      "qpos": 0.0,
+      "qvel": 0.0,
+      "reaction": 0.0,
+      "reason": 0.0,
+      "velocity": 0.0
+    },
+    "first_mismatch": {},
+    "scope": "every saved value at every full-horizon sample"
+  },
+  "exact_commands": {
+    "status": "passed",
+    "mismatch_count": {
+      "kd": 0,
+      "kp": 0,
+      "target": 0
+    },
+    "max_absolute_error": {
+      "kd": 0.0,
+      "kp": 0.0,
+      "target": 0.0
+    },
+    "first_mismatch": {},
+    "scope": "every saved value at every full-horizon sample"
+  },
+  "attribution_allowed": true,
+  "limitations": [
+    "raw qfrc_constraint includes multiple constraint types",
+    "postterminal held-command tail is not a source-terminal prefix",
+    "no GPU or gain-safety qualification"
+  ]
+}

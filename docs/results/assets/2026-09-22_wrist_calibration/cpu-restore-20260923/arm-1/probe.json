@@ -1,0 +1,38 @@
+{
+  "status": "passed",
+  "stage": "complete",
+  "arm": 1,
+  "device": "cpu",
+  "physics_dt_s": 0.00025,
+  "control_dt_s": 0.02,
+  "window_s": 0.05,
+  "num_worlds": 128,
+  "physics_rollout_steps": 0,
+  "reset_may_forward": true,
+  "capture": "/cephhome/eunikhilr/campaigns/z1-wrist-calibration-20260922.7DPuER/engineering-validation/contact-1-capture",
+  "source_runtime_identity": {
+    "commit": "cc46d9998a3c9cd5d8813e89b57e44248353e03e",
+    "source_sha256": "c0169cc20cf3c6cf67799141ac9d42ba0cdbf34b91b298d82b5a909aea628e42",
+    "versions": {
+      "mjlab": "1.4.0",
+      "mujoco": "3.8.1",
+      "mujoco_warp": "3.8.1",
+      "torch": "2.12.0",
+      "warp-lang": "1.14.0"
+    }
+  },
+  "saved_model_hash": "254f10c9e90acb2a08abfd28808564710ed7d24baac2fabb9b6d8a1c50f874d1",
+  "saved_state_hash": "40637e41bbec173c55cefdd8ce6880cbcf3f372bfef7b052d334aafc54795317",
+  "saved_expanded_hash": "0eb66d03292eb0fdd55705c2c82fd03a867a8022f6d4a9c534645de8a49f332c",
+  "sensor_status": {
+    "contact_gate_reducer": "maxforce",
+    "delivered_reducer": "netforce",
+    "point_slot_quality": "unavailable",
+    "point_slot_num_slots": null,
+    "contact_match_capacity": 64
+  },
+  "error": null,
+  "traceback": null,
+  "close_error": null,
+  "interpretation": "CPU construction/restore compatibility only; no rollout or numerical equivalence claim"
+}

@@ -1,0 +1,5 @@
+{
+  "dt": 0.002,
+  "error": "native replay fidelity failed: reaction maxabs=1.0713934898376465e-05",
+  "status": "numerical attribution blocked; no later refinement executed"
+}

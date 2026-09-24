@@ -1,0 +1,1103 @@
+{
+  "task": "Unitree-Z1-Hammer-Quintic-M20-ImpactSpeed",
+  "mode": "external",
+  "seed": 2026092101,
+  "checkpoint": "/cephhome/eunikhilr/campaigns/z1-speed-preflight-20260921.O9UyYJ/smoke-retry1/logs/rsl_rl/z1_hammer/2026-09-21_19-32-27_preflight_only/model_1.pt",
+  "checkpoint_sha256": "13e195bf6361e64c7269b736aea7a7ca172f07e7e29d3d5053e1ff025427372f",
+  "actor_status": "checkpoint",
+  "qualification": "not assessed; bounds/cost are supplied experiment inputs, not physical certification",
+  "transitions": 6000,
+  "learning_updates": 0,
+  "conditions": [
+    {
+      "goal_mps": 1.5,
+      "contract": {
+        "action_type": "joint_position_variable_impedance",
+        "action_dim": 13,
+        "target_names": [
+          "joint1",
+          "joint2",
+          "joint3",
+          "joint4",
+          "joint5",
+          "joint6"
+        ],
+        "target_ids": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "actuator_names": [
+          "joint1",
+          "joint2",
+          "joint3",
+          "joint4",
+          "joint5",
+          "joint6"
+        ],
+        "use_default_offset": true,
+        "default_offsets": [
+          0.0,
+          1.6059999465942383,
+          -0.4300999939441681,
+          -1.19760000705719,
+          -0.0013000000035390258,
+          1.5543999671936035
+        ],
+        "action_scale": [
+          0.05570376291871071,
+          0.5878274440765381,
+          0.14464382827281952,
+          0.22881677746772766,
+          0.05571571737527847,
+          0.05516456812620163
+        ],
+        "physical_clips": [
+          [
+            -2.617990016937256,
+            2.617990016937256
+          ],
+          [
+            0.0,
+            2.967060089111328
+          ],
+          [
+            -2.8797900676727295,
+            0.0
+          ],
+          [
+            -1.5184400081634521,
+            1.5184400081634521
+          ],
+          [
+            -1.3438999652862549,
+            1.3438999652862549
+          ],
+          [
+            -2.792530059814453,
+            2.792530059814453
+          ]
+        ],
+        "raw_policy_clip": 1.0,
+        "physics_dt_s": 0.002,
+        "control_decimation": 10,
+        "joint_action_qualification_payload_sha256": "8425bda4e472316fcbbf990d7e06f5db31c2f631ba9ce4098d45a935e224b5fe",
+        "delivered_impulse_i_ref_n_s": 0.2799950838088989,
+        "observation_names": [
+          "joint_pos",
+          "joint_vel",
+          "ee_pos",
+          "ee_vel",
+          "head_pos",
+          "head_vel",
+          "nail_top_pos",
+          "nail_depth",
+          "strike_phase",
+          "strike_ref_error",
+          "actions",
+          "impact_speed_goal",
+          "impact_speed_pending"
+        ],
+        "observation_widths": {
+          "actor": 42,
+          "critic": 42
+        },
+        "guidance_type": "direct_reference",
+        "guidance_reward_key": "r_imit",
+        "guidance_reward_impl": "src.tasks.hammer.mdp.rewards.ImitationPriorTerm",
+        "observation_term_widths": [
+          7,
+          7,
+          3,
+          3,
+          3,
+          3,
+          3,
+          1,
+          1,
+          3,
+          6,
+          1,
+          1
+        ],
+        "observation_normalization": {
+          "type": "physical40_empirical_fixed_tail_v1",
+          "empirical_width": 40,
+          "fixed_tail": [
+            "impact_speed_goal",
+            "impact_speed_pending"
+          ],
+          "empirical_eps": 0.01
+        },
+        "r_tt_enabled": true,
+        "r_tt_k_tt": 1.0,
+        "action_terms": [
+          "joint_position",
+          "joint_stiffness",
+          "strike_speed"
+        ],
+        "action_term_dims": [
+          6,
+          6,
+          1
+        ],
+        "position_action_dim": 6,
+        "nominal_actuator_signature": [
+          {
+            "type": "BuiltinPositionActuatorCfg",
+            "target_names_expr": [
+              "joint1",
+              "joint3",
+              "joint4",
+              "joint5",
+              "joint6"
+            ],
+            "stiffness": 1000.0,
+            "damping": 100.0,
+            "effort_limit": 30.0,
+            "armature": 0.01
+          },
+          {
+            "type": "BuiltinPositionActuatorCfg",
+            "target_names_expr": [
+              "joint2"
+            ],
+            "stiffness": 1500.0,
+            "damping": 150.0,
+            "effort_limit": 60.0,
+            "armature": 0.02
+          },
+          {
+            "type": "BuiltinPositionActuatorCfg",
+            "target_names_expr": [
+              "jointGripper"
+            ],
+            "stiffness": 100.0,
+            "damping": 20.0,
+            "effort_limit": 30.0,
+            "armature": 0.005
+          }
+        ],
+        "action_observation_impl": "mjlab.envs.mdp.observations.last_action",
+        "action_observation_source": "joint_position",
+        "action_rate_impl": "src.tasks.hammer.mdp.rewards.action_rate_penalty",
+        "action_rate_source": "joint_position",
+        "action_rate_weight": -0.01,
+        "r_tt_weight": -1.0,
+        "r_tt_impl": "src.tasks.hammer.mdp.trackability.joint_trackability_cost",
+        "variable_impedance": {
+          "mapping_family": "author_v1_exponential",
+          "C": 1.25,
+          "p_bounds": [
+            -1.0,
+            1.0
+          ],
+          "joint_names": [
+            "joint1",
+            "joint2",
+            "joint3",
+            "joint4",
+            "joint5",
+            "joint6"
+          ],
+          "control_ids": [
+            0,
+            5,
+            1,
+            2,
+            3,
+            4
+          ],
+          "nominal_kp": [
+            1000.0,
+            1500.0,
+            1000.0,
+            1000.0,
+            1000.0,
+            1000.0
+          ],
+          "nominal_kd": [
+            100.0,
+            150.0,
+            100.0,
+            100.0,
+            100.0,
+            100.0
+          ],
+          "native_model_fields": [
+            "actuator_gainprm",
+            "actuator_biasprm"
+          ]
+        },
+        "schema_version": "impact_speed_v1",
+        "distribution_parameters": [
+          "mean",
+          "std",
+          "activity_mask"
+        ],
+        "speed_bounds_mps": [
+          1.5,
+          2.2
+        ],
+        "speed_axis_world": [
+          0.0,
+          0.0,
+          -1.0
+        ],
+        "speed_mode": "external",
+        "speed_measurement": "first_accepted_contact_onset_previous_free_flight_difference_mps",
+        "speed_cost": {
+          "coefficient": 0.8493676,
+          "units": "dimensionless_per_event",
+          "reward_term_units": "cost_per_second_before_manager_dt",
+          "timeout_semantics": "reset_boundary_shaping"
+        },
+        "safety": {
+          "cat_soft": {
+            "use_vel": true,
+            "use_impulse": true,
+            "imp_limit": [
+              0.369,
+              0.246,
+              0.738,
+              0.369,
+              0.246,
+              0.0164
+            ],
+            "imp_max_p": 0.2,
+            "imp_seed": 0.001,
+            "limit": 3.1415,
+            "max_p": 0.5,
+            "min_p": 0.0,
+            "tau": 0.95,
+            "vel_detection": "substep"
+          },
+          "substep_impulse": {
+            "sensor_name": "hammer_nail_contact",
+            "subtract_baseline": true,
+            "event_window_substeps": 25
+          }
+        }
+      },
+      "reset_hashes": [
+        "c16530c41d7652b8e5286823ff87d617bb533f75ddcf73eca79f3718a435aa6e",
+        "a234fd33ef25cc70c98d1addaaa19b65b33c56e2778b0e41ff05aa30c553d7e2"
+      ],
+      "torch_post_reset_rng_hash": "ae98050f157ff284b74c58b36d1e5137807fe3599768520d59ca806bc483d94f",
+      "cuda_post_reset_rng_hash": "f0dfa833815102cda95843493a5061cc4dee4185d2f166ef192d6792dd3672d9",
+      "first_action_hash": "72313f8f8c8c680fa8a4ce8010c9b92523315ae92b1808f37808a4c8b32f9f55",
+      "second_motor_action": [
+        [
+          0.11446112394332886,
+          -0.010762646794319153,
+          0.02197256311774254,
+          0.045006588101387024,
+          0.06952035427093506,
+          -0.06014695018529892,
+          0.15768010914325714,
+          0.10318712890148163,
+          -0.008220179006457329,
+          0.005780283361673355,
+          0.0796796977519989,
+          0.10631453990936279
+        ],
+        [
+          0.1609596610069275,
+          -0.011847302317619324,
+          0.023426460102200508,
+          0.06366346776485443,
+          0.058578088879585266,
+          -0.030019059777259827,
+          0.16997110843658447,
+          0.11567874252796173,
+          -0.034047000110149384,
+          -0.0359809510409832,
+          0.04676181823015213,
+          0.09968554973602295
+        ]
+      ],
+      "second_kp": [
+        [
+          1035.8116455078125,
+          1534.93896484375,
+          998.1674194335938,
+          1001.2906494140625,
+          1017.93896484375,
+          1024.007080078125
+        ],
+        [
+          1038.6563720703125,
+          1539.2235107421875,
+          992.431396484375,
+          992.003173828125,
+          1010.4891967773438,
+          1022.4934692382812
+        ]
+      ],
+      "transitions": 2000,
+      "selection_count": 0,
+      "parity": {
+        "pt": "not requested",
+        "onnx": "not requested",
+        "observations": 0
+      }
+    },
+    {
+      "goal_mps": 1.85,
+      "contract": {
+        "action_type": "joint_position_variable_impedance",
+        "action_dim": 13,
+        "target_names": [
+          "joint1",
+          "joint2",
+          "joint3",
+          "joint4",
+          "joint5",
+          "joint6"
+        ],
+        "target_ids": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "actuator_names": [
+          "joint1",
+          "joint2",
+          "joint3",
+          "joint4",
+          "joint5",
+          "joint6"
+        ],
+        "use_default_offset": true,
+        "default_offsets": [
+          0.0,
+          1.6059999465942383,
+          -0.4300999939441681,
+          -1.19760000705719,
+          -0.0013000000035390258,
+          1.5543999671936035
+        ],
+        "action_scale": [
+          0.05570376291871071,
+          0.5878274440765381,
+          0.14464382827281952,
+          0.22881677746772766,
+          0.05571571737527847,
+          0.05516456812620163
+        ],
+        "physical_clips": [
+          [
+            -2.617990016937256,
+            2.617990016937256
+          ],
+          [
+            0.0,
+            2.967060089111328
+          ],
+          [
+            -2.8797900676727295,
+            0.0
+          ],
+          [
+            -1.5184400081634521,
+            1.5184400081634521
+          ],
+          [
+            -1.3438999652862549,
+            1.3438999652862549
+          ],
+          [
+            -2.792530059814453,
+            2.792530059814453
+          ]
+        ],
+        "raw_policy_clip": 1.0,
+        "physics_dt_s": 0.002,
+        "control_decimation": 10,
+        "joint_action_qualification_payload_sha256": "8425bda4e472316fcbbf990d7e06f5db31c2f631ba9ce4098d45a935e224b5fe",
+        "delivered_impulse_i_ref_n_s": 0.2799950838088989,
+        "observation_names": [
+          "joint_pos",
+          "joint_vel",
+          "ee_pos",
+          "ee_vel",
+          "head_pos",
+          "head_vel",
+          "nail_top_pos",
+          "nail_depth",
+          "strike_phase",
+          "strike_ref_error",
+          "actions",
+          "impact_speed_goal",
+          "impact_speed_pending"
+        ],
+        "observation_widths": {
+          "actor": 42,
+          "critic": 42
+        },
+        "guidance_type": "direct_reference",
+        "guidance_reward_key": "r_imit",
+        "guidance_reward_impl": "src.tasks.hammer.mdp.rewards.ImitationPriorTerm",
+        "observation_term_widths": [
+          7,
+          7,
+          3,
+          3,
+          3,
+          3,
+          3,
+          1,
+          1,
+          3,
+          6,
+          1,
+          1
+        ],
+        "observation_normalization": {
+          "type": "physical40_empirical_fixed_tail_v1",
+          "empirical_width": 40,
+          "fixed_tail": [
+            "impact_speed_goal",
+            "impact_speed_pending"
+          ],
+          "empirical_eps": 0.01
+        },
+        "r_tt_enabled": true,
+        "r_tt_k_tt": 1.0,
+        "action_terms": [
+          "joint_position",
+          "joint_stiffness",
+          "strike_speed"
+        ],
+        "action_term_dims": [
+          6,
+          6,
+          1
+        ],
+        "position_action_dim": 6,
+        "nominal_actuator_signature": [
+          {
+            "type": "BuiltinPositionActuatorCfg",
+            "target_names_expr": [
+              "joint1",
+              "joint3",
+              "joint4",
+              "joint5",
+              "joint6"
+            ],
+            "stiffness": 1000.0,
+            "damping": 100.0,
+            "effort_limit": 30.0,
+            "armature": 0.01
+          },
+          {
+            "type": "BuiltinPositionActuatorCfg",
+            "target_names_expr": [
+              "joint2"
+            ],
+            "stiffness": 1500.0,
+            "damping": 150.0,
+            "effort_limit": 60.0,
+            "armature": 0.02
+          },
+          {
+            "type": "BuiltinPositionActuatorCfg",
+            "target_names_expr": [
+              "jointGripper"
+            ],
+            "stiffness": 100.0,
+            "damping": 20.0,
+            "effort_limit": 30.0,
+            "armature": 0.005
+          }
+        ],
+        "action_observation_impl": "mjlab.envs.mdp.observations.last_action",
+        "action_observation_source": "joint_position",
+        "action_rate_impl": "src.tasks.hammer.mdp.rewards.action_rate_penalty",
+        "action_rate_source": "joint_position",
+        "action_rate_weight": -0.01,
+        "r_tt_weight": -1.0,
+        "r_tt_impl": "src.tasks.hammer.mdp.trackability.joint_trackability_cost",
+        "variable_impedance": {
+          "mapping_family": "author_v1_exponential",
+          "C": 1.25,
+          "p_bounds": [
+            -1.0,
+            1.0
+          ],
+          "joint_names": [
+            "joint1",
+            "joint2",
+            "joint3",
+            "joint4",
+            "joint5",
+            "joint6"
+          ],
+          "control_ids": [
+            0,
+            5,
+            1,
+            2,
+            3,
+            4
+          ],
+          "nominal_kp": [
+            1000.0,
+            1500.0,
+            1000.0,
+            1000.0,
+            1000.0,
+            1000.0
+          ],
+          "nominal_kd": [
+            100.0,
+            150.0,
+            100.0,
+            100.0,
+            100.0,
+            100.0
+          ],
+          "native_model_fields": [
+            "actuator_gainprm",
+            "actuator_biasprm"
+          ]
+        },
+        "schema_version": "impact_speed_v1",
+        "distribution_parameters": [
+          "mean",
+          "std",
+          "activity_mask"
+        ],
+        "speed_bounds_mps": [
+          1.5,
+          2.2
+        ],
+        "speed_axis_world": [
+          0.0,
+          0.0,
+          -1.0
+        ],
+        "speed_mode": "external",
+        "speed_measurement": "first_accepted_contact_onset_previous_free_flight_difference_mps",
+        "speed_cost": {
+          "coefficient": 0.8493676,
+          "units": "dimensionless_per_event",
+          "reward_term_units": "cost_per_second_before_manager_dt",
+          "timeout_semantics": "reset_boundary_shaping"
+        },
+        "safety": {
+          "cat_soft": {
+            "use_vel": true,
+            "use_impulse": true,
+            "imp_limit": [
+              0.369,
+              0.246,
+              0.738,
+              0.369,
+              0.246,
+              0.0164
+            ],
+            "imp_max_p": 0.2,
+            "imp_seed": 0.001,
+            "limit": 3.1415,
+            "max_p": 0.5,
+            "min_p": 0.0,
+            "tau": 0.95,
+            "vel_detection": "substep"
+          },
+          "substep_impulse": {
+            "sensor_name": "hammer_nail_contact",
+            "subtract_baseline": true,
+            "event_window_substeps": 25
+          }
+        }
+      },
+      "reset_hashes": [
+        "c16530c41d7652b8e5286823ff87d617bb533f75ddcf73eca79f3718a435aa6e",
+        "a234fd33ef25cc70c98d1addaaa19b65b33c56e2778b0e41ff05aa30c553d7e2"
+      ],
+      "torch_post_reset_rng_hash": "ae98050f157ff284b74c58b36d1e5137807fe3599768520d59ca806bc483d94f",
+      "cuda_post_reset_rng_hash": "f0dfa833815102cda95843493a5061cc4dee4185d2f166ef192d6792dd3672d9",
+      "first_action_hash": "70187a3d1139ed7b3d6ca9f1d9f263578d6106e071d822c9776326327c8f0b4b",
+      "second_motor_action": [
+        [
+          0.13027720153331757,
+          -0.011576376855373383,
+          0.026639774441719055,
+          0.05223449319601059,
+          0.0623505562543869,
+          -0.06954264640808105,
+          0.14395292103290558,
+          0.11129267513751984,
+          0.007437473628669977,
+          0.008940298110246658,
+          0.07564892619848251,
+          0.09389679878950119
+        ],
+        [
+          0.17716757953166962,
+          -0.01470191776752472,
+          0.029375404119491577,
+          0.07273777574300766,
+          0.05282263457775116,
+          -0.03707748278975487,
+          0.15627604722976685,
+          0.12602022290229797,
+          -0.019958924502134323,
+          -0.03318050131201744,
+          0.041975490748882294,
+          0.08675403892993927
+        ]
+      ],
+      "second_kp": [
+        [
+          1032.6436767578125,
+          1537.7177734375,
+          1001.6609497070312,
+          1001.9970092773438,
+          1017.0238037109375,
+          1021.1734619140625
+        ],
+        [
+          1035.4871826171875,
+          1542.7796630859375,
+          995.55615234375,
+          992.6233520507812,
+          1009.41064453125,
+          1019.5472412109375
+        ]
+      ],
+      "transitions": 2000,
+      "selection_count": 0,
+      "parity": {
+        "pt": "not requested",
+        "onnx": "not requested",
+        "observations": 0
+      }
+    },
+    {
+      "goal_mps": 2.2,
+      "contract": {
+        "action_type": "joint_position_variable_impedance",
+        "action_dim": 13,
+        "target_names": [
+          "joint1",
+          "joint2",
+          "joint3",
+          "joint4",
+          "joint5",
+          "joint6"
+        ],
+        "target_ids": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "actuator_names": [
+          "joint1",
+          "joint2",
+          "joint3",
+          "joint4",
+          "joint5",
+          "joint6"
+        ],
+        "use_default_offset": true,
+        "default_offsets": [
+          0.0,
+          1.6059999465942383,
+          -0.4300999939441681,
+          -1.19760000705719,
+          -0.0013000000035390258,
+          1.5543999671936035
+        ],
+        "action_scale": [
+          0.05570376291871071,
+          0.5878274440765381,
+          0.14464382827281952,
+          0.22881677746772766,
+          0.05571571737527847,
+          0.05516456812620163
+        ],
+        "physical_clips": [
+          [
+            -2.617990016937256,
+            2.617990016937256
+          ],
+          [
+            0.0,
+            2.967060089111328
+          ],
+          [
+            -2.8797900676727295,
+            0.0
+          ],
+          [
+            -1.5184400081634521,
+            1.5184400081634521
+          ],
+          [
+            -1.3438999652862549,
+            1.3438999652862549
+          ],
+          [
+            -2.792530059814453,
+            2.792530059814453
+          ]
+        ],
+        "raw_policy_clip": 1.0,
+        "physics_dt_s": 0.002,
+        "control_decimation": 10,
+        "joint_action_qualification_payload_sha256": "8425bda4e472316fcbbf990d7e06f5db31c2f631ba9ce4098d45a935e224b5fe",
+        "delivered_impulse_i_ref_n_s": 0.2799950838088989,
+        "observation_names": [
+          "joint_pos",
+          "joint_vel",
+          "ee_pos",
+          "ee_vel",
+          "head_pos",
+          "head_vel",
+          "nail_top_pos",
+          "nail_depth",
+          "strike_phase",
+          "strike_ref_error",
+          "actions",
+          "impact_speed_goal",
+          "impact_speed_pending"
+        ],
+        "observation_widths": {
+          "actor": 42,
+          "critic": 42
+        },
+        "guidance_type": "direct_reference",
+        "guidance_reward_key": "r_imit",
+        "guidance_reward_impl": "src.tasks.hammer.mdp.rewards.ImitationPriorTerm",
+        "observation_term_widths": [
+          7,
+          7,
+          3,
+          3,
+          3,
+          3,
+          3,
+          1,
+          1,
+          3,
+          6,
+          1,
+          1
+        ],
+        "observation_normalization": {
+          "type": "physical40_empirical_fixed_tail_v1",
+          "empirical_width": 40,
+          "fixed_tail": [
+            "impact_speed_goal",
+            "impact_speed_pending"
+          ],
+          "empirical_eps": 0.01
+        },
+        "r_tt_enabled": true,
+        "r_tt_k_tt": 1.0,
+        "action_terms": [
+          "joint_position",
+          "joint_stiffness",
+          "strike_speed"
+        ],
+        "action_term_dims": [
+          6,
+          6,
+          1
+        ],
+        "position_action_dim": 6,
+        "nominal_actuator_signature": [
+          {
+            "type": "BuiltinPositionActuatorCfg",
+            "target_names_expr": [
+              "joint1",
+              "joint3",
+              "joint4",
+              "joint5",
+              "joint6"
+            ],
+            "stiffness": 1000.0,
+            "damping": 100.0,
+            "effort_limit": 30.0,
+            "armature": 0.01
+          },
+          {
+            "type": "BuiltinPositionActuatorCfg",
+            "target_names_expr": [
+              "joint2"
+            ],
+            "stiffness": 1500.0,
+            "damping": 150.0,
+            "effort_limit": 60.0,
+            "armature": 0.02
+          },
+          {
+            "type": "BuiltinPositionActuatorCfg",
+            "target_names_expr": [
+              "jointGripper"
+            ],
+            "stiffness": 100.0,
+            "damping": 20.0,
+            "effort_limit": 30.0,
+            "armature": 0.005
+          }
+        ],
+        "action_observation_impl": "mjlab.envs.mdp.observations.last_action",
+        "action_observation_source": "joint_position",
+        "action_rate_impl": "src.tasks.hammer.mdp.rewards.action_rate_penalty",
+        "action_rate_source": "joint_position",
+        "action_rate_weight": -0.01,
+        "r_tt_weight": -1.0,
+        "r_tt_impl": "src.tasks.hammer.mdp.trackability.joint_trackability_cost",
+        "variable_impedance": {
+          "mapping_family": "author_v1_exponential",
+          "C": 1.25,
+          "p_bounds": [
+            -1.0,
+            1.0
+          ],
+          "joint_names": [
+            "joint1",
+            "joint2",
+            "joint3",
+            "joint4",
+            "joint5",
+            "joint6"
+          ],
+          "control_ids": [
+            0,
+            5,
+            1,
+            2,
+            3,
+            4
+          ],
+          "nominal_kp": [
+            1000.0,
+            1500.0,
+            1000.0,
+            1000.0,
+            1000.0,
+            1000.0
+          ],
+          "nominal_kd": [
+            100.0,
+            150.0,
+            100.0,
+            100.0,
+            100.0,
+            100.0
+          ],
+          "native_model_fields": [
+            "actuator_gainprm",
+            "actuator_biasprm"
+          ]
+        },
+        "schema_version": "impact_speed_v1",
+        "distribution_parameters": [
+          "mean",
+          "std",
+          "activity_mask"
+        ],
+        "speed_bounds_mps": [
+          1.5,
+          2.2
+        ],
+        "speed_axis_world": [
+          0.0,
+          0.0,
+          -1.0
+        ],
+        "speed_mode": "external",
+        "speed_measurement": "first_accepted_contact_onset_previous_free_flight_difference_mps",
+        "speed_cost": {
+          "coefficient": 0.8493676,
+          "units": "dimensionless_per_event",
+          "reward_term_units": "cost_per_second_before_manager_dt",
+          "timeout_semantics": "reset_boundary_shaping"
+        },
+        "safety": {
+          "cat_soft": {
+            "use_vel": true,
+            "use_impulse": true,
+            "imp_limit": [
+              0.369,
+              0.246,
+              0.738,
+              0.369,
+              0.246,
+              0.0164
+            ],
+            "imp_max_p": 0.2,
+            "imp_seed": 0.001,
+            "limit": 3.1415,
+            "max_p": 0.5,
+            "min_p": 0.0,
+            "tau": 0.95,
+            "vel_detection": "substep"
+          },
+          "substep_impulse": {
+            "sensor_name": "hammer_nail_contact",
+            "subtract_baseline": true,
+            "event_window_substeps": 25
+          }
+        }
+      },
+      "reset_hashes": [
+        "c16530c41d7652b8e5286823ff87d617bb533f75ddcf73eca79f3718a435aa6e",
+        "a234fd33ef25cc70c98d1addaaa19b65b33c56e2778b0e41ff05aa30c553d7e2"
+      ],
+      "torch_post_reset_rng_hash": "ae98050f157ff284b74c58b36d1e5137807fe3599768520d59ca806bc483d94f",
+      "cuda_post_reset_rng_hash": "f0dfa833815102cda95843493a5061cc4dee4185d2f166ef192d6792dd3672d9",
+      "first_action_hash": "9a25427c1f9fa3ed3215647c0e2a5c8f641e272626a6310a1261845c871c2be6",
+      "second_motor_action": [
+        [
+          0.1453583836555481,
+          -0.015573970973491669,
+          0.029427241533994675,
+          0.05784893035888672,
+          0.05575298145413399,
+          -0.08032982796430588,
+          0.12730513513088226,
+          0.1192292869091034,
+          0.02411615289747715,
+          0.012783315032720566,
+          0.07107637822628021,
+          0.08211882412433624
+        ],
+        [
+          0.19091354310512543,
+          -0.021170124411582947,
+          0.03285400941967964,
+          0.0800141841173172,
+          0.04799419641494751,
+          -0.045810386538505554,
+          0.13956063985824585,
+          0.13600021600723267,
+          -0.004940599203109741,
+          -0.02876986935734749,
+          0.03777780011296272,
+          0.0742153450846672
+        ]
+      ],
+      "second_kp": [
+        [
+          1028.814697265625,
+          1540.443359375,
+          1005.3958740234375,
+          1002.8566284179688,
+          1015.9866943359375,
+          1018.4931640625
+        ],
+        [
+          1031.632080078125,
+          1546.2191162109375,
+          998.8981323242188,
+          993.6007080078125,
+          1008.4655151367188,
+          1016.6986083984375
+        ]
+      ],
+      "transitions": 2000,
+      "selection_count": 0,
+      "parity": {
+        "pt": "not requested",
+        "onnx": "not requested",
+        "observations": 0
+      }
+    }
+  ],
+  "comparisons": [
+    {
+      "seed": 2026092101,
+      "bootstrap_samples": 2000,
+      "common_valid_pairs": 0,
+      "paired_speed_difference": null,
+      "ci95": null,
+      "responsive": false,
+      "coverage": {
+        "low": {
+          "episodes": 2,
+          "hits": 0,
+          "available": 0,
+          "misses": 2
+        },
+        "high": {
+          "episodes": 2,
+          "hits": 0,
+          "available": 0,
+          "misses": 2
+        }
+      },
+      "interpretation": "common-valid speed contrast only; inspect miss coverage; not a qualification gate",
+      "low_goal_mps": 1.5,
+      "high_goal_mps": 1.85
+    },
+    {
+      "seed": 2026092101,
+      "bootstrap_samples": 2000,
+      "common_valid_pairs": 0,
+      "paired_speed_difference": null,
+      "ci95": null,
+      "responsive": false,
+      "coverage": {
+        "low": {
+          "episodes": 2,
+          "hits": 0,
+          "available": 0,
+          "misses": 2
+        },
+        "high": {
+          "episodes": 2,
+          "hits": 0,
+          "available": 0,
+          "misses": 2
+        }
+      },
+      "interpretation": "common-valid speed contrast only; inspect miss coverage; not a qualification gate",
+      "low_goal_mps": 1.85,
+      "high_goal_mps": 2.2
+    },
+    {
+      "seed": 2026092101,
+      "bootstrap_samples": 2000,
+      "common_valid_pairs": 0,
+      "paired_speed_difference": null,
+      "ci95": null,
+      "responsive": false,
+      "coverage": {
+        "low": {
+          "episodes": 2,
+          "hits": 0,
+          "available": 0,
+          "misses": 2
+        },
+        "high": {
+          "episodes": 2,
+          "hits": 0,
+          "available": 0,
+          "misses": 2
+        }
+      },
+      "interpretation": "common-valid speed contrast only; inspect miss coverage; not a qualification gate",
+      "low_goal_mps": 1.5,
+      "high_goal_mps": 2.2
+    }
+  ],
+  "timeout_count": 6,
+  "completed_episodes": 6,
+  "cost_semantics": "positive cost magnitude; gamma-discounted from first transition; timeout is reset-boundary shaping, not a hard deadline",
+  "tracking_semantics": "all sampled steps, geometric reference preview, reward-time one-substep-stale positions",
+  "reset_evidence_semantics": "first episode joint/nail positions and velocities plus physical observations; fresh same-seed native construction; not a portable full-state replay"
+}

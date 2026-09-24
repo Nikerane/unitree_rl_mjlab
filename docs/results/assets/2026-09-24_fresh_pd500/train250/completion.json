@@ -1,0 +1,286 @@
+{
+  "phase": "train",
+  "iterations": 250,
+  "seed": 2,
+  "checkpoint": "/cephhome/eunikhilr/campaigns/z1-fresh-pd500-20260924.sbkVqV/train250/model_249.pt",
+  "sha256": "0de912ae08faf988454c3cc561da62abc0df4bc744940383c870c97466377815",
+  "reload": "passed",
+  "contract": {
+    "action_type": "joint_position_fixed_sampled_pd",
+    "action_dim": 13,
+    "target_names": [
+      "joint1",
+      "joint2",
+      "joint3",
+      "joint4",
+      "joint5",
+      "joint6"
+    ],
+    "target_ids": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "actuator_names": [
+      "joint1",
+      "joint2",
+      "joint3",
+      "joint4",
+      "joint5",
+      "joint6"
+    ],
+    "use_default_offset": true,
+    "default_offsets": [
+      0.0,
+      1.6059999465942383,
+      -0.4300999939441681,
+      -1.19760000705719,
+      -0.0013000000035390258,
+      1.5543999671936035
+    ],
+    "action_scale": [
+      0.05570376291871071,
+      0.5878274440765381,
+      0.14464382827281952,
+      0.22881677746772766,
+      0.05571571737527847,
+      0.05516456812620163
+    ],
+    "physical_clips": [
+      [
+        -2.617990016937256,
+        2.617990016937256
+      ],
+      [
+        0.0,
+        2.967060089111328
+      ],
+      [
+        -2.8797900676727295,
+        0.0
+      ],
+      [
+        -1.5184400081634521,
+        1.5184400081634521
+      ],
+      [
+        -1.3438999652862549,
+        1.3438999652862549
+      ],
+      [
+        -2.792530059814453,
+        2.792530059814453
+      ]
+    ],
+    "raw_policy_clip": 1.0,
+    "physics_dt_s": 0.00025,
+    "control_decimation": 80,
+    "joint_action_qualification_payload_sha256": "8425bda4e472316fcbbf990d7e06f5db31c2f631ba9ce4098d45a935e224b5fe",
+    "delivered_impulse_i_ref_n_s": 0.2799950838088989,
+    "observation_names": [
+      "joint_pos",
+      "joint_vel",
+      "ee_pos",
+      "ee_vel",
+      "head_pos",
+      "head_vel",
+      "nail_top_pos",
+      "nail_depth",
+      "strike_phase",
+      "strike_ref_error",
+      "actions",
+      "impact_speed_goal",
+      "impact_speed_pending"
+    ],
+    "observation_widths": {
+      "actor": 42,
+      "critic": 42
+    },
+    "guidance_type": "direct_reference",
+    "guidance_reward_key": "r_imit",
+    "guidance_reward_impl": "src.tasks.hammer.mdp.rewards.ImitationPriorTerm",
+    "observation_term_widths": [
+      7,
+      7,
+      3,
+      3,
+      3,
+      3,
+      3,
+      1,
+      1,
+      3,
+      6,
+      1,
+      1
+    ],
+    "observation_normalization": {
+      "type": "physical40_empirical_fixed_tail_v1",
+      "empirical_width": 40,
+      "fixed_tail": [
+        "impact_speed_goal",
+        "impact_speed_pending"
+      ],
+      "empirical_eps": 0.01
+    },
+    "r_tt_enabled": true,
+    "r_tt_k_tt": 1.0,
+    "action_terms": [
+      "joint_position",
+      "joint_stiffness",
+      "strike_speed"
+    ],
+    "action_term_dims": [
+      6,
+      6,
+      1
+    ],
+    "position_action_dim": 6,
+    "nominal_actuator_signature": [
+      {
+        "type": "BuiltinPositionActuatorCfg",
+        "target_names_expr": [
+          "joint1",
+          "joint3",
+          "joint4",
+          "joint5",
+          "joint6"
+        ],
+        "stiffness": 1000.0,
+        "damping": 100.0,
+        "effort_limit": 30.0,
+        "armature": 0.01
+      },
+      {
+        "type": "BuiltinPositionActuatorCfg",
+        "target_names_expr": [
+          "joint2"
+        ],
+        "stiffness": 1500.0,
+        "damping": 150.0,
+        "effort_limit": 60.0,
+        "armature": 0.02
+      },
+      {
+        "type": "BuiltinPositionActuatorCfg",
+        "target_names_expr": [
+          "jointGripper"
+        ],
+        "stiffness": 100.0,
+        "damping": 20.0,
+        "effort_limit": 30.0,
+        "armature": 0.005
+      }
+    ],
+    "action_observation_impl": "mjlab.envs.mdp.observations.last_action",
+    "action_observation_source": "joint_position",
+    "action_rate_impl": "src.tasks.hammer.mdp.rewards.action_rate_penalty",
+    "action_rate_source": "joint_position",
+    "action_rate_weight": -0.01,
+    "r_tt_weight": -1.0,
+    "r_tt_impl": "src.tasks.hammer.mdp.trackability.joint_trackability_cost",
+    "sampled_pd": {
+      "version": "fixed_pd500_v1",
+      "pd_dt_s": 0.002,
+      "physics_dt_s": 0.00025,
+      "policy_dt_s": 0.02,
+      "kp": [
+        256.0,
+        384.0,
+        384.0,
+        256.0,
+        192.0,
+        128.0
+      ],
+      "kd": [
+        6.4,
+        6.4,
+        6.4,
+        6.4,
+        6.4,
+        6.4
+      ],
+      "control_ids": [
+        0,
+        5,
+        1,
+        2,
+        3,
+        4
+      ],
+      "effort_limits_nm": [
+        30.0,
+        60.0,
+        30.0,
+        30.0,
+        30.0,
+        30.0
+      ],
+      "gripper_kp": 100.0,
+      "gripper_kd": 20.0,
+      "ignored_action_indices": [
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "event_window_s": 0.05,
+      "delivered_rearm_gap_s": 0.05,
+      "torque_hold": "zero_order_hold_without_native_feedback"
+    },
+    "schema_version": "impact_speed_v1",
+    "distribution_parameters": [
+      "mean",
+      "std",
+      "activity_mask"
+    ],
+    "speed_bounds_mps": [
+      1.5,
+      2.2
+    ],
+    "speed_axis_world": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "speed_mode": "external",
+    "speed_measurement": "first_accepted_contact_onset_previous_free_flight_difference_mps",
+    "speed_cost": {
+      "coefficient": 0.8493676,
+      "units": "dimensionless_per_event",
+      "reward_term_units": "cost_per_second_before_manager_dt",
+      "timeout_semantics": "reset_boundary_shaping"
+    },
+    "safety": {
+      "cat_soft": {
+        "use_vel": true,
+        "use_impulse": true,
+        "imp_limit": [
+          0.369,
+          0.246,
+          0.738,
+          0.369,
+          0.246,
+          0.0164
+        ],
+        "imp_max_p": 0.2,
+        "imp_seed": 0.001,
+        "limit": 3.1415,
+        "max_p": 0.5,
+        "min_p": 0.0,
+        "tau": 0.95,
+        "vel_detection": "substep"
+      },
+      "substep_impulse": {
+        "sensor_name": "hammer_nail_contact",
+        "subtract_baseline": true,
+        "event_window_substeps": 200
+      }
+    }
+  }
+}

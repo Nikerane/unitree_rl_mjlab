@@ -4,6 +4,17 @@
 
 ## Identity to freeze before approval
 
+### Baseline recovered on 2026-09-21
+
+The earlier bounded indexed search missed a banked artifact in the main checkout. The comparator is now recovered: `Unitree-Z1-Hammer-Quintic-M20-Pilot`, fresh seed 2, 250 iterations, 4,096 worlds, 24-step rollouts; source `3ca89a297a58d8e59d74c4797caeb8629499f1aa`, asset `b58ccd2f81fd246f27c1e8d88cf86484cd888703`. Vega job `45513585` is independently confirmed COMPLETED, exit `0:0`, elapsed 9m47s. Local and remote `model_249.pt` hashes both equal `fb526aeca10c47d10def0e5f32ee545e56a180378271e65b8a4972ea5e73525d`.
+
+- Local artifact: `/Users/nikerane/repos/unitree_rl_mjlab/docs/results/quintic-m20-pilot/iter250/model_249.pt`.
+- Remote artifact: `/cephhome/eunikhilr/campaigns/z1-quintic-m20-pilot/runs/3ca89a2-seed2-250iter-retry1/logs/rsl_rl/z1_hammer/2026-09-20_15-14-39_quintic_m20_seed2_baseline250/model_249.pt`.
+- Remote source: `/cephhome/eunikhilr/repos/unitree_rl_mjlab-quintic-3ca89a2`, clean tracked source; assets match with no tracked diff.
+- Existing CPU playback is historical supporting evidence, not the newly planned matched replay: eight deterministic resets repeated the same trajectory, about 2.218 m/s, 0.3615 N·s, 21.06 mm nearest-approach geometric RMS and J6 peak cap utilization 1.0348. This metric differs from the experimental evaluator's phase-indexed tracking metric. Neither eight nor 128 repeated fixed starts establishes robustness or a physically safe speed range.
+
+This recovery supersedes the **missing comparator** entries below, but not the remaining calibration/reset/launch gates. The final whole-branch review at `cc46d99` is also complete with software-handoff approval and no actionable findings. The user has approved baseline recovery and replay only; no E1/E2 training is authorized by this update.
+
 | Field | Confirmed evidence now | Required resolution before E1 |
 |---|---|---|
 | Experimental code | `codex/z1-impact-speed` derives from code baseline `3ca89a2`; the dated software checks used implementation through `f7560d8` plus a narrow Task 8 test/docs correction. | Freeze an exact clean source SHA after whole-branch review and retain its diff/manifest. This proposal does not treat the in-progress branch as a frozen launch artifact. |

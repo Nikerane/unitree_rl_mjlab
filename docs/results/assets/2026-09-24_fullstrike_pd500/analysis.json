@@ -1,0 +1,451 @@
+{
+  "replays": 8,
+  "learning_updates": 0,
+  "records": [
+    {
+      "source": 1,
+      "dt": 0.00025,
+      "additional_recording_noninterference": true,
+      "reconstruction_max_error": 0,
+      "contact_count": 1,
+      "complete_windows": 0,
+      "source_prefix_complete_windows": 0,
+      "late_incomplete_windows": 1,
+      "contact_onset_s": {
+        "median": 0.27675,
+        "p95": 0.27675,
+        "max": 0.27675
+      },
+      "full_speed_max": [
+        2.623300552368164,
+        8.478772163391113,
+        8.842164993286133,
+        10.726227760314941,
+        2.451850652694702,
+        1.0403666496276855
+      ],
+      "full_speed_violations": [
+        0,
+        128,
+        128,
+        128,
+        0,
+        0
+      ],
+      "source_prefix_speed_max": [
+        2.623300552368164,
+        6.279452323913574,
+        7.502613067626953,
+        10.726227760314941,
+        2.451850652694702,
+        1.0403666496276855
+      ],
+      "source_prefix_speed_violations": [
+        0,
+        128,
+        128,
+        128,
+        0,
+        0
+      ],
+      "before_first_contact_speed_max": [
+        2.623300552368164,
+        8.478772163391113,
+        8.842164993286133,
+        10.726227760314941,
+        2.451850652694702,
+        1.0403666496276855
+      ],
+      "before_first_contact_speed_violations": [
+        0,
+        128,
+        128,
+        128,
+        0,
+        0
+      ],
+      "chatter_world_counts": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "saturation_mean": [
+        0.003794642857142853,
+        0.6393973214285718,
+        0.7064174107142854,
+        0.4164062499999999,
+        0,
+        0
+      ],
+      "delivered_complete_Ns": null,
+      "contact_joint_complete_Nms": null,
+      "delivered_source_complete_Ns": null,
+      "contact_joint_source_complete_Nms": null,
+      "sensor_off_nonzero_contact_rows": 0
+    },
+    {
+      "source": 1,
+      "dt": 0.000125,
+      "additional_recording_noninterference": true,
+      "reconstruction_max_error": 0,
+      "contact_count": 1,
+      "complete_windows": 0,
+      "source_prefix_complete_windows": 0,
+      "late_incomplete_windows": 1,
+      "contact_onset_s": {
+        "median": 0.277,
+        "p95": 0.277,
+        "max": 0.277
+      },
+      "full_speed_max": [
+        2.627610206604004,
+        8.492734909057617,
+        8.857479095458984,
+        10.747657775878906,
+        2.4579412937164307,
+        1.0459142923355103
+      ],
+      "full_speed_violations": [
+        0,
+        128,
+        128,
+        128,
+        0,
+        0
+      ],
+      "source_prefix_speed_max": [
+        2.627610206604004,
+        6.285179615020752,
+        7.515755653381348,
+        10.747657775878906,
+        2.4579412937164307,
+        1.0459142923355103
+      ],
+      "source_prefix_speed_violations": [
+        0,
+        128,
+        128,
+        128,
+        0,
+        0
+      ],
+      "before_first_contact_speed_max": [
+        2.627610206604004,
+        8.492734909057617,
+        8.857479095458984,
+        10.747657775878906,
+        2.4579412937164307,
+        1.0459142923355103
+      ],
+      "before_first_contact_speed_violations": [
+        0,
+        128,
+        128,
+        128,
+        0,
+        0
+      ],
+      "chatter_world_counts": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "saturation_mean": [
+        0.0039062499999999957,
+        0.6395647321428575,
+        0.7066406249999998,
+        0.4163504464285714,
+        0,
+        0
+      ],
+      "delivered_complete_Ns": null,
+      "contact_joint_complete_Nms": null,
+      "delivered_source_complete_Ns": null,
+      "contact_joint_source_complete_Nms": null,
+      "sensor_off_nonzero_contact_rows": 0
+    },
+    {
+      "source": 3,
+      "dt": 0.00025,
+      "additional_recording_noninterference": true,
+      "reconstruction_max_error": 0,
+      "contact_count": 0,
+      "complete_windows": 0,
+      "source_prefix_complete_windows": 0,
+      "late_incomplete_windows": 0,
+      "contact_onset_s": null,
+      "full_speed_max": [
+        2.197770357131958,
+        9.002602577209473,
+        8.32829761505127,
+        9.865837097167969,
+        2.2340247631073,
+        1.1997203826904297
+      ],
+      "full_speed_violations": [
+        0,
+        128,
+        128,
+        128,
+        0,
+        0
+      ],
+      "source_prefix_speed_max": [
+        2.197770357131958,
+        5.841296195983887,
+        7.65919303894043,
+        9.865837097167969,
+        2.2340247631073,
+        1.1997203826904297
+      ],
+      "source_prefix_speed_violations": [
+        0,
+        128,
+        128,
+        128,
+        0,
+        0
+      ],
+      "before_first_contact_speed_max": [
+        2.197770357131958,
+        9.002602577209473,
+        8.32829761505127,
+        9.865837097167969,
+        2.2340247631073,
+        1.1997203826904297
+      ],
+      "before_first_contact_speed_violations": [
+        0,
+        128,
+        128,
+        128,
+        0,
+        0
+      ],
+      "chatter_world_counts": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "saturation_mean": [
+        0.006975446428571412,
+        0.44107142857142856,
+        0.7321428571428573,
+        0.26244419642857114,
+        0,
+        0
+      ],
+      "delivered_complete_Ns": null,
+      "contact_joint_complete_Nms": null,
+      "delivered_source_complete_Ns": null,
+      "contact_joint_source_complete_Nms": null,
+      "sensor_off_nonzero_contact_rows": 0
+    },
+    {
+      "source": 3,
+      "dt": 0.000125,
+      "additional_recording_noninterference": true,
+      "reconstruction_max_error": 0,
+      "contact_count": 0,
+      "complete_windows": 0,
+      "source_prefix_complete_windows": 0,
+      "late_incomplete_windows": 0,
+      "contact_onset_s": null,
+      "full_speed_max": [
+        2.200005054473877,
+        9.012374877929688,
+        8.34088134765625,
+        9.902750015258789,
+        2.239384412765503,
+        1.204364538192749
+      ],
+      "full_speed_violations": [
+        0,
+        128,
+        128,
+        128,
+        0,
+        0
+      ],
+      "source_prefix_speed_max": [
+        2.200005054473877,
+        5.845170021057129,
+        7.661169528961182,
+        9.902750015258789,
+        2.239384412765503,
+        1.204364538192749
+      ],
+      "source_prefix_speed_violations": [
+        0,
+        128,
+        128,
+        128,
+        0,
+        0
+      ],
+      "before_first_contact_speed_max": [
+        2.200005054473877,
+        9.012374877929688,
+        8.34088134765625,
+        9.902750015258789,
+        2.239384412765503,
+        1.204364538192749
+      ],
+      "before_first_contact_speed_violations": [
+        0,
+        128,
+        128,
+        128,
+        0,
+        0
+      ],
+      "chatter_world_counts": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "saturation_mean": [
+        0.006975446428571412,
+        0.44112723214285715,
+        0.7325892857142858,
+        0.26244419642857114,
+        0,
+        0
+      ],
+      "delivered_complete_Ns": null,
+      "contact_joint_complete_Nms": null,
+      "delivered_source_complete_Ns": null,
+      "contact_joint_source_complete_Nms": null,
+      "sensor_off_nonzero_contact_rows": 0
+    }
+  ],
+  "comparisons": [
+    {
+      "source": 1,
+      "paired_complete_count": 0,
+      "paired_source_complete_count": 0,
+      "contact_status_mismatches": 0,
+      "peak_speed_difference_p95": [
+        0.004123485181480646,
+        0.016623806208372116,
+        0.018381621688604355,
+        0.021254682913422585,
+        0.005686688236892223,
+        0.005547642707824707
+      ],
+      "peak_speed_difference_max": [
+        0.004309654235839844,
+        0.027992725372314453,
+        0.02375650405883789,
+        0.028298377990722656,
+        0.006090641021728516,
+        0.005547642707824707
+      ],
+      "speed_numerical_screen_pass": true,
+      "prefix_peak_speed_difference_max": [
+        0.004309654235839844,
+        0.007023811340332031,
+        0.013142585754394531,
+        0.028298377990722656,
+        0.006090641021728516,
+        0.005547642707824707
+      ],
+      "qpos_rms_difference": [
+        0.00009764620335772634,
+        0.0002208455844083801,
+        0.0003955092397518456,
+        0.00015997004811652005,
+        0.000037681020330637693,
+        0.00001172725205833558,
+        7.044267817946093e-7,
+        0.000002871875722121331
+      ],
+      "velocity_rms_difference": [
+        0.0020797578617930412,
+        0.004268070682883263,
+        0.00971008837223053,
+        0.009780426509678364,
+        0.0017998237162828445,
+        0.0006727568106725812
+      ],
+      "onset_difference_s": null,
+      "delivered_difference_Ns": null,
+      "contact_joint_difference_Nms": null,
+      "source_complete_delivered_difference_Ns": null,
+      "source_complete_contact_joint_difference_Nms": null
+    },
+    {
+      "source": 3,
+      "paired_complete_count": 0,
+      "paired_source_complete_count": 0,
+      "contact_status_mismatches": 0,
+      "peak_speed_difference_p95": [
+        0.0027062713634222746,
+        0.015656091272830963,
+        0.017482805997133255,
+        0.024501526728272438,
+        0.00518645066767931,
+        0.00535130500793457
+      ],
+      "peak_speed_difference_max": [
+        0.002855539321899414,
+        0.022782325744628906,
+        0.037851810455322266,
+        0.042125701904296875,
+        0.005359649658203125,
+        0.005471229553222656
+      ],
+      "speed_numerical_screen_pass": true,
+      "prefix_peak_speed_difference_max": [
+        0.002855539321899414,
+        0.006200313568115234,
+        0.017615318298339844,
+        0.042125701904296875,
+        0.005359649658203125,
+        0.005471229553222656
+      ],
+      "qpos_rms_difference": [
+        0.0000876154808793217,
+        0.00020767621754202992,
+        0.0003759125538635999,
+        0.00014410432777367532,
+        0.00003267726060585119,
+        0.000013516919352696277,
+        6.927298272785265e-7,
+        0
+      ],
+      "velocity_rms_difference": [
+        0.0016556759364902973,
+        0.005468490533530712,
+        0.011751741170883179,
+        0.013017243705689907,
+        0.001442479551769793,
+        0.0009323536651208997
+      ],
+      "onset_difference_s": null,
+      "delivered_difference_Ns": null,
+      "contact_joint_difference_Nms": null,
+      "source_complete_delivered_difference_Ns": null,
+      "source_complete_contact_joint_difference_Nms": null
+    }
+  ],
+  "limitations": [
+    "Frozen old commands, not closed-loop policies.",
+    "Full horizon includes post-source-termination holds.",
+    "Contact generalized impulse is not internal gearbox load.",
+    "No old joint-load safety threshold transferred.",
+    "Observer parity concerns additional recording only."
+  ]
+}

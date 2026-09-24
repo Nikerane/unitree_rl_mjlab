@@ -1,0 +1,11 @@
+{
+  "identity_checks": "passed against accepted 2ms summary and between both refinements",
+  "strict_native_verdict_preserved": "failed",
+  "engineering_basis": "2026-09-22-prospective-engineering-v1",
+  "timesteps_s": [
+    0.001,
+    0.0005
+  ],
+  "horizon_s": 0.28,
+  "numerical_convergence": "not adjudicated; inspect physical results against independent budget"
+}

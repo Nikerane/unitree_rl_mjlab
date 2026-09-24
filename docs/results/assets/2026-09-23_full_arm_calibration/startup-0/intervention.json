@@ -1,0 +1,20 @@
+{
+  "kp": [
+    512,
+    768,
+    768,
+    512,
+    384,
+    256.0
+  ],
+  "kd": [
+    25.6,
+    25.6,
+    25.6,
+    25.6,
+    25.6,
+    25.6
+  ],
+  "learning_updates": 0,
+  "scope": "60ms startup: world0 six-joint traces, existing all-world J6 peaks; no contact, no full-strike qualification"
+}

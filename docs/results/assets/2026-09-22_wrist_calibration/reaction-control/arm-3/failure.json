@@ -1,0 +1,5 @@
+{
+  "dt": 0.00025,
+  "error": "unobserved same-dt control failed prospective non-interference gate",
+  "status": "data retained; control failed; no attribution authorized"
+}

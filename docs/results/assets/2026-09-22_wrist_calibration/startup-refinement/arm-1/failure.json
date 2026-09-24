@@ -1,0 +1,5 @@
+{
+  "dt": 0.000125,
+  "error": "[Errno 17] File exists: '/cephhome/eunikhilr/campaigns/z1-wrist-calibration-20260922.7DPuER/startup-refinement/arm-1/comparisons.json'",
+  "status": "stopped; no further timestep executed"
+}

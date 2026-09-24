@@ -1,0 +1,11 @@
+{
+  "treatment": "runtime_wrist_override",
+  "wrist_kp": 512.0,
+  "wrist_kd": 25.6,
+  "joint": "joint6",
+  "intervention_point": "after JointStiffnessAction.process_actions",
+  "observer": "/cephhome/eunikhilr/campaigns/z1-speed-dose-pair-20260922.28P0cS/dose_eval.py",
+  "observer_sha256": "5d446daed13192383e0dd2e34079d34ddd29a83f6612a755dbd383a15f30ba11",
+  "learning_updates": 0,
+  "metadata_notice": "Checkpoint was loaded strictly by the native evaluator. Its original metadata describes the original controller contract, not modified runtime wrist gains or qualification of the altered controller."
+}

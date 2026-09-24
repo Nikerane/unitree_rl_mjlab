@@ -40,6 +40,7 @@ class TrainConfig:
   speed_cost: float | None = None
   speed_mode: Literal["policy", "external"] | None = None
   qualification_checkpoint: str | None = None
+  sampled_pd500: bool = False
 
   @staticmethod
   def from_task(task_id: str) -> "TrainConfig":
@@ -73,6 +74,9 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
   configure_impact_speed_experiment(
     cfg.env, bounds=cfg.speed_bounds, cost=cfg.speed_cost, mode=cfg.speed_mode
   )
+  if cfg.sampled_pd500:
+    from src.tasks.hammer.mdp.sampled_pd500 import configure_sampled_pd500
+    configure_sampled_pd500(cfg.env)
   cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
   if cuda_visible == "":
     device = "cpu"
@@ -125,6 +129,9 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
   env = ManagerBasedRlEnv(
     cfg=cfg.env, device=device, render_mode="rgb_array" if cfg.video else None
   )
+  if cfg.sampled_pd500:
+    from src.tasks.hammer.mdp.sampled_pd500 import install_sampled_pd500
+    install_sampled_pd500(env)
 
   log_root_path = log_dir.parent  # Go up from specific run dir to experiment dir.
 

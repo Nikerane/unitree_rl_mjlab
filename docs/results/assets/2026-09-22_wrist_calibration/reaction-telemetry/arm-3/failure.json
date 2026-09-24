@@ -1,0 +1,5 @@
+{
+  "dt": 0.00025,
+  "error": "same-dt non-interference failed at dt-0p25ms; attribution blocked",
+  "status": "data retained; attribution blocked; no later level executed"
+}

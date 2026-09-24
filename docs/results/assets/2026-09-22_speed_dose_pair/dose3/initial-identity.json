@@ -1,0 +1,6 @@
+{
+  "actor_sha256": "23466a6db4b546ba6162354917b6bb30da6c5ac9232d15e15504e5b34bcfa435",
+  "physical_sha256": "fde0ea4e47f7eda7ac54d98ca61823cc98855cd47b70776afff5a911a0b2e7cb",
+  "cpu_rng": "d810da67c6a1c69da4d95d5ee3cb153ee08f3db39580a4d0cf20ec6a4fadda26",
+  "cuda_rng": "e8988cb5ec9b7284cf4cbc0ec50ea66cda46564e5dbeffd6551b8e1a742b1a63"
+}

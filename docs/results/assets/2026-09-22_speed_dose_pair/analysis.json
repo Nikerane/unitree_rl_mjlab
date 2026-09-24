@@ -1,0 +1,605 @@
+{
+  "initialization_matched": true,
+  "arms": [
+    {
+      "dose": 0.2,
+      "conditions": [
+        {
+          "goal": 1.5,
+          "hits": 128,
+          "valid_speed": 128,
+          "speed_median": 1.6906242370605469,
+          "speed_median_absolute_error": 0.1957167387008667,
+          "tracking_median_mm": 10.763400536163893,
+          "delivered_impulse_median": 0.30060938000679016,
+          "impulse_ratio_p95": [
+            0.5165458048585307,
+            0.799958562342132,
+            0.40979491985910305,
+            0.5035085487494947,
+            0.5704227410923175,
+            1.6439807737564167
+          ],
+          "impulse_ratio_max": [
+            0.6456708681938771,
+            0.8942959754447627,
+            0.4568003461289858,
+            0.5941932925040806,
+            0.63528871633173,
+            2.160381026020864
+          ],
+          "impulse_over_episodes": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            128
+          ],
+          "velocity_peak_p95": [
+            1.5159681379795074,
+            2.923797607421875,
+            2.5336417675018312,
+            3.240642476081848,
+            2.2352775573730463,
+            4.609762191772461
+          ],
+          "velocity_peak_max": [
+            1.5373127460479736,
+            2.923797845840454,
+            2.625692129135132,
+            4.514023303985596,
+            3.0442183017730713,
+            4.609762191772461
+          ],
+          "velocity_over_episodes": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            128
+          ],
+          "j6_violating_control_reads": 149,
+          "j6_reads_impulse_dominates": 147,
+          "j6_reads_mean_delta_impulse": 0.06579789959813075,
+          "j6_reads_mean_incremental_delta": 0.06564859372576161,
+          "immediate_incremental_discount": 21.945804165152367,
+          "e1_per_goal_pass": false
+        },
+        {
+          "goal": 1.85,
+          "hits": 128,
+          "valid_speed": 128,
+          "speed_median": 1.9222255945205688,
+          "speed_median_absolute_error": 0.08023306131362906,
+          "tracking_median_mm": 10.025293590699949,
+          "delivered_impulse_median": 0.35316669940948486,
+          "impulse_ratio_p95": [
+            0.6393472717060306,
+            0.92186062801175,
+            0.48113389188035066,
+            0.5935645321520363,
+            0.6337443200068745,
+            2.0018111482807774
+          ],
+          "impulse_ratio_max": [
+            0.7848413333014098,
+            1.0369080838149156,
+            0.5014890093144363,
+            0.6114078084950848,
+            0.785073432011333,
+            2.2835102750033864
+          ],
+          "impulse_over_episodes": [
+            0,
+            1,
+            0,
+            0,
+            0,
+            128
+          ],
+          "velocity_peak_p95": [
+            1.4811435222625733,
+            3.286047565937042,
+            2.4433870911598206,
+            2.755439281463622,
+            2.7827839136123624,
+            4.609762191772461
+          ],
+          "velocity_peak_max": [
+            1.515409231185913,
+            3.292320966720581,
+            2.6356201171875,
+            3.555551528930664,
+            3.071922540664673,
+            4.609762191772461
+          ],
+          "velocity_over_episodes": [
+            0,
+            11,
+            0,
+            1,
+            0,
+            128
+          ],
+          "j6_violating_control_reads": 157,
+          "j6_reads_impulse_dominates": 156,
+          "j6_reads_mean_delta_impulse": 0.15796296329646828,
+          "j6_reads_mean_incremental_delta": 0.15701424385343862,
+          "immediate_incremental_discount": 57.660782031249255,
+          "e1_per_goal_pass": false
+        },
+        {
+          "goal": 2.2,
+          "hits": 128,
+          "valid_speed": 128,
+          "speed_median": 2.269828677177429,
+          "speed_median_absolute_error": 0.07922010421752912,
+          "tracking_median_mm": 10.068431018178497,
+          "delivered_impulse_median": 0.3618057817220688,
+          "impulse_ratio_p95": [
+            0.7777293200092263,
+            0.9889868186499046,
+            0.6079707547093471,
+            0.692694216239743,
+            0.7707710976038521,
+            2.239488678552755
+          ],
+          "impulse_ratio_max": [
+            0.8743662982775267,
+            1.091682814001068,
+            0.6448920099392816,
+            0.7321824064745812,
+            0.8525228112693725,
+            2.412187026404753
+          ],
+          "impulse_over_episodes": [
+            0,
+            5,
+            0,
+            0,
+            0,
+            127
+          ],
+          "velocity_peak_p95": [
+            1.5025354385375977,
+            2.9237977623939515,
+            2.387307453155517,
+            2.771679389476776,
+            2.8979303598403927,
+            4.609762191772461
+          ],
+          "velocity_peak_max": [
+            1.5212233066558838,
+            3.1247191429138184,
+            2.5877788066864014,
+            3.3174002170562744,
+            2.94400954246521,
+            4.609762191772461
+          ],
+          "velocity_over_episodes": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            128
+          ],
+          "j6_violating_control_reads": 153,
+          "j6_reads_impulse_dominates": 152,
+          "j6_reads_mean_delta_impulse": 0.07356928452507751,
+          "j6_reads_mean_incremental_delta": 0.07302564375686119,
+          "immediate_incremental_discount": 27.7004955277298,
+          "e1_per_goal_pass": false
+        }
+      ],
+      "comparisons": [
+        {
+          "seed": 2026092101,
+          "bootstrap_samples": 2000,
+          "common_valid_pairs": 128,
+          "paired_speed_difference": 0.22885477542877197,
+          "ci95": [
+            0.21018522260710598,
+            0.2463778403587639
+          ],
+          "responsive": true,
+          "coverage": {
+            "low": {
+              "episodes": 128,
+              "hits": 128,
+              "available": 128,
+              "misses": 0
+            },
+            "high": {
+              "episodes": 128,
+              "hits": 128,
+              "available": 128,
+              "misses": 0
+            }
+          },
+          "interpretation": "common-valid speed contrast only; inspect miss coverage; not a qualification gate",
+          "low_goal_mps": 1.5,
+          "high_goal_mps": 1.85
+        },
+        {
+          "seed": 2026092101,
+          "bootstrap_samples": 2000,
+          "common_valid_pairs": 128,
+          "paired_speed_difference": 0.3472793875262141,
+          "ci95": [
+            0.3278689027996734,
+            0.366846230160445
+          ],
+          "responsive": true,
+          "coverage": {
+            "low": {
+              "episodes": 128,
+              "hits": 128,
+              "available": 128,
+              "misses": 0
+            },
+            "high": {
+              "episodes": 128,
+              "hits": 128,
+              "available": 128,
+              "misses": 0
+            }
+          },
+          "interpretation": "common-valid speed contrast only; inspect miss coverage; not a qualification gate",
+          "low_goal_mps": 1.85,
+          "high_goal_mps": 2.2
+        },
+        {
+          "seed": 2026092101,
+          "bootstrap_samples": 2000,
+          "common_valid_pairs": 128,
+          "paired_speed_difference": 0.5761341629549861,
+          "ci95": [
+            0.5581310838460922,
+            0.5932404665509239
+          ],
+          "responsive": true,
+          "coverage": {
+            "low": {
+              "episodes": 128,
+              "hits": 128,
+              "available": 128,
+              "misses": 0
+            },
+            "high": {
+              "episodes": 128,
+              "hits": 128,
+              "available": 128,
+              "misses": 0
+            }
+          },
+          "interpretation": "common-valid speed contrast only; inspect miss coverage; not a qualification gate",
+          "low_goal_mps": 1.5,
+          "high_goal_mps": 2.2
+        }
+      ],
+      "e1_all_goal_pass": false,
+      "e1_screen_pass": false
+    },
+    {
+      "dose": 0.3,
+      "conditions": [
+        {
+          "goal": 1.5,
+          "hits": 128,
+          "valid_speed": 128,
+          "speed_median": 1.5968587398529053,
+          "speed_median_absolute_error": 0.09685873985290527,
+          "tracking_median_mm": 12.127582843506865,
+          "delivered_impulse_median": 0.2945527583360672,
+          "impulse_ratio_p95": [
+            0.42977948700832475,
+            0.6926808173094338,
+            0.35389227676520824,
+            0.5103169599684273,
+            0.5158358987996249,
+            1.3495032936788913
+          ],
+          "impulse_ratio_max": [
+            0.4792786064509777,
+            0.7655395240318484,
+            0.39357980738487347,
+            0.5164907634419801,
+            0.5596519970312351,
+            1.7695308367653588
+          ],
+          "impulse_over_episodes": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            128
+          ],
+          "velocity_peak_p95": [
+            1.4723506212234496,
+            2.8681970953941347,
+            2.7431003570556642,
+            3.4434505105018616,
+            2.106846237182617,
+            4.580195426940918
+          ],
+          "velocity_peak_max": [
+            1.513814091682434,
+            2.9610273838043213,
+            2.745295524597168,
+            3.490170478820801,
+            2.3529531955718994,
+            4.580195426940918
+          ],
+          "velocity_over_episodes": [
+            0,
+            0,
+            0,
+            8,
+            0,
+            128
+          ],
+          "j6_violating_control_reads": 148,
+          "j6_reads_impulse_dominates": 140,
+          "j6_reads_mean_delta_impulse": 0.16785017910690322,
+          "j6_reads_mean_incremental_delta": 0.1606554643855103,
+          "immediate_incremental_discount": 53.168013670510845,
+          "e1_per_goal_pass": false
+        },
+        {
+          "goal": 1.85,
+          "hits": 128,
+          "valid_speed": 128,
+          "speed_median": 1.910861611366272,
+          "speed_median_absolute_error": 0.060861611366271884,
+          "tracking_median_mm": 11.240545425699242,
+          "delivered_impulse_median": 0.31855663657188416,
+          "impulse_ratio_p95": [
+            0.4646456924072772,
+            0.7813586058413108,
+            0.4085419462302189,
+            0.49312115927052674,
+            0.5580705113527251,
+            1.329620874191566
+          ],
+          "impulse_ratio_max": [
+            0.51123420720501,
+            0.9008513354673618,
+            0.4686875152717115,
+            0.5674386412147584,
+            0.6011072697678232,
+            1.5194770857328321
+          ],
+          "impulse_over_episodes": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            128
+          ],
+          "velocity_peak_p95": [
+            1.4285555720329284,
+            2.994435489177704,
+            2.2157538890838624,
+            2.546758544445038,
+            2.090850293636322,
+            4.580195426940918
+          ],
+          "velocity_peak_max": [
+            1.4873311519622803,
+            3.118206024169922,
+            2.2206807136535645,
+            2.5497822761535645,
+            2.091611385345459,
+            4.580195426940918
+          ],
+          "velocity_over_episodes": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            128
+          ],
+          "j6_violating_control_reads": 128,
+          "j6_reads_impulse_dominates": 128,
+          "j6_reads_mean_delta_impulse": 0.15309193966095336,
+          "j6_reads_mean_incremental_delta": 0.15309193966095336,
+          "immediate_incremental_discount": 53.46972981840372,
+          "e1_per_goal_pass": true
+        },
+        {
+          "goal": 2.2,
+          "hits": 128,
+          "valid_speed": 128,
+          "speed_median": 2.1807104349136353,
+          "speed_median_absolute_error": 0.05270731449127197,
+          "tracking_median_mm": 10.135807448829407,
+          "delivered_impulse_median": 0.36346666514873505,
+          "impulse_ratio_p95": [
+            0.5151619634977201,
+            0.9310662231551922,
+            0.5137030307839556,
+            0.5943560907188147,
+            0.6029246753551126,
+            1.5664660065185005
+          ],
+          "impulse_ratio_max": [
+            0.5625916851891412,
+            1.0428558277889965,
+            0.5566728147387827,
+            0.6367359057997624,
+            0.6683666289337282,
+            1.598839284624995
+          ],
+          "impulse_over_episodes": [
+            0,
+            3,
+            0,
+            0,
+            0,
+            127
+          ],
+          "velocity_peak_p95": [
+            1.3611571788787842,
+            2.8705583930015566,
+            2.2146411299705506,
+            2.899095916748047,
+            2.094819116592407,
+            4.580195426940918
+          ],
+          "velocity_peak_max": [
+            1.4975143671035767,
+            2.8790674209594727,
+            2.4025323390960693,
+            3.1685566902160645,
+            2.139934539794922,
+            4.580195426940918
+          ],
+          "velocity_over_episodes": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            128
+          ],
+          "j6_violating_control_reads": 148,
+          "j6_reads_impulse_dominates": 147,
+          "j6_reads_mean_delta_impulse": 0.16964869295023507,
+          "j6_reads_mean_incremental_delta": 0.16762166584266122,
+          "immediate_incremental_discount": 63.388593291223515,
+          "e1_per_goal_pass": true
+        }
+      ],
+      "comparisons": [
+        {
+          "seed": 2026092101,
+          "bootstrap_samples": 2000,
+          "common_valid_pairs": 128,
+          "paired_speed_difference": 0.30963221937417984,
+          "ci95": [
+            0.29872863423079254,
+            0.320036767818965
+          ],
+          "responsive": true,
+          "coverage": {
+            "low": {
+              "episodes": 128,
+              "hits": 128,
+              "available": 128,
+              "misses": 0
+            },
+            "high": {
+              "episodes": 128,
+              "hits": 128,
+              "available": 128,
+              "misses": 0
+            }
+          },
+          "interpretation": "common-valid speed contrast only; inspect miss coverage; not a qualification gate",
+          "low_goal_mps": 1.5,
+          "high_goal_mps": 1.85
+        },
+        {
+          "seed": 2026092101,
+          "bootstrap_samples": 2000,
+          "common_valid_pairs": 128,
+          "paired_speed_difference": 0.256832055747509,
+          "ci95": [
+            0.24616985931061208,
+            0.26750486698001624
+          ],
+          "responsive": true,
+          "coverage": {
+            "low": {
+              "episodes": 128,
+              "hits": 128,
+              "available": 128,
+              "misses": 0
+            },
+            "high": {
+              "episodes": 128,
+              "hits": 128,
+              "available": 128,
+              "misses": 0
+            }
+          },
+          "interpretation": "common-valid speed contrast only; inspect miss coverage; not a qualification gate",
+          "low_goal_mps": 1.85,
+          "high_goal_mps": 2.2
+        },
+        {
+          "seed": 2026092101,
+          "bootstrap_samples": 2000,
+          "common_valid_pairs": 128,
+          "paired_speed_difference": 0.5664642751216888,
+          "ci95": [
+            0.5518610537284985,
+            0.5805509233381599
+          ],
+          "responsive": true,
+          "coverage": {
+            "low": {
+              "episodes": 128,
+              "hits": 128,
+              "available": 128,
+              "misses": 0
+            },
+            "high": {
+              "episodes": 128,
+              "hits": 128,
+              "available": 128,
+              "misses": 0
+            }
+          },
+          "interpretation": "common-valid speed contrast only; inspect miss coverage; not a qualification gate",
+          "low_goal_mps": 1.5,
+          "high_goal_mps": 2.2
+        }
+      ],
+      "e1_all_goal_pass": false,
+      "e1_screen_pass": false
+    }
+  ],
+  "comparisons": [
+    {
+      "goal": 1.5,
+      "impulse_retention": 0.97985218667965,
+      "utility_guard_pass": true,
+      "j6_frequency_reduced": false,
+      "j6_p95_reduced": true,
+      "any_joint_p95_worse": true,
+      "any_velocity_p95_worse": true,
+      "any_joint_max_worse": false,
+      "any_velocity_max_worse": true
+    },
+    {
+      "goal": 1.85,
+      "impulse_retention": 0.9020007750009535,
+      "utility_guard_pass": true,
+      "j6_frequency_reduced": false,
+      "j6_p95_reduced": true,
+      "any_joint_p95_worse": false,
+      "any_velocity_p95_worse": false,
+      "any_joint_max_worse": false,
+      "any_velocity_max_worse": false
+    },
+    {
+      "goal": 2.2,
+      "impulse_retention": 1.0045905386551897,
+      "utility_guard_pass": true,
+      "j6_frequency_reduced": false,
+      "j6_p95_reduced": true,
+      "any_joint_p95_worse": false,
+      "any_velocity_p95_worse": true,
+      "any_joint_max_worse": false,
+      "any_velocity_max_worse": false
+    }
+  ],
+  "caveat": "Single training-seed screen; probabilities use fresh evaluation normalizers, not reconstructed training gradients. No hardware-safety or autonomous qualification claim."
+}

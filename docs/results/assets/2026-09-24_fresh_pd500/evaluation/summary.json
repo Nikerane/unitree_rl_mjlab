@@ -1,0 +1,182 @@
+{
+  "checkpoint": "/cephhome/eunikhilr/campaigns/z1-fresh-pd500-20260924.sbkVqV/train250/model_249.pt",
+  "sha256": "0de912ae08faf988454c3cc561da62abc0df4bc744940383c870c97466377815",
+  "conditions": [
+    {
+      "seed": 2026092401,
+      "goal": 1.5,
+      "episodes": 128,
+      "hits": 128,
+      "productive": 128,
+      "episode_censored": 0,
+      "native_finalized_first_strikes": 128,
+      "incomplete_first_strikes": 0,
+      "all_joint_speed_safe": 128,
+      "joint_speed_violations": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "joint_speed_peak_rad_s": [
+        1.014638900756836,
+        3.0053441524505615,
+        2.709660768508911,
+        2.8337719440460205,
+        1.5895236730575562,
+        1.9474313259124756
+      ],
+      "delivered_impulse_all_first_episodes_median_ns": 0.3341129869222641,
+      "tracking_rms_median_mm": 12.636551098571566
+    },
+    {
+      "seed": 2026092401,
+      "goal": 1.85,
+      "episodes": 128,
+      "hits": 128,
+      "productive": 128,
+      "episode_censored": 0,
+      "native_finalized_first_strikes": 128,
+      "incomplete_first_strikes": 0,
+      "all_joint_speed_safe": 128,
+      "joint_speed_violations": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "joint_speed_peak_rad_s": [
+        0.9938570261001587,
+        2.969449043273926,
+        2.7734267711639404,
+        2.8923580646514893,
+        1.5368528366088867,
+        1.9037153720855713
+      ],
+      "delivered_impulse_all_first_episodes_median_ns": 0.3836487829685211,
+      "tracking_rms_median_mm": 15.6533857174396
+    },
+    {
+      "seed": 2026092401,
+      "goal": 2.2,
+      "episodes": 128,
+      "hits": 128,
+      "productive": 128,
+      "episode_censored": 0,
+      "native_finalized_first_strikes": 128,
+      "incomplete_first_strikes": 0,
+      "all_joint_speed_safe": 128,
+      "joint_speed_violations": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "joint_speed_peak_rad_s": [
+        0.9709679484367371,
+        2.9750967025756836,
+        2.9785988330841064,
+        2.8360679149627686,
+        1.5134754180908203,
+        1.8740493059158325
+      ],
+      "delivered_impulse_all_first_episodes_median_ns": 0.3231111317873001,
+      "tracking_rms_median_mm": 19.07120780122005
+    },
+    {
+      "seed": 2026092402,
+      "goal": 1.5,
+      "episodes": 128,
+      "hits": 128,
+      "productive": 128,
+      "episode_censored": 0,
+      "native_finalized_first_strikes": 128,
+      "incomplete_first_strikes": 0,
+      "all_joint_speed_safe": 128,
+      "joint_speed_violations": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "joint_speed_peak_rad_s": [
+        0.960564911365509,
+        3.014091968536377,
+        2.7804341316223145,
+        2.80458402633667,
+        1.6003142595291138,
+        1.9500727653503418
+      ],
+      "delivered_impulse_all_first_episodes_median_ns": 0.3380999118089676,
+      "tracking_rms_median_mm": 12.553256131442009
+    },
+    {
+      "seed": 2026092402,
+      "goal": 1.85,
+      "episodes": 128,
+      "hits": 128,
+      "productive": 128,
+      "episode_censored": 0,
+      "native_finalized_first_strikes": 128,
+      "incomplete_first_strikes": 0,
+      "all_joint_speed_safe": 128,
+      "joint_speed_violations": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "joint_speed_peak_rad_s": [
+        0.9347745776176453,
+        2.983440637588501,
+        2.830019474029541,
+        2.8680307865142822,
+        1.5579999685287476,
+        1.9477696418762207
+      ],
+      "delivered_impulse_all_first_episodes_median_ns": 0.38333432376384735,
+      "tracking_rms_median_mm": 16.130753579415824
+    },
+    {
+      "seed": 2026092402,
+      "goal": 2.2,
+      "episodes": 128,
+      "hits": 128,
+      "productive": 128,
+      "episode_censored": 0,
+      "native_finalized_first_strikes": 128,
+      "incomplete_first_strikes": 0,
+      "all_joint_speed_safe": 128,
+      "joint_speed_violations": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "joint_speed_peak_rad_s": [
+        0.907707154750824,
+        2.9913485050201416,
+        2.9659342765808105,
+        2.889749526977539,
+        1.5060514211654663,
+        1.904807209968567
+      ],
+      "delivered_impulse_all_first_episodes_median_ns": 0.31378689408302307,
+      "tracking_rms_median_mm": 19.140258221028542
+    }
+  ],
+  "smoke_step_cap": null,
+  "claim": "one training seed; load safety unqualified; no learning in evaluation"
+}

@@ -106,6 +106,11 @@ def build_impact_speed_metadata(env, raw_policy_clip: float) -> dict:
         load_joint_position_contract(_JOINT_POSITION_CONTRACT_PATH), action_term_dims=(6, 6, 1),
     )
     metadata = _with_vic_metadata(env, metadata, controller)
+    sampled = getattr(env, "_sampled_pd500", None)
+    if sampled is not None:
+        metadata.pop("variable_impedance")
+        metadata["action_type"] = "joint_position_fixed_sampled_pd"
+        metadata["sampled_pd"] = sampled.metadata()
     metadata.pop("run_path")
     # Freeze the safety knobs rather than runtime EMA state. Preserve configured
     # doses/limits; constructing metadata never changes the treatment.

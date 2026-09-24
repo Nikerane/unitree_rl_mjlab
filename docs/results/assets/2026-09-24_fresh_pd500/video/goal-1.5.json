@@ -1,0 +1,10 @@
+{
+  "checkpoint": "/cephhome/eunikhilr/campaigns/z1-fresh-pd500-20260924.sbkVqV/train250/model_249.pt",
+  "seed": 2026092401,
+  "goal_mps": 1.5,
+  "frames": 9,
+  "physics_dt": 0.00025,
+  "pd_dt": 0.002,
+  "policy_dt": 0.02,
+  "note": "Illustrative single-world first episode, no cherry-picking; video is not the128-world evaluation. Red is commanded reference. Auto-reset off to retain terminal frame."
+}

@@ -1,0 +1,7 @@
+{
+  "treatment": "normal",
+  "learning_updates": 0,
+  "interpretation": "Strict original checkpoint loaded; runtime wrist gains overridden only after action processing. Config metadata describes original contract, NOT qualification of altered controller.",
+  "wrist_kp": null,
+  "wrist_kd": null
+}

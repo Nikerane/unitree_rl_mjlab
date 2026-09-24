@@ -1,0 +1,139 @@
+{
+  "status": "failed",
+  "failures": [
+    "budget:qpos",
+    "budget:qvel",
+    "budget:velocity",
+    "budget:reaction",
+    "exact:finalized",
+    "exact:reason",
+    "exact:contact"
+  ],
+  "first_budget_violation": {
+    "qpos": [
+      938,
+      104,
+      7
+    ],
+    "qvel": [
+      796,
+      104,
+      2
+    ],
+    "velocity": [
+      888,
+      104,
+      3
+    ],
+    "reaction": [
+      888,
+      104,
+      1
+    ]
+  },
+  "max_absolute_error_per_component": {
+    "qpos": [
+      2.733711153268814e-05,
+      2.2172927856445312e-05,
+      4.738569259643555e-05,
+      3.337860107421875e-05,
+      1.4757737517356873e-05,
+      4.291534423828125e-06,
+      2.586166374385357e-07,
+      0.0002881176769733429
+    ],
+    "qvel": [
+      0.008162170648574829,
+      0.009418845176696777,
+      0.026265084743499756,
+      0.04721963405609131,
+      0.01008356362581253,
+      0.0008565075695514679,
+      0.00040238385554403067,
+      0.057554006576538086
+    ],
+    "velocity": [
+      0.008162170648574829,
+      0.009418845176696777,
+      0.026265084743499756,
+      0.04721963405609131,
+      0.01008356362581253,
+      0.0008565075695514679
+    ],
+    "reaction": [
+      0.0027799755334854126,
+      0.00705409049987793,
+      0.01181793212890625,
+      0.007104814052581787,
+      0.0013684183359146118,
+      0.00011637527495622635
+    ],
+    "delivered_native": 0.0006917044520378113
+  },
+  "budgets": {
+    "reaction": [
+      0.001845,
+      0.00123,
+      0.00369,
+      0.001845,
+      0.00123,
+      8.200000000000001e-05
+    ],
+    "delivered_native": 0.001,
+    "velocity": [
+      0.015707500000000003,
+      0.015707500000000003,
+      0.015707500000000003,
+      0.015707500000000003,
+      0.015707500000000003,
+      0.015707500000000003
+    ],
+    "qpos": [
+      0.0001,
+      0.0001,
+      0.0001,
+      0.0001,
+      0.0001,
+      0.0001,
+      0.0001,
+      0.0001
+    ],
+    "qvel": [
+      0.005,
+      0.005,
+      0.005,
+      0.005,
+      0.005,
+      0.005,
+      0.005,
+      0.005
+    ]
+  },
+  "exact_channels": [
+    "native_target",
+    "ctrl",
+    "encoder_bias",
+    "contact",
+    "finalized",
+    "reason"
+  ],
+  "cap_classification_flips": {
+    "reaction": {
+      "full_horizon": [],
+      "source_terminal_prefix": []
+    },
+    "velocity": {
+      "full_horizon": [],
+      "source_terminal_prefix": []
+    }
+  },
+  "scope": "full 0.28 s same-dt trace; caps also checked through each source-native terminal prefix",
+  "rtol": 0,
+  "attribution_allowed": false,
+  "arm": 1,
+  "dt": 0.00025,
+  "observer_enabled": false,
+  "reference": "/cephhome/eunikhilr/campaigns/z1-wrist-calibration-20260922.7DPuER/startup-refinement/arm-1/dt-0p25ms",
+  "control": "/cephhome/eunikhilr/campaigns/z1-wrist-calibration-20260922.7DPuER/reaction-control/arm-1/dt-0p25ms",
+  "interpretation": "single control comparison, not a statistical noise floor"
+}

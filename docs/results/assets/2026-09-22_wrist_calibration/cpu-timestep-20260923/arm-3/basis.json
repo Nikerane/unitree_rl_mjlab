@@ -1,0 +1,56 @@
+{
+  "basis": "explicit root authorization after all four fresh engineering checks passed",
+  "protocol": "cpu-timestep-brief.md: conditional single finer CPU level",
+  "profile": "2026-09-22-prospective-engineering-v1",
+  "validation_job": "45737812",
+  "strict_native_verdict": "failed",
+  "strict_failure_cause": "unresolved; engineering acceptance is not strict reproduction",
+  "engineering_acceptance": "all four passed",
+  "arm": 3,
+  "horizon_steps": 14,
+  "horizon_s": 0.28,
+  "timesteps_s": [
+    0.00025,
+    0.000125
+  ],
+  "evidence": [
+    {
+      "arm": 0,
+      "report": "/cephhome/eunikhilr/campaigns/z1-wrist-calibration-20260922.7DPuER/engineering-validation/arm-0/native-audit-2ms/engineering-equivalence.json",
+      "report_sha256": "b99cfc9cbfd36ff13f6fbfb9c5234b6ba196952775a4952c320d4ac519144e3f",
+      "summary_sha256": "ece62d5811d45f4f949a6133dca6cb3b71bb0185e27c6f100c86d58064ea80f6"
+    },
+    {
+      "arm": 1,
+      "report": "/cephhome/eunikhilr/campaigns/z1-wrist-calibration-20260922.7DPuER/engineering-validation/arm-1/native-audit-2ms/engineering-equivalence.json",
+      "report_sha256": "fa6363f9daaa50bc1dafbf4c700afb68d09523d12014fb442c2a9a4b431218e9",
+      "summary_sha256": "ab9afc8111e2317cc618cf4f057535d3afef86b28ee65a43952e691025ac6b03"
+    },
+    {
+      "arm": 2,
+      "report": "/cephhome/eunikhilr/campaigns/z1-wrist-calibration-20260922.7DPuER/engineering-validation/arm-2/native-audit-2ms/engineering-equivalence.json",
+      "report_sha256": "90a087586cfce67041e4cdea6328c6cd1a55c7f1c46b87f73d6433dc4f3f698d",
+      "summary_sha256": "c1e1d53f9aad47ea210b502a83c6e4b1022cf523fec48cb22e2773c733cd54bd"
+    },
+    {
+      "arm": 3,
+      "report": "/cephhome/eunikhilr/campaigns/z1-wrist-calibration-20260922.7DPuER/engineering-validation/arm-3/native-audit-2ms/engineering-equivalence.json",
+      "report_sha256": "5a4ed24b448740d41f25176c420711e08da59518758ddc315ce6aed89b530fba",
+      "summary_sha256": "bb97cb61431bf43202b6663010028f654d84cdf72be1bd72ae31e9485e7cad60"
+    }
+  ],
+  "qualification": "bounded numerical diagnostic only",
+  "device": "cpu",
+  "control_dt_s": 0.02,
+  "window_s": 0.05,
+  "num_worlds": 128,
+  "capture": "/cephhome/eunikhilr/campaigns/z1-wrist-calibration-20260922.7DPuER/engineering-validation/contact-3-capture",
+  "reference": "/cephhome/eunikhilr/campaigns/z1-wrist-calibration-20260922.7DPuER/cpu-repeat-20260923/arm-3/repeat-1",
+  "repeat2": "/cephhome/eunikhilr/campaigns/z1-wrist-calibration-20260922.7DPuER/cpu-repeat-20260923/arm-3/repeat-2",
+  "cpu_repeat_evidence": {
+    "1": "/cephhome/eunikhilr/campaigns/z1-wrist-calibration-20260922.7DPuER/cpu-repeat-20260923/arm-1/comparison.json",
+    "3": "/cephhome/eunikhilr/campaigns/z1-wrist-calibration-20260922.7DPuER/cpu-repeat-20260923/arm-3/comparison.json"
+  },
+  "held_tail_limit": "full 0.28 s fixed-command horizon includes postterminal held-command tail",
+  "interpretation": "bounded two-timestep CPU comparison only; no GPU, gain-safety or convergence qualification"
+}

@@ -1,0 +1,24 @@
+{
+  "treatment": "fixed_all_six_gain_transfer",
+  "kp": [
+    512.0,
+    768.0,
+    768.0,
+    512.0,
+    384.0,
+    128.0
+  ],
+  "kd": [
+    25.6,
+    25.6,
+    25.6,
+    25.6,
+    25.6,
+    25.6
+  ],
+  "learning_updates": 0,
+  "effective_gain_checks": 20120,
+  "runner_sha256": "849904c6e2223be04ebedf7b0f2d2a5b3c56a862bf9f9157c453ea9d48b6f90a",
+  "observer_sha256": "5d446daed13192383e0dd2e34079d34ddd29a83f6612a755dbd383a15f30ba11",
+  "interpretation": "Posttraining intervention, not fresh fixed-gain training or safety qualification. Original checkpoint metadata is unchanged."
+}

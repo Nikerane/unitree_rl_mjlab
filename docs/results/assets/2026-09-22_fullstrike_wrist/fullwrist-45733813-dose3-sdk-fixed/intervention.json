@@ -1,0 +1,7 @@
+{
+  "treatment": "sdk-fixed",
+  "learning_updates": 0,
+  "interpretation": "Strict original checkpoint loaded; runtime wrist gains overridden only after action processing. Config metadata describes original contract, NOT qualification of altered controller.",
+  "wrist_kp": 256,
+  "wrist_kd": 25.6
+}

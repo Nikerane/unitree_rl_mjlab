@@ -10,6 +10,8 @@ The experimental actor uses a recorded active-action mask in likelihood, entropy
 
 ## Reproducible checks and observed outcomes
 
+Final combined acceptance at `cc46d99`: **684 passed**, 72 upstream warnings, 43.72 s, exit 0 (`final-acceptance.xml`). This is the union of the six new, fourteen legacy/safety and two docs/config files below, not the complete historical suite. A final read-only Astra Ultra audit of `da1e826..cc46d99` approved software handoff with no actionable findings; it independently checked installed model/distribution/PPO load interfaces and `git diff --check`, without repeating this test run. Merge readiness and physical qualification remain unestablished.
+
 All local commands used `/Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python` in this worktree. For standalone scripts, `PYTHONPATH=/Users/nikerane/.codex/worktrees/z1-impact-speed/unitree_rl_mjlab` was set: without it, the editable main checkout can be imported instead of this branch. The scratch SDD ledger contains the per-task reports and JUnit XML; this record freezes their results because scratch may later be removed.
 
 | Check | Actual result | Scope/limit |
@@ -42,7 +44,7 @@ The smoke observed the inherited active velocity CaT maximum `0.5`, impulse dose
 
 ## Review provenance and decisions retained from the SDD ledger
 
-Independent per-task Astra/Sol reviews for Tasks 1–7 reported no blocking findings after targeted fixes. Two later Astra crosschecks of Tasks 1–5 found no actionable learning/safety defect; one prompted the delayed-credit CatPPO regression above. GLM 5.3 Tasks 1–3 reviewed code with limited installed-API/test visibility: its two Important concerns were adjudicated by consuming fresh per-transition extras every step in Task 7 and validating actual observation order at runner construction in Task 5. GLM Tasks 4–5 gave a no-concrete-defect advisory verdict with limited API/context visibility. Multiple Qwen implementation-review attempts timed out or ended without a final assessment; **none is an approval**. A fresh *whole-branch* review remains for the controller after this record, so no whole-branch sign-off is claimed here.
+Independent per-task reviews for all eight tasks reported no blocking findings after targeted fixes. Two later Astra crosschecks of Tasks 1–5 found no actionable learning/safety defect; one prompted the delayed-credit CatPPO regression above. GLM 5.3 Tasks 1–3 reviewed code with limited installed-API/test visibility: its two Important concerns were adjudicated by consuming fresh per-transition extras every step in Task 7 and validating actual observation order at runner construction in Task 5. GLM Tasks 4–5 gave a no-concrete-defect advisory verdict with limited API/context visibility. Multiple Qwen implementation-review attempts timed out or ended without a final assessment; **none is an approval**. The final whole-branch Astra Ultra review at `cc46d99` approved software handoff only, not GPU qualification, learned responsiveness or hardware safety.
 
 The four explicit design/execution rulings and their costs if wrong are:
 

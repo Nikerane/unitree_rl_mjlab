@@ -1,0 +1,57 @@
+{
+  "snapshot_date": "2026-09-24",
+  "purpose": "Faithful baseline for the free-time spline impact implementation; no new implementation is part of this snapshot",
+  "source_worktree": "/Users/nikerane/.codex/worktrees/z1-impact-speed/unitree_rl_mjlab",
+  "destination_branch": "codex/free-time-spline-impact",
+  "base_commit": "cc46d9998a3c9cd5d8813e89b57e44248353e03e",
+  "provenance": {
+    "source_tracked_diff_command": "git diff --binary HEAD",
+    "source_tracked_diff_sha256": "a16bad2dbea42b271dc84a68b0fe63adbcf634999f477b3d052152ee2561ed2f",
+    "tracked_modified_paths": [
+      "docs/README.md",
+      "docs/results/2026-09-21_z1_impact_speed_plumbing.md",
+      "docs/results/2026-09-21_z1_impact_speed_qualification_proposal.md",
+      "scripts/train.py",
+      "src/tasks/hammer/rl/impact_speed_contract.py",
+      "src/tasks/hammer/rl/runner.py"
+    ],
+    "tracked_deletions": [],
+    "tracked_mode_changes": [],
+    "source_untracked_count": 673,
+    "source_untracked_full_sha256_inventory_digest": "f72c8d28418ab238cfd49552d0668afa348b51823a632705ec3ac1d7a804f504",
+    "source_before_after_equal": true,
+    "destination_tracked_diff_equal_to_source": true,
+    "destination_included_hashes_equal_to_source": true
+  },
+  "transfer": {
+    "included_untracked_count": 384,
+    "included_sha256_file": "docs/results/2026-09-24-free-time-spline-source-included.sha256",
+    "included_sha256_file_digest": "effe78492a638cb6a53ce0a07842dcee5ee26afb70c9bb05b36f315bc5131620",
+    "excluded_untracked_count": 289,
+    "excluded_paths_file": "docs/results/2026-09-24-free-time-spline-source-excluded.txt",
+    "excluded_paths_file_digest": "7563ba4a62cccc375f3d9ceac8ab2123ca6734bfbd78bea8e4d55e0c47403fb1",
+    "included_policy": "All untracked files outside docs/results/assets, plus result scripts, protocols, batch recipes, checksums, XML, and JSON metadata no larger than 1,000,000 bytes. This includes the sampled controller, its tests, research and result documents, and the source's referenced fresh-PD500 code and compact evidence.",
+    "excluded_policy": "Only historical docs/results/assets data: 93 npz arrays, 89 logs, 73 jsonl event/trace files, 17 model checkpoints, 6 PNG images, 6 MP4 videos, and 5 raw JSON files larger than 1,000,000 bytes. These are bulky result artifacts and are not imported or read by the focused baseline tests. Their exact paths remain recorded in the excluded-paths file and the read-only source worktree.",
+    "essential_untracked_sha256": {
+      "src/tasks/hammer/mdp/sampled_pd500.py": "c2ef31500f6d65aee2b29c6bb9a7e157ea5ebae6e80ad2a125940618065af0a5",
+      "tests/test_sampled_pd500.py": "7ea7adb53711c7e6bfc9d619967035bf74fe74c392d80d702631e12351681c22"
+    },
+    "planning_documents_sha256": {
+      "docs/superpowers/plans/2026-09-24-free-time-spline-impact.md": "56d57465d7913cbb6fb175107a9e68a44e25374bfd48987d184b01e436b49cb7",
+      "docs/superpowers/specs/2026-09-24-free-time-spline-impact-design.md": "a581c9f39f425951107a3548b80912a89c12dadf660bb688242df706fd1a3eca"
+    }
+  },
+  "external_read_only_assets": {
+    "destination_sibling_link": "/Users/nikerane/.codex/worktrees/a370/safe_impact_manipulation",
+    "link_target": "/Users/nikerane/repos/safe_impact_manipulation",
+    "source_sibling_link_has_same_target": true,
+    "assets_relative_directory": "hammer_z1_env/assets",
+    "asset_count": 32,
+    "asset_sha256_file": "docs/results/2026-09-24-free-time-spline-external-assets.sha256",
+    "asset_sha256_file_digest": "571bec311767567475176530012cf71c478d93ba9f27594f80aa551ba952e453",
+    "required_xml_sha256": {
+      "z1_hammer_robot.xml": "ce6d36a85ca04621fdf5cf8f080848e31362945b0ca796854c4c3a4e2b3298a4",
+      "nail_block_scene.xml": "47b0986d74675673a8c7e03a7b6d7012790d7cb10c1622bf699179f0046c3e00"
+    }
+  }
+}

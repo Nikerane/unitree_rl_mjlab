@@ -495,18 +495,22 @@ def _joint_position_metadata(
     if not action.cfg.use_default_offset:
         raise ValueError("joint metadata requires default-offset action semantics")
     physics_dt_s = env.cfg.sim.mujoco.timestep
+    sampled = getattr(env, "_sampled_pd500", None)
+    if sampled is not None:
+        sampled.metadata()  # Require live hooks, not a config label.
+    expected_dt, expected_decimation = (.00025, 80) if sampled is not None else (.002, 10)
     if (
         isinstance(physics_dt_s, bool)
         or not isinstance(physics_dt_s, (int, float))
         or not math.isfinite(float(physics_dt_s))
-        or physics_dt_s != 0.002
+        or physics_dt_s != expected_dt
     ):
         raise ValueError("joint metadata requires physics timestep 0.002 s")
     control_decimation = env.cfg.decimation
     if (
         isinstance(control_decimation, bool)
         or not isinstance(control_decimation, int)
-        or control_decimation != 10
+        or control_decimation != expected_decimation
     ):
         raise ValueError("joint metadata requires control decimation 10")
     if (
@@ -591,6 +595,7 @@ def _metadata_for_onnx(metadata: dict) -> dict:
     if metadata.get("action_type") not in (
         "joint_position",
         "joint_position_variable_impedance",
+        "joint_position_fixed_sampled_pd",
     ):
         return metadata
     return {
@@ -812,6 +817,9 @@ class HammerOnPolicyRunner(MjlabOnPolicyRunner):
         self.alg.storage, tuple(metadata["speed_bounds_mps"])
       )
       if telemetry is not None:
+        if "sampled_pd" in metadata:
+          telemetry["gain_action_interpretation"] = "ignored outputs; fixed gains applied"
+          telemetry["applied_controller"] = metadata["sampled_pd"]
         infos["impact_speed_rollout_telemetry"] = telemetry
       else:
         # Resuming callers may pass old infos; do not relabel old rollout data.

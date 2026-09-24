@@ -1,0 +1,7 @@
+{
+  "status": "passed",
+  "meaning": "CPU same-dt noninterference only; reconstruction and attribution remain separate",
+  "timestep_s": 0.000125,
+  "device": "cpu",
+  "horizon_s": 0.28
+}

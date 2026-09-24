@@ -1,4 +1,4 @@
-# Docs index — current truth map (2026-09-21)
+# Docs index — current truth map (2026-09-22)
 
 **Authority rule: code > this index > the living docs it lists.** `docs/archive/**` and dated
 records are historical evidence — never act on them without checking here first. When a doc and
@@ -8,6 +8,14 @@ the code disagree, the checked-out code wins; fix the doc.
 
 | Doc | What it is |
 |---|---|
+| `docs/results/2026-09-24_z1_pd500_repeats.md` | Two unchanged fresh250 repeats submitted:seed3 job45860324,seed4 job45860325 afterok. Proposed progression:repeatability, explicit speed authority, sampled learned impedance, three splines; test cleanup deferred, load/optimality claims remain qualified |
+| `docs/results/2026-09-24_z1_fresh_pd500_pilot.md` | Fresh250-update fixed-gain500Hz pilot complete:768/768 productive evaluated first episodes and zero measured joint-speed violations (maxJ2=3.014rad/s; J6=1.950); native tracker impulse0.318–0.384Ns median by goal. Videos banked. One training seed, external speed conditioning; regression caveats classified (environment plus two unrelated assertions), no full-suite-pass claim; load safety unqualified |
+| `docs/results/2026-09-24_z1_closedloop_pd500.md` | Closed-loop old-policy transfer complete: contacts return (34/128 and102/128 at finer physics), but all cases breach J2–J4 speed limits; J6 stays below1.561rad/s. User now requests fresh250-update pilot; checkpoint/controller integration and required gates precede training |
+| `docs/results/2026-09-24_z1_fullstrike_pd500.md` | Selected-gain280ms replay complete: wrist chatter absent/J6≤1.205rad/s, but J2–J4 overspeed in all cases and zero complete impact windows. Motion agrees across physics resolutions; impact qualification unresolved. Next closed-loop feasibility evaluation, no training |
+| `docs/results/2026-09-24_z1_sampled_pd_gain_screen.md` | All28 startup replays complete at500Hz held torque: half stiffness/damping6.4 removes screened wrist chatter and reduces J6 peak to1.046rad/s, but J4 still reaches4.326rad/s. Startup candidate only; next full-strike diagnostic, no training or production changes |
+| `docs/results/2026-09-23_z1_sampled_pd500.md` | Corrected controller-clock diagnostic: true500Hz sampled/held PD retains J6 chatter and overspeed at finer physics steps. Earlier native-PD refinement was not hardware-rate validation. Next: bounded Kp/Kd calibration at fixed500Hz; no training |
+| `docs/results/2026-09-23_z1_full_arm_calibration.md` | Fixed-all-arm transfer: J6 speed passes but all1536 first episodes breach J4. Native2ms startup remains timestep-sensitive; contact-row isolation materially improves numerical load consistency. Next: finer-step full-strike check, no new training or production changes |
+| `docs/results/2026-09-22_z1_contact_refinement.md` | Current wrist-calibration decision: softer wrist retains native utility, but timestep-sensitive joint reaction still fails within real strike prefixes. Same-dt-validated CPU telemetry gives an algebraic, baseline-sensitive decomposition—not causation or gain qualification. No training-gain go; next is supervisor measurement-definition review plus a proposed offline baseline-history shadow check |
 | `CLAUDE.md` (repo root) | Agent context: thesis direction, live reward weights, pre-train gate, environment |
 | `docs/thesis/README.md` | Curated thesis digest: confirmed contributions, decisions, defense points, citations |
 | `docs/superpowers/specs/2026-08-12-z1-direct-reference-fic-design.md` | Approved direct-reference fixed-impedance FIC-0/FIC-TT task and treatment contract |
