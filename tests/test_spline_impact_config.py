@@ -1,6 +1,11 @@
 """Free-time quintic route and guidance configuration contract."""
 
 import math
+import dataclasses
+import hashlib
+from copy import deepcopy
+
+import numpy as np
 
 import pytest
 import torch
@@ -13,6 +18,57 @@ import src.tasks.hammer.config.z1 as z1
 
 LEFT = "Unitree-Z1-Hammer-Quintic-M20-ImpactSpeed"
 THREE = "Unitree-Z1-Hammer-Quintic-ThreeStarts-ImpactSpeed"
+
+
+def _canonical(value):
+    """Preserve every config field and mapping order in a stable value tree."""
+    if dataclasses.is_dataclass(value):
+        return tuple((field.name, _canonical(getattr(value, field.name)))
+                     for field in dataclasses.fields(value))
+    if isinstance(value, dict):
+        return tuple((key, _canonical(item)) for key, item in value.items())
+    if isinstance(value, (tuple, list)):
+        return tuple(_canonical(item) for item in value)
+    if isinstance(value, np.ndarray):
+        return (str(value.dtype), tuple(value.shape), tuple(value.reshape(-1).tolist()))
+    if isinstance(value, torch.Tensor):
+        cpu = value.detach().cpu()
+        return (str(cpu.dtype), tuple(cpu.shape), tuple(cpu.reshape(-1).tolist()))
+    if callable(value):
+        return (value.__module__, value.__qualname__)
+    return value
+
+
+def _config_digest(cfg):
+    return hashlib.sha256(repr(_canonical(cfg)).encode("utf-8")).hexdigest()
+
+
+# Generated from the committed pre-Task-3 config at b60ddc29 under Python 3.10.
+# The task's left route and pilot were identical in config at 3b91419.
+_LEFT_BASELINE_SHA256 = {
+    False: "def45332b8d4bbc40b0a84195a97ead911991a30a26194f9094a760546626c93",
+    True: "d024b1d5e1dd971d942756e6b8c2f44bafbffc81f88caf49f803541b77e7c254",
+}
+
+
+@pytest.mark.parametrize("play", [False, True])
+def test_left_default_full_config_matches_prechange_snapshot(play):
+    assert _config_digest(load_env_cfg(LEFT, play=play)) == _LEFT_BASELINE_SHA256[play]
+
+
+@pytest.mark.parametrize("play", [False, True])
+def test_full_snapshot_detects_route_guidance_clock_and_safety_drift(play):
+    baseline = load_env_cfg(LEFT, play=play)
+    mutations = (
+        lambda cfg: cfg.events["sample_strike_route_signs"].params.update(fixed_route_sign=0),
+        lambda cfg: setattr(cfg.rewards["r_imit"], "weight", .1),
+        lambda cfg: setattr(cfg.sim.mujoco, "timestep", .001),
+        lambda cfg: cfg.metrics["cat_soft"].params.update(imp_max_p=.1),
+    )
+    for mutate in mutations:
+        changed = deepcopy(baseline)
+        mutate(changed)
+        assert _config_digest(changed) != _LEFT_BASELINE_SHA256[play]
 
 
 @pytest.mark.parametrize("play", [False, True])
