@@ -93,6 +93,22 @@ class SampledPD500:
             or not np.all(model.actuator_forcelimited)
             or not np.array_equal(model.actuator_gear, np.tile([1.,0,0,0,0,0], (7,1)))):
             raise ValueError("sampled controller physics actuator mechanics drift")
+        # Validate the arrays the integrator actually reads, not just its host
+        # template. Some bridge fields are shared; others carry a world axis.
+        # Gain/bias parameters are controller-owned and rewritten on each step.
+        for name in ("actuator_trntype", "actuator_dyntype", "actuator_gaintype",
+                     "actuator_biastype", "actuator_forcelimited", "actuator_gear",
+                     "actuator_trnid", "actuator_forcerange", "jnt_qposadr", "jnt_dofadr"):
+            expected = torch.as_tensor(getattr(model, name).copy())
+            actual = getattr(self.sim.model, name).detach().cpu()
+            if actual.ndim == expected.ndim + 1:
+                if actual.shape[0] not in (1, self.env.num_envs):
+                    raise ValueError(f"sampled runtime {name} has unexpected world shape")
+                if not torch.equal(actual, actual[:1].expand_as(actual)):
+                    raise ValueError(f"sampled runtime {name} is heterogeneous across worlds")
+                actual = actual[0]
+            if not torch.equal(actual, expected):
+                raise ValueError(f"sampled runtime {name} actuator mechanics/mapping/limits drift")
         ids = self.gains.control_ids
         joints = model.actuator_trnid[:, 0]
         qids = torch.as_tensor(model.jnt_qposadr[joints].copy(), device=self.env.device).long()

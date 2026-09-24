@@ -238,6 +238,21 @@ class SingleStrikeReference:
     error_m = (head_w - waypoint).norm(dim=-1)
     return phase, waypoint, error_m
 
+  def approach_height_coordinate(self, head_w: torch.Tensor) -> torch.Tensor:
+    """Pure start-to-nail height fraction for precontact coverage, not phase.
+
+    Full-path phase still indexes the curve including follow-through. This
+    separate coordinate reaches one at nail height and can decrease on rebound.
+    """
+    if self.path_shape != "quintic":
+      raise ValueError("approach-height diagnostic requires a quintic path")
+    if head_w.shape != self._head0.shape:
+      raise ValueError(f"head_w must have shape {tuple(self._head0.shape)}")
+    if not bool(self._anchored.all()):
+      raise RuntimeError("reference must be anchored before diagnostics")
+    height = self._head0[:, 2] - self._nail[:, 2]
+    return ((self._head0[:, 2] - head_w[:, 2]) / height).clamp(0, 1)
+
   def set_route_signs(self, signs: torch.Tensor) -> None:
     """Force one route sign per environment for deterministic playback."""
     valid = (signs == -1) | (signs == 0) | (signs == 1)

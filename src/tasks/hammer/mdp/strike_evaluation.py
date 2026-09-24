@@ -47,20 +47,20 @@ class StrikeEvaluationCollector:
         self.bin_count = zeros(16, dtype=torch.long)
         self.bin_squares = zeros(16)
         self.bin_max = zeros(16)
-        self.phase_min = zeros()
-        self.phase_min.fill_(1.)
-        self.phase_max = zeros()
+        self.approach_height_min = zeros()
+        self.approach_height_min.fill_(1.)
+        self.approach_height_max = zeros()
         self.success_sample = zeros(dtype=torch.long)
 
     def reset(self, env_ids):
         ids = slice(None) if env_ids is None else env_ids
         for name in ("samples", "onset", "window_count", "integrals", "load_peaks",
                      "load_exceedances", "path_count", "path_squares", "path_max",
-                     "bin_count", "bin_squares", "bin_max", "phase_max", "success_sample"):
+                     "bin_count", "bin_squares", "bin_max", "approach_height_max", "success_sample"):
             getattr(self, name)[ids] = 0
-        self.phase_min[ids] = 1
+        self.approach_height_min[ids] = 1
 
-    def sample(self, *, started, contact, force_world, axis, load, phase, error_m):
+    def sample(self, *, started, contact, force_world, axis, load, approach_height, error_m):
         self.samples += 1
         self.onset.copy_(torch.where(started & (self.onset == 0), self.samples, self.onset))
         active = (self.onset > 0) & (self.window_count < self.window)
@@ -78,10 +78,10 @@ class StrikeEvaluationCollector:
             self.path_count[:, index] += mask.long()
             self.path_squares[:, index] += torch.where(mask, error_m.double().square(), 0.)
             self.path_max[:, index] = torch.maximum(self.path_max[:, index], torch.where(mask, error_m, 0.))
-        phase = phase.clamp(0, 1)
-        self.phase_min = torch.minimum(self.phase_min, torch.where(precontact, phase, 1.))
-        self.phase_max = torch.maximum(self.phase_max, torch.where(precontact, phase, 0.))
-        bins = (phase * 16).long().clamp_max(15)
+        approach_height = approach_height.clamp(0, 1)
+        self.approach_height_min = torch.minimum(self.approach_height_min, torch.where(precontact, approach_height, 1.))
+        self.approach_height_max = torch.maximum(self.approach_height_max, torch.where(precontact, approach_height, 0.))
+        bins = (approach_height * 16).long().clamp_max(15)
         worlds = torch.arange(self.num_envs, device=self.samples.device)
         self.bin_count[worlds, bins] += precontact.long()
         self.bin_squares[worlds, bins] += torch.where(precontact, error_m.double().square(), 0.)
@@ -111,7 +111,8 @@ class StrikeEvaluationCollector:
             pre.update(bins=bins, skipped_bins=skipped, coverage=(16 - len(skipped)) / 16,
                        observed_bin_rms_m=math.sqrt(sum(entry["rms_m"] ** 2 for entry in visited) / len(visited)) if visited else None,
                        observed_bin_max_m=max(entry["max_m"] for entry in visited) if visited else None,
-                       phase_extent=[float(self.phase_min[i]), float(self.phase_max[i])] if pre["sample_count"] else None)
+                       height_coordinate="clamped start-to-nail vertical fraction; excludes follow-through",
+                       approach_height_extent=[float(self.approach_height_min[i]), float(self.approach_height_max[i])] if pre["sample_count"] else None)
             loads = {"cap_nms": self.caps.tolist(), "cadence_s": self.dt,
                      "signal": LOAD_SIGNAL_SEMANTICS,
                      "common_window_semantics": (
@@ -161,10 +162,11 @@ class StrikeEvaluationMetric(ManagerTermBase):
         tracker = env._hammer_first_strike
         head = tracker._robot.data.site_pos_w[:, tracker._site_ids].squeeze(1)
         phase, _, error = env._strike_reference.diagnose_current_height(head)
+        approach_height = env._strike_reference.approach_height_coordinate(head)
         self.collector.sample(started=tracker.started,
             contact=(tracker._contact_sensor.data.found > 0).any(-1),
             force_world=tracker._impulse_sensor.data.force.sum(-2), axis=tracker._axis,
-            load=env._hammer_substep_impulse.impulse, phase=phase, error_m=error)
+            load=env._hammer_substep_impulse.impulse, approach_height=approach_height, error_m=error)
         return torch.zeros_like(phase)
 
 

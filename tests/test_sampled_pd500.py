@@ -32,6 +32,76 @@ def _variable_controller():
     return env, api.install_sampled_pd500(env, gain_mode="variable")
 
 
+def test_live_only_effort_limit_changes_real_force_and_is_rejected():
+    env, controller = _variable_controller()
+    try:
+        env.reset()
+        j1 = int(controller.ids[0])
+        host = env.sim.mj_model.actuator_forcerange.copy()
+        env.sim.model.actuator_forcerange[0, j1, 1] = 1.
+        env.sim.data.qpos[:, controller.qids] = 0.
+        env.sim.data.qvel[:, controller.vids] = 0.
+        env.sim.data.ctrl[:] = .01
+        env.sim.step()
+        assert (env.sim.mj_model.actuator_forcerange == host).all()
+        torch.testing.assert_close(controller.torque[:, j1], torch.full((2,), 2.56))
+        torch.testing.assert_close(env.sim.data.actuator_force[:, j1], torch.ones(2))
+        with pytest.raises(ValueError, match="runtime.*actuator_forcerange"):
+            build_impact_speed_metadata(env, 1.)
+    finally:
+        env.close()
+
+
+@pytest.mark.parametrize("field,index,value", [
+    ("actuator_gear", (0, 0, 0), 2.),
+    ("actuator_trnid", (0, 0), 1),
+    ("actuator_trntype", (0,), 1),
+    ("actuator_dyntype", (0,), 1),
+    ("actuator_gaintype", (0,), 1),
+    ("actuator_biastype", (0,), 0),
+    ("actuator_forcelimited", (0,), 0),
+    ("jnt_qposadr", (0,), 1),
+    ("jnt_dofadr", (0,), 1),
+])
+def test_live_only_actuator_contract_drift_is_rejected(field, index, value):
+    env, _ = _variable_controller()
+    try:
+        host = getattr(env.sim.mj_model, field).copy()
+        getattr(env.sim.model, field)[index] = value
+        assert (getattr(env.sim.mj_model, field) == host).all()
+        with pytest.raises(ValueError, match="runtime.*" + field):
+            build_impact_speed_metadata(env, 1.)
+    finally:
+        env.close()
+
+
+@pytest.mark.parametrize("field", ["actuator_gear", "actuator_forcerange", "dof_damping"])
+def test_live_heterogeneous_mechanics_and_damping_rejected(field):
+    env, _ = _variable_controller()
+    try:
+        env.sim.expand_model_fields((field,))
+        values = getattr(env.sim.model, field)
+        values[1].view(-1)[0] += 1
+        with pytest.raises(ValueError, match="heterogeneous"):
+            build_impact_speed_metadata(env, 1.)
+    finally:
+        env.close()
+
+
+def test_live_only_homogeneous_damping_changes_checkpoint_identity():
+    env, _ = _variable_controller()
+    try:
+        expected = build_impact_speed_metadata(env, 1.)
+        host = env.sim.mj_model.dof_damping.copy()
+        env.sim.model.dof_damping[0, 0] += .1
+        assert (env.sim.mj_model.dof_damping == host).all()
+        changed = build_impact_speed_metadata(env, 1.)
+        with pytest.raises(ValueError, match="mismatch"):
+            validate_impact_speed_metadata(expected, changed)
+    finally:
+        env.close()
+
+
 def test_variable_sample_maps_each_joint_and_environment_into_applied_torque():
     env, controller = _variable_controller()
     try:

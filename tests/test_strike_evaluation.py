@@ -8,6 +8,54 @@ import pytest
 import torch
 
 
+def _reference_metric():
+    from src.tasks.hammer.mdp.references import SingleStrikeReference
+    from src.tasks.hammer.mdp.strike_evaluation import StrikeEvaluationMetric
+    ref = SingleStrikeReference(1, "cpu", overshoot=.02, path_shape="quintic")
+    ref.update(torch.tensor([[.48, 0., .25]]), torch.tensor([[.5, 0., .1]]), torch.tensor([0]))
+    head = torch.zeros(1, 1, 3)
+    tracker = SimpleNamespace(started=torch.tensor([False]), _axis=torch.tensor([0., 0., -1.]),
+        _site_ids=[0], _robot=SimpleNamespace(data=SimpleNamespace(site_pos_w=head)),
+        _contact_sensor=SimpleNamespace(data=SimpleNamespace(found=torch.zeros(1, 1))),
+        _impulse_sensor=SimpleNamespace(data=SimpleNamespace(force=torch.zeros(1, 1, 3))))
+    env = SimpleNamespace(num_envs=1, device="cpu", physics_dt=.00025,
+        cfg=SimpleNamespace(metrics={"cat_soft": SimpleNamespace(params={"imp_limit": [1.] * 6})}),
+        _strike_reference=ref, _hammer_first_strike=tracker,
+        _hammer_substep_impulse=SimpleNamespace(impulse=torch.zeros(1, 6)))
+    metric = StrikeEvaluationMetric(None, env)
+    return env, metric, head, ref
+
+
+def test_real_reference_metric_dense_approach_covers_all_bins_without_followthrough():
+    env, metric, head, ref = _reference_metric()
+    for approach in torch.linspace(0., .999, 1000):
+        head[:, 0] = ref.waypoint((approach * (.15 / .17)).reshape(1))
+        metric(env)
+    path = metric.collector.records()[0]["precontact_path"]
+    assert path["max_m"] < 1e-6
+    assert path["coverage"] == 1.
+    assert path["skipped_bins"] == []
+    assert path["approach_height_extent"] == pytest.approx([0., .999], abs=1e-6)
+    assert ref.peek().item() == 0.
+
+
+def test_real_reference_metric_sparse_rebound_offcurve_preserves_phase():
+    env, metric, head, ref = _reference_metric()
+    for approach, lateral in ((.01, 0.), (.99, 0.), (.26, .06)):
+        head[:, 0] = ref.waypoint(torch.tensor([approach * .15 / .17]))
+        head[:, 0, 1] += lateral
+        metric(env)
+    path = metric.collector.records()[0]["precontact_path"]
+    assert path["coverage"] == 3 / 16
+    assert path["skipped_bins"] == [i for i in range(16) if i not in (0, 4, 15)]
+    assert path["bins"][4]["max_m"] == pytest.approx(.06)
+    assert path["approach_height_extent"] == pytest.approx([.01, .99], abs=1e-6)
+    assert ref.peek().item() == 0.
+    phase, _, error = ref.diagnose_current_height(head[:, 0])
+    assert phase.item() == pytest.approx(.26 * .15 / .17)
+    assert error.item() == pytest.approx(.06)
+
+
 def collector(n=1):
     module = importlib.import_module("src.tasks.hammer.mdp.strike_evaluation")
     return module.StrikeEvaluationCollector(n, "cpu", .00025, [1.] * 6)
@@ -21,7 +69,7 @@ def sample(c, *, started=True, contact=True, force=(3., 4., -10.), load=None, ph
              force_world=torch.tensor(force).expand(n, 3),
              axis=torch.tensor([0., 0., -1.]),
              load=torch.zeros(n, 6) if load is None else torch.tensor(load).expand(n, 6),
-             phase=vector(phase), error_m=vector(error))
+             approach_height=vector(phase), error_m=vector(error))
 
 
 def test_inclusive_200_sample_integrals_freeze_and_contact_gaps_count():
@@ -73,7 +121,7 @@ def test_hovering_miss_has_low_coverage_not_a_good_path_completion():
     assert path["coverage"] == 1 / 16
     assert path["skipped_bins"] == list(range(1, 16))
     assert path["bins"][1]["rms_m"] is None
-    assert path["phase_extent"] == pytest.approx([.01, .01])
+    assert path["approach_height_extent"] == pytest.approx([.01, .01])
     sample(c, phase=.99, error=.1)
     assert c.records()[0]["precontact_path"] == path
     assert c.records()[0]["postcontact_path"]["rms_m"] == pytest.approx(.1)
@@ -184,7 +232,7 @@ def test_real_metric_order_reads_live_accumulator_before_cat_policy_read():
     configure_strike_evaluation(cfg)
     env = SimpleNamespace(num_envs=1, device="cpu", physics_dt=.002, cfg=cfg,
         _hammer_first_strike=tracker, _hammer_substep_impulse=accumulator,
-        _strike_reference=SimpleNamespace(diagnose_current_height=lambda h:
+        _strike_reference=SimpleNamespace(approach_height_coordinate=lambda h: torch.zeros(1), diagnose_current_height=lambda h:
             (torch.zeros(1), h, torch.zeros(1))))
     manager = MetricsManager(cfg.metrics, env)
     manager.compute_substep()

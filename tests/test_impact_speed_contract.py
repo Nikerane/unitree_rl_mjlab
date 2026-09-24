@@ -344,7 +344,7 @@ def test_variable_sampled_metadata_rejects_heterogeneous_runtime_loads():
             assert _contract().build_impact_speed_metadata(one_env, 1.0) == expected
         finally:
             one_env.close()
-        env.sim.expand_model_fields(("body_mass",))
+        env.sim.expand_model_fields(("body_mass", "actuator_gear", "actuator_forcerange", "dof_damping"))
         assert _contract().build_impact_speed_metadata(env, 1.0) == expected
         env.sim.model.body_mass[1, 1] += .1
         with pytest.raises(ValueError, match="heterogeneous"):

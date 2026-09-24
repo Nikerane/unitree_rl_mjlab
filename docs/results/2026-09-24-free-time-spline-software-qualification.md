@@ -33,3 +33,21 @@ Exit 0: **340 passed, 0 failed, 0 skipped, 70 warnings in 55.59 s** at the origi
 | Applied sampled gain authority; 2 ms held-torque timing under 0.25 ms physics and 20 ms policy steps; asynchronous reset isolation; fixed/VIC checkpoint identities and transfer; free-time route geometry and persistent guidance; exact 50 ms common window; per-joint load reporting; goal latch and action recomputation. | Learned path quality, physical speed response/compliance at 1.5–2.2 m/s, useful impact improvement, joint-load compliance rates, and competence on all three curves. The intervention actor was deterministic test code, not a learned policy. |
 
 The inherited effort limits `[30,60,30,30,30,30] N m`, per-joint impulse caps `[0.369,0.246,0.738,0.369,0.246,0.0164] N m s`, impulse dose `0.2`, velocity limit `3.1415 rad/s`, and velocity maximum probability `0.5` remain unchanged. These are software contract values, not a hardware safety guarantee. Hardware safety requires a separately validated load model and limits. Independent whole-change review is pending in the parent handoff; this document should receive its final review status there.
+
+## Final-review findings and corrections
+
+The independent whole-feature review identified two important measurement/identity gaps at `e9226fe`. Before these fixes, the root combined 19-file verification (the 18-file command above plus `tests/test_free_time_software_qualification.py`) exited 0 with **346 passed, 72 upstream warnings in 73.01 s**. That is a pre-fix result, not the final tree's test count.
+
+**Executed actuator identity.** Host-template checks alone missed live actuator changes. A CPU regression changes only the executed J1 force upper limit to 1 Nm: the sampled controller holds 2.56 Nm while MuJoCo applies 1 Nm, with the host template untouched. Metadata validation now rejects this drift. It also checks executed transmission/type/gear/force-limit fields and joint-address mappings against the already validated actuator contract. Shared arrays and homogeneous per-world arrays are accepted; heterogeneous worlds are rejected. VIC load metadata now includes executed joint damping, so a homogeneous live-only damping change invalidates checkpoint matching. Homogeneous one/two-world identities and expanded mechanics/damping arrays are covered. Native and legacy fixed serialized identities remain unchanged. Controller-owned gain/bias parameters remain mutable and are not plant fingerprints; this is not an audit of every MuJoCo parameter.
+
+**Approach coverage.** Full-path phase includes 20 mm of follow-through, so its last bin was unreachable in a complete precontact approach. The reference now supplies a separate clamped start-to-nail vertical coordinate for the 16 precontact bins. Output labels this coordinate and reports `approach_height_extent` instead of the misleading `phase_extent`. Full-path waypoint/error computation and the monotone policy phase latch are unchanged. Tests feed the real reference-to-metric adapter: a dense ideal approach has full coverage and negligible geometric error; sparse samples retain missing bins; rebound/off-curve samples retain current-height error without advancing policy phase. Coverage still reflects observed samples, not interpolation, exact pacing invariance, or learned competence.
+
+The final-fix focused command was:
+
+```bash
+PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -m pytest tests/test_sampled_pd500.py tests/test_impact_speed_contract.py tests/test_strike_evaluation.py tests/test_quintic_reference.py tests/test_impact_speed_evaluation.py tests/test_free_time_software_qualification.py -q --show-capture=no
+```
+
+Exit 0: **123 passed, 0 failed, 0 skipped, 70 upstream TorchScript/ONNX deprecation warnings in 64.03 s**. Sixteen new targeted regressions first failed for the missing validation/incorrect binning. This is the scoped final-fix suite, not a repository-wide regression. The final review remains **pending scoped re-review** of these fixes.
+
+These corrections improve software identity and evidence quality. They establish no learned speed response, useful-impact improvement, joint-load compliance rate, three-route competence, CUDA/numerical-failure parity, or hardware safety. No training, cluster/job interaction, hardware action, or original-source edit was performed.

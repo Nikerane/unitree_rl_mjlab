@@ -86,6 +86,7 @@ def _sampled_vic_treatment_metadata(env) -> dict:
             "body_inertia_kg_m2": executed_field("body_inertia"),
             "body_gravcomp": executed_field("body_gravcomp"),
             "dof_frictionloss_nm": executed_field("dof_frictionloss"),
+            "dof_damping": executed_field("dof_damping"),
             "jnt_stiffness": executed_field("jnt_stiffness"),
         },
     }
