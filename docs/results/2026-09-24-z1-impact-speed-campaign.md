@@ -1,6 +1,6 @@
 # z1-impact-speed: paired Vega pilot
 
-Status: submitted 2026-09-24, preflight running, training array waiting for its successful completion. This is an exploratory simulation campaign, not hardware qualification.
+Status: first preflight failed and first array was cancelled without starting; a user-authorized retry has been submitted after a test-only precision fix (details below). This is an exploratory simulation campaign, not hardware qualification.
 
 ## Frozen experiment
 
@@ -43,3 +43,13 @@ sbatch --parsable --array=0-5%3 --dependency=afterok:45885607 --kill-on-invalid-
 ```
 
 Only these new job IDs were queried. The original source and old jobs 45860324/45860325 remain untouched. This post-submission record is not part of the already frozen source archive.
+
+## First failure and authorized retry
+
+First preflight 45885607 failed after 4m55s with exit 1. Reward, contact and setup gates passed. Focused tests: 149 passed, 1 failed in 109.37 s. Failing test: `test_live_action_writes_all_native_pd_fields_without_touching_limits_or_gripper`; exact native damping comparison differed by 1.52587890625e-05 (relative 1.1373229824584996e-07). The fixture runs on CPU. A minimal arithmetic check on Vega reproduced the same difference between `sqrt(1/C) * Kd` and `Kd / sqrt(C)`. No campaign learning smoke was reached. Array 45885608 was automatically cancelled with zero runtime.
+
+User approved the fix and resubmission. Commit `eafb795` changes only the test: relative tolerance of two dtype epsilons, zero absolute tolerance, on computed arm damping only. All other bias fields, gain fields, gripper and force limits remain exact. No controller, reward, safety setting, training budget or evaluator changes. Local focused verification: 70 passed, 38 upstream warnings, 21.80 s; diff check passed.
+
+Retry directory: `/cephhome/eunikhilr/campaigns/z1-impact-speed-retry-20260924.IGsdQz`. Fresh source extracted from the verified original archive, then applied the exact binary Git diff from `e3fda7e` to `eafb795`; this includes the earlier documentation update. Patch SHA-256 `9883d3f956f7102c9f5160d8cc95607ae4e5095dd1a670caf8c47c2f0cf242ab` matched remotely. New per-file source manifest generated before execution. Existing runtime package record copied; test dependencies copied into the new directory; assets remain read-only. Original failed campaign remains untouched.
+
+Retry preflight **45890149** (30 minutes); retry training array **45890150**, `0-5%3`, two hours/task, `afterok:45890149`, invalid dependency cancellation enabled. Full preflight repeats; no gate is skipped. This is one explicitly authorized retry, not an automatic retry policy. GPU preflight/training outcomes pending.
