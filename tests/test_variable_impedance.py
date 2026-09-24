@@ -241,9 +241,16 @@ def test_live_action_writes_all_native_pd_fields_without_touching_limits_or_grip
     torch.testing.assert_close(
         env.sim.model.actuator_gainprm[:], expected_gain, rtol=0.0, atol=0.0
     )
+    # sqrt(1 / C) * Kd and Kd / sqrt(C) can differ by one float32
+    # rounding step across platforms. Allow only computed arm damping to
+    # differ; every other bias field (including the gripper) stays exact.
+    actual_bias = env.sim.model.actuator_biasprm[:]
     torch.testing.assert_close(
-        env.sim.model.actuator_biasprm[:], expected_bias, rtol=0.0, atol=0.0
+        actual_bias[:, ctrl, 2], -expected_kd,
+        rtol=2 * torch.finfo(expected_kd.dtype).eps, atol=0.0,
     )
+    expected_bias[:, ctrl, 2] = actual_bias[:, ctrl, 2]
+    torch.testing.assert_close(actual_bias, expected_bias, rtol=0.0, atol=0.0)
     torch.testing.assert_close(
         env.sim.model.actuator_forcerange[:],
         force_before,
