@@ -122,6 +122,50 @@ def test_variable_nominal_matches_fixed_at_identical_state_and_full_policy_inter
     torch.testing.assert_close(results[0], results[1], rtol=0, atol=0)
 
 
+def test_variable_sample_uses_calibrated_nominals_not_different_native_nominals():
+    env, controller = _variable_controller()
+    try:
+        env.reset()
+        gain = env.action_manager.get_term("joint_stiffness")
+        assert not torch.equal(gain.nominal_kp, controller.arm_kp)
+        assert not torch.equal(gain.nominal_kd, controller.arm_kd)
+        gain.process_actions(torch.zeros(2, 6))
+        env.sim.data.qpos[:, controller.qids] = 0.
+        env.sim.data.qvel[:, controller.vids] = 0.
+        env.sim.data.ctrl[:] = 0.
+        env.sim.data.ctrl[:, controller.ids] = .01
+        env.sim.step()
+        expected = torch.tensor([2.56, 3.84, 3.84, 2.56, 1.92, 1.28])
+        torch.testing.assert_close(controller.applied_kp, torch.tensor([256.,384.,384.,256.,192.,128.]).expand(2,-1))
+        torch.testing.assert_close(controller.torque[:, controller.ids], expected.expand(2,-1))
+        torch.testing.assert_close(env.sim.data.actuator_force[:, controller.ids], expected.expand(2,-1))
+    finally:
+        env.close()
+
+
+def test_fixed_subset_reset_preserves_held_torque_until_next_sample():
+    api = subject()
+    cfg = config()
+    api.configure_sampled_pd500(cfg)
+    env = ManagerBasedRlEnv(cfg, device="cpu")
+    try:
+        controller = api.install_sampled_pd500(env)
+        env.reset()
+        env.sim.data.ctrl[:] = 10.
+        env.sim.step()
+        held = controller.torque.clone()
+        applied_kp = controller.applied_kp.clone()
+        env.action_manager.get_term("joint_stiffness").reset(torch.tensor([0]))
+        for _ in range(7):
+            env.sim.step()
+            torch.testing.assert_close(controller.torque, held)
+            torch.testing.assert_close(controller.applied_kp, applied_kp)
+            torch.testing.assert_close(env.sim.data.actuator_force[:], held)
+        assert controller.updates == 1
+    finally:
+        env.close()
+
+
 def test_variable_subset_and_full_reset_invalidate_applied_snapshots():
     env, controller = _variable_controller()
     try:

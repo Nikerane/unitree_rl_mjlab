@@ -124,11 +124,12 @@ class SampledPD500:
         if self.gain_mode == "fixed":
             self.fixed_gains()
             self.gains._write_native_gains(self.gains._resolve_env_ids(env_ids))
-        ids = self.gains._resolve_env_ids(env_ids)
-        for snapshot in (self.torque, self.requested_torque, self.saturated,
-                         self.applied_kp, self.applied_kd):
-            if snapshot is not None:
-                snapshot[ids] = 0
+        else:
+            ids = self.gains._resolve_env_ids(env_ids)
+            for snapshot in (self.torque, self.requested_torque, self.saturated,
+                             self.applied_kp, self.applied_kd):
+                if snapshot is not None:
+                    snapshot[ids] = 0
 
     def reset_env(self, *args, **kwargs):
         self.count = self.updates = 0
