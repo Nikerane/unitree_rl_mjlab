@@ -57,11 +57,13 @@ def test_cpu_sampled_three_routes_async_reset_and_pre_reset_measurement(gain_mod
         env.close()
 
 
-def test_native_diagnostics_leave_finite_staggered_reset_sequence_unchanged():
+@pytest.mark.parametrize("gain_mode", [None, "fixed", "variable"])
+def test_diagnostics_leave_finite_staggered_reset_sequence_unchanged(gain_mode):
     from mjlab.envs import ManagerBasedRlEnv
     from src.tasks.hammer.config.z1 import _impact_speed_env_cfg
     from src.tasks.hammer.mdp.strike_evaluation import configure_strike_evaluation
-    from src.tasks.hammer.rl.impact_speed_wrapper import wrap_impact_speed_env
+    from src.tasks.hammer.rl.impact_speed_wrapper import (wrap_impact_speed_env,
+        configure_impact_speed_controller, install_impact_speed_controller)
     from scripts.evaluate_impact_speed import PreResetSnapshot
 
     def sequence(diagnostic):
@@ -70,25 +72,42 @@ def test_native_diagnostics_leave_finite_staggered_reset_sequence_unchanged():
         cfg.seed = 13
         cfg.actions["strike_speed"].bounds = (1.5, 2.2)
         cfg.rewards["speed_goal"].weight = -.4
+        if gain_mode is not None:
+            configure_impact_speed_controller(cfg, sampled_pd500=True, gain_mode=gain_mode)
         if diagnostic:
             configure_strike_evaluation(cfg)
         env = ManagerBasedRlEnv(cfg, device="cpu")
         try:
+            controller = None
+            if gain_mode is not None:
+                controller = install_impact_speed_controller(env, sampled_pd500=True, gain_mode=gain_mode)
             wrapped = wrap_impact_speed_env(env, 1.)
             obs, _ = wrapped.reset()
-            records = []
+            records = [(obs["actor"].clone(), obs["critic"].clone(),
+                        env._strike_reference.route_signs().clone(),
+                        torch.get_rng_state().clone())]
             for reset_world in (0, 1, 2):
                 env.episode_length_buf[reset_world] = env.max_episode_length - 1
                 action = torch.zeros(3, 13)
+                action[:, 6:12] = .25
                 with PreResetSnapshot(env) as capture:
                     obs, reward, done, extras = wrapped.step(action)
                 assert torch.isfinite(obs["actor"]).all()
                 assert torch.isfinite(reward).all()
+                assert done.tolist() == [index == reset_world for index in range(3)]
                 if diagnostic:
                     assert capture.latest_evaluation[reset_world]["observed_samples"] > 0
                 records.append((obs["actor"].clone(), obs["critic"].clone(), reward.clone(),
                                 done.clone(), extras["impact_speed_outcome"]["goal_mps"].clone(),
-                                env.scene["robot"].data.joint_pos.clone()))
+                                env.scene["robot"].data.joint_pos.clone(),
+                                env.scene["robot"].data.joint_vel.clone(),
+                                env._strike_reference.route_signs().clone(),
+                                env.action_manager.get_term("strike_speed").state.pending.clone(),
+                                capture.latest["kp"].clone(), capture.latest["kd"].clone(),
+                                torch.get_rng_state().clone(),
+                                controller.torque.clone() if controller is not None else torch.empty(0)))
+                if controller is not None:
+                    assert torch.isfinite(controller.applied_kp).all()
             return records
         finally:
             env.close()
