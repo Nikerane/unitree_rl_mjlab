@@ -24,6 +24,143 @@ def config():
     return cfg
 
 
+def _variable_controller():
+    api = subject()
+    cfg = config()
+    api.configure_sampled_pd500(cfg, gain_mode="variable")
+    env = ManagerBasedRlEnv(cfg, device="cpu")
+    return env, api.install_sampled_pd500(env, gain_mode="variable")
+
+
+def test_variable_sample_maps_each_joint_and_environment_into_applied_torque():
+    env, controller = _variable_controller()
+    try:
+        env.reset()
+        gain = env.action_manager.get_term("joint_stiffness")
+        p = torch.tensor([[-1., 0., 1., -.5, .5, 0.], [1., -1., 0., .5, -.5, 1.]])
+        gain.process_actions(p)
+        env.sim.data.qpos[:, controller.qids] = 0.
+        env.sim.data.qvel[:, controller.vids] = .25
+        env.sim.data.ctrl[:] = 0.
+        env.sim.data.ctrl[:, controller.ids] = .02
+        position_error = env.sim.data.ctrl[:, controller.ids] - env.sim.data.qpos[:, controller.qids[controller.ids]]
+        joint_velocity = env.sim.data.qvel[:, controller.vids[controller.ids]]
+        nominal_kp = p.new_tensor([256.,384.,384.,256.,192.,128.])
+        nominal_kd = p.new_tensor([6.4]*6)
+        expected_kp = nominal_kp * torch.pow(p.new_tensor(1.25), p)
+        expected_kd = nominal_kd * torch.sqrt(torch.pow(p.new_tensor(1.25), p))
+        expected_request = expected_kp * position_error - expected_kd * joint_velocity
+        upper = p.new_tensor([30.,60.,30.,30.,30.,30.])
+        lower = -upper
+        expected_torque = torch.maximum(torch.minimum(expected_request, upper), lower)
+        env.sim.step()
+        torch.testing.assert_close(controller.applied_kp, expected_kp)
+        torch.testing.assert_close(controller.applied_kd, expected_kd)
+        torch.testing.assert_close(controller.requested_torque[:, controller.ids], expected_request)
+        torch.testing.assert_close(controller.torque[:, controller.ids], expected_torque)
+        torch.testing.assert_close(env.sim.data.actuator_force[:, controller.ids], expected_torque)
+        torch.testing.assert_close(controller.saturated[:, controller.ids], expected_request.ne(expected_torque))
+        assert controller.updates == 1
+        assert controller.metadata()["version"] == "variable_impedance_pd500_v1"
+        assert "ignored_action_indices" not in controller.metadata()
+    finally:
+        env.close()
+
+
+def test_variable_sample_clamps_effort_and_holds_old_request_for_eight_steps():
+    env, controller = _variable_controller()
+    try:
+        env.reset()
+        gain = env.action_manager.get_term("joint_stiffness")
+        gain.process_actions(torch.ones(2, 6))
+        env.sim.data.ctrl[:] = 10.
+        env.sim.step()
+        first = controller.torque.clone()
+        first_request = controller.requested_torque.clone()
+        first_kp = controller.applied_kp.clone()
+        assert bool(controller.saturated[:, controller.ids].all())
+        assert bool((first[:, controller.ids].abs() <= first.new_tensor([30.,60.,30.,30.,30.,30.])).all())
+        gain.process_actions(-torch.ones(2, 6))
+        env.sim.data.ctrl[:] = -10.
+        for _ in range(7):
+            env.sim.step()
+            torch.testing.assert_close(controller.torque, first)
+            torch.testing.assert_close(controller.requested_torque, first_request)
+            torch.testing.assert_close(controller.applied_kp, first_kp)
+        assert controller.updates == 1
+        env.sim.step()
+        assert controller.updates == 2
+        assert bool((controller.torque[:, controller.ids] < 0).all())
+        assert bool((controller.applied_kp < first_kp).all())
+    finally:
+        env.close()
+
+
+def test_variable_nominal_matches_fixed_at_identical_state_and_full_policy_interval():
+    api = subject()
+    results = []
+    for mode in ("fixed", "variable"):
+        cfg = config()
+        api.configure_sampled_pd500(cfg, gain_mode=mode)
+        env = ManagerBasedRlEnv(cfg, device="cpu")
+        try:
+            controller = api.install_sampled_pd500(env, gain_mode=mode)
+            env.reset()
+            env.action_manager.get_term("joint_stiffness").process_actions(torch.zeros(2, 6))
+            env.sim.data.qpos[:, controller.qids] = 0.
+            env.sim.data.qvel[:, controller.vids] = 0.
+            env.sim.data.ctrl[:] = 0.
+            env.sim.data.ctrl[:, controller.ids] = .01
+            env.sim.step()
+            results.append(controller.torque.clone())
+            for _ in range(79):
+                env.sim.step()
+            assert controller.updates == 10
+            assert controller.count == 80
+        finally:
+            env.close()
+    torch.testing.assert_close(results[0], results[1], rtol=0, atol=0)
+
+
+def test_variable_subset_and_full_reset_invalidate_applied_snapshots():
+    env, controller = _variable_controller()
+    try:
+        env.reset()
+        gain = env.action_manager.get_term("joint_stiffness")
+        gain.process_actions(torch.ones(2, 6))
+        env.sim.data.ctrl[:] = 10.
+        env.sim.step()
+        gain.reset(torch.tensor([0]))
+        assert not bool(controller.torque[0].any())
+        assert not bool(controller.requested_torque[0].any())
+        assert not bool(controller.saturated[0].any())
+        assert not bool(controller.applied_kp[0].any())
+        assert bool(controller.torque[1].any())
+        for _ in range(7):
+            env.sim.step()
+        assert controller.updates == 1
+        env.sim.step()
+        assert controller.updates == 2
+        torch.testing.assert_close(controller.applied_kp[0], controller.arm_kp)
+        assert bool(controller.torque[0].any())
+        env.reset()
+        assert controller.count == controller.updates == 0
+        assert controller.torque is None
+        assert controller.applied_kp is None
+        assert controller.applied_kd is None
+        assert controller.requested_torque is None
+        assert controller.saturated is None
+    finally:
+        env.close()
+
+
+@pytest.mark.parametrize("mode", ["bad", "VARIABLE", ""])
+def test_sampled_mode_rejects_unknown_values(mode):
+    api = subject()
+    with pytest.raises(ValueError, match="gain_mode"):
+        api.configure_sampled_pd500(config(), gain_mode=mode)
+
+
 def test_configuration_preserves_wall_time_and_safety():
     cfg = config()
     before = dict(cfg.metrics["cat_soft"].params)

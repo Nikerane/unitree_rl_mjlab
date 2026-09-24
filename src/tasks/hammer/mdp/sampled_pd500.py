@@ -1,20 +1,24 @@
-"""Opt-in fixed-gain pilot: 500 Hz torque hold, 4 kHz physics, 50 Hz policy.
-
-The 13-output policy interface is retained; stiffness outputs have no physical
-effect in this fixed-impedance experiment. Native checkpoint routes are untouched.
-"""
+"""Opt-in sampled joint impedance: 500 Hz torque hold, 4 kHz physics, 50 Hz policy."""
 from __future__ import annotations
 
 import mujoco
 import numpy as np
 import torch
 
+from .variable_impedance import _variable_impedance_gains_unchecked, variable_impedance_gains
+
 
 ARM_KP = (256., 384., 384., 256., 192., 128.)
 ARM_KD = (6.4,) * 6
 
 
-def configure_sampled_pd500(cfg) -> None:
+def _check_gain_mode(gain_mode):
+    if gain_mode not in ("fixed", "variable"):
+        raise ValueError(f"gain_mode must be 'fixed' or 'variable', got {gain_mode!r}")
+
+
+def configure_sampled_pd500(cfg, *, gain_mode="fixed") -> None:
+    _check_gain_mode(gain_mode)
     if tuple(cfg.actions) != ("joint_position", "joint_stiffness", "strike_speed"):
         raise ValueError("sampled PD pilot requires the impact-speed action interface")
     cfg.sim.mujoco.timestep = .00025
@@ -28,7 +32,9 @@ def configure_sampled_pd500(cfg) -> None:
 class SampledPD500:
     """Own the torque hold at the simulation-step seam, without host sync."""
 
-    def __init__(self, env):
+    def __init__(self, env, *, gain_mode="fixed"):
+        _check_gain_mode(gain_mode)
+        self.gain_mode = gain_mode
         if env.cfg.sim.mujoco.timestep != .00025 or env.cfg.decimation != 80:
             raise ValueError("sampled PD pilot requires .00025 physics / decimation 80")
         self.env = env
@@ -44,10 +50,18 @@ class SampledPD500:
             raise ValueError("sampled PD requires seven unit-gear, affine joint actuators")
         self.gains = env.action_manager.get_term("joint_stiffness")
         self.ids = self.gains.control_ids
+        self.C = self.gains._C
         self.kp = self.sim.model.actuator_gainprm[:, :, 0].clone()
         self.kd = -self.sim.model.actuator_biasprm[:, :, 2].clone()
         self.arm_kp = self.kp.new_tensor(ARM_KP)
         self.arm_kd = self.kd.new_tensor(ARM_KD)
+        if gain_mode == "variable":
+            if self.C != 1.25:
+                raise ValueError("sampled variable impedance requires C=1.25")
+            variable_impedance_gains(
+                torch.zeros((env.num_envs, 6), dtype=self.kp.dtype, device=env.device),
+                self.arm_kp, self.arm_kd, C=self.C,
+            )
         self.kp[:, self.ids] = self.arm_kp
         self.kd[:, self.ids] = self.arm_kd
         self.limits = self.kp.new_tensor(model.actuator_forcerange.copy())
@@ -63,6 +77,10 @@ class SampledPD500:
         self.original_env_reset = env.reset
         self.count = self.updates = 0
         self.torque = None
+        self.requested_torque = None
+        self.saturated = None
+        self.applied_kp = None
+        self.applied_kd = None
         self.validate_physics()
 
     def validate_physics(self):
@@ -98,23 +116,46 @@ class SampledPD500:
 
     def process_actions(self, actions):
         self.original_process(actions)
-        self.fixed_gains()
+        if self.gain_mode == "fixed":
+            self.fixed_gains()
 
     def reset_gains(self, env_ids=None):
         self.original_reset(env_ids)
-        self.fixed_gains()
-        self.gains._write_native_gains(self.gains._resolve_env_ids(env_ids))
+        if self.gain_mode == "fixed":
+            self.fixed_gains()
+            self.gains._write_native_gains(self.gains._resolve_env_ids(env_ids))
+        ids = self.gains._resolve_env_ids(env_ids)
+        for snapshot in (self.torque, self.requested_torque, self.saturated,
+                         self.applied_kp, self.applied_kd):
+            if snapshot is not None:
+                snapshot[ids] = 0
 
     def reset_env(self, *args, **kwargs):
         self.count = self.updates = 0
         self.torque = None
+        self.requested_torque = None
+        self.saturated = None
+        self.applied_kp = None
+        self.applied_kd = None
         return self.original_env_reset(*args, **kwargs)
 
     def step(self):
         if self.count % 8 == 0:
-            requested = (self.kp * (self.sim.data.ctrl[:] - self.sim.data.qpos[:, self.qids])
-                         - self.kd * self.sim.data.qvel[:, self.vids])
+            sampled_kp = self.kp.clone()
+            sampled_kd = self.kd.clone()
+            if self.gain_mode == "variable":
+                mapped = _variable_impedance_gains_unchecked(
+                    self.gains._p, self.arm_kp, self.arm_kd, C=self.C,
+                )
+                sampled_kp[:, self.ids] = mapped.kp
+                sampled_kd[:, self.ids] = mapped.kd
+            self.applied_kp = sampled_kp[:, self.ids].clone()
+            self.applied_kd = sampled_kd[:, self.ids].clone()
+            requested = (sampled_kp * (self.sim.data.ctrl[:] - self.sim.data.qpos[:, self.qids])
+                         - sampled_kd * self.sim.data.qvel[:, self.vids])
+            self.requested_torque = requested.clone()
             self.torque = torch.maximum(torch.minimum(requested, self.limits[:, 1]), self.limits[:, 0])
+            self.saturated = requested.ne(self.torque)
             self.updates += 1
         # Native action application rewrites PD fields every physics step.
         # Clear ALL feedback immediately before integration: torque only.
@@ -131,22 +172,31 @@ class SampledPD500:
             raise ValueError("sampled PD controller hooks are not installed")
         if self.env.cfg.sim.mujoco.timestep != .00025 or self.env.cfg.decimation != 80:
             raise ValueError("sampled PD timing changed after installation")
-        return dict(version="fixed_pd500_v1", pd_dt_s=.002, physics_dt_s=.00025,
+        metadata = dict(version="fixed_pd500_v1", pd_dt_s=.002, physics_dt_s=.00025,
                     policy_dt_s=.02, kp=list(ARM_KP), kd=list(ARM_KD),
                     control_ids=self.ids.tolist(), effort_limits_nm=[30.,60.,30.,30.,30.,30.],
                     gripper_kp=100., gripper_kd=20., ignored_action_indices=list(range(6,12)),
                     event_window_s=.05, delivered_rearm_gap_s=.05,
                     torque_hold="zero_order_hold_without_native_feedback")
+        if self.gain_mode == "variable":
+            metadata["version"] = "variable_impedance_pd500_v1"
+            metadata["gain_mode"] = "variable"
+            metadata["mapping_family"] = "author_v1_exponential"
+            metadata["C"] = 1.25
+            metadata["p_bounds"] = [-1., 1.]
+            metadata.pop("ignored_action_indices")
+        return metadata
 
 
-def install_sampled_pd500(env) -> SampledPD500:
+def install_sampled_pd500(env, *, gain_mode="fixed") -> SampledPD500:
     if hasattr(env, "_sampled_pd500"):
         raise ValueError("sampled PD already installed")
-    controller = SampledPD500(env)
+    controller = SampledPD500(env, gain_mode=gain_mode)
     env._sampled_pd500 = controller
     env.sim.step = controller.step
     controller.gains.process_actions = controller.process_actions
     controller.gains.reset = controller.reset_gains
     env.reset = controller.reset_env
-    controller.fixed_gains()
+    if gain_mode == "fixed":
+        controller.fixed_gains()
     return controller
