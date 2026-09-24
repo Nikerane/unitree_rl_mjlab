@@ -31,8 +31,9 @@ def _contract():
     return importlib.import_module("src.tasks.hammer.rl.impact_speed_contract")
 
 
-def _cfg():
-    cfg = _impact_speed_env_cfg(play=True)
+def _cfg(*, route_mode="left", guidance_weight=.2, guidance_width=.05):
+    cfg = _impact_speed_env_cfg(play=True, route_mode=route_mode,
+                                guidance_weight=guidance_weight, guidance_width=guidance_width)
     cfg.scene.num_envs = 1
     # Arithmetic software-test inputs, not physically qualified speed bounds/cost.
     cfg.actions["strike_speed"].bounds = (0.2, 0.8)
@@ -223,6 +224,40 @@ def test_fixed_and_variable_sampled_checkpoints_do_not_interchange():
             env.close()
     with pytest.raises(ValueError, match="mismatch"):
         _contract().validate_impact_speed_metadata(contracts["fixed"], contracts["variable"])
+
+
+def test_three_start_sampled_vic_identity_tracks_route_and_guidance_not_draws():
+    from src.tasks.hammer.mdp.references import sample_strike_route_signs
+
+    def metadata_for(cfg):
+        configure_sampled_pd500(cfg, gain_mode="variable")
+        env = ManagerBasedRlEnv(cfg, device="cpu")
+        try:
+            install_sampled_pd500(env, gain_mode="variable")
+            metadata = _contract().build_impact_speed_metadata(env, 1.0)
+            for _ in range(4):
+                sample_strike_route_signs(
+                    env, torch.tensor([0]),
+                    **cfg.events["sample_strike_route_signs"].params,
+                )
+                assert _contract().build_impact_speed_metadata(env, 1.0) == metadata
+            return metadata
+        finally:
+            env.close()
+
+    left = metadata_for(_cfg())
+    three = metadata_for(_cfg(route_mode="three_starts"))
+    tuned = metadata_for(_cfg(route_mode="three_starts", guidance_weight=.35,
+                              guidance_width=.07))
+    assert left["sampled_vic_treatment"]["reference"]["fixed_route_sign"] == -1
+    assert three["sampled_vic_treatment"]["reference"]["fixed_route_sign"] is None
+    assert tuned["sampled_vic_treatment"]["guidance"]["weight"] == .35
+    assert tuned["sampled_vic_treatment"]["guidance"]["width_m"] == .07
+    for different in (three, tuned):
+        with pytest.raises(ValueError, match="mismatch"):
+            _contract().validate_impact_speed_metadata(left, different)
+    with pytest.raises(ValueError, match="mismatch"):
+        _contract().validate_impact_speed_metadata(three, tuned)
 
 
 def test_variable_sampled_pt_roundtrip_and_deterministic_exports(tmp_path, capsys):

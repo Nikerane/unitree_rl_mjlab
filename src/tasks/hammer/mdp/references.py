@@ -216,6 +216,28 @@ class SingleStrikeReference:
     """Latched phase as committed by the last update() — non-mutating read."""
     return self._phi.clone()
 
+  def diagnose_current_height(
+    self, head_w: torch.Tensor,
+  ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Return current-height phase, waypoint and 3D error without changing state.
+
+    This geometry-only diagnostic accepts one world-space head per environment.
+    It intentionally ignores the policy's monotone phase latch and axis tolerance,
+    so a rebound moves its phase backward and an off-curve head retains its true
+    lateral error. The reference must already be anchored by ``update``.
+    """
+    if self.path_shape != "quintic":
+      raise ValueError("current-height diagnostic requires a quintic path")
+    if head_w.shape != self._head0.shape:
+      raise ValueError(f"head_w must have shape {tuple(self._head0.shape)}")
+    if not bool(self._anchored.all()):
+      raise RuntimeError("reference must be anchored before diagnostics")
+    height = self._head0[:, 2] - self._target[:, 2]
+    phase = ((self._head0[:, 2] - head_w[:, 2]) / height).clamp(0, 1)
+    waypoint = self.waypoint(phase)
+    error_m = (head_w - waypoint).norm(dim=-1)
+    return phase, waypoint, error_m
+
   def set_route_signs(self, signs: torch.Tensor) -> None:
     """Force one route sign per environment for deterministic playback."""
     valid = (signs == -1) | (signs == 0) | (signs == 1)

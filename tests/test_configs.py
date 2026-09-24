@@ -668,6 +668,7 @@ class TestCartesianGuidelineStudy:
             self._VIC_TT + "-DiagonalFixedStartP40mm-Persistent",
             "Unitree-Z1-Hammer-Quintic-M20-Pilot",
             "Unitree-Z1-Hammer-Quintic-M20-ImpactSpeed",
+            "Unitree-Z1-Hammer-Quintic-ThreeStarts-ImpactSpeed",
         }
 
     @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))

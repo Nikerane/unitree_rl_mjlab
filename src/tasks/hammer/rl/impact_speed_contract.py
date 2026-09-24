@@ -7,6 +7,7 @@ episode goal latch, reset, clipping, and goal/pending observation feedback.
 from __future__ import annotations
 
 import json
+import math
 
 import torch
 
@@ -46,10 +47,11 @@ def _sampled_vic_treatment_metadata(env) -> dict:
     reference_keys = ("path_shape", "overshoot", "followthrough_mode", "horizontal_detour_m")
     reference = {key: reward.params.get(key, 0.0 if key == "horizontal_detour_m" else None)
                  for key in reference_keys}
-    if (reward.weight != 0.2 or env.cfg.rewards["r_imit"].weight != reward.weight or reference != {
+    if (not math.isfinite(reward.weight) or reward.weight < 0
+        or env.cfg.rewards["r_imit"].weight != reward.weight or reference != {
         "path_shape": "quintic", "overshoot": .02,
         "followthrough_mode": "vertical", "horizontal_detour_m": 0.0,
-    }):
+    } or "r_imit_anneal" in env.cfg.curriculum):
         raise ValueError("sampled VIC guidance must preserve the persistent quintic treatment")
     for group in ("actor", "critic"):
         for name in ("strike_phase", "strike_ref_error"):
@@ -61,18 +63,20 @@ def _sampled_vic_treatment_metadata(env) -> dict:
     if any(sampler.get(key, 0.0 if key == "horizontal_detour_m" else None) != value
            for key, value in reference.items()):
         raise ValueError("sampled VIC reset path differs from guidance")
-    if sampler.get("fixed_route_sign") != -1:
-        raise ValueError("sampled VIC requires the left-only route")
+    fixed_route_sign = sampler.get("fixed_route_sign")
+    if fixed_route_sign not in (-1, None):
+        raise ValueError("sampled VIC route must be left-only or three-start sampled")
     width = reward.params.get("sigma", .05)
-    if width != .05:
-        raise ValueError("sampled VIC guidance width must be 0.05 m")
+    if (not math.isfinite(width) or width <= 0
+        or env.cfg.rewards["r_imit"].params.get("sigma", .05) != width):
+        raise ValueError("sampled VIC guidance width must be finite and positive")
     route_positions = env.cfg.events["reset_strike_route_joints"].params["route_joint_positions"]
     return {
         "reference": {
             "path_shape": reference["path_shape"], "overshoot_m": reference["overshoot"],
             "followthrough_mode": reference["followthrough_mode"],
             "horizontal_detour_m": reference["horizontal_detour_m"],
-            "fixed_route_sign": -1,
+            "fixed_route_sign": fixed_route_sign,
             "route_joint_positions_rad": route_positions,
         },
         "guidance": {"weight": float(reward.weight), "width_m": float(width),

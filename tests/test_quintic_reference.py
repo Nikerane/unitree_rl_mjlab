@@ -1,4 +1,5 @@
 """Accepted quintic geometry, spatial progress and shared rendering contract."""
+import pytest
 import torch
 
 from src.tasks.hammer.mdp.references import SingleStrikeReference
@@ -57,3 +58,50 @@ def test_video_overlay_preserves_quintic_bend():
     line = _reference_polyline_m(ref, 'cpu')
     assert len(line) > 2
     assert abs(float(line[16, 0]) - .482870) < .0001
+
+
+def test_current_height_diagnostic_is_sample_rate_independent_and_pure():
+    ref = SingleStrikeReference(1, "cpu", overshoot=.02, path_shape="quintic")
+    start = torch.tensor([[.48, 0., .25]])
+    nail = torch.tensor([[.50, 0., .10]])
+    ref.update(start, nail, torch.tensor([0]))
+    for count in (11, 51):
+        for point in ref.reference_polyline(num_points=count):
+            phase, waypoint, error_m = ref.diagnose_current_height(point.unsqueeze(0))
+            torch.testing.assert_close(waypoint, point.unsqueeze(0), atol=1e-6, rtol=0)
+            torch.testing.assert_close(error_m, torch.zeros(1), atol=1e-6, rtol=0)
+            assert 0 <= phase.item() <= 1
+    assert ref.peek().item() == 0
+
+
+def test_current_height_diagnostic_reports_off_curve_error_and_rebound():
+    ref = SingleStrikeReference(1, "cpu", overshoot=.02, path_shape="quintic")
+    start = torch.tensor([[.48, 0., .25]])
+    nail = torch.tensor([[.50, 0., .10]])
+    ref.update(start, nail, torch.tensor([0]))
+    low = ref.waypoint(torch.tensor([.75]))
+    high = ref.waypoint(torch.tensor([.25]))
+    ref.update(low, nail, torch.tensor([1]))
+    low_phase, _, _ = ref.diagnose_current_height(low)
+    high_phase, _, _ = ref.diagnose_current_height(high)
+    assert low_phase.item() == pytest.approx(.75)
+    assert high_phase.item() == pytest.approx(.25)
+    off_curve = high + torch.tensor([[.0, .03, .0]])
+    phase, waypoint, error_m = ref.diagnose_current_height(off_curve)
+    assert phase.item() == pytest.approx(.25)
+    torch.testing.assert_close(waypoint, high)
+    assert error_m.item() == pytest.approx(.03)
+    assert ref.peek().item() == pytest.approx(.75)
+
+
+def test_paired_same_head_and_nail_expose_start_geometry_in_reference_error():
+    ref = SingleStrikeReference(3, "cpu", overshoot=.02, path_shape="quintic")
+    starts = torch.tensor([[.48, 0., .25], [.50, 0., .25], [.52, 0., .25]])
+    nail = torch.tensor([[.50, 0., .10]]).expand(3, -1)
+    ref.update(starts, nail, torch.zeros(3, dtype=torch.long))
+    paired_head = torch.tensor([[.50, 0., .20]]).expand(3, -1)
+    phase = ref.update(paired_head, nail, torch.ones(3, dtype=torch.long))
+    error = ref.waypoint(phase) - paired_head
+    torch.testing.assert_close(phase, phase[:1].expand_as(phase))
+    assert error[0, 0] < error[1, 0] < error[2, 0]
+    assert ref.peek().shape == (3,)

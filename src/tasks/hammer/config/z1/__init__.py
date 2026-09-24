@@ -1,5 +1,8 @@
 """Z1 hammer-nail task configurations."""
 
+import math
+from typing import Literal
+
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.observation_manager import ObservationTermCfg
@@ -295,9 +298,27 @@ register_mjlab_task(
 
 def _quintic_pilot_env_cfg(*, play: bool):
     """Single left-start quintic pilot; preserve the specialist control recipe."""
+    return _free_time_quintic_env_cfg(play=play, route_mode="left")
+
+
+def _free_time_quintic_env_cfg(
+    *,
+    play: bool,
+    route_mode: Literal["left", "three_starts"],
+    guidance_weight: float = 0.2,
+    guidance_width: float = 0.05,
+):
+    """Build the quintic treatment with one reset-stable route selection."""
+    if route_mode not in ("left", "three_starts"):
+        raise ValueError("route_mode must be 'left' or 'three_starts'")
+    if not math.isfinite(guidance_weight) or guidance_weight < 0:
+        raise ValueError("guidance_weight must be finite and nonnegative")
+    if not math.isfinite(guidance_width) or guidance_width <= 0:
+        raise ValueError("guidance_width must be finite and positive")
     cfg = _diagonal_starts_variable_impedance_env_cfg(
-        play=play, route_joint_positions=_DIAGONAL_START_JOINT_POSITIONS_RAD,
-        fixed_route_sign=-1,
+        play=play,
+        route_joint_positions=_DIAGONAL_START_JOINT_POSITIONS_RAD,
+        fixed_route_sign=-1 if route_mode == "left" else None,
     )
     consumers = [cfg.events['sample_strike_route_signs'].params,
                  cfg.rewards['r_imit'].params]
@@ -306,12 +327,20 @@ def _quintic_pilot_env_cfg(*, play: bool):
                          for name in ('strike_phase', 'strike_ref_error'))
     for params in consumers:
         params.update(path_shape='quintic', overshoot=.02, followthrough_mode='vertical')
+    cfg.rewards['r_imit'].weight = float(guidance_weight)
+    cfg.rewards['r_imit'].params['sigma'] = float(guidance_width)
     return cfg
 
 
-def _impact_speed_env_cfg(*, play: bool):
+def _impact_speed_env_cfg(
+    *, play: bool, route_mode: Literal["left", "three_starts"] = "left",
+    guidance_weight: float = 0.2, guidance_width: float = 0.05,
+):
     """Experimental speed-selection extension; numbers remain deliberately unset."""
-    cfg = _quintic_pilot_env_cfg(play=play)
+    cfg = _free_time_quintic_env_cfg(
+        play=play, route_mode=route_mode,
+        guidance_weight=guidance_weight, guidance_width=guidance_width,
+    )
     cfg.actions["strike_speed"] = ImpactSpeedActionCfg(
         entity_name="robot", bounds=None, mode="policy"
     )
@@ -828,6 +857,14 @@ register_mjlab_task(
     task_id="Unitree-Z1-Hammer-Quintic-M20-ImpactSpeed",
     env_cfg=_impact_speed_env_cfg(play=False),
     play_env_cfg=_impact_speed_env_cfg(play=True),
+    rl_cfg=z1_impact_speed_ppo_runner_cfg(),
+    runner_cls=HammerOnPolicyRunner,
+)
+
+register_mjlab_task(
+    task_id="Unitree-Z1-Hammer-Quintic-ThreeStarts-ImpactSpeed",
+    env_cfg=_impact_speed_env_cfg(play=False, route_mode="three_starts"),
+    play_env_cfg=_impact_speed_env_cfg(play=True, route_mode="three_starts"),
     rl_cfg=z1_impact_speed_ppo_runner_cfg(),
     runner_cls=HammerOnPolicyRunner,
 )
