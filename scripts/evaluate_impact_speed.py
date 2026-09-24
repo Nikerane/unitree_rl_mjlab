@@ -285,7 +285,8 @@ def _condition(args, goal, index):
     from src.tasks.hammer.rl.impact_speed_wrapper import (configure_impact_speed_experiment,
         configure_impact_speed_controller, install_impact_speed_controller, wrap_impact_speed_env)
     from src.tasks.hammer.mdp.strike_evaluation import (
-        configure_strike_evaluation, MeasurementProtocol, summarize_strike_evaluations)
+        configure_strike_evaluation, MeasurementProtocol, summarize_strike_evaluations,
+        LOAD_SIGNAL_SEMANTICS)
 
     # Play configs remove the finite timeout and alter reset/noise distributions.
     # Evaluation retains the training task's horizon, safety, and reset treatment.
@@ -390,7 +391,7 @@ def _condition(args, goal, index):
                           "physics_dt_s": env.physics_dt, "required_window_samples": env._strike_evaluation.window,
                           "window_duration_s": .05, "onset_sample_included": True,
                           "path_bins": 16, "impulse_dose": cfg.metrics["cat_soft"].params["imp_max_p"],
-                          "load_signal": "per-physics SubstepImpulseAccumulator.impulse: max(current rolling Lambda, current control-step peak)"},
+                          "load_signal": LOAD_SIGNAL_SEMANTICS},
                       "torch_post_reset_rng_hash": rng_hash, "cuda_post_reset_rng_hash": cuda_rng_hash,
                       "first_action_hash": first_action_hash, "second_motor_action": second_action,
                       "second_kp": second_kp, "transitions": (step + 1) * env.num_envs,

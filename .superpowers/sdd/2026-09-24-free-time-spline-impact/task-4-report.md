@@ -20,7 +20,7 @@ Status: DONE. Base: `bdde187`. Scoped commit recorded in the final task response
 
 - At sampled `dt=.00025`, exactly 200 inclusive samples; native `.002` uses 25, still 50 ms. Contact gaps advance wall-time counters; only intended-pair contact contributes force. Completed window force/load records freeze.
 - Positive axial, signed axial, and transverse-magnitude integrals are distinct. The hand-checked constant-force result is `10 * 200 * .00025 = .5 N s`.
-- Six separate whole-episode and common-window load peaks/caps/utilizations/exceedance flags/counts/durations. The common-window peak includes pre-onset sliding-ring history by definition.
+- Six separate whole-episode and common-window load peaks/caps/utilizations/exceedance flags/counts/durations. The common-window peak includes pre-onset sliding-ring history and any retained current-control-step peak by definition. Exceedance durations describe the authoritative peak-held signal, not instantaneous rolling-Lambda exceedance durations.
 - Sixteen current-height bins, missing unvisited bins, sample counts/RMS/max, equal-observed-bin RMS/max, coverage/skipped bins and normalized phase extent. Hovering cannot claim path coverage merely from low geometric error. Postcontact error is separate.
 - Metadata records the native site-state offset of minus one physics sample, physics cadence, policy termination cadence, configured impulse dose, and explicit protocol override. No extra simulator forward calls.
 
@@ -55,6 +55,28 @@ Warnings are upstream TorchScript script/load and legacy ONNX-export deprecation
 
 ## Self-review and limitations
 
-Read the entire new module and evaluator diff; `git diff --check` clean. Native environment tests compare bitwise observations (both groups), actions, rewards, terminations/timeouts and RNG with/without diagnostics. Real MetricsManager/FirstStrikeEventTracker/SubstepImpulseAccumulator regression captures a load spike before any policy/CaT read, then accepts an onset with its prior ring history intact. Failure/timeout tests exercise real TerminationManager with simultaneous success. Saved-checkpoint native/common-window evaluation verifies original contract load and restored final metadata comparison.
+Read the entire new module and evaluator diff; `git diff --check` clean. Native environment tests compare bitwise observations (both groups), actions, rewards, terminations/timeouts and RNG with/without diagnostics for three finite native-environment transitions. This does not establish numerical-failure episode parity or sampled-controller reset-sequence parity; Task 5 covers the latter integration. Real MetricsManager/FirstStrikeEventTracker/SubstepImpulseAccumulator regression captures a load spike before any policy/CaT read, then accepts an onset with its prior ring history intact. Failure/timeout tests exercise real TerminationManager with simultaneous success. Saved-checkpoint native/common-window evaluation verifies original contract load and restored final metadata comparison.
 
 Software semantics are verified, not trained performance or hardware safety. Native untrained traces do not establish useful impact, learned path following, speed compliance, or feasible joint-load containment. The collector intentionally retains the repository's native stale site-state convention and control-step peak component of the live Lambda property. Per-substep diagnostics add evaluation overhead; they are never installed by training. No correctness concern remains known at implementation handoff; independent task review is still required.
+
+## Review fix 1 — authoritative peak-held load labeling
+
+Base `6085ddf`. Confirmed the review finding: the earlier episode label and class documentation omitted the current-control-step peak component even though the implementation read the correct authoritative property. Updated those labels to `max(current rolling Lambda, current control-step peak)` and explicitly disclosed retained pre-onset peaks and peak-held exceedance-duration semantics. Episode and condition signal labels now share `LOAD_SIGNAL_SEMANTICS`. The direct per-substep property read and all numeric measurements are unchanged.
+
+Added assertions against serialized episode JSON for the complete signal, common-window peak, and exceedance-duration meanings, including consistency with serialized condition metadata.
+
+RED command:
+
+```bash
+PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -m pytest tests/test_impact_speed_evaluation.py::test_native_smoke_64_transitions_no_learning_and_real_export_parity -q
+```
+
+Exit 1: `1 failed, 40 warnings in 9.99s`; expected `KeyError: 'signal'` on the serialized episode evidence.
+
+GREEN command:
+
+```bash
+PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -m pytest tests/test_strike_evaluation.py tests/test_impact_speed_evaluation.py::test_native_smoke_64_transitions_no_learning_and_real_export_parity -q
+```
+
+Output/status: exit 0, `17 passed, 40 warnings in 10.91s`. These tests are scoped to the collector and covering serialization test, as requested for this label-only review fix. Warnings remain upstream deprecations, not pristine output and not task correctness failures. Native parity claims are now explicitly limited to the three finite native transitions tested; no numerical-failure parity claim is made.

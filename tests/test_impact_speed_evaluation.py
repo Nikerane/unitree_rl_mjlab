@@ -210,6 +210,14 @@ def test_native_smoke_64_transitions_no_learning_and_real_export_parity(tmp_path
     assert rows[0]["tracking_rms_mm"] >= 0
     assert len(rows[0]["kp_mean"]) == 6
     assert "common_window" in rows[0]["measurement"]
+    loads = rows[0]["measurement"]["loads"]
+    assert loads["signal"] == summary["conditions"][0]["measurement"]["load_signal"]
+    assert loads["common_window_semantics"] == (
+        "peak of max(current rolling Lambda, current control-step peak) during the onset window; "
+        "includes pre-onset ring history and any retained pre-onset control-step peak")
+    assert loads["exceedance_duration_semantics"] == (
+        "physics-sample duration above cap for the authoritative peak-held signal, "
+        "not instantaneous rolling-Lambda exceedance duration")
     assert summary["conditions"][0]["measurement"]["site_state_offset_physics_samples"] == -1
     with pytest.raises(FileExistsError):
         evaluator().run(args)

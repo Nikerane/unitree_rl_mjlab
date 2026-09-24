@@ -9,10 +9,19 @@ from mjlab.managers.manager_base import ManagerTermBase
 from mjlab.managers.metrics_manager import MetricsTermCfg
 
 
+LOAD_SIGNAL_SEMANTICS = (
+    "per-physics SubstepImpulseAccumulator.impulse: "
+    "max(current rolling Lambda, current control-step peak)"
+)
+
+
 class StrikeEvaluationCollector:
     """Independent onset window and path/load counters, with subset-safe reset.
 
-    The load input is the live sliding-window Lambda, including pre-onset history.
+    The load input is the authoritative per-physics max(current rolling Lambda,
+    current control-step peak), including pre-onset ring history and any retained
+    pre-onset control-step peak. Exceedance durations describe this peak-held
+    signal, not instantaneous rolling-Lambda exceedance durations.
     The onset boolean is the native tracker's accepted, latched onset identity.
     """
 
@@ -104,7 +113,13 @@ class StrikeEvaluationCollector:
                        observed_bin_max_m=max(entry["max_m"] for entry in visited) if visited else None,
                        phase_extent=[float(self.phase_min[i]), float(self.phase_max[i])] if pre["sample_count"] else None)
             loads = {"cap_nms": self.caps.tolist(), "cadence_s": self.dt,
-                     "common_window_semantics": "peak of live sliding-window Lambda; includes pre-onset ring history"}
+                     "signal": LOAD_SIGNAL_SEMANTICS,
+                     "common_window_semantics": (
+                         "peak of max(current rolling Lambda, current control-step peak) during the onset window; "
+                         "includes pre-onset ring history and any retained pre-onset control-step peak"),
+                     "exceedance_duration_semantics": (
+                         "physics-sample duration above cap for the authoritative peak-held signal, "
+                         "not instantaneous rolling-Lambda exceedance duration")}
             for index, name in enumerate(("episode", "common_window")):
                 loads[name] = dict(peak_nms=self.load_peaks[i, index].tolist(),
                                    utilization=(self.load_peaks[i, index] / self.caps).tolist(),
