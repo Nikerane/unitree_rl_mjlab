@@ -2,8 +2,8 @@
 
 Each requested goal gets a fresh, identically seeded environment. Comparisons use
 only the first episode of each world, not asynchronously diverging reset streams.
-Tracking is the geometric-reference error at reward-time (one-substep stale),
-reported over every sampled control step, including contact/followthrough.
+Legacy tracking remains at reward time. Evaluation-only evidence separately
+reports substep precontact path coverage and onset-aligned impact/load windows.
 """
 
 from __future__ import annotations
@@ -73,9 +73,11 @@ class EpisodeAccumulator:
                     cat_delta_sum=0., cat_delta_max=0., cat_active_steps=0,
                     kp_sum=[0.] * 6, kd_sum=[0.] * 6)
 
-    def update(self, outcome, physical, raw, pending):
+    def update(self, outcome, physical, raw, pending, evaluation=None):
         # Inputs are immutable evidence for THIS transition, not live reset tensors.
         for world, row in enumerate(self.active):
+            if evaluation is not None:
+                row["measurement"] = evaluation[world]
             step = row["steps"]
             if bool(outcome["charged"][world]):
                 if row["charge_count"]:
@@ -172,6 +174,7 @@ class PreResetSnapshot:
 
     def __init__(self, env, reader=physical_snapshot):
         self.env, self.reader, self.latest = env, reader, None
+        self.latest_evaluation = None
 
     def __enter__(self):
         self.original = self.env.metrics_manager.compute
@@ -179,6 +182,9 @@ class PreResetSnapshot:
         def compute():
             result = self.original()
             self.latest = {k: v.detach().clone() for k, v in self.reader(self.env).items()}
+            if hasattr(self.env, "_strike_evaluation"):
+                from src.tasks.hammer.mdp.strike_evaluation import evaluation_snapshot
+                self.latest_evaluation = evaluation_snapshot(self.env)
             return result
 
         self.env.metrics_manager.compute = compute
@@ -217,6 +223,7 @@ def parse_args(argv=None):
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--sampled-pd500", action="store_true")
     parser.add_argument("--sampled-pd500-gain-mode", choices=("fixed", "variable"), default="fixed")
+    parser.add_argument("--measurement-protocol", choices=("native", "common-window"), default="native")
     args = parser.parse_args(argv)
     lo, hi = args.speed_bounds
     if not (math.isfinite(lo) and math.isfinite(hi) and 0 < lo < hi and
@@ -277,6 +284,8 @@ def _condition(args, goal, index):
     from src.tasks.hammer.rl.impact_speed_contract import build_impact_speed_metadata
     from src.tasks.hammer.rl.impact_speed_wrapper import (configure_impact_speed_experiment,
         configure_impact_speed_controller, install_impact_speed_controller, wrap_impact_speed_env)
+    from src.tasks.hammer.mdp.strike_evaluation import (
+        configure_strike_evaluation, MeasurementProtocol, summarize_strike_evaluations)
 
     # Play configs remove the finite timeout and alter reset/noise distributions.
     # Evaluation retains the training task's horizon, safety, and reset treatment.
@@ -288,6 +297,7 @@ def _condition(args, goal, index):
         mode = payload["infos"]["impact_speed_contract"]["speed_mode"]
     configure_impact_speed_experiment(cfg, bounds=tuple(args.speed_bounds), cost=args.speed_cost, mode=mode)
     configure_impact_speed_controller(cfg, sampled_pd500=args.sampled_pd500, gain_mode=args.sampled_pd500_gain_mode)
+    configure_strike_evaluation(cfg)
     cfg.scene.num_envs, cfg.seed = args.num_envs, args.seed
     directory = args.output / f"condition-{index}"
     directory.mkdir()
@@ -318,7 +328,9 @@ def _condition(args, goal, index):
         acc = EpisodeAccumulator(env.num_envs, gamma=gamma, coefficient=args.speed_cost)
         steps = 64 // args.num_envs if args.mode == "smoke" else env.max_episode_length + 1
         first_action_hash = second_action = second_kp = None
-        with torch.inference_mode(), PreResetSnapshot(env) as capture:
+        # Runner/checkpoint validation above sees the original training termination.
+        # The context restores it before the final safety/controller contract check.
+        with torch.inference_mode(), MeasurementProtocol(env, args.measurement_protocol), PreResetSnapshot(env) as capture:
             for step in range(steps):
                 if args.mode == "intervention" and step == 1:
                     if any(acc.episodes):
@@ -357,7 +369,7 @@ def _condition(args, goal, index):
                 for key, value in capture.latest.items():
                     if not torch.isfinite(value).all():
                         raise ValueError(f"nonfinite physical metric {key}")
-                acc.update(outcome, capture.latest, raw, pending)
+                acc.update(outcome, capture.latest, raw, pending, capture.latest_evaluation)
                 if step == 1:
                     second_kp = capture.latest["kp"].cpu().tolist()
                 if args.mode != "smoke" and all(episode >= 1 for episode in acc.episodes):
@@ -370,6 +382,15 @@ def _condition(args, goal, index):
                        episode_id=f"{row['world']}:{row['episode']}",
                        reset_hash=reset_hashes[row["world"]] if row["episode"] == 0 else None)
         return rows, {"goal_mps": goal, "contract": contract, "reset_hashes": reset_hashes,
+                      "measurement": {"protocol": args.measurement_protocol,
+                          "all_observed_attempts": summarize_strike_evaluations([r["measurement"] for r in rows]),
+                          "success_reset_override": args.measurement_protocol == "common-window",
+                          "site_state_offset_physics_samples": -1,
+                          "termination_check_cadence_s": env.step_dt,
+                          "physics_dt_s": env.physics_dt, "required_window_samples": env._strike_evaluation.window,
+                          "window_duration_s": .05, "onset_sample_included": True,
+                          "path_bins": 16, "impulse_dose": cfg.metrics["cat_soft"].params["imp_max_p"],
+                          "load_signal": "per-physics SubstepImpulseAccumulator.impulse: max(current rolling Lambda, current control-step peak)"},
                       "torch_post_reset_rng_hash": rng_hash, "cuda_post_reset_rng_hash": cuda_rng_hash,
                       "first_action_hash": first_action_hash, "second_motor_action": second_action,
                       "second_kp": second_kp, "transitions": (step + 1) * env.num_envs,

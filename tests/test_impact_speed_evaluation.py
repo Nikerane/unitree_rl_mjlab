@@ -156,6 +156,8 @@ def test_cli_requires_checkpoint_except_smoke_and_checks_goals(tmp_path):
         evaluator().parse_args(base + ["--mode", "smoke", "--sampled-pd500-gain-mode", "variable"])
     args = evaluator().parse_args(base + ["--mode", "smoke", "--sampled-pd500", "--sampled-pd500-gain-mode", "variable"])
     assert args.sampled_pd500 and args.sampled_pd500_gain_mode == "variable"
+    assert args.measurement_protocol == "native"
+    assert evaluator().parse_args(base + ["--mode", "smoke", "--measurement-protocol", "common-window"]).measurement_protocol == "common-window"
 
 
 def test_sampled_physical_snapshot_reports_applied_calibrated_gains():
@@ -207,6 +209,8 @@ def test_native_smoke_64_transitions_no_learning_and_real_export_parity(tmp_path
     assert rows and rows[0]["steps"] > 0
     assert rows[0]["tracking_rms_mm"] >= 0
     assert len(rows[0]["kp_mean"]) == 6
+    assert "common_window" in rows[0]["measurement"]
+    assert summary["conditions"][0]["measurement"]["site_state_offset_physics_samples"] == -1
     with pytest.raises(FileExistsError):
         evaluator().run(args)
 
@@ -251,7 +255,8 @@ def test_native_terminal_physical_snapshot_survives_reset():
         env.close()
 
 
-def test_native_paired_interventions_recompute_actions_and_gains(tmp_path, monkeypatch):
+@pytest.mark.parametrize("protocol", ["native", "common-window"])
+def test_native_paired_interventions_recompute_actions_and_gains(tmp_path, monkeypatch, protocol):
     from dataclasses import asdict
     from mjlab.envs import ManagerBasedRlEnv
     from mjlab.tasks import registry
@@ -283,7 +288,8 @@ def test_native_paired_interventions_recompute_actions_and_gains(tmp_path, monke
     args = evaluator().parse_args([
         "--task", "Unitree-Z1-Hammer-Quintic-M20-ImpactSpeed", "--checkpoint", str(checkpoint),
         "--speed-bounds", ".2", ".8", "--speed-cost", ".4", "--seed", "7", "--num-envs", "2",
-        "--mode", "intervention", "--goals", ".2", ".5", ".8", "--output", str(tmp_path / "paired")])
+        "--mode", "intervention", "--goals", ".2", ".5", ".8", "--output", str(tmp_path / "paired"),
+        "--measurement-protocol", protocol])
     summary = evaluator().run(args)
     assert summary["transitions"] == 18
     assert summary["timeout_count"] == 6
