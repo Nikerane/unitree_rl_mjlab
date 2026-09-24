@@ -1,6 +1,6 @@
 # z1-impact-speed: paired Vega pilot
 
-Status: prepared, not yet submitted. This is an exploratory simulation campaign, not hardware qualification.
+Status: submitted 2026-09-24, preflight running, training array waiting for its successful completion. This is an exploratory simulation campaign, not hardware qualification.
 
 ## Frozen experiment
 
@@ -21,3 +21,25 @@ Harness: `scripts/vega_impact_campaign.py`; scheduler wrapper: `scripts/slurm/ve
 Material passport: source=local committed implementation and launcher; reference=approved fixed/VIC paired pilot; license=repository/dependency licenses unchanged; verification=local launcher/routing tests and pending GPU gates; destination=isolated Vega campaign only; limitations=simulation, short exploratory training, no empirical result yet.
 
 Next decisions after evidence: longer training if learning is still progressing; autonomous terminal-speed selector and three-start generalization only after speed-conditioned behavior and measurement coverage are understood. No such extension is submitted by this pilot.
+
+## Launch evidence
+
+- Branch: `z1-impact-speed` (no `codex/` prefix).
+- Source commit: `e3fda7e639a47df3be039dae4f59045cbbb30dc0`.
+- Archive SHA-256: `03f8fddd6affbf52f7345673fab8c0ebe301e85156eacc87a4ef8d7e79d86e5b`, matched on Vega before extraction.
+- Isolated remote directory: `/cephhome/eunikhilr/campaigns/z1-impact-speed-20260924.Fk9TSe`.
+- Remote `source.sha256` covers the extracted source; `runtime-packages.txt` records installed runtime distribution versions. No Git repository is fabricated inside the archive; runner Git logging can skip that path. This record and archive/manifest supply source identity instead.
+- Existing external asset revision `b58ccd2f81fd246f27c1e8d88cf86484cd888703`; all 32 asset file hashes passed before launch and again inside the preflight.
+- Local launcher/routing verification: **12 passed**, 35 installed TorchScript deprecation warnings, 6.42 s. Shell syntax and `git diff --check` passed. Initial test-first collection failed for the absent launcher, before implementation.
+- Independent bounded launcher review: no P1/P2 issue. GPU capacity and full-size train-to-evaluation memory remain empirical checks; the small smoke cannot establish full-run memory headroom.
+- Preflight job **45885607**, submitted 19:08:09 Vega scheduler time; observed RUNNING on `gn29`, NVIDIA A100-SXM4-40GB, Torch `2.12.0+cu130`, one GPU, 30-minute limit, requeue disabled.
+- Training array **45885608**, indices `0-5%3`; observed PENDING (Dependency), `afterok:45885607`, two-hour limit, one GPU/task, requeue disabled, invalid dependency cancellation enabled. No training result exists yet.
+
+Actual scheduler submission arguments (campaign path abbreviated as C here only):
+
+```bash
+sbatch --parsable --time=00:30:00 --output="$C/logs/preflight-%j.log" "$C/source/scripts/slurm/vega_impact_campaign.sbatch" "$C" preflight
+sbatch --parsable --array=0-5%3 --dependency=afterok:45885607 --kill-on-invalid-dep=yes --output="$C/logs/train-%A_%a.log" "$C/source/scripts/slurm/vega_impact_campaign.sbatch" "$C" train
+```
+
+Only these new job IDs were queried. The original source and old jobs 45860324/45860325 remain untouched. This post-submission record is not part of the already frozen source archive.
