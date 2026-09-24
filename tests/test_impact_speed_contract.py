@@ -24,6 +24,7 @@ from src.tasks.hammer.rl.runner import (
     _JOINT_POSITION_CONTRACT_PATH,
 )
 from src.tasks.hammer.config.z1.joint_position_contract import load_joint_position_contract
+from src.tasks.hammer.mdp.sampled_pd500 import configure_sampled_pd500, install_sampled_pd500
 
 
 def _contract():
@@ -172,6 +173,118 @@ def test_only_explicit_external_to_policy_transfer_allows_mode_difference(live_e
         _contract().validate_impact_speed_metadata(expected, external, allow_phase_transfer=True)
     with pytest.raises(ValueError, match="metadata"):
         _contract().validate_impact_speed_metadata({}, expected)
+
+
+def test_variable_sampled_checkpoint_identity_and_live_gain_changes(live_env):
+    native = _contract().build_impact_speed_metadata(live_env, 1.0)
+    cfg = _cfg()
+    configure_sampled_pd500(cfg, gain_mode="variable")
+    env = ManagerBasedRlEnv(cfg, device="cpu")
+    try:
+        controller = install_sampled_pd500(env, gain_mode="variable")
+        variable = _contract().build_impact_speed_metadata(env, 1.0)
+        assert variable["action_type"] == "joint_position_variable_impedance_sampled_pd"
+        assert variable["controller_identity"] == "sampled_vic500_v1"
+        assert variable["sampled_pd"]["kp"] == [256., 384., 384., 256., 192., 128.]
+        assert variable["sampled_pd"]["kd"] == [6.4] * 6
+        assert variable["sampled_pd"]["C"] == 1.25
+        assert variable["sampled_vic_treatment"]["reference"]["path_shape"] == "quintic"
+        assert variable["sampled_vic_treatment"]["reference"]["overshoot_m"] == .02
+        assert variable["sampled_vic_treatment"]["guidance"]["weight"] == .2
+        assert variable["sampled_vic_treatment"]["guidance"]["width_m"] == .05
+        assert len(variable["sampled_vic_treatment"]["reference"]["route_joint_positions_rad"]) > 0
+        assert len(variable["sampled_vic_treatment"]["load"]["body_mass_kg"]) > 1
+        _contract().validate_impact_speed_metadata(variable, variable)
+        with pytest.raises(ValueError, match="mismatch"):
+            _contract().validate_impact_speed_metadata(native, variable)
+        env.action_manager.get_term("joint_stiffness").process_actions(torch.ones(1, 6))
+        assert _contract().build_impact_speed_metadata(env, 1.0) == variable
+        controller.C = 1.5
+        with pytest.raises(ValueError, match="C"):
+            _contract().build_impact_speed_metadata(env, 1.0)
+        controller.C = 1.25
+        env.cfg.rewards["r_imit"].weight = .1
+        with pytest.raises(ValueError, match="guidance"):
+            _contract().build_impact_speed_metadata(env, 1.0)
+    finally:
+        env.close()
+
+
+def test_fixed_and_variable_sampled_checkpoints_do_not_interchange():
+    contracts = {}
+    for mode in ("fixed", "variable"):
+        cfg = _cfg()
+        configure_sampled_pd500(cfg, gain_mode=mode)
+        env = ManagerBasedRlEnv(cfg, device="cpu")
+        try:
+            install_sampled_pd500(env, gain_mode=mode)
+            contracts[mode] = _contract().build_impact_speed_metadata(env, 1.0)
+        finally:
+            env.close()
+    with pytest.raises(ValueError, match="mismatch"):
+        _contract().validate_impact_speed_metadata(contracts["fixed"], contracts["variable"])
+
+
+def test_variable_sampled_pt_roundtrip_and_deterministic_exports(tmp_path, capsys):
+    onnx = pytest.importorskip("onnx")
+    from onnx.reference import ReferenceEvaluator
+    cfg = _cfg()
+    configure_sampled_pd500(cfg, gain_mode="variable")
+    env = ManagerBasedRlEnv(cfg, device="cpu")
+    try:
+        install_sampled_pd500(env, gain_mode="variable")
+        wrapped = wrap_impact_speed_env(env, 1.)
+        runner = HammerOnPolicyRunner(wrapped, _runner_cfg())
+        wrapped.reset()
+        runner.learn(num_learning_iterations=1)
+        checkpoint = tmp_path / "variable.pt"
+        runner.save(str(checkpoint))
+        assert "[WARN] ONNX export failed" not in capsys.readouterr().out
+        infos = torch.load(checkpoint, weights_only=False)["infos"]
+        saved = infos["impact_speed_contract"]
+        assert saved["action_type"] == "joint_position_variable_impedance_sampled_pd"
+        assert infos["impact_speed_rollout_telemetry"]["gain_action_interpretation"] == "mapped and applied at sampled torque updates"
+        resumed = HammerOnPolicyRunner(wrapped, _runner_cfg())
+        resumed.load(str(checkpoint))
+        resumed.export_policy_to_jit(str(tmp_path), "variable-jit.pt")
+        jit = torch.jit.load(str(tmp_path / "variable-jit.pt"))
+        _, _, onnx_path = resumed._get_export_paths(str(checkpoint))
+        model = onnx.load(str(onnx_path))
+        props = {item.key: item.value for item in model.metadata_props}
+        assert props["action_type"] == saved["action_type"]
+        assert json.loads(props["sampled_pd"]) == saved["sampled_pd"]
+        backend = ReferenceEvaluator(model)
+        with torch.inference_mode():
+            obs, _ = wrapped.reset()
+            eager = resumed.get_inference_policy(device="cpu")(obs)
+        torch.testing.assert_close(jit(obs["actor"]), eager)
+        output = backend.run(None, {backend.input_names[0]: obs["actor"].numpy()})[0]
+        torch.testing.assert_close(torch.from_numpy(output), eager, rtol=1e-5, atol=1e-6)
+    finally:
+        env.close()
+
+
+def test_variable_sampled_metadata_rejects_physics_and_gain_config_drift():
+    cfg = _cfg()
+    configure_sampled_pd500(cfg, gain_mode="variable")
+    env = ManagerBasedRlEnv(cfg, device="cpu")
+    try:
+        install_sampled_pd500(env, gain_mode="variable")
+        expected = _contract().build_impact_speed_metadata(env, 1.0)
+        env.sim.mj_model.body_mass[1] += .1
+        changed = _contract().build_impact_speed_metadata(env, 1.0)
+        with pytest.raises(ValueError, match="mismatch"):
+            _contract().validate_impact_speed_metadata(expected, changed)
+        env.sim.mj_model.body_mass[1] -= .1
+        env.sim.mj_model.actuator_forcelimited[0] = 0
+        with pytest.raises(ValueError, match="physics"):
+            _contract().build_impact_speed_metadata(env, 1.0)
+        env.sim.mj_model.actuator_forcelimited[0] = 1
+        env.action_manager.get_term("joint_stiffness").cfg.C = 1.5
+        with pytest.raises(ValueError, match="C"):
+            _contract().build_impact_speed_metadata(env, 1.0)
+    finally:
+        env.close()
 
 
 def _storage(*, selected=True):

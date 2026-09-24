@@ -21,6 +21,8 @@ from mjlab.utils.wrappers import VideoRecorder
 from src.tasks.hammer.rl.impact_speed_wrapper import (
   IMPACT_SPEED_ACTION_SIGNATURE,
   configure_impact_speed_experiment,
+  configure_impact_speed_controller,
+  install_impact_speed_controller,
   wrap_impact_speed_env,
 )
 
@@ -41,6 +43,7 @@ class TrainConfig:
   speed_mode: Literal["policy", "external"] | None = None
   qualification_checkpoint: str | None = None
   sampled_pd500: bool = False
+  sampled_pd500_gain_mode: Literal["fixed", "variable"] = "fixed"
 
   @staticmethod
   def from_task(task_id: str) -> "TrainConfig":
@@ -74,9 +77,7 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
   configure_impact_speed_experiment(
     cfg.env, bounds=cfg.speed_bounds, cost=cfg.speed_cost, mode=cfg.speed_mode
   )
-  if cfg.sampled_pd500:
-    from src.tasks.hammer.mdp.sampled_pd500 import configure_sampled_pd500
-    configure_sampled_pd500(cfg.env)
+  configure_impact_speed_controller(cfg.env, sampled_pd500=cfg.sampled_pd500, gain_mode=cfg.sampled_pd500_gain_mode)
   cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
   if cuda_visible == "":
     device = "cpu"
@@ -129,9 +130,7 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
   env = ManagerBasedRlEnv(
     cfg=cfg.env, device=device, render_mode="rgb_array" if cfg.video else None
   )
-  if cfg.sampled_pd500:
-    from src.tasks.hammer.mdp.sampled_pd500 import install_sampled_pd500
-    install_sampled_pd500(env)
+  install_impact_speed_controller(env, sampled_pd500=cfg.sampled_pd500, gain_mode=cfg.sampled_pd500_gain_mode)
 
   log_root_path = log_dir.parent  # Go up from specific run dir to experiment dir.
 

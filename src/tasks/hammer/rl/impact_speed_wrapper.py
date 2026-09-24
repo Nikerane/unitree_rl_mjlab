@@ -14,6 +14,26 @@ from src.tasks.hammer.mdp.impact_speed import (
 IMPACT_SPEED_ACTION_SIGNATURE = ("joint_position", "joint_stiffness", "strike_speed")
 
 
+def configure_impact_speed_controller(env_cfg, *, sampled_pd500: bool, gain_mode: str) -> None:
+  """Select the physical controller before constructing the environment."""
+  if gain_mode not in ("fixed", "variable"):
+    raise ValueError("sampled PD gain mode must be fixed or variable")
+  if not sampled_pd500:
+    if gain_mode == "variable":
+      raise ValueError("variable gain mode requires sampled PD control")
+    return
+  from src.tasks.hammer.mdp.sampled_pd500 import configure_sampled_pd500
+  configure_sampled_pd500(env_cfg, gain_mode=gain_mode)
+
+
+def install_impact_speed_controller(env, *, sampled_pd500: bool, gain_mode: str):
+  """Install torque authority before environment wrapping and runner creation."""
+  if sampled_pd500:
+    from src.tasks.hammer.mdp.sampled_pd500 import install_sampled_pd500
+    return install_sampled_pd500(env, gain_mode=gain_mode)
+  return None
+
+
 class ImpactSpeedVecEnvWrapper(RslRlVecEnvWrapper):
   def step(self, actions: torch.Tensor):
     if not bool(torch.isfinite(actions).all()):

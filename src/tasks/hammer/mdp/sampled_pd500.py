@@ -85,6 +85,14 @@ class SampledPD500:
 
     def validate_physics(self):
         model = self.sim.mj_model
+        if (model.nu != 7
+            or not np.all(model.actuator_trntype == mujoco.mjtTrn.mjTRN_JOINT)
+            or not np.all(model.actuator_dyntype == mujoco.mjtDyn.mjDYN_NONE)
+            or not np.all(model.actuator_gaintype == mujoco.mjtGain.mjGAIN_FIXED)
+            or not np.all(model.actuator_biastype == mujoco.mjtBias.mjBIAS_AFFINE)
+            or not np.all(model.actuator_forcelimited)
+            or not np.array_equal(model.actuator_gear, np.tile([1.,0,0,0,0,0], (7,1)))):
+            raise ValueError("sampled controller physics actuator mechanics drift")
         ids = self.gains.control_ids
         joints = model.actuator_trnid[:, 0]
         qids = torch.as_tensor(model.jnt_qposadr[joints].copy(), device=self.env.device).long()
@@ -168,6 +176,13 @@ class SampledPD500:
 
     def metadata(self):
         self.validate_physics()
+        if self.gain_mode == "variable" and (
+            self.C != 1.25 or self.gains._C != self.C
+            or self.gains.cfg.C != self.C
+            or tuple(self.gains.cfg.joint_names) != ("joint1", "joint2", "joint3", "joint4", "joint5", "joint6")
+            or not torch.equal(self.gains.control_ids, self.ids)
+        ):
+            raise ValueError("sampled variable impedance C, joint order, or mapping changed")
         if (self.sim.step != self.step or self.gains.process_actions != self.process_actions
             or self.gains.reset != self.reset_gains or self.env.reset != self.reset_env):
             raise ValueError("sampled PD controller hooks are not installed")

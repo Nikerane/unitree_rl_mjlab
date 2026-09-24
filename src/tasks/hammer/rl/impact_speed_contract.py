@@ -28,6 +28,54 @@ _TAIL = ("impact_speed_goal", "impact_speed_pending")
 _OBSERVATION_WIDTHS = (7, 7, 3, 3, 3, 3, 3, 1, 1, 3, 6, 1, 1)
 
 
+def _sampled_vic_treatment_metadata(env) -> dict:
+    """Freeze variable-controller plant and the path that supplies its policy inputs."""
+    reward = env.reward_manager.get_term_cfg("r_imit")
+    reference_keys = ("path_shape", "overshoot", "followthrough_mode", "horizontal_detour_m")
+    reference = {key: reward.params.get(key, 0.0 if key == "horizontal_detour_m" else None)
+                 for key in reference_keys}
+    if (reward.weight != 0.2 or env.cfg.rewards["r_imit"].weight != reward.weight or reference != {
+        "path_shape": "quintic", "overshoot": .02,
+        "followthrough_mode": "vertical", "horizontal_detour_m": 0.0,
+    }):
+        raise ValueError("sampled VIC guidance must preserve the persistent quintic treatment")
+    for group in ("actor", "critic"):
+        for name in ("strike_phase", "strike_ref_error"):
+            params = env.observation_manager.get_term_cfg(group, name).params
+            if any(params.get(key, 0.0 if key == "horizontal_detour_m" else None) != value
+                   for key, value in reference.items()):
+                raise ValueError("sampled VIC observation path differs from guidance")
+    sampler = env.cfg.events["sample_strike_route_signs"].params
+    if any(sampler.get(key, 0.0 if key == "horizontal_detour_m" else None) != value
+           for key, value in reference.items()):
+        raise ValueError("sampled VIC reset path differs from guidance")
+    if sampler.get("fixed_route_sign") != -1:
+        raise ValueError("sampled VIC requires the left-only route")
+    width = reward.params.get("sigma", .05)
+    if width != .05:
+        raise ValueError("sampled VIC guidance width must be 0.05 m")
+    route_positions = env.cfg.events["reset_strike_route_joints"].params["route_joint_positions"]
+    model = env.sim.mj_model
+    return {
+        "reference": {
+            "path_shape": reference["path_shape"], "overshoot_m": reference["overshoot"],
+            "followthrough_mode": reference["followthrough_mode"],
+            "horizontal_detour_m": reference["horizontal_detour_m"],
+            "fixed_route_sign": -1,
+            "route_joint_positions_rad": route_positions,
+        },
+        "guidance": {"weight": float(reward.weight), "width_m": float(width),
+                     "impl": f"{type(reward.func).__module__}.{type(reward.func).__qualname__}"},
+        "load": {
+            "body_mass_kg": model.body_mass.tolist(),
+            "body_inertia_kg_m2": model.body_inertia.tolist(),
+            "body_gravcomp": model.body_gravcomp.tolist(),
+            "dof_frictionloss_nm": model.dof_frictionloss.tolist(),
+            "jnt_stiffness": model.jnt_stiffness.tolist(),
+        },
+    }
+
+
 def _observation_metadata(env) -> dict:
     # Shared validation is imported lazily to keep the legacy runner's public
     # dispatch small without introducing a second copy of its controller rules.
@@ -109,8 +157,14 @@ def build_impact_speed_metadata(env, raw_policy_clip: float) -> dict:
     sampled = getattr(env, "_sampled_pd500", None)
     if sampled is not None:
         metadata.pop("variable_impedance")
-        metadata["action_type"] = "joint_position_fixed_sampled_pd"
+        metadata["action_type"] = (
+            "joint_position_variable_impedance_sampled_pd"
+            if sampled.gain_mode == "variable" else "joint_position_fixed_sampled_pd"
+        )
         metadata["sampled_pd"] = sampled.metadata()
+        if sampled.gain_mode == "variable":
+            metadata["controller_identity"] = "sampled_vic500_v1"
+            metadata["sampled_vic_treatment"] = _sampled_vic_treatment_metadata(env)
     metadata.pop("run_path")
     # Freeze the safety knobs rather than runtime EMA state. Preserve configured
     # doses/limits; constructing metadata never changes the treatment.

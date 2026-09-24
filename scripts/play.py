@@ -22,6 +22,8 @@ from mjlab.viewer import NativeMujocoViewer, ViserPlayViewer
 from src.tasks.hammer.mdp.references import SingleStrikeReference
 from src.tasks.hammer.rl.impact_speed_wrapper import (
   configure_impact_speed_experiment,
+  configure_impact_speed_controller,
+  install_impact_speed_controller,
   wrap_impact_speed_env,
 )
 
@@ -118,6 +120,8 @@ class PlayConfig:
   speed_bounds: tuple[float, float] | None = None
   speed_cost: float | None = None
   speed_mode: Literal["policy", "external"] | None = None
+  sampled_pd500: bool = False
+  sampled_pd500_gain_mode: Literal["fixed", "variable"] = "fixed"
 
   # Internal flag used by demo script.
   _demo_mode: tyro.conf.Suppress[bool] = False
@@ -133,6 +137,7 @@ def run_play(task_id: str, cfg: PlayConfig):
   configure_impact_speed_experiment(
     env_cfg, bounds=cfg.speed_bounds, cost=cfg.speed_cost, mode=cfg.speed_mode
   )
+  configure_impact_speed_controller(env_cfg, sampled_pd500=cfg.sampled_pd500, gain_mode=cfg.sampled_pd500_gain_mode)
 
   DUMMY_MODE = cfg.agent in {"zero", "random"}
   TRAINED_MODE = not DUMMY_MODE
@@ -207,6 +212,7 @@ def run_play(task_id: str, cfg: PlayConfig):
       "[WARN] Video recording with dummy agents is disabled (no checkpoint/log_dir)."
     )
   env = ManagerBasedRlEnv(cfg=env_cfg, device=device, render_mode=render_mode)
+  install_impact_speed_controller(env, sampled_pd500=cfg.sampled_pd500, gain_mode=cfg.sampled_pd500_gain_mode)
 
   if TRAINED_MODE and cfg.video:
     print("[INFO] Recording videos during play")

@@ -152,6 +152,36 @@ def test_cli_requires_checkpoint_except_smoke_and_checks_goals(tmp_path):
     assert evaluator().parse_args(base + ["--mode", "smoke"]).checkpoint is None
     with pytest.raises(SystemExit):
         evaluator().parse_args(base + ["--mode", "external", "--checkpoint", "p.pt", "--goals", ".1", ".5", ".8"])
+    with pytest.raises(SystemExit):
+        evaluator().parse_args(base + ["--mode", "smoke", "--sampled-pd500-gain-mode", "variable"])
+    args = evaluator().parse_args(base + ["--mode", "smoke", "--sampled-pd500", "--sampled-pd500-gain-mode", "variable"])
+    assert args.sampled_pd500 and args.sampled_pd500_gain_mode == "variable"
+
+
+def test_sampled_physical_snapshot_reports_applied_calibrated_gains():
+    from mjlab.envs import ManagerBasedRlEnv
+    from src.tasks.hammer.config.z1 import _impact_speed_env_cfg
+    from src.tasks.hammer.mdp.sampled_pd500 import configure_sampled_pd500, install_sampled_pd500
+    cfg = _impact_speed_env_cfg(play=True)
+    cfg.scene.num_envs = 1
+    cfg.actions["strike_speed"].bounds = (.2, .8)
+    cfg.rewards["speed_goal"].weight = -.4
+    configure_sampled_pd500(cfg, gain_mode="variable")
+    env = ManagerBasedRlEnv(cfg, device="cpu")
+    try:
+        controller = install_sampled_pd500(env, gain_mode="variable")
+        from src.tasks.hammer.rl.impact_speed_wrapper import wrap_impact_speed_env
+        wrapped = wrap_impact_speed_env(env, 1.)
+        wrapped.reset()
+        action = torch.zeros(1, 13)
+        action[:, 6:12] = 1.
+        wrapped.step(action)
+        snapshot = evaluator().physical_snapshot(env)
+        torch.testing.assert_close(snapshot["kp"], controller.applied_kp)
+        torch.testing.assert_close(snapshot["kd"], controller.applied_kd)
+        torch.testing.assert_close(snapshot["kp"][0], torch.tensor([320., 480., 480., 320., 240., 160.]))
+    finally:
+        env.close()
 
 
 def test_native_smoke_64_transitions_no_learning_and_real_export_parity(tmp_path, monkeypatch):
@@ -179,6 +209,19 @@ def test_native_smoke_64_transitions_no_learning_and_real_export_parity(tmp_path
     assert len(rows[0]["kp_mean"]) == 6
     with pytest.raises(FileExistsError):
         evaluator().run(args)
+
+
+def test_variable_sampled_smoke_installs_controller_before_runner(tmp_path):
+    args = evaluator().parse_args([
+        "--task", "Unitree-Z1-Hammer-Quintic-M20-ImpactSpeed", "--speed-bounds", ".2", ".8",
+        "--speed-cost", ".4", "--seed", "7", "--num-envs", "1", "--mode", "smoke",
+        "--sampled-pd500", "--sampled-pd500-gain-mode", "variable",
+        "--output", str(tmp_path / "variable")])
+    summary = evaluator().run(args)
+    contract = summary["conditions"][0]["contract"]
+    assert contract["action_type"] == "joint_position_variable_impedance_sampled_pd"
+    assert contract["controller_identity"] == "sampled_vic500_v1"
+    assert summary["conditions"][0]["parity"]["pt"] == "passed"
 
 
 def test_native_terminal_physical_snapshot_survives_reset():

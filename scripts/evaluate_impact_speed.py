@@ -146,13 +146,20 @@ def physical_snapshot(env):
                 if name == "cat_soft")
     cat = hook.constraint_telemetry()
     gains = env.action_manager.get_term("joint_stiffness").telemetry
+    sampled = getattr(env, "_sampled_pd500", None)
+    if sampled is not None:
+        if sampled.applied_kp is None or sampled.applied_kd is None:
+            raise ValueError("sampled controller has no applied gains after a physics step")
+        applied_kp, applied_kd = sampled.applied_kp, sampled.applied_kd
+    else:
+        applied_kp, applied_kd = gains.kp, gains.kd
     return {"path_error_m": torch.linalg.vector_norm(reference.waypoint(phase) - head, dim=-1),
             "joint_target_error_rad": joint_target_rmse(env, joint_cfg),
             "started": tracker.started, "first_contact_time_s": tracker.first_contact_time_s,
             "delivered_impulse_ns": tracker.delivered,
             "joint_impulse_nms": cat["lambda_per_joint"],
             "impulse_exceeded": cat["raw_margin_per_joint"] > 0,
-            "cat_delta": cat["delta"], "kp": gains.kp, "kd": gains.kd,
+            "cat_delta": cat["delta"], "kp": applied_kp, "kd": applied_kd,
             "timeout": env.reset_time_outs}
 
 
@@ -208,6 +215,8 @@ def parse_args(argv=None):
     parser.add_argument("--goals", nargs=3, type=float, help="low middle high, in increasing order")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--sampled-pd500", action="store_true")
+    parser.add_argument("--sampled-pd500-gain-mode", choices=("fixed", "variable"), default="fixed")
     args = parser.parse_args(argv)
     lo, hi = args.speed_bounds
     if not (math.isfinite(lo) and math.isfinite(hi) and 0 < lo < hi and
@@ -224,6 +233,8 @@ def parse_args(argv=None):
         parser.error("output directory already exists; refusing overwrite")
     if args.mode == "smoke" and 64 % args.num_envs:
         parser.error("smoke num-envs must divide 64 (exactly 64 world transitions)")
+    if args.sampled_pd500_gain_mode == "variable" and not args.sampled_pd500:
+        parser.error("variable gain mode requires sampled PD control")
     return args
 
 
@@ -264,7 +275,8 @@ def _condition(args, goal, index):
     from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
     from tensordict import TensorDict
     from src.tasks.hammer.rl.impact_speed_contract import build_impact_speed_metadata
-    from src.tasks.hammer.rl.impact_speed_wrapper import configure_impact_speed_experiment, wrap_impact_speed_env
+    from src.tasks.hammer.rl.impact_speed_wrapper import (configure_impact_speed_experiment,
+        configure_impact_speed_controller, install_impact_speed_controller, wrap_impact_speed_env)
 
     # Play configs remove the finite timeout and alter reset/noise distributions.
     # Evaluation retains the training task's horizon, safety, and reset treatment.
@@ -275,11 +287,13 @@ def _condition(args, goal, index):
         payload = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
         mode = payload["infos"]["impact_speed_contract"]["speed_mode"]
     configure_impact_speed_experiment(cfg, bounds=tuple(args.speed_bounds), cost=args.speed_cost, mode=mode)
+    configure_impact_speed_controller(cfg, sampled_pd500=args.sampled_pd500, gain_mode=args.sampled_pd500_gain_mode)
     cfg.scene.num_envs, cfg.seed = args.num_envs, args.seed
     directory = args.output / f"condition-{index}"
     directory.mkdir()
     env = ManagerBasedRlEnv(cfg, device=args.device)
     try:
+        install_impact_speed_controller(env, sampled_pd500=args.sampled_pd500, gain_mode=args.sampled_pd500_gain_mode)
         wrapped = wrap_impact_speed_env(env, agent_cfg.clip_actions)
         runner = load_runner_cls(args.task)(wrapped, asdict(agent_cfg), device=args.device)
         if args.checkpoint is not None:

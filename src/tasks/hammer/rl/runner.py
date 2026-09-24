@@ -596,6 +596,7 @@ def _metadata_for_onnx(metadata: dict) -> dict:
         "joint_position",
         "joint_position_variable_impedance",
         "joint_position_fixed_sampled_pd",
+        "joint_position_variable_impedance_sampled_pd",
     ):
         return metadata
     return {
@@ -818,7 +819,11 @@ class HammerOnPolicyRunner(MjlabOnPolicyRunner):
       )
       if telemetry is not None:
         if "sampled_pd" in metadata:
-          telemetry["gain_action_interpretation"] = "ignored outputs; fixed gains applied"
+          telemetry["gain_action_interpretation"] = (
+            "mapped and applied at sampled torque updates"
+            if metadata["action_type"] == "joint_position_variable_impedance_sampled_pd"
+            else "ignored outputs; fixed gains applied"
+          )
           telemetry["applied_controller"] = metadata["sampled_pd"]
         infos["impact_speed_rollout_telemetry"] = telemetry
       else:
