@@ -1,5 +1,7 @@
 # Free-Time Spline Impact Implementation Plan
 
+**Status:** Tasks 0–5 completed and independently reviewed. Final focused CPU verification: 362 passed, no failures/skips, 72 dependency warnings. [Qualification and review record](../../results/2026-09-24-free-time-spline-software-qualification.md). The optional trained-checkpoint replay was unavailable and is explicitly recorded as not exercised. No training, merge, or push was performed.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox syntax for tracking.
 
 **Goal:** Make the existing free-time spline-guided policy apply sampled joint impedance and provide trustworthy speed, impact, path, and per-joint-load evidence before any new training.
@@ -43,12 +45,12 @@ Every task ends with focused verification, a scoped commit, and independent spec
 
 **Files:** new `docs/results/2026-09-24-free-time-spline-source-manifest.json` in the implementation checkout; transfer the current experimental source and the two planning documents.
 
-- [ ] Use the git-worktrees skill to create an isolated checkout from `cc46d9998a3c9cd5d8813e89b57e44248353e03e`, on a `codex/` branch.
-- [ ] Inventory `git diff --binary HEAD`, tracked deletions/modes, and `git ls-files --others --exclude-standard` in the source. Hash before transfer and recheck after transfer to detect concurrent changes.
-- [ ] Apply tracked differences only in the destination. Transfer untracked source/tests/configuration and every required referenced asset/document. Record excluded bulky results with reasons. Preserve the two planning documents under their current repository-relative names.
-- [ ] Confirm the essential hashes against the freshly captured source, including the untracked sampled controller and tests. The planning-time controller hash was `c2ef31500f6d65aee2b29c6bb9a7e157ea5ebae6e80ad2a125940618065af0a5`; if it changed, inspect and update provenance rather than force the old contents.
-- [ ] Commit the transferred baseline separately from new implementation, preserving authorship/provenance in the commit message and manifest.
-- [ ] Verify imports and run the existing focused baseline once:
+- [x] Use the git-worktrees skill to create an isolated checkout from `cc46d9998a3c9cd5d8813e89b57e44248353e03e`, on a `codex/` branch.
+- [x] Inventory `git diff --binary HEAD`, tracked deletions/modes, and `git ls-files --others --exclude-standard` in the source. Hash before transfer and recheck after transfer to detect concurrent changes.
+- [x] Apply tracked differences only in the destination. Transfer untracked source/tests/configuration and every required referenced asset/document. Record excluded bulky results with reasons. Preserve the two planning documents under their current repository-relative names.
+- [x] Confirm the essential hashes against the freshly captured source, including the untracked sampled controller and tests. The planning-time controller hash was `c2ef31500f6d65aee2b29c6bb9a7e157ea5ebae6e80ad2a125940618065af0a5`; if it changed, inspect and update provenance rather than force the old contents.
+- [x] Commit the transferred baseline separately from new implementation, preserving authorship/provenance in the commit message and manifest.
+- [x] Verify imports and run the existing focused baseline once:
 
 ```bash
 PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -c 'import src; print(src.__file__)'
@@ -63,7 +65,7 @@ PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -m pytest 
 
 **Interface:** preserve existing calls and add keyword-only `gain_mode="fixed"` to `configure_sampled_pd500` and `install_sampled_pd500`. The installed controller owns applied-gain/torque snapshots; fixed mode retains its original metadata identity.
 
-- [ ] Write failing tests for variable mode, nominal parity, mapped endpoints, and held-torque behavior. Use identical nonsaturated state/target to isolate gain effects:
+- [x] Write failing tests for variable mode, nominal parity, mapped endpoints, and held-torque behavior. Use identical nonsaturated state/target to isolate gain effects:
 
 ```python
 expected_kp = nominal_kp * torch.pow(p.new_tensor(1.25), p)
@@ -75,11 +77,11 @@ torch.testing.assert_close(controller.applied_kd, expected_kd)
 torch.testing.assert_close(controller.torque[:, controller.ids], expected_torque)
 ```
 
-- [ ] Run those tests and confirm failures arise from missing behavior.
-- [ ] Validate modes, calibrated nominals, and gain base once. Reuse the tensor-only gain map in the controller hot path; avoid per-substep host synchronization. On scheduled samples, snapshot mapped gains and compute/clamp torque; preserve the existing eight-step hold/native-feedback clearing.
-- [ ] Add explicit requested torque and saturation snapshots, with applied `Kp/Kd` for all six controlled joints. Do not expose native mapped gains as applied sampled gains.
-- [ ] Test each endpoint, distinct environments/joints, full and subset resets, effort limits, hooks, and ten updates in an 80-step interval. A changed request mid-hold must leave held torque unchanged until the next scheduled sample.
-- [ ] Verify `p=0` variable torque and fixed torque agree at matched states and that fixed-mode behavior is unchanged.
+- [x] Run those tests and confirm failures arise from missing behavior.
+- [x] Validate modes, calibrated nominals, and gain base once. Reuse the tensor-only gain map in the controller hot path; avoid per-substep host synchronization. On scheduled samples, snapshot mapped gains and compute/clamp torque; preserve the existing eight-step hold/native-feedback clearing.
+- [x] Add explicit requested torque and saturation snapshots, with applied `Kp/Kd` for all six controlled joints. Do not expose native mapped gains as applied sampled gains.
+- [x] Test each endpoint, distinct environments/joints, full and subset resets, effort limits, hooks, and ten updates in an 80-step interval. A changed request mid-hold must leave held torque unchanged until the next scheduled sample.
+- [x] Verify `p=0` variable torque and fixed torque agree at matched states and that fixed-mode behavior is unchanged.
 
 ```bash
 PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -m pytest tests/test_sampled_pd500.py tests/test_variable_impedance.py -q
@@ -93,11 +95,11 @@ PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -m pytest 
 
 **Interfaces:** `sampled_pd500_gain_mode: Literal["fixed", "variable"] = "fixed"`; controller identity `sampled_vic500_v1`, action type `joint_position_variable_impedance_sampled_pd`. Add no flag that silently changes a loaded checkpoint's controller.
 
-- [ ] Add failing tests for native/fixed/variable mismatch rejection, variable mode without sampled control, and playback/evaluation construction order.
-- [ ] Install the selected sampled controller before wrapping the environment/constructing the runner. Preserve native and legacy fixed routes. Factor only the small shared setup/validation needed by these three entry points.
-- [ ] Serialize calibrated nominals, gain mapping, timing, effort limits, joint order, load settings, and path/guidance semantics for the new VIC contract. Keep old serialized contracts unchanged. Normal resume is exact; only the existing explicit external-to-policy speed transition is permitted.
-- [ ] Make controller metadata validation account for live variable gains without treating ordinary gain changes as drift. Changing nominal values, limits, clocks, joint mapping, or hooks must still fail validation.
-- [ ] Update applied-gain reads in evaluation and export metadata. Test PT save/load and deterministic export parity.
+- [x] Add failing tests for native/fixed/variable mismatch rejection, variable mode without sampled control, and playback/evaluation construction order.
+- [x] Install the selected sampled controller before wrapping the environment/constructing the runner. Preserve native and legacy fixed routes. Factor only the small shared setup/validation needed by these three entry points.
+- [x] Serialize calibrated nominals, gain mapping, timing, effort limits, joint order, load settings, and path/guidance semantics for the new VIC contract. Keep old serialized contracts unchanged. Normal resume is exact; only the existing explicit external-to-policy speed transition is permitted.
+- [x] Make controller metadata validation account for live variable gains without treating ordinary gain changes as drift. Changing nominal values, limits, clocks, joint mapping, or hooks must still fail validation.
+- [x] Update applied-gain reads in evaluation and export metadata. Test PT save/load and deterministic export parity.
 
 ```python
 with pytest.raises(ValueError, match="mismatch"):
@@ -119,12 +121,12 @@ PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -m pytest 
 
 **Interfaces:** a shared private quintic configuration builder with explicit route mode and guidance weight/width; register `Unitree-Z1-Hammer-Quintic-ThreeStarts-ImpactSpeed` separately. Preserve `Unitree-Z1-Hammer-Quintic-M20-ImpactSpeed` defaults and meaning.
 
-- [ ] Test left-only configuration equality against the snapshot baseline, persistent precontact guidance, and unchanged active CaT settings.
-- [ ] Validate weight as finite/nonnegative and width as finite/positive. Support controlled overrides without an automatic sweep or curriculum.
-- [ ] Construct the three-start task using the existing three reset poses and independent equal-probability sampling; exact per-batch route counts are not required. Apply identical quintic/follow-through parameters to reset, observations, and reward consumers.
-- [ ] Test each reset anchor, nail crossing, terminal tangent, vertical continuation, subset reset isolation, and observation/action schema.
-- [ ] Test diagnostics for paths sampled at different rates, off-curve positions, and rebound without mutating the reference's monotone latch. Keep policy phase semantics unchanged.
-- [ ] Check whether current observations distinguish the three supplied geometries using paired states. Record the result; a failure blocks a generalization claim and calls for a separate minimal observation change, not a silent schema expansion.
+- [x] Test left-only configuration equality against the snapshot baseline, persistent precontact guidance, and unchanged active CaT settings.
+- [x] Validate weight as finite/nonnegative and width as finite/positive. Support controlled overrides without an automatic sweep or curriculum.
+- [x] Construct the three-start task using the existing three reset poses and independent equal-probability sampling; exact per-batch route counts are not required. Apply identical quintic/follow-through parameters to reset, observations, and reward consumers.
+- [x] Test each reset anchor, nail crossing, terminal tangent, vertical continuation, subset reset isolation, and observation/action schema.
+- [x] Test diagnostics for paths sampled at different rates, off-curve positions, and rebound without mutating the reference's monotone latch. Keep policy phase semantics unchanged.
+- [x] Check whether current observations distinguish the three supplied geometries using paired states. Record the result; a failure blocks a generalization claim and calls for a separate minimal observation change, not a silent schema expansion.
 
 ```python
 assert cfg.rewards["r_imit"].weight == 0.2
@@ -145,9 +147,9 @@ PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -m pytest 
 
 **Interfaces:** `StrikeEvaluationCollector`, installed only for evaluation as a per-substep metric after both the existing first-strike tracker and `substep_impulse`. It owns independent counters/buffers and observes the accepted onset once. Its output explicitly separates native and common-window records.
 
-- [ ] Write tensor/synthetic tests for the exact interval convention, axial/transverse force integrals, all-joint exceedances, precontact path bins, coverage, and subset reset.
-- [ ] Use 200 inclusive physics samples from accepted onset for sampled control. Count wall-clock physics samples even across contact gaps; integrate force only for the intended contact pair. Freeze complete outputs so later substeps cannot add impulse.
-- [ ] Test a constant positive axial force analytically, with independently checked expected values:
+- [x] Write tensor/synthetic tests for the exact interval convention, axial/transverse force integrals, all-joint exceedances, precontact path bins, coverage, and subset reset.
+- [x] Use 200 inclusive physics samples from accepted onset for sampled control. Count wall-clock physics samples even across contact gaps; integrate force only for the intended contact pair. Freeze complete outputs so later substeps cannot add impulse.
+- [x] Test a constant positive axial force analytically, with independently checked expected values:
 
 ```python
 expected_impulse_ns = 10.0 * 200 * 0.00025  # 0.5 N s
@@ -156,12 +158,12 @@ assert result.window_complete
 assert result.axial_positive_ns == pytest.approx(expected_impulse_ns)
 ```
 
-- [ ] Add protocol selection `--measurement-protocol native|common-window` with native as the compatibility default. Validate original checkpoint metadata before applying evaluation overrides. Defer only success reset until the common window completes; record success at its native time, and preserve failures/timeouts.
-- [ ] Test success on onset and on the final sample, contact gaps, failure before completion, timeout, simultaneous success/failure, and different onset times in a vectorized batch. Never integrate reset-state forces into the previous event.
-- [ ] Sample current-height path error before accepted contact, with 16 normalized-height bins. Report observed-bin RMS/max, sample RMS/max, counts, coverage, skipped bins, and path extent. Do not fill empty bins or penalize postcontact motion as approach error. A hovering synthetic trace must show low progress/coverage and a miss despite small geometric error.
-- [ ] Read the authoritative `SubstepImpulseAccumulator.impulse` after its update every physics substep. Test callback insertion order and a one-substep exceedance between policy reads; the collector must retain it even when CaT's cached 50 Hz telemetry has not updated.
-- [ ] Report each joint's whole-observed-episode and common-window peaks, configured cap, utilization/exceedance, and cadence. Common-window peak is the maximum of existing sliding-window Lambda during the interval, including any pre-onset ring history; do not reset the ring or relabel it an onset-only integral. Test an earlier sensor contact followed by accepted onset. Keep no-contact/failed attempts in summaries. Preserve native tracker impulse and stop reason.
-- [ ] Test that enabling diagnostic collection under native protocol leaves actions, observations, rewards, terminations, and RNG unchanged. Common-window behavior may diverge only at the explicitly recorded termination override.
+- [x] Add protocol selection `--measurement-protocol native|common-window` with native as the compatibility default. Validate original checkpoint metadata before applying evaluation overrides. Defer only success reset until the common window completes; record success at its native time, and preserve failures/timeouts.
+- [x] Test success on onset and on the final sample, contact gaps, failure before completion, timeout, simultaneous success/failure, and different onset times in a vectorized batch. Never integrate reset-state forces into the previous event.
+- [x] Sample current-height path error before accepted contact, with 16 normalized-height bins. Report observed-bin RMS/max, sample RMS/max, counts, coverage, skipped bins, and path extent. Do not fill empty bins or penalize postcontact motion as approach error. A hovering synthetic trace must show low progress/coverage and a miss despite small geometric error.
+- [x] Read the authoritative `SubstepImpulseAccumulator.impulse` after its update every physics substep. Test callback insertion order and a one-substep exceedance between policy reads; the collector must retain it even when CaT's cached 50 Hz telemetry has not updated.
+- [x] Report each joint's whole-observed-episode and common-window peaks, configured cap, utilization/exceedance, and cadence. Common-window peak is the maximum of existing sliding-window Lambda during the interval, including any pre-onset ring history; do not reset the ring or relabel it an onset-only integral. Test an earlier sensor contact followed by accepted onset. Keep no-contact/failed attempts in summaries. Preserve native tracker impulse and stop reason.
+- [x] Test that enabling diagnostic collection under native protocol leaves actions, observations, rewards, terminations, and RNG unchanged. Common-window behavior may diverge only at the explicitly recorded termination override.
 
 ```bash
 PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -m pytest tests/test_strike_evaluation.py tests/test_impact_speed_evaluation.py tests/test_first_strike_event.py tests/test_impulse_bound.py tests/test_impulse_constraint.py -q
@@ -173,18 +175,18 @@ PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -m pytest 
 
 **Files:** extend relevant integration tests; create `docs/results/2026-09-24-free-time-spline-software-qualification.md`; update the implementation checkout's docs index with this software-only result.
 
-- [ ] Run a small CPU simulator smoke test with synthetic actions, both sampled gain modes, all three reset poses, and asynchronous resets. This is not a learning run.
-- [ ] Exercise the existing post-latch intervention harness with a deterministic test actor whose later motor outputs depend on the goal: identical first action, different second action, one-time speed latch. Preserve the existing masked-distribution and checkpoint-transfer tests.
-- [ ] If a compatible fixed checkpoint is locally available, verify fixed replay construction without relabeling it VIC. Absence of a trained VIC checkpoint is expected; record physical speed compliance as untested.
-- [ ] Run the consolidated focused regression:
+- [x] Run a small CPU simulator smoke test with synthetic actions, both sampled gain modes, all three reset poses, and asynchronous resets. This is not a learning run.
+- [x] Exercise the existing post-latch intervention harness with a deterministic test actor whose later motor outputs depend on the goal: identical first action, different second action, one-time speed latch. Preserve the existing masked-distribution and checkpoint-transfer tests.
+- [x] If a compatible fixed checkpoint is locally available, verify fixed replay construction without relabeling it VIC. Absence of a trained VIC checkpoint is expected; record physical speed compliance as untested.
+- [x] Run the consolidated focused regression:
 
 ```bash
 PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -m pytest tests/test_sampled_pd500.py tests/test_variable_impedance.py tests/test_impact_speed.py tests/test_impact_speed_policy.py tests/test_impact_speed_contract.py tests/test_impact_speed_wrapper.py tests/test_impact_speed_train_routing.py tests/test_impact_speed_evaluation.py tests/test_quintic_reference.py tests/test_imitation_reward.py tests/test_spline_impact_config.py tests/test_strike_evaluation.py tests/test_first_strike_event.py tests/test_impulse_bound.py tests/test_impulse_constraint.py tests/test_cat_soft_hook.py tests/test_cat_ppo_gae.py tests/test_cat_storage.py -q
 ```
 
-- [ ] Report failures, skips, simulator availability, command exit status, versions, source manifest, and test counts. No full-suite or physical-learning claim follows from a focused regression.
-- [ ] Obtain independent whole-change review, resolve important findings through a fix agent and scoped re-review, and publish a compact result table.
-- [ ] Stop. Do not launch training or modify existing jobs.
+- [x] Report failures, skips, simulator availability, command exit status, versions, source manifest, and test counts. No full-suite or physical-learning claim follows from a focused regression.
+- [x] Obtain independent whole-change review, resolve important findings through a fix agent and scoped re-review, and publish a compact result table.
+- [x] Stop. Do not launch training or modify existing jobs.
 
 **Handoff table:** applied gain authority / hold timing / reset isolation / checkpoint separation / free-time geometry / exact window / per-joint load reporting / speed plumbing are software-testable. Learned path quality / physical speed responsiveness / impact improvement / compliance rates / three-curve competence require later experiments. Hardware safety requires a separately validated load model and limits.
 

@@ -1,5 +1,7 @@
 # Free-time spline impact: software qualification only (2026-09-24)
 
+**Final outcome:** implementation and independent review complete at production/test commit `ca0ecfb`. Fresh combined verification: **362 passed, 0 failed, 0 skipped, 72 dependency warnings**, exit 0, in 66.00 s. Later changes are documentation only. No training campaign, merge, or push performed. The new integration/evaluation runs make no learning updates; existing checkpoint/PPO regression tests do exercise isolated synthetic optimizer updates and one-iteration runner fixtures, which are software tests, not trained-policy results.
+
 ## Scope and provenance
 
 This is a no-learning CPU integration record for the implementation through `aeb8fe5` plus the Task 5 test commit. It is not a policy or hardware result. The implementation is an isolated snapshot on `codex/free-time-spline-impact`, copied from experimental worktree `/Users/nikerane/.codex/worktrees/z1-impact-speed/unitree_rl_mjlab` at `cc46d9998a3c9cd5d8813e89b57e44248353e03e`. The [source manifest](2026-09-24-free-time-spline-source-manifest.json) records the exact tracked patch SHA-256 `a16bad2dbea42b271dc84a68b0fe63adbcf634999f477b3d052152ee2561ed2f`, 673 untracked source paths, 384 included paths, 289 excluded historical result assets, and read-only external asset hashes. The source-before/source-after inventories matched. The external asset ledger covers 32 files; its SHA-256 is `571bec311767567475176530012cf71c478d93ba9f27594f80aa551ba952e453`. The original source and jobs `45860324`/`45860325` were not changed or queried.
@@ -8,7 +10,7 @@ Development decisions retained from the scratch ledger: the already isolated `a3
 
 ## Execution
 
-macOS Darwin CPU; Python 3.10.20, pytest 9.0.3, PyTorch 2.12.0, MuJoCo 3.8.1, MuJoCo Warp 3.8.1, Warp 1.13.0, mjlab 1.4.0 (`importlib.metadata.version("mjlab")`; its module has no `__version__` attribute). Simulator construction and live stepping succeeded on CPU. No CUDA, training, cluster, or hardware execution occurred.
+macOS Darwin CPU; Python 3.10.20, pytest 9.0.3, PyTorch 2.12.0, MuJoCo 3.8.1, MuJoCo Warp 3.8.1, Warp 1.13.0, mjlab 1.4.0 (`importlib.metadata.version("mjlab")`; its module has no `__version__` attribute). Simulator construction and live stepping succeeded on CPU. No CUDA, training campaign, cluster, or hardware execution occurred. Synthetic learning fixtures in the regression suite do not provide empirical training evidence.
 
 | Check | Result | Software evidence |
 |---|---:|---|
@@ -32,7 +34,7 @@ Exit 0: **340 passed, 0 failed, 0 skipped, 70 warnings in 55.59 s** at the origi
 |---|---|
 | Applied sampled gain authority; 2 ms held-torque timing under 0.25 ms physics and 20 ms policy steps; asynchronous reset isolation; fixed/VIC checkpoint identities and transfer; free-time route geometry and persistent guidance; exact 50 ms common window; per-joint load reporting; goal latch and action recomputation. | Learned path quality, physical speed response/compliance at 1.5–2.2 m/s, useful impact improvement, joint-load compliance rates, and competence on all three curves. The intervention actor was deterministic test code, not a learned policy. |
 
-The inherited effort limits `[30,60,30,30,30,30] N m`, per-joint impulse caps `[0.369,0.246,0.738,0.369,0.246,0.0164] N m s`, impulse dose `0.2`, velocity limit `3.1415 rad/s`, and velocity maximum probability `0.5` remain unchanged. These are software contract values, not a hardware safety guarantee. Hardware safety requires a separately validated load model and limits. Independent whole-change review is pending in the parent handoff; this document should receive its final review status there.
+The inherited effort limits `[30,60,30,30,30,30] N m`, per-joint impulse caps `[0.369,0.246,0.738,0.369,0.246,0.0164] N m s`, impulse dose `0.2`, velocity limit `3.1415 rad/s`, and velocity maximum probability `0.5` remain unchanged. These are software contract values, not a hardware safety guarantee. Hardware safety requires a separately validated load model and limits. Independent whole-change review and scoped fix re-review are complete, with no remaining findings.
 
 ## Final-review findings and corrections
 
@@ -48,6 +50,25 @@ The final-fix focused command was:
 PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -m pytest tests/test_sampled_pd500.py tests/test_impact_speed_contract.py tests/test_strike_evaluation.py tests/test_quintic_reference.py tests/test_impact_speed_evaluation.py tests/test_free_time_software_qualification.py -q --show-capture=no
 ```
 
-Exit 0: **123 passed, 0 failed, 0 skipped, 70 upstream TorchScript/ONNX deprecation warnings in 64.03 s**. Sixteen new targeted regressions first failed for the missing validation/incorrect binning. This is the scoped final-fix suite, not a repository-wide regression. The final review remains **pending scoped re-review** of these fixes.
+Exit 0: **123 passed, 0 failed, 0 skipped, 70 upstream TorchScript/ONNX deprecation warnings in 64.03 s**. Sixteen new targeted regressions first failed for the missing validation/incorrect binning. This is the scoped final-fix suite, not a repository-wide regression. Independent scoped re-review marked both findings **addressed**, with no new or residual findings.
 
 These corrections improve software identity and evidence quality. They establish no learned speed response, useful-impact improvement, joint-load compliance rate, three-route competence, CUDA/numerical-failure parity, or hardware safety. No training, cluster/job interaction, hardware action, or original-source edit was performed.
+
+## Final verification and decision record
+
+The coordinating agent independently ran this command on `ca0ecfb`, after the final production changes:
+
+```bash
+PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -m pytest tests/test_sampled_pd500.py tests/test_variable_impedance.py tests/test_impact_speed.py tests/test_impact_speed_policy.py tests/test_impact_speed_contract.py tests/test_impact_speed_wrapper.py tests/test_impact_speed_train_routing.py tests/test_impact_speed_evaluation.py tests/test_quintic_reference.py tests/test_imitation_reward.py tests/test_spline_impact_config.py tests/test_strike_evaluation.py tests/test_first_strike_event.py tests/test_impulse_bound.py tests/test_impulse_constraint.py tests/test_cat_soft_hook.py tests/test_cat_ppo_gae.py tests/test_cat_storage.py tests/test_free_time_software_qualification.py -q
+```
+
+Exit 0: **362 passed, 72 warnings in 66.00 s**, no skips. Warnings remain the installed TorchScript/ONNX deprecations and profiler warning. `git diff --check b60ddc29..HEAD` also passed. This final run supersedes the earlier scoped counts; it is not the full repository suite. All task-level spec/quality reviews passed after fixes. The final broad review found R1/R2 above; one fix wave and independent re-review resolved both. The baseline configuration digests have documented source provenance, but their one-time extraction script was not retained.
+
+The following are all execution rulings, in order, retained from the temporary coordination ledger:
+
+1. Reuse the existing isolated checkout instead of creating another. If wrong, redo branch/snapshot setup; the original source remains unaffected.
+2. Run the approved focused regression, not the entire unrelated repository suite. Unrelated regressions remain outside this evidence.
+3. Restore only the missing sibling asset link, using the existing asset repository read-only. If wrong, remove that link and correct the dependency; asset contents were not edited.
+4. Keep sampled calibration independent of native gain nominals, as the binding design requires. If wrong, revisit calibration before experiments; no hardware qualification follows here.
+5. Canonicalize identical world parameters and reject heterogeneous live loads. Future load-randomization experiments need a separately defined/versioned identity contract.
+6. Extend the checkpoint validator narrowly to serialize valid route/guidance choices. If this boundary is wrong, revise compatibility validation; cross-treatment loading must remain rejected.

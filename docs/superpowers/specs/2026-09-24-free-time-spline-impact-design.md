@@ -1,6 +1,6 @@
 # Free-time spline following, selected impact speed, and joint impedance
 
-Status: proposed design, informed by three independent agents and a cross-review discussion. Implementation stops after software and no-learning integration tests; training is a separate checkpoint.
+Status: approved and implemented through the software-only milestone. Independent task reviews and final whole-feature review are complete; 362 focused tests passed. See the [qualification record](../../results/2026-09-24-free-time-spline-software-qualification.md). Training remains a separate checkpoint.
 
 ## Research question and agreed intent
 
