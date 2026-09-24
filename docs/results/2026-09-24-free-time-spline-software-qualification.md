@@ -1,0 +1,35 @@
+# Free-time spline impact: software qualification only (2026-09-24)
+
+## Scope and provenance
+
+This is a no-learning CPU integration record for the implementation through `aeb8fe5` plus the Task 5 test commit. It is not a policy or hardware result. The implementation is an isolated snapshot on `codex/free-time-spline-impact`, copied from experimental worktree `/Users/nikerane/.codex/worktrees/z1-impact-speed/unitree_rl_mjlab` at `cc46d9998a3c9cd5d8813e89b57e44248353e03e`. The [source manifest](2026-09-24-free-time-spline-source-manifest.json) records the exact tracked patch SHA-256 `a16bad2dbea42b271dc84a68b0fe63adbcf634999f477b3d052152ee2561ed2f`, 673 untracked source paths, 384 included paths, 289 excluded historical result assets, and read-only external asset hashes. The source-before/source-after inventories matched. The external asset ledger covers 32 files; its SHA-256 is `571bec311767567475176530012cf71c478d93ba9f27594f80aa551ba952e453`. The original source and jobs `45860324`/`45860325` were not changed or queried.
+
+Development decisions retained from the scratch ledger: the already isolated `a370` checkout was reused; the missing sibling simulator-assets symlink was recreated read-only to match the source; the focused regression scope was approved instead of a repository-wide suite; sampled gain calibration remains independent of native nominal gains; the VIC checkpoint contract fingerprints homogeneous *live* model loads and the live clock; the three-route/guidance treatment is serialized; load evidence uses `max(current rolling Lambda, current control-step peak)` including retained pre-onset history, so peak-held exceedance duration is not instantaneous rolling-Lambda duration. These decisions and their limitations govern the interpretation below.
+
+## Execution
+
+macOS Darwin CPU; Python 3.10.20, pytest 9.0.3, PyTorch 2.12.0, MuJoCo 3.8.1, MuJoCo Warp 3.8.1, Warp 1.13.0. The installed `mjlab` package does not expose a version attribute. Simulator construction and live stepping succeeded on CPU. No CUDA, training, cluster, or hardware execution occurred.
+
+| Check | Result | Software evidence |
+|---|---:|---|
+| New live sampled smoke | 2/2 gain modes | Twelve CPU worlds in the three-start task showed actual R−/R0/R+ reset joint poses, finite 42D actor/critic observations, finite applied gains, a 13D synthetic action, one asynchronous timeout/reset, and an 80-sample pre-reset evaluation record. Nonreset route assignments stayed unchanged. |
+| Native diagnostic parity | Pass for tested finite sequence | With evaluation metrics absent/present, three staggered native world resets produced exactly equal actor/critic observations, rewards, done flags, speed goals, and robot joint positions. This does not cover numerical failure paths. |
+| Deterministic intervention | Pass | An untrained checkpoint fixture plus deterministic test actor gave identical first actions across 1.5/1.85/2.2 m/s goal conditions; second motor actions were respectively −1/0/+1 (floating tolerance), with exactly one speed selection per world per condition. The harness still reported physical responsiveness `false`. |
+| Existing checkpoint/export and masked-policy tests | Pass | Covered by the focused regression, including checkpoint round-trip/transfer, masked distribution, PT/ONNX parity, and native/common-window evaluation. Test-generated fixtures are untrained. |
+| Optional trained fixed checkpoint | Not exercised | No compatible checkpoint was supplied in this implementation checkout. Historical bulky checkpoints were intentionally excluded from the source snapshot; no unrelated directories or original jobs were searched. Fixed replay construction is covered by synthetic checkpoint tests, without calling it trained VIC performance. |
+
+The exact approved 18-file command was:
+
+```bash
+PYTHONPATH=. /Users/nikerane/miniconda3/envs/unitree_mjlab/bin/python -m pytest tests/test_sampled_pd500.py tests/test_variable_impedance.py tests/test_impact_speed.py tests/test_impact_speed_policy.py tests/test_impact_speed_contract.py tests/test_impact_speed_wrapper.py tests/test_impact_speed_train_routing.py tests/test_impact_speed_evaluation.py tests/test_quintic_reference.py tests/test_imitation_reward.py tests/test_spline_impact_config.py tests/test_strike_evaluation.py tests/test_first_strike_event.py tests/test_impulse_bound.py tests/test_impulse_constraint.py tests/test_cat_soft_hook.py tests/test_cat_ppo_gae.py tests/test_cat_storage.py -q
+```
+
+Exit 0: **340 passed, 0 failed, 0 skipped, 70 warnings in 55.59 s**. The new integration file separately exited 0: **4 passed, 0 failed, 0 skipped, 37 warnings in 7.38 s**. A combined run before the final pose assertion exited through a shell bookkeeping error after pytest had reported **344 passed, 72 warnings**; the exact approved command and final new-file run above have clean process exit codes. Warnings were installed TorchScript/ONNX deprecations and one Torch profiler warning; no new functional failure or pre-existing failure appeared in the focused scope. The full repository suite was not run.
+
+## Qualification boundary
+
+| Software-testable and checked | Requires later empirical work |
+|---|---|
+| Applied sampled gain authority; 2 ms held-torque timing under 0.25 ms physics and 20 ms policy steps; asynchronous reset isolation; fixed/VIC checkpoint identities and transfer; free-time route geometry and persistent guidance; exact 50 ms common window; per-joint load reporting; goal latch and action recomputation. | Learned path quality, physical speed response/compliance at 1.5–2.2 m/s, useful impact improvement, joint-load compliance rates, and competence on all three curves. The intervention actor was deterministic test code, not a learned policy. |
+
+The inherited effort limits `[30,60,30,30,30,30] N m`, per-joint impulse caps `[0.369,0.246,0.738,0.369,0.246,0.0164] N m s`, impulse dose `0.2`, velocity limit `3.1415 rad/s`, and velocity maximum probability `0.5` remain unchanged. These are software contract values, not a hardware safety guarantee. Hardware safety requires a separately validated load model and limits. Independent whole-change review is pending in the parent handoff; this document should receive its final review status there.

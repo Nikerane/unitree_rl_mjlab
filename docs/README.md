@@ -8,6 +8,7 @@ the code disagree, the checked-out code wins; fix the doc.
 
 | Doc | What it is |
 |---|---|
+| `docs/results/2026-09-24-free-time-spline-software-qualification.md` | No-learning CPU software qualification for sampled fixed/VIC gains, three routes, asynchronous reset, native diagnostic parity, and post-latch intervention; focused regression passed, physical performance and hardware safety unqualified |
 | `docs/results/2026-09-24_z1_pd500_repeats.md` | Two unchanged fresh250 repeats submitted:seed3 job45860324,seed4 job45860325 afterok. Proposed progression:repeatability, explicit speed authority, sampled learned impedance, three splines; test cleanup deferred, load/optimality claims remain qualified |
 | `docs/results/2026-09-24_z1_fresh_pd500_pilot.md` | Fresh250-update fixed-gain500Hz pilot complete:768/768 productive evaluated first episodes and zero measured joint-speed violations (maxJ2=3.014rad/s; J6=1.950); native tracker impulse0.318–0.384Ns median by goal. Videos banked. One training seed, external speed conditioning; regression caveats classified (environment plus two unrelated assertions), no full-suite-pass claim; load safety unqualified |
 | `docs/results/2026-09-24_z1_closedloop_pd500.md` | Closed-loop old-policy transfer complete: contacts return (34/128 and102/128 at finer physics), but all cases breach J2–J4 speed limits; J6 stays below1.561rad/s. User now requests fresh250-update pilot; checkpoint/controller integration and required gates precede training |
