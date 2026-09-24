@@ -186,8 +186,11 @@ class SampledPD500:
         if (self.sim.step != self.step or self.gains.process_actions != self.process_actions
             or self.gains.reset != self.reset_gains or self.env.reset != self.reset_env):
             raise ValueError("sampled PD controller hooks are not installed")
-        if self.env.cfg.sim.mujoco.timestep != .00025 or self.env.cfg.decimation != 80:
-            raise ValueError("sampled PD timing changed after installation")
+        live_dt = self.sim.model.opt.timestep.detach().cpu()
+        if (self.env.cfg.sim.mujoco.timestep != .00025 or self.env.cfg.decimation != 80
+            or live_dt.ndim != 1 or live_dt.shape[0] not in (1, self.env.num_envs)
+            or not torch.all(live_dt == .00025)):
+            raise ValueError("sampled PD execution timestep or configured timing changed after installation")
         metadata = dict(version="fixed_pd500_v1", pd_dt_s=.002, physics_dt_s=.00025,
                     policy_dt_s=.02, kp=list(ARM_KP), kd=list(ARM_KD),
                     control_ids=self.ids.tolist(), effort_limits_nm=[30.,60.,30.,30.,30.,30.],

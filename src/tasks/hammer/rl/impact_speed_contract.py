@@ -30,6 +30,18 @@ _OBSERVATION_WIDTHS = (7, 7, 3, 3, 3, 3, 3, 1, 1, 3, 6, 1, 1)
 
 def _sampled_vic_treatment_metadata(env) -> dict:
     """Freeze variable-controller plant and the path that supplies its policy inputs."""
+    def executed_field(name: str) -> list:
+        # The host MjModel is a template. The Warp bridge exposes the arrays
+        # that simulation steps read, including expanded per-world fields.
+        values = getattr(env.sim.model, name).detach().cpu()
+        if values.ndim < 2 or values.shape[0] not in (1, env.num_envs):
+            raise ValueError(f"sampled VIC runtime load {name} has unexpected world shape")
+        if not torch.isfinite(values).all():
+            raise ValueError(f"sampled VIC runtime load {name} must be finite")
+        if values.shape[0] > 1 and not torch.equal(values, values[:1].expand_as(values)):
+            raise ValueError(f"sampled VIC runtime load {name} is heterogeneous across worlds; unsupported checkpoint identity")
+        return values[0].tolist()
+
     reward = env.reward_manager.get_term_cfg("r_imit")
     reference_keys = ("path_shape", "overshoot", "followthrough_mode", "horizontal_detour_m")
     reference = {key: reward.params.get(key, 0.0 if key == "horizontal_detour_m" else None)
@@ -55,7 +67,6 @@ def _sampled_vic_treatment_metadata(env) -> dict:
     if width != .05:
         raise ValueError("sampled VIC guidance width must be 0.05 m")
     route_positions = env.cfg.events["reset_strike_route_joints"].params["route_joint_positions"]
-    model = env.sim.mj_model
     return {
         "reference": {
             "path_shape": reference["path_shape"], "overshoot_m": reference["overshoot"],
@@ -67,11 +78,11 @@ def _sampled_vic_treatment_metadata(env) -> dict:
         "guidance": {"weight": float(reward.weight), "width_m": float(width),
                      "impl": f"{type(reward.func).__module__}.{type(reward.func).__qualname__}"},
         "load": {
-            "body_mass_kg": model.body_mass.tolist(),
-            "body_inertia_kg_m2": model.body_inertia.tolist(),
-            "body_gravcomp": model.body_gravcomp.tolist(),
-            "dof_frictionloss_nm": model.dof_frictionloss.tolist(),
-            "jnt_stiffness": model.jnt_stiffness.tolist(),
+            "body_mass_kg": executed_field("body_mass"),
+            "body_inertia_kg_m2": executed_field("body_inertia"),
+            "body_gravcomp": executed_field("body_gravcomp"),
+            "dof_frictionloss_nm": executed_field("dof_frictionloss"),
+            "jnt_stiffness": executed_field("jnt_stiffness"),
         },
     }
 

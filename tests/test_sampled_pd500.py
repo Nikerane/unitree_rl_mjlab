@@ -280,6 +280,19 @@ def test_metadata_rejects_drift_of_applied_controller(field):
         env.close()
 
 
+def test_metadata_rejects_live_execution_clock_drift_with_config_unchanged():
+    env, controller = _variable_controller()
+    try:
+        assert controller.metadata()["physics_dt_s"] == .00025
+        env.sim.model.opt.timestep[0] = .0005
+        assert env.cfg.sim.mujoco.timestep == .00025
+        assert env.sim.mj_model.opt.timestep == .00025
+        with pytest.raises(ValueError, match="timestep"):
+            controller.metadata()
+    finally:
+        env.close()
+
+
 def test_checkpoint_roundtrip_and_native_controller_rejection(tmp_path):
     from copy import deepcopy
     from dataclasses import asdict

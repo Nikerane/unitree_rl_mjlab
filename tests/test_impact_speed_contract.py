@@ -271,10 +271,16 @@ def test_variable_sampled_metadata_rejects_physics_and_gain_config_drift():
     try:
         install_sampled_pd500(env, gain_mode="variable")
         expected = _contract().build_impact_speed_metadata(env, 1.0)
+        host_mass = env.sim.mj_model.body_mass.copy()
+        env.sim.model.body_mass[0, 1] += .1
+        assert (env.sim.mj_model.body_mass == host_mass).all()
+        runtime_changed = _contract().build_impact_speed_metadata(env, 1.0)
+        with pytest.raises(ValueError, match="mismatch"):
+            _contract().validate_impact_speed_metadata(expected, runtime_changed)
+        env.sim.model.body_mass[0, 1] -= .1
         env.sim.mj_model.body_mass[1] += .1
         changed = _contract().build_impact_speed_metadata(env, 1.0)
-        with pytest.raises(ValueError, match="mismatch"):
-            _contract().validate_impact_speed_metadata(expected, changed)
+        assert changed == expected
         env.sim.mj_model.body_mass[1] -= .1
         env.sim.mj_model.actuator_forcelimited[0] = 0
         with pytest.raises(ValueError, match="physics"):
@@ -282,6 +288,31 @@ def test_variable_sampled_metadata_rejects_physics_and_gain_config_drift():
         env.sim.mj_model.actuator_forcelimited[0] = 1
         env.action_manager.get_term("joint_stiffness").cfg.C = 1.5
         with pytest.raises(ValueError, match="C"):
+            _contract().build_impact_speed_metadata(env, 1.0)
+    finally:
+        env.close()
+
+
+def test_variable_sampled_metadata_rejects_heterogeneous_runtime_loads():
+    cfg = _cfg()
+    cfg.scene.num_envs = 2
+    configure_sampled_pd500(cfg, gain_mode="variable")
+    env = ManagerBasedRlEnv(cfg, device="cpu")
+    try:
+        install_sampled_pd500(env, gain_mode="variable")
+        expected = _contract().build_impact_speed_metadata(env, 1.0)
+        one_cfg = _cfg()
+        configure_sampled_pd500(one_cfg, gain_mode="variable")
+        one_env = ManagerBasedRlEnv(one_cfg, device="cpu")
+        try:
+            install_sampled_pd500(one_env, gain_mode="variable")
+            assert _contract().build_impact_speed_metadata(one_env, 1.0) == expected
+        finally:
+            one_env.close()
+        env.sim.expand_model_fields(("body_mass",))
+        assert _contract().build_impact_speed_metadata(env, 1.0) == expected
+        env.sim.model.body_mass[1, 1] += .1
+        with pytest.raises(ValueError, match="heterogeneous"):
             _contract().build_impact_speed_metadata(env, 1.0)
     finally:
         env.close()
