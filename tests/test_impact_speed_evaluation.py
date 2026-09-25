@@ -114,6 +114,117 @@ def test_double_charge_rejected_and_no_selection_is_null():
     assert row["measured_mps"] is None
 
 
+def test_route_strata_report_requested_and_achieved_speed_separately():
+    rows = []
+    for world, sign, goal, measured in (
+        (0, -1, 1.6, 1.1), (1, -1, 1.8, None), (2, 0, 1.9, 1.3), (3, 1, 2.1, 1.5),
+    ):
+        rows.append({
+            "world": world, "episode": 0, "route_sign": sign,
+            "hit": measured is not None, "miss": measured is None,
+            "selection_count": 1, "goal_mps": goal, "selected_goal_mps": goal - .1,
+            "measured_mps": measured,
+            "measurement": {
+                "common_window": {"window_complete": measured is not None,
+                                   "axial_positive_ns": .2 if measured is not None else 0.},
+                "loads": {"episode": {"exceeded": [False, False, False, False, False, False]}},
+            },
+        })
+    report = evaluator().summarize_route_strata(rows, expected_route_signs=(-1, 0, 1))
+    assert report["route_counts"] == {"-1": 2, "0": 1, "1": 1}
+    left = report["routes"]["-1"]
+    assert left["attempts"] == 2 and left["hits"] == 1 and left["misses"] == 1
+    assert left["requested_goal_mps"]["mean"] == pytest.approx(1.7)
+    assert left["selected_goal_mps"]["mean"] == pytest.approx(1.6)
+    assert left["achieved_speed_mps"] == {"mean": pytest.approx(1.1), "count": 1}
+    assert left["complete_common_windows"] == 1
+
+
+def test_route_strata_reject_missing_route_identity_or_uncovered_start():
+    row = {"world": 0, "episode": 0, "route_sign": -1, "selection_count": 0,
+           "goal_mps": 1.5, "measured_mps": None, "hit": False, "miss": True,
+           "measurement": {"common_window": {"window_complete": False,
+                                                "axial_positive_ns": 0.},
+                           "loads": {"episode": {"exceeded": [False] * 6}}}}
+    with pytest.raises(ValueError, match="route"):
+        evaluator().summarize_route_strata([row], expected_route_signs=(-1, 0, 1))
+    row["route_sign"] = None
+    with pytest.raises(ValueError, match="route"):
+        evaluator().summarize_route_strata([row], expected_route_signs=(-1,))
+
+
+@pytest.mark.parametrize(("mode", "expected"), [("external", 0), ("policy", 1)])
+def test_first_episode_selector_count_matches_speed_mode(mode, expected):
+    rows = [{"world": world, "episode": 0, "selection_count": expected}
+            for world in range(3)]
+    report = evaluator().validate_selector_counts(rows, mode=mode)
+    assert report == {"first_episode_count": 3, "expected_per_episode": expected,
+                      "episodes_with_expected_count": 3, "total_selections": 3 * expected}
+    rows[1]["selection_count"] = 1 - expected
+    with pytest.raises(ValueError, match="selector"):
+        evaluator().validate_selector_counts(rows, mode=mode)
+
+
+def test_accumulator_keeps_each_episode_route_from_its_pre_reset_snapshot():
+    acc = evaluator().EpisodeAccumulator(1, gamma=.99, coefficient=.4)
+    raw = torch.zeros(1, 13)
+    out, physical = transition((False,), (True,))
+    physical["route_sign"] = torch.tensor([-1])
+    acc.update(out, physical, raw, torch.zeros(1))
+    out, physical = transition((False,), (False,))
+    physical["route_sign"] = torch.tensor([1])
+    acc.update(out, physical, raw, torch.zeros(1))
+    assert [row["route_sign"] for row in acc.finish()] == [-1, 1]
+
+
+def test_accumulator_rejects_non_route_sign_values():
+    acc = evaluator().EpisodeAccumulator(1, gamma=.99, coefficient=.4)
+    out, physical = transition((False,))
+    physical["route_sign"] = torch.tensor([.5])
+    with pytest.raises(ValueError, match="route sign"):
+        acc.update(out, physical, torch.zeros(1, 13), torch.zeros(1))
+
+
+def test_short_three_route_policy_mode_steps_latch_speed_once_per_episode():
+    from mjlab.envs import ManagerBasedRlEnv
+    from src.tasks.hammer.config.z1 import _impact_speed_env_cfg
+    from src.tasks.hammer.rl.impact_speed_wrapper import wrap_impact_speed_env
+
+    cfg = _impact_speed_env_cfg(play=False, route_mode="three_starts")
+    cfg.scene.num_envs = 1
+    cfg.actions["strike_speed"].bounds = (.2, .8)
+    cfg.rewards["speed_goal"].weight = -.4
+    env = ManagerBasedRlEnv(cfg, device="cpu")
+    try:
+        wrapped = wrap_impact_speed_env(env, 1.)
+        wrapped.reset()
+        speed = env.action_manager.get_term("strike_speed").state
+        assert torch.equal(speed.pending, torch.ones(1))
+        pre_reset_signs = env._strike_reference.route_signs().clone()
+        action = torch.zeros(1, 13)
+        action[:, 12] = 1.
+        env.episode_length_buf[:] = env.max_episode_length - 1
+        with evaluator().PreResetSnapshot(env) as capture:
+            _, _, done, extras = wrapped.step(action)
+        assert done.item()
+        torch.testing.assert_close(capture.latest["route_sign"], pre_reset_signs)
+        torch.testing.assert_close(extras["impact_speed_outcome"]["goal_mps"], torch.tensor([.8]))
+        assert torch.equal(speed.pending, torch.ones(1))
+
+        action[:, 12] = -1.
+        wrapped.step(action)
+        torch.testing.assert_close(speed.goal_mps, torch.tensor([.2]))
+        assert torch.equal(speed.pending, torch.zeros(1))
+        action[:, 12] = 1.
+        wrapped.step(action)
+        torch.testing.assert_close(speed.goal_mps, torch.tensor([.2]))
+        assert torch.equal(speed.pending, torch.zeros(1))
+        assert cfg.events["sample_strike_route_signs"].params.get("fixed_route_sign") is None
+        assert int(env._strike_reference.route_signs()[0]) in {-1, 0, 1}
+    finally:
+        env.close()
+
+
 def test_snapshot_is_after_metrics_but_before_reset_and_is_restored():
     env = SimpleNamespace(value=torch.tensor([0.]))
     def compute():

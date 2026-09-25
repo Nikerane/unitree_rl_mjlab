@@ -67,6 +67,7 @@ class EpisodeAccumulator:
         return dict(world=world, episode=self.episodes[world], steps=0, charge_count=0,
                     goal_mps=None, measured_mps=None, finalized=False, productive=False,
                     hit=False, miss=False, incomplete=False, timeout=False, complete=False,
+                    route_sign=None,
                     first_contact_time_s=None, cost=0., discounted_cost=0., selection_count=0,
                     selected_raw=None, clipping_count=0, tracking_sum_sq_m2=0., tracking_max_mm=0.,
                     joint_target_sum_sq_rad2=0., joint_impulse_peak_nms=[0.] * 6,
@@ -76,7 +77,21 @@ class EpisodeAccumulator:
 
     def update(self, outcome, physical, raw, pending, evaluation=None):
         # Inputs are immutable evidence for THIS transition, not live reset tensors.
+        route_signs = physical.get("route_sign")
+        if route_signs is not None:
+            if not isinstance(route_signs, torch.Tensor) or route_signs.shape != (len(self.active),):
+                raise ValueError("route signs must be one pre-reset sign per world")
+            route_signs = route_signs.detach().cpu().tolist()
         for world, row in enumerate(self.active):
+            if route_signs is not None:
+                raw_route_sign = route_signs[world]
+                if isinstance(raw_route_sign, bool) or raw_route_sign not in (-1, 0, 1):
+                    raise ValueError("route sign must be one of -1, 0, or +1")
+                route_sign = int(raw_route_sign)
+                if row["route_sign"] is None:
+                    row["route_sign"] = route_sign
+                elif route_sign != row["route_sign"]:
+                    raise ValueError("route sign changed before the episode reset")
             if evaluation is not None:
                 row["measurement"] = evaluation[world]
             step = row["steps"]
@@ -135,6 +150,93 @@ class EpisodeAccumulator:
         return self.rows + [self._finish_row(row) for row in self.active if row["steps"]]
 
 
+def validate_selector_counts(rows, *, mode: str, expected_episode_count: int | None = None) -> dict:
+    """Require one speed selection per policy episode and none for external goals."""
+    if mode not in ("external", "policy", "intervention"):
+        raise ValueError("selector evidence requires external, policy, or intervention mode")
+    first = [row for row in rows if row.get("episode") == 0]
+    if not first or (expected_episode_count is not None and len(first) != expected_episode_count):
+        raise ValueError("selector evidence requires every first episode")
+    expected = 0 if mode == "external" else 1
+    matched = sum(row.get("selection_count") == expected for row in first)
+    if matched != len(first):
+        raise ValueError(f"selector count must be exactly {expected} per first episode")
+    return {
+        "first_episode_count": len(first),
+        "expected_per_episode": expected,
+        "episodes_with_expected_count": matched,
+        "total_selections": sum(row["selection_count"] for row in first),
+    }
+
+
+_ROUTE_LABELS = {-1: "R-", 0: "R0", 1: "R+"}
+
+
+def _finite_mean(values) -> dict:
+    finite = [float(value) for value in values
+              if value is not None and math.isfinite(float(value))]
+    return {"mean": sum(finite) / len(finite) if finite else None, "count": len(finite)}
+
+
+def summarize_route_strata(
+    rows, *, expected_route_signs: tuple[int, ...], require_all: bool = True,
+    expected_episode_count: int | None = None,
+) -> dict:
+    """Summarize only first episodes by the route captured before native reset."""
+    if (not expected_route_signs
+        or len(set(expected_route_signs)) != len(expected_route_signs)
+        or any(isinstance(sign, bool) or sign not in _ROUTE_LABELS for sign in expected_route_signs)):
+        raise ValueError("expected route signs must be a unique subset of -1, 0, and +1")
+    first = sorted((row for row in rows if row.get("episode") == 0), key=lambda row: row["world"])
+    if not first or (expected_episode_count is not None and len(first) != expected_episode_count):
+        raise ValueError("route evidence requires every first episode")
+    groups = {sign: [] for sign in expected_route_signs}
+    for row in first:
+        sign = row.get("route_sign")
+        if isinstance(sign, bool) or sign not in _ROUTE_LABELS:
+            raise ValueError("route identity is missing or invalid in a first-episode row")
+        if sign not in groups:
+            raise ValueError(f"observed route sign {sign} is outside the task route contract")
+        groups[sign].append(row)
+    missing = [sign for sign, group in groups.items() if not group]
+    if require_all and missing:
+        raise ValueError(f"evaluation did not observe required route sign(s): {missing}")
+
+    routes = {}
+    for sign, group in groups.items():
+        measurements = [row.get("measurement", {}) for row in group]
+        complete = [measurement for measurement in measurements
+                    if measurement.get("common_window", {}).get("window_complete")]
+        loads = [measurement.get("loads", {}).get("episode", {}).get("exceeded")
+                 for measurement in measurements]
+        path_values = [measurement.get("precontact_path", {}).get("observed_bin_rms_m")
+                       for measurement in measurements]
+        routes[str(sign)] = {
+            "route_label": _ROUTE_LABELS[sign],
+            "attempts": len(group),
+            "hits": sum(bool(row.get("hit")) for row in group),
+            "misses": sum(bool(row.get("miss")) for row in group),
+            "selector_selections": sum(int(row.get("selection_count", 0)) for row in group),
+            "requested_goal_mps": _finite_mean(row.get("goal_mps") for row in group),
+            "selected_goal_mps": _finite_mean(row.get("selected_goal_mps") for row in group),
+            "achieved_speed_mps": _finite_mean(row.get("measured_mps") for row in group),
+            "complete_common_windows": len(complete),
+            "positive_axial_impulse_50ms_ns": _finite_mean(
+                metric.get("axial_positive_ns") for metric in
+                (measurement["common_window"] for measurement in complete)),
+            "any_joint_load_cap_exceedance_attempts": sum(
+                bool(exceeded) and any(exceeded) for exceeded in loads),
+            "precontact_observed_bin_rms_mm": _finite_mean(
+                None if value is None else float(value) * 1000 for value in path_values),
+        }
+    return {
+        "first_episode_count": len(first),
+        "route_counts": {str(sign): len(group) for sign, group in groups.items()},
+        "routes": routes,
+        "required_route_signs": list(expected_route_signs),
+    }
+
+
 def physical_snapshot(env):
     """Read native reward-time channels without mutating phase or safety state."""
     from src.tasks.hammer.mdp.trackability import joint_target_rmse
@@ -158,6 +260,7 @@ def physical_snapshot(env):
         applied_kp, applied_kd = gains.kp, gains.kd
     return {"path_error_m": torch.linalg.vector_norm(reference.waypoint(phase) - head, dim=-1),
             "joint_target_error_rad": joint_target_rmse(env, joint_cfg),
+            "route_sign": env._strike_reference.route_signs(),
             "started": tracker.started, "first_contact_time_s": tracker.first_contact_time_s,
             "delivered_impulse_ns": tracker.delivered,
             "joint_impulse_nms": cat["lambda_per_joint"],
@@ -391,11 +494,34 @@ def _condition(args, goal, index):
         if build_impact_speed_metadata(env, wrapped.clip_actions) != contract:
             raise ValueError("live safety/controller contract changed during evaluation")
         rows = acc.finish()
+        lo, hi = args.speed_bounds
         for row in rows:
+            row["selected_goal_mps"] = (
+                lo + (max(-1., min(1., row["selected_raw"])) + 1) * .5 * (hi - lo)
+                if row["selection_count"] and row["selected_raw"] is not None else None
+            )
             row.update(condition=index, intervention_goal_mps=goal,
                        episode_id=f"{row['world']}:{row['episode']}",
                        reset_hash=reset_hashes[row["world"]] if row["episode"] == 0 else None)
+        selector_evidence = validate_selector_counts(
+            rows, mode=mode, expected_episode_count=env.num_envs
+        )
+        route_event = cfg.events.get("sample_strike_route_signs")
+        fixed_sign = (None if route_event is None
+                      else route_event.params.get("fixed_route_sign"))
+        expected_signs = (-1, 0, 1) if fixed_sign is None else (fixed_sign,)
+        route_evidence = summarize_route_strata(
+            rows, expected_route_signs=expected_signs,
+            require_all=args.mode != "smoke", expected_episode_count=env.num_envs,
+        )
+        first_episode_route_signs = [
+            row["route_sign"] for row in sorted(rows, key=lambda row: row["world"])
+            if row["episode"] == 0
+        ]
         return rows, {"goal_mps": goal, "contract": contract, "reset_hashes": reset_hashes,
+                      "first_episode_route_signs": first_episode_route_signs,
+                      "route_stratified": route_evidence,
+                      "selector_validation": selector_evidence,
                       "contact_trace": ("contact-trace.pt" if trace is not None else None),
                       "measurement": {"protocol": args.measurement_protocol,
                           "all_observed_attempts": summarize_strike_evaluations([r["measurement"] for r in rows]),
@@ -428,7 +554,8 @@ def run(args):
     if args.goals:
         baseline = conditions[0]
         for condition in conditions[1:]:
-            for key in ("reset_hashes", "torch_post_reset_rng_hash", "cuda_post_reset_rng_hash"):
+            for key in ("reset_hashes", "first_episode_route_signs",
+                        "torch_post_reset_rng_hash", "cuda_post_reset_rng_hash"):
                 if condition[key] != baseline[key]:
                     raise ValueError(f"paired initial state/RNG mismatch: {key}")
             if args.mode == "intervention" and condition["first_action_hash"] != baseline["first_action_hash"]:
@@ -457,6 +584,10 @@ def run(args):
                "qualification": "not assessed; bounds/cost are supplied experiment inputs, not physical certification",
                "transitions": sum(c["transitions"] for c in conditions), "learning_updates": 0,
                "conditions": conditions, "comparisons": comparisons,
+               "initial_state_pairing": (
+                   "paired_within_external_goal_conditions" if args.goals else
+                   "not_compared_across_speed_modes; use campaign reset-hash and route-sign audit"
+               ),
                "timeout_count": sum(r["timeout"] for r in rows), "completed_episodes": sum(r["complete"] for r in rows),
                "cost_semantics": "positive cost magnitude; gamma-discounted from first transition; timeout is reset-boundary shaping, not a hard deadline",
                "tracking_semantics": "all sampled steps, geometric reference preview, reward-time one-substep-stale positions",
