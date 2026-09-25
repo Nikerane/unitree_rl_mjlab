@@ -1,0 +1,254 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-8.4.2, pluggy-1.6.0
+rootdir: /cephhome/eunikhilr/campaigns/z1-contact-diagnostics-20260925.yPFIQH/source
+configfile: pytest.ini
+plugins: typeguard-4.5.2
+collected 4 items
+
+tests/test_contact_trace.py .FFF                                         [100%]
+
+=================================== FAILURES ===================================
+_____ test_trace_cli_requires_sampled_control_and_saves_condition_artifact _____
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/git/__init__.py:296: in <module>
+    refresh()
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/git/__init__.py:287: in refresh
+    if not Git.refresh(path=path):
+           ^^^^^^^^^^^^^^^^^^^^^^
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/git/cmd.py:864: in refresh
+    raise ImportError(err)
+E   ImportError: Bad git executable.
+E   The git executable must be specified in one of the following ways:
+E       - be included in your $PATH
+E       - be set via $GIT_PYTHON_GIT_EXECUTABLE
+E       - explicitly set via git.refresh(<full-path-to-git-executable>)
+E   
+E   All git commands will error until this is rectified.
+E   
+E   This initial message can be silenced or aggravated in the future by setting the
+E   $GIT_PYTHON_REFRESH environment variable. Use one of the following values:
+E       - quiet|q|silence|s|silent|none|n|0: for no message or exception
+E       - warn|w|warning|log|l|1: for a warning message (logging level CRITICAL, displayed by default)
+E       - error|e|exception|raise|r|2: for a raised exception
+E   
+E   Example:
+E       export GIT_PYTHON_REFRESH=quiet
+
+The above exception was the direct cause of the following exception:
+tests/test_contact_trace.py:42: in test_trace_cli_requires_sampled_control_and_saves_condition_artifact
+    summary = evaluator.run(args)
+              ^^^^^^^^^^^^^^^^^^^
+scripts/evaluate_impact_speed.py:418: in run
+    import mjlab.tasks  # noqa: F401
+    ^^^^^^^^^^^^^^^^^^
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/tasks/__init__.py:5: in <module>
+    import_packages(__name__, _BLACKLIST_PKGS)
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/utils/lab_api/tasks/importer.py:40: in import_packages
+    for _ in _walk_packages(
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/utils/lab_api/tasks/importer.py:77: in _walk_packages
+    __import__(info.name)
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/tasks/cartpole/__init__.py:1: in <module>
+    from mjlab.tasks.cartpole.cartpole_env_cfg import (
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/tasks/cartpole/cartpole_env_cfg.py:31: in <module>
+    from mjlab.rl import (
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/rl/__init__.py:5: in <module>
+    from mjlab.rl.runner import MjlabOnPolicyRunner as MjlabOnPolicyRunner
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/rl/runner.py:6: in <module>
+    from rsl_rl.runners import OnPolicyRunner
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/rsl_rl/runners/__init__.py:8: in <module>
+    from .on_policy_runner import OnPolicyRunner  # noqa: I001
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/rsl_rl/runners/on_policy_runner.py:17: in <module>
+    from rsl_rl.utils.logger import Logger
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/rsl_rl/utils/logger.py:9: in <module>
+    import git
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/git/__init__.py:298: in <module>
+    raise ImportError("Failed to initialize: {0}".format(_exc)) from _exc
+E   ImportError: Failed to initialize: Bad git executable.
+E   The git executable must be specified in one of the following ways:
+E       - be included in your $PATH
+E       - be set via $GIT_PYTHON_GIT_EXECUTABLE
+E       - explicitly set via git.refresh(<full-path-to-git-executable>)
+E   
+E   All git commands will error until this is rectified.
+E   
+E   This initial message can be silenced or aggravated in the future by setting the
+E   $GIT_PYTHON_REFRESH environment variable. Use one of the following values:
+E       - quiet|q|silence|s|silent|none|n|0: for no message or exception
+E       - warn|w|warning|log|l|1: for a warning message (logging level CRITICAL, displayed by default)
+E       - error|e|exception|raise|r|2: for a raised exception
+E   
+E   Example:
+E       export GIT_PYTHON_REFRESH=quiet
+----------------------------- Captured stderr call -----------------------------
+usage: __main__.py [-h] --task TASK [--checkpoint CHECKPOINT] --speed-bounds
+                   SPEED_BOUNDS SPEED_BOUNDS --speed-cost SPEED_COST --seed
+                   SEED --num-envs NUM_ENVS --mode
+                   {external,policy,intervention,smoke}
+                   [--goals GOALS GOALS GOALS] --output OUTPUT
+                   [--device DEVICE] [--sampled-pd500]
+                   [--sampled-pd500-gain-mode {fixed,variable}]
+                   [--measurement-protocol {native,common-window}]
+                   [--trace-contact]
+__main__.py: error: contact trace requires sampled PD control
+Warp DeprecationWarning: warp.config.quiet is deprecated; use warp.config.log_level = warp.LOG_WARNING to suppress the init banner.
+______ test_live_trace_preserves_dynamics_and_stops_at_first_reset[fixed] ______
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/git/__init__.py:296: in <module>
+    refresh()
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/git/__init__.py:287: in refresh
+    if not Git.refresh(path=path):
+           ^^^^^^^^^^^^^^^^^^^^^^
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/git/cmd.py:864: in refresh
+    raise ImportError(err)
+E   ImportError: Bad git executable.
+E   The git executable must be specified in one of the following ways:
+E       - be included in your $PATH
+E       - be set via $GIT_PYTHON_GIT_EXECUTABLE
+E       - explicitly set via git.refresh(<full-path-to-git-executable>)
+E   
+E   All git commands will error until this is rectified.
+E   
+E   This initial message can be silenced or aggravated in the future by setting the
+E   $GIT_PYTHON_REFRESH environment variable. Use one of the following values:
+E       - quiet|q|silence|s|silent|none|n|0: for no message or exception
+E       - warn|w|warning|log|l|1: for a warning message (logging level CRITICAL, displayed by default)
+E       - error|e|exception|raise|r|2: for a raised exception
+E   
+E   Example:
+E       export GIT_PYTHON_REFRESH=quiet
+
+The above exception was the direct cause of the following exception:
+tests/test_contact_trace.py:60: in test_live_trace_preserves_dynamics_and_stops_at_first_reset
+    from src.tasks.hammer.config.z1 import _impact_speed_env_cfg
+src/tasks/__init__.py:5: in <module>
+    import_packages(__name__, _BLACKLIST_PKGS)
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/utils/lab_api/tasks/importer.py:40: in import_packages
+    for _ in _walk_packages(
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/utils/lab_api/tasks/importer.py:89: in _walk_packages
+    yield from _walk_packages(path, info.name + ".", onerror, blacklist_pkgs)
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/utils/lab_api/tasks/importer.py:77: in _walk_packages
+    __import__(info.name)
+src/tasks/hammer/calibration/__init__.py:3: in <module>
+    from src.tasks.hammer.calibration.controlled_drop import (
+src/tasks/hammer/calibration/controlled_drop.py:22: in <module>
+    from src.tasks.hammer.calibration.controlled_drop_env import (
+src/tasks/hammer/calibration/controlled_drop_env.py:16: in <module>
+    from mjlab.tasks.registry import load_env_cfg
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/tasks/__init__.py:5: in <module>
+    import_packages(__name__, _BLACKLIST_PKGS)
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/utils/lab_api/tasks/importer.py:40: in import_packages
+    for _ in _walk_packages(
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/utils/lab_api/tasks/importer.py:77: in _walk_packages
+    __import__(info.name)
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/tasks/cartpole/__init__.py:1: in <module>
+    from mjlab.tasks.cartpole.cartpole_env_cfg import (
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/tasks/cartpole/cartpole_env_cfg.py:31: in <module>
+    from mjlab.rl import (
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/rl/__init__.py:5: in <module>
+    from mjlab.rl.runner import MjlabOnPolicyRunner as MjlabOnPolicyRunner
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/rl/runner.py:6: in <module>
+    from rsl_rl.runners import OnPolicyRunner
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/rsl_rl/runners/__init__.py:8: in <module>
+    from .on_policy_runner import OnPolicyRunner  # noqa: I001
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/rsl_rl/runners/on_policy_runner.py:17: in <module>
+    from rsl_rl.utils.logger import Logger
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/rsl_rl/utils/logger.py:9: in <module>
+    import git
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/git/__init__.py:298: in <module>
+    raise ImportError("Failed to initialize: {0}".format(_exc)) from _exc
+E   ImportError: Failed to initialize: Bad git executable.
+E   The git executable must be specified in one of the following ways:
+E       - be included in your $PATH
+E       - be set via $GIT_PYTHON_GIT_EXECUTABLE
+E       - explicitly set via git.refresh(<full-path-to-git-executable>)
+E   
+E   All git commands will error until this is rectified.
+E   
+E   This initial message can be silenced or aggravated in the future by setting the
+E   $GIT_PYTHON_REFRESH environment variable. Use one of the following values:
+E       - quiet|q|silence|s|silent|none|n|0: for no message or exception
+E       - warn|w|warning|log|l|1: for a warning message (logging level CRITICAL, displayed by default)
+E       - error|e|exception|raise|r|2: for a raised exception
+E   
+E   Example:
+E       export GIT_PYTHON_REFRESH=quiet
+____ test_live_trace_preserves_dynamics_and_stops_at_first_reset[variable] _____
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/git/__init__.py:296: in <module>
+    refresh()
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/git/__init__.py:287: in refresh
+    if not Git.refresh(path=path):
+           ^^^^^^^^^^^^^^^^^^^^^^
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/git/cmd.py:864: in refresh
+    raise ImportError(err)
+E   ImportError: Bad git executable.
+E   The git executable must be specified in one of the following ways:
+E       - be included in your $PATH
+E       - be set via $GIT_PYTHON_GIT_EXECUTABLE
+E       - explicitly set via git.refresh(<full-path-to-git-executable>)
+E   
+E   All git commands will error until this is rectified.
+E   
+E   This initial message can be silenced or aggravated in the future by setting the
+E   $GIT_PYTHON_REFRESH environment variable. Use one of the following values:
+E       - quiet|q|silence|s|silent|none|n|0: for no message or exception
+E       - warn|w|warning|log|l|1: for a warning message (logging level CRITICAL, displayed by default)
+E       - error|e|exception|raise|r|2: for a raised exception
+E   
+E   Example:
+E       export GIT_PYTHON_REFRESH=quiet
+
+The above exception was the direct cause of the following exception:
+tests/test_contact_trace.py:60: in test_live_trace_preserves_dynamics_and_stops_at_first_reset
+    from src.tasks.hammer.config.z1 import _impact_speed_env_cfg
+src/tasks/hammer/config/z1/__init__.py:10: in <module>
+    from mjlab.tasks.registry import register_mjlab_task
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/tasks/__init__.py:5: in <module>
+    import_packages(__name__, _BLACKLIST_PKGS)
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/utils/lab_api/tasks/importer.py:40: in import_packages
+    for _ in _walk_packages(
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/utils/lab_api/tasks/importer.py:77: in _walk_packages
+    __import__(info.name)
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/tasks/cartpole/__init__.py:1: in <module>
+    from mjlab.tasks.cartpole.cartpole_env_cfg import (
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/tasks/cartpole/cartpole_env_cfg.py:31: in <module>
+    from mjlab.rl import (
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/rl/__init__.py:5: in <module>
+    from mjlab.rl.runner import MjlabOnPolicyRunner as MjlabOnPolicyRunner
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/mjlab/rl/runner.py:6: in <module>
+    from rsl_rl.runners import OnPolicyRunner
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/rsl_rl/runners/__init__.py:8: in <module>
+    from .on_policy_runner import OnPolicyRunner  # noqa: I001
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/rsl_rl/runners/on_policy_runner.py:17: in <module>
+    from rsl_rl.utils.logger import Logger
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/rsl_rl/utils/logger.py:9: in <module>
+    import git
+../../../repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/git/__init__.py:298: in <module>
+    raise ImportError("Failed to initialize: {0}".format(_exc)) from _exc
+E   ImportError: Failed to initialize: Bad git executable.
+E   The git executable must be specified in one of the following ways:
+E       - be included in your $PATH
+E       - be set via $GIT_PYTHON_GIT_EXECUTABLE
+E       - explicitly set via git.refresh(<full-path-to-git-executable>)
+E   
+E   All git commands will error until this is rectified.
+E   
+E   This initial message can be silenced or aggravated in the future by setting the
+E   $GIT_PYTHON_REFRESH environment variable. Use one of the following values:
+E       - quiet|q|silence|s|silent|none|n|0: for no message or exception
+E       - warn|w|warning|log|l|1: for a warning message (logging level CRITICAL, displayed by default)
+E       - error|e|exception|raise|r|2: for a raised exception
+E   
+E   Example:
+E       export GIT_PYTHON_REFRESH=quiet
+=============================== warnings summary ===============================
+tests/test_contact_trace.py: 35 warnings
+  /cephhome/eunikhilr/repos/unitree_rl_mjlab/.venv/lib/python3.12/site-packages/torch/jit/_script.py:1488: DeprecationWarning: `torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_contact_trace.py::test_trace_cli_requires_sampled_control_and_saves_condition_artifact
+FAILED tests/test_contact_trace.py::test_live_trace_preserves_dynamics_and_stops_at_first_reset[fixed]
+FAILED tests/test_contact_trace.py::test_live_trace_preserves_dynamics_and_stops_at_first_reset[variable]
+================== 3 failed, 1 passed, 35 warnings in 48.49s ===================
