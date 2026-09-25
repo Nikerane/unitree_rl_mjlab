@@ -8,6 +8,7 @@
 #SBATCH --time=00:30:00
 #SBATCH --no-requeue
 set -euo pipefail
+module load git
 readonly DIAGNOSTIC="${1:?new diagnostic directory required}"
 readonly CHECKPOINT_CAMPAIGN="${2:?completed checkpoint campaign required}"
 readonly PY=/cephhome/eunikhilr/repos/unitree_rl_mjlab/.venv/bin/python
