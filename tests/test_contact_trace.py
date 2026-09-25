@@ -90,8 +90,9 @@ def test_live_trace_preserves_dynamics_and_stops_at_first_reset(tmp_path, mode):
                     obs, reward, done, _ = wrapped.step(action)
                     if trace:
                         trace.finish_step(done, capture.latest_evaluation)
-                    results.extend([obs['actor'].clone(), reward.clone(), done.clone(),
-                                    env.sim.data.qpos.clone(), env._sampled_pd500.torque.clone()])
+                    results.extend([obs['actor'].clone(), obs['critic'].clone(),
+                                    reward.clone(), done.clone(), env.sim.data.qpos.clone(),
+                                    env.sim.data.qvel.clone(), env._sampled_pd500.torque.clone()])
             restored = env.metrics_manager.compute_substep
             assert restored.__func__ is original.__func__
             assert restored.__self__ is original.__self__

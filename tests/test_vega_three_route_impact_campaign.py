@@ -83,7 +83,7 @@ def test_training_rollout_selector_evidence_is_mode_specific(mode, selections, v
     import torch
 
     checkpoint = tmp_path / "checkpoint.pt"
-    torch.save({"infos": {"impact_speed_rollout_telemetry": {
+    torch.save({"iter": 7, "infos": {"impact_speed_rollout_telemetry": {
         "selection_count": selections,
         "selection_source": "saved_distribution_activity_mask",
         "selected_speed_mps": {},
@@ -91,7 +91,14 @@ def test_training_rollout_selector_evidence_is_mode_specific(mode, selections, v
     }}}, checkpoint)
     spec = {"speed_mode": mode}
     if valid:
-        assert campaign()._rollout_evidence(checkpoint, spec)["selection_count"] == selections
+        evidence = campaign()._rollout_evidence(checkpoint, spec)
+        assert evidence["inspected_saved_windows_selection_count"] == selections
+        assert evidence["inspected_saved_windows"] == [{
+            "checkpoint": "checkpoint.pt", "iteration": 7,
+            "rollout_window": "rollout_storage_saved_at_iteration_7",
+            "selection_count": selections,
+            "selected_speed_mps": {},
+        }]
     else:
         with pytest.raises(ValueError, match="selector telemetry"):
             campaign()._rollout_evidence(checkpoint, spec)
@@ -107,7 +114,7 @@ def test_training_rollout_evidence_requires_mask_source_and_campaign_bounds(
     import torch
 
     checkpoint = tmp_path / "checkpoint.pt"
-    torch.save({"infos": {"impact_speed_rollout_telemetry": {
+    torch.save({"iter": 7, "infos": {"impact_speed_rollout_telemetry": {
         "selection_count": 0,
         "selection_source": selection_source,
         "selected_speed_mps": {},
@@ -115,6 +122,95 @@ def test_training_rollout_evidence_requires_mask_source_and_campaign_bounds(
     }}}, checkpoint)
     with pytest.raises(ValueError, match="selector telemetry|speed bounds"):
         campaign()._rollout_evidence(checkpoint, {"speed_mode": "external"})
+
+
+def _save_rollout_window(path, *, iteration, selections):
+    import torch
+
+    torch.save({"iter": iteration, "infos": {"impact_speed_rollout_telemetry": {
+        "selection_count": selections,
+        "selection_source": "saved_distribution_activity_mask",
+        "selected_speed_mps": {},
+        "speed_bounds_mps": [1.5, 2.2],
+    }}}, path)
+
+
+def test_policy_selection_in_first_saved_window_passes_when_final_window_has_zero(tmp_path):
+    first, final = tmp_path / "model_0.pt", tmp_path / "model_1.pt"
+    _save_rollout_window(first, iteration=0, selections=32)
+    _save_rollout_window(final, iteration=1, selections=0)
+
+    evidence = campaign()._rollout_evidence(final, {"speed_mode": "policy"}, first)
+
+    assert evidence["inspected_saved_windows_selection_count"] == 32
+    assert [(row["checkpoint"], row["iteration"], row["selection_count"])
+            for row in evidence["inspected_saved_windows"]] == [
+                ("model_0.pt", 0, 32), ("model_1.pt", 1, 0)]
+
+
+@pytest.mark.parametrize(("mode", "first_count", "final_count"), [
+    ("policy", 0, 0), ("external", 1, 0),
+])
+def test_inspected_windows_reject_wrong_aggregate_or_earlier_external_selection(
+    tmp_path, mode, first_count, final_count,
+):
+    first, final = tmp_path / "model_0.pt", tmp_path / "model_1.pt"
+    _save_rollout_window(first, iteration=0, selections=first_count)
+    _save_rollout_window(final, iteration=1, selections=final_count)
+    with pytest.raises(ValueError, match="selector telemetry"):
+        campaign()._rollout_evidence(final, {"speed_mode": mode}, first)
+
+
+def test_external_all_zero_saved_windows_pass(tmp_path):
+    first, final = tmp_path / "model_0.pt", tmp_path / "model_1.pt"
+    _save_rollout_window(first, iteration=0, selections=0)
+    _save_rollout_window(final, iteration=1, selections=0)
+    evidence = campaign()._rollout_evidence(final, {"speed_mode": "external"}, first)
+    assert evidence["inspected_saved_windows_selection_count"] == 0
+    assert len(evidence["inspected_saved_windows"]) == 2
+
+
+def test_duplicate_saved_window_is_not_double_counted(tmp_path):
+    checkpoint = tmp_path / "model_0.pt"
+    _save_rollout_window(checkpoint, iteration=0, selections=3)
+    evidence = campaign()._rollout_evidence(checkpoint, {"speed_mode": "policy"}, checkpoint)
+    assert evidence["inspected_saved_windows_selection_count"] == 3
+    assert len(evidence["inspected_saved_windows"]) == 1
+
+
+@pytest.mark.parametrize("invalid", [True, -1, 1.5, "3", None])
+def test_saved_window_rejects_malformed_selection_count(tmp_path, invalid):
+    checkpoint = tmp_path / "model_0.pt"
+    _save_rollout_window(checkpoint, iteration=0, selections=invalid)
+    with pytest.raises(ValueError, match="selector telemetry"):
+        campaign()._rollout_evidence(checkpoint, {"speed_mode": "policy"})
+
+
+def test_train_and_evaluate_inspects_initial_and_final_saved_paths(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    module = campaign()
+    spec = {"speed_mode": "policy", "iterations": 2}
+    captured = []
+
+    def fake_train(_task, _cfg, train_dir):
+        train_dir.mkdir()
+        _save_rollout_window(train_dir / "model_0.pt", iteration=0, selections=1)
+        _save_rollout_window(train_dir / "model_1.pt", iteration=1, selections=0)
+
+    original_rollout = module._rollout_evidence
+    def inspect_rollout(final, run_spec, initial):
+        captured.append((final, initial, run_spec))
+        return original_rollout(final, run_spec, initial)
+
+    monkeypatch.setattr(module, "training_config", lambda _spec: SimpleNamespace())
+    monkeypatch.setattr("scripts.train.run_train", fake_train)
+    monkeypatch.setattr(module, "_selector_preflight", lambda *_: {"strict_reload": "passed"})
+    monkeypatch.setattr(module, "_rollout_evidence", inspect_rollout)
+    monkeypatch.setattr(module.subprocess, "run", lambda *_args, **_kwargs: None)
+    result = module.train_and_evaluate(spec, tmp_path / "run", smoke=True)
+    assert captured == [(tmp_path / "run/train/model_1.pt", tmp_path / "run/train/model_0.pt", spec)]
+    assert result["training_selector_telemetry"]["inspected_saved_windows_selection_count"] == 1
 
 
 def campaign():

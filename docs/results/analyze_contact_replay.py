@@ -38,12 +38,16 @@ def analyze_condition(path, rows):
         valid = data["valid"][:, w]
         count = int(valid.sum())
         assert valid[:count].all() and not valid[count:].any()
+        if count == 0:
+            raise ValueError(f"world {w} has zero valid samples")
         measure = row["measurement"]
         assert count == measure["observed_samples"]
         onset = first_true(data["accepted_onset"][:, w] & valid)
         assert int((data["accepted_onset"][:, w] & valid).sum()) <= 1
         success = int(data["native_success_sample"][w]) or None
         assert success == measure["native_success_sample"]
+        if success is not None and not 1 <= success <= count:
+            raise ValueError(f"world {w} native success sample {success} is outside observed samples 1..{count}")
         load = data["joint_load_nms"][:count, w].double()
         rolling = data["rolling_joint_load_nms"][:count, w].double()
         peak = data["control_step_peak_load_nms"][:count, w].double()

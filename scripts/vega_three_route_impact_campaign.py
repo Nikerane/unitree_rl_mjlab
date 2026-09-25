@@ -169,30 +169,49 @@ def _selector_preflight(checkpoint: Path, spec: dict) -> dict:
 def _rollout_evidence(checkpoint: Path, spec: dict, initial_checkpoint: Path | None = None) -> dict:
     import torch
 
-    payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
-    infos = payload.get("infos") or {}
-    telemetry = infos.get("impact_speed_rollout_telemetry")
-    if not isinstance(telemetry, dict):
-        raise ValueError("checkpoint is missing impact-speed rollout selector telemetry")
-    if telemetry.get("selection_source") != "saved_distribution_activity_mask":
-        raise ValueError("checkpoint selector telemetry is not derived from the saved activity mask")
-    if telemetry.get("speed_bounds_mps") != list(SPEED_BOUNDS):
-        raise ValueError("checkpoint selector telemetry speed bounds disagree with the campaign")
-    selections = telemetry.get("selection_count")
-    valid_selection_count = (
-        isinstance(selections, int) and not isinstance(selections, bool) and selections >= 0
-        and (selections > 0 if spec["speed_mode"] == "policy" else selections == 0)
-    )
-    if not valid_selection_count:
+    paths = [initial_checkpoint, checkpoint] if initial_checkpoint is not None else [checkpoint]
+    inspected = []
+    payloads = {}
+    for path in paths:
+        identity = path.resolve()
+        if identity in payloads:
+            continue
+        saved = torch.load(path, map_location="cpu", weights_only=False)
+        payloads[identity] = saved
+        iteration = saved.get("iter")
+        if isinstance(iteration, bool) or not isinstance(iteration, int) or iteration < 0:
+            raise ValueError(f"checkpoint {path} has invalid saved iteration identity")
+        telemetry = (saved.get("infos") or {}).get("impact_speed_rollout_telemetry")
+        if not isinstance(telemetry, dict):
+            raise ValueError(f"checkpoint {path} is missing impact-speed rollout selector telemetry")
+        if telemetry.get("selection_source") != "saved_distribution_activity_mask":
+            raise ValueError(f"checkpoint {path} selector telemetry is not derived from the saved activity mask")
+        if telemetry.get("speed_bounds_mps") != list(SPEED_BOUNDS):
+            raise ValueError(f"checkpoint {path} selector telemetry speed bounds disagree with the campaign")
+        selections = telemetry.get("selection_count")
+        if isinstance(selections, bool) or not isinstance(selections, int) or selections < 0:
+            raise ValueError(f"checkpoint {path} selector telemetry has invalid selection count")
+        inspected.append({
+            "checkpoint": path.name,
+            "iteration": iteration,
+            "rollout_window": f"rollout_storage_saved_at_iteration_{iteration}",
+            "selection_count": selections,
+            "selected_speed_mps": telemetry.get("selected_speed_mps"),
+        })
+    total = sum(row["selection_count"] for row in inspected)
+    if (spec["speed_mode"] == "policy" and total == 0) or (
+        spec["speed_mode"] == "external" and any(row["selection_count"] for row in inspected)
+    ):
         raise ValueError(f"training selector telemetry disagrees with {spec['speed_mode']} mode")
     evidence = {
-        "selection_count": selections,
-        "selection_source": telemetry.get("selection_source"),
-        "selected_speed_mps": telemetry.get("selected_speed_mps"),
-        "speed_bounds_mps": telemetry.get("speed_bounds_mps"),
+        "inspected_saved_windows_selection_count": total,
+        "inspected_saved_windows": inspected,
+        "selection_source": "saved_distribution_activity_mask",
+        "speed_bounds_mps": list(SPEED_BOUNDS),
     }
-    if initial_checkpoint is not None and initial_checkpoint.is_file():
-        initial = torch.load(initial_checkpoint, map_location="cpu", weights_only=False)
+    payload = payloads[checkpoint.resolve()]
+    if initial_checkpoint is not None:
+        initial = payloads[initial_checkpoint.resolve()]
         final_actor, initial_actor = payload.get("actor_state_dict"), initial.get("actor_state_dict")
         if isinstance(final_actor, dict) and isinstance(initial_actor, dict):
             candidates = [
