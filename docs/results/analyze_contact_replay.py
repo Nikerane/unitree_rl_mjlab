@@ -65,7 +65,7 @@ def analyze_condition(path, rows):
                 "first_exceedance_relative_contact_ms": (first - onset) * dt * 1000 if first and onset else None,
                 "first_exceedance_relative_success_ms": (first - success) * dt * 1000 if first and success else None,
                 "exceeded_by_native_success": bool(exceed[:success, j].any()) if success else None,
-                "first_exceedance_after_native_success": bool(first > success) if first and success else False,
+                "first_exceedance_after_native_success": (bool(first and first > success) if success else None),
                 "held_only_exceedance_samples": int((exceed[:, j] & ~roll_exceed[:, j]).sum()),
                 "exceedance_samples": int(exceed[:, j].sum()),
                 "reaction_abs_peak_nm": float(data["qfrc_constraint_nm"][:count, w, j].abs().max()),
