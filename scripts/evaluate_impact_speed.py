@@ -9,6 +9,7 @@ reports substep precontact path coverage and onset-aligned impact/load windows.
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 from dataclasses import asdict
 import hashlib
 import json
@@ -224,6 +225,8 @@ def parse_args(argv=None):
     parser.add_argument("--sampled-pd500", action="store_true")
     parser.add_argument("--sampled-pd500-gain-mode", choices=("fixed", "variable"), default="fixed")
     parser.add_argument("--measurement-protocol", choices=("native", "common-window"), default="native")
+    parser.add_argument("--trace-contact", action="store_true",
+                        help="save first-episode physics traces for sampled PD evaluation")
     args = parser.parse_args(argv)
     lo, hi = args.speed_bounds
     if not (math.isfinite(lo) and math.isfinite(hi) and 0 < lo < hi and
@@ -242,6 +245,8 @@ def parse_args(argv=None):
         parser.error("smoke num-envs must divide 64 (exactly 64 world transitions)")
     if args.sampled_pd500_gain_mode == "variable" and not args.sampled_pd500:
         parser.error("variable gain mode requires sampled PD control")
+    if args.trace_contact and not args.sampled_pd500:
+        parser.error("contact trace requires sampled PD control")
     return args
 
 
@@ -287,6 +292,7 @@ def _condition(args, goal, index):
     from src.tasks.hammer.mdp.strike_evaluation import (
         configure_strike_evaluation, MeasurementProtocol, summarize_strike_evaluations,
         LOAD_SIGNAL_SEMANTICS)
+    from scripts.contact_trace import ContactTrace
 
     # Play configs remove the finite timeout and alter reset/noise distributions.
     # Evaluation retains the training task's horizon, safety, and reset treatment.
@@ -331,7 +337,10 @@ def _condition(args, goal, index):
         first_action_hash = second_action = second_kp = None
         # Runner/checkpoint validation above sees the original training termination.
         # The context restores it before the final safety/controller contract check.
-        with torch.inference_mode(), MeasurementProtocol(env, args.measurement_protocol), PreResetSnapshot(env) as capture:
+        trace = (ContactTrace(env, max_policy_steps=steps)
+                 if getattr(args, "trace_contact", False) else None)
+        with (torch.inference_mode(), MeasurementProtocol(env, args.measurement_protocol),
+              PreResetSnapshot(env) as capture, trace if trace is not None else nullcontext()):
             for step in range(steps):
                 if args.mode == "intervention" and step == 1:
                     if any(acc.episodes):
@@ -360,6 +369,8 @@ def _condition(args, goal, index):
                         parity["onnx"] = "passed: ReferenceEvaluator"
                     parity["observations"] += 1
                 obs, _, done, extras = wrapped.step(raw)
+                if trace is not None:
+                    trace.finish_step(done, capture.latest_evaluation)
                 outcome = extras["impact_speed_outcome"]
                 if not torch.equal(outcome["done"], done.bool()):
                     raise ValueError("terminal speed evidence disagrees with native done")
@@ -375,6 +386,8 @@ def _condition(args, goal, index):
                     second_kp = capture.latest["kp"].cpu().tolist()
                 if args.mode != "smoke" and all(episode >= 1 for episode in acc.episodes):
                     break
+        if trace is not None:
+            trace.save(directory)
         if build_impact_speed_metadata(env, wrapped.clip_actions) != contract:
             raise ValueError("live safety/controller contract changed during evaluation")
         rows = acc.finish()
@@ -383,6 +396,7 @@ def _condition(args, goal, index):
                        episode_id=f"{row['world']}:{row['episode']}",
                        reset_hash=reset_hashes[row["world"]] if row["episode"] == 0 else None)
         return rows, {"goal_mps": goal, "contract": contract, "reset_hashes": reset_hashes,
+                      "contact_trace": ("contact-trace.pt" if trace is not None else None),
                       "measurement": {"protocol": args.measurement_protocol,
                           "all_observed_attempts": summarize_strike_evaluations([r["measurement"] for r in rows]),
                           "success_reset_override": args.measurement_protocol == "common-window",
