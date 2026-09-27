@@ -41,7 +41,7 @@ def write_valid_checkpoint(tmp_path, monkeypatch):
     return checkpoint, evaluator_script, specs[0]
 
 
-def valid_summary(spec, *, seed=20260926, task=None, contract=None):
+def valid_summary(spec, *, seed=20260926, task=None, contract=None, protocol="common-window"):
     shared_contract = frozen_contract() if contract is None else contract
     goals = [None, 1.5, 1.85, 2.2]
     roles = ["autonomous_policy_selector", "preaction_fixed_target",
@@ -54,10 +54,15 @@ def valid_summary(spec, *, seed=20260926, task=None, contract=None):
         "initial_state_pairing": "verified_policy_vs_preaction_fixed_targets",
         "conditions": [
             {"goal_mps": goal, "condition_role": role, "contract": shared_contract,
-             "measurement": {"protocol": "common-window"}}
+             "measurement": {"protocol": protocol}}
             for goal, role in zip(goals, roles)
         ],
-        "comparisons": [{} for _ in range(6)],
+        "comparisons": [
+            {"low_condition": low, "high_condition": high,
+             "low_condition_role": roles[low], "high_condition_role": roles[high],
+             "low_goal_mps": goals[low], "high_goal_mps": goals[high]}
+            for low, high in ((0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3))
+        ],
     }
 
 
@@ -72,16 +77,17 @@ def test_array_slots_are_only_existing_policy_checkpoints():
         campaign().checkpoint_spec(True)
 
 
-def test_command_is_fixed_contract_paired_evaluation_not_training(tmp_path):
+@pytest.mark.parametrize("protocol", ["native", "common-window"])
+def test_command_is_fixed_contract_paired_evaluation_not_training(tmp_path, protocol):
     command = campaign().evaluation_command(
-        tmp_path / "model_49.pt", tmp_path / "seed-10", tmp_path / "evaluate_impact_speed.py"
+        tmp_path / "model_49.pt", tmp_path / "seed-10", tmp_path / "evaluate_impact_speed.py", protocol
     )
 
     assert command[:2] == [campaign().sys.executable, str(tmp_path / "evaluate_impact_speed.py")]
     assert command[command.index("--mode") + 1] == "paired"
     assert command[command.index("--num-envs") + 1] == "384"
     assert command[command.index("--goals") + 1:command.index("--goals") + 4] == ["1.5", "1.85", "2.2"]
-    assert command[command.index("--measurement-protocol") + 1] == "common-window"
+    assert command[command.index("--measurement-protocol") + 1] == protocol
     assert command[command.index("--sampled-pd500-gain-mode") + 1] == "variable"
     assert command[command.index("--device") + 1] == "cuda:0"
     assert "--sampled-pd500" in command
@@ -116,9 +122,10 @@ def test_remote_campaign_runner_fails_closed_on_wrong_task_seed_goals_or_contrac
 
     def fake_run(command, *, check):
         assert check is True
-        result_dir.mkdir(parents=True)
+        output = module.Path(command[command.index("--output") + 1])
+        output.mkdir(parents=True)
         summary = valid_summary(spec, seed=20260925)
-        (result_dir / "summary.json").write_text(json.dumps(summary))
+        (output / "summary.json").write_text(json.dumps(summary))
 
     monkeypatch.setattr(module.subprocess, "run", fake_run)
 
@@ -128,14 +135,15 @@ def test_remote_campaign_runner_fails_closed_on_wrong_task_seed_goals_or_contrac
     assert not (result_dir / "completion.json").exists()
 
 
+@pytest.mark.parametrize("protocol", ["native", "common-window"])
 @pytest.mark.parametrize("mutation", [
-    "task", "seed", "goal", "actor", "protocol", "missing_measurement",
-    "bounds", "cost", "controller", "caps",
+    "task", "seed", "goal", "actor", "protocol", "missing_measurement", "missing_protocol",
+    "bounds", "cost", "controller", "caps", "pair", "pair_role", "pair_goal", "missing_pair",
 ])
-def test_summary_contract_validation_rejects_experiment_drift(tmp_path, monkeypatch, mutation):
+def test_summary_contract_validation_rejects_experiment_drift(tmp_path, monkeypatch, mutation, protocol):
     module = campaign()
     _, _, spec = write_valid_checkpoint(tmp_path, monkeypatch)
-    summary = valid_summary(spec)
+    summary = valid_summary(spec, protocol=protocol)
     if mutation == "task":
         summary["task"] = "Unitree-Z1-Hammer-Quintic-M20-ImpactSpeed"
     elif mutation == "seed":
@@ -146,9 +154,11 @@ def test_summary_contract_validation_rejects_experiment_drift(tmp_path, monkeypa
         summary["actor_status"] = "untrained software smoke only"
     elif mutation == "protocol":
         for condition in summary["conditions"]:
-            condition["measurement"]["protocol"] = "native"
+            condition["measurement"]["protocol"] = "native" if protocol == "common-window" else "common-window"
     elif mutation == "missing_measurement":
         summary["conditions"][0].pop("measurement")
+    elif mutation == "missing_protocol":
+        summary["conditions"][0]["measurement"].pop("protocol")
     elif mutation == "bounds":
         for condition in summary["conditions"]:
             condition["contract"]["speed_bounds_mps"] = [.5, 1.]
@@ -158,12 +168,20 @@ def test_summary_contract_validation_rejects_experiment_drift(tmp_path, monkeypa
     elif mutation == "controller":
         for condition in summary["conditions"]:
             condition["contract"]["sampled_pd"]["gain_mode"] = "fixed"
-    else:
+    elif mutation == "caps":
         for condition in summary["conditions"]:
             condition["contract"]["safety"]["cat_soft"]["imp_limit"][1] = .5
+    elif mutation == "pair":
+        summary["comparisons"][0] = summary["comparisons"][1]
+    elif mutation == "pair_role":
+        summary["comparisons"][0]["low_condition_role"] = "preaction_fixed_target"
+    elif mutation == "pair_goal":
+        summary["comparisons"][0]["high_goal_mps"] = 1.6
+    else:
+        summary["comparisons"][0].pop("low_condition")
 
     with pytest.raises(ValueError, match="frozen run contract"):
-        module.validate_summary(summary, spec["expected_sha256"])
+        module.validate_summary(summary, spec["expected_sha256"], protocol)
 
 
 def test_remote_campaign_runner_writes_verified_manifest_and_refuses_reuse(tmp_path, monkeypatch):
@@ -176,8 +194,11 @@ def test_remote_campaign_runner_writes_verified_manifest_and_refuses_reuse(tmp_p
     def fake_run(command, *, check):
         launched.append(command)
         assert check is True
-        result_dir.mkdir(parents=True)
-        (result_dir / "summary.json").write_text(json.dumps(valid_summary(spec)))
+        output = module.Path(command[command.index("--output") + 1])
+        protocol = command[command.index("--measurement-protocol") + 1]
+        output.mkdir(parents=True)
+        (output / "summary.json").write_text(json.dumps(valid_summary(spec, protocol=protocol)))
+        assert not (result_dir / "completion.json").exists()
 
     monkeypatch.setattr(module.subprocess, "run", fake_run)
     manifest = module.run_evaluation(0, tmp_path / "training", output_root, evaluator_script)
@@ -185,7 +206,64 @@ def test_remote_campaign_runner_writes_verified_manifest_and_refuses_reuse(tmp_p
     assert manifest["status"] == "completed"
     assert manifest["checkpoint_sha256"] == spec["expected_sha256"]
     assert manifest["learning_updates"] == 0
-    assert len(launched) == 1
+    assert len(launched) == 2
+    native_command, common_command = launched
+    native_output = native_command.index("--output") + 1
+    native_protocol = native_command.index("--measurement-protocol") + 1
+    assert native_command[native_output] == str(result_dir / "native")
+    assert common_command[native_output] == str(result_dir / "common-window")
+    assert native_command[native_protocol] == "native"
+    assert common_command[native_protocol] == "common-window"
+    assert [value for index, value in enumerate(native_command)
+            if index not in (native_output, native_protocol)] == [
+        value for index, value in enumerate(common_command)
+        if index not in (native_output, native_protocol)]
+    assert manifest["measurement_protocols"] == ["native", "common-window"]
+    assert manifest["summaries"] == {"native": "native/summary.json", "common-window": "common-window/summary.json"}
+    assert json.loads((result_dir / "completion.json").read_text()) == manifest
     with pytest.raises(FileExistsError, match="refusing to overwrite"):
         module.run_evaluation(0, tmp_path / "training", output_root, evaluator_script)
-    assert len(launched) == 1
+    assert len(launched) == 2
+
+
+@pytest.mark.parametrize("failure", ["missing_summary", "wrong_protocol", "subprocess"])
+def test_second_protocol_failure_leaves_no_completion_marker(tmp_path, monkeypatch, failure):
+    module = campaign()
+    _, evaluator_script, spec = write_valid_checkpoint(tmp_path, monkeypatch)
+    result_dir = tmp_path / "evaluation" / "evaluations" / "seed-10"
+
+    def fake_run(command, *, check):
+        output = module.Path(command[command.index("--output") + 1])
+        protocol = command[command.index("--measurement-protocol") + 1]
+        output.mkdir(parents=True)
+        if protocol == "common-window":
+            if failure == "subprocess":
+                raise module.subprocess.CalledProcessError(1, command)
+            if failure == "missing_summary":
+                return
+            protocol = "native"
+        (output / "summary.json").write_text(json.dumps(valid_summary(spec, protocol=protocol)))
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    with pytest.raises((FileNotFoundError, ValueError, module.subprocess.CalledProcessError)):
+        module.run_evaluation(0, tmp_path / "training", tmp_path / "evaluation", evaluator_script)
+    assert (result_dir / "native" / "summary.json").is_file()
+    assert not (result_dir / "completion.json").exists()
+
+
+@pytest.mark.parametrize("protocol", ["native", "common-window"])
+def test_existing_protocol_output_is_preserved_without_launch(tmp_path, monkeypatch, protocol):
+    module = campaign()
+    _, evaluator_script, _ = write_valid_checkpoint(tmp_path, monkeypatch)
+    existing = tmp_path / "evaluation" / "evaluations" / "seed-10" / protocol
+    existing.mkdir(parents=True)
+    sentinel = existing / "summary.json"
+    sentinel.write_text("existing evidence")
+
+    def forbidden_run(*args, **kwargs):
+        pytest.fail("existing output must prevent any evaluation launch")
+
+    monkeypatch.setattr(module.subprocess, "run", forbidden_run)
+    with pytest.raises(FileExistsError, match="refusing to overwrite"):
+        module.run_evaluation(0, tmp_path / "training", tmp_path / "evaluation", evaluator_script)
+    assert sentinel.read_text() == "existing evidence"

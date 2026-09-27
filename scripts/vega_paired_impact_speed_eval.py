@@ -17,6 +17,7 @@ GOALS = (1.5, 1.85, 2.2)
 SPEED_COST = .8493676
 EVALUATION_SEED = 20260926
 EVALUATION_WORLDS = 384
+MEASUREMENT_PROTOCOLS = ("native", "common-window")
 CHECKPOINTS = (
     {"run_index": 1, "seed": 10,
      "expected_sha256": "5d106461e602fbbfe5a1ab9c97b4d860298bfb3760ec6384a3fdb1dc3eb43f54"},
@@ -41,7 +42,10 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def evaluation_command(checkpoint: Path, output: Path, evaluator_script: Path) -> list[str]:
+def evaluation_command(checkpoint: Path, output: Path, evaluator_script: Path,
+                       protocol: str) -> list[str]:
+    if protocol not in MEASUREMENT_PROTOCOLS:
+        raise ValueError("unsupported measurement protocol")
     return [
         sys.executable, str(evaluator_script),
         "--task", TASK,
@@ -55,13 +59,15 @@ def evaluation_command(checkpoint: Path, output: Path, evaluator_script: Path) -
         "--output", str(output),
         "--device", "cuda:0",
         "--sampled-pd500", "--sampled-pd500-gain-mode", "variable",
-        "--measurement-protocol", "common-window",
+        "--measurement-protocol", protocol,
     ]
 
 
-def validate_summary(summary: dict, expected_checkpoint_hash: str) -> None:
+def validate_summary(summary: dict, expected_checkpoint_hash: str, protocol: str) -> None:
     """Refuse completion records that drift from the preregistered run contract."""
     try:
+        if protocol not in MEASUREMENT_PROTOCOLS:
+            raise ValueError("unsupported measurement protocol")
         conditions = summary["conditions"]
         roles = [condition["condition_role"] for condition in conditions]
         goals = [condition["goal_mps"] for condition in conditions]
@@ -76,9 +82,24 @@ def validate_summary(summary: dict, expected_checkpoint_hash: str) -> None:
                 or summary["checkpoint_sha256"] != expected_checkpoint_hash
                 or summary["initial_state_pairing"] != "verified_policy_vs_preaction_fixed_targets"
                 or goals != [None, *GOALS] or roles != expected_roles
-                or measurement_protocols != ["common-window"] * 4
+                or measurement_protocols != [protocol] * 4
                 or len(conditions) != 4 or len(summary["comparisons"]) != 6):
             raise ValueError("summary identity, goals, conditions, or pairing marker differs")
+        expected_pairs = {(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)}
+        observed_pairs = []
+        for comparison in summary["comparisons"]:
+            low, high = comparison["low_condition"], comparison["high_condition"]
+            if (type(low) is not int or type(high) is not int
+                    or (low, high) not in expected_pairs):
+                raise ValueError("comparison condition identity differs")
+            if (comparison["low_condition_role"] != roles[low]
+                    or comparison["high_condition_role"] != roles[high]
+                    or comparison["low_goal_mps"] != goals[low]
+                    or comparison["high_goal_mps"] != goals[high]):
+                raise ValueError("comparison roles or goals differ")
+            observed_pairs.append((low, high))
+        if set(observed_pairs) != expected_pairs:
+            raise ValueError("comparison pairs are missing or duplicated")
         if any(contract != contracts[0] for contract in contracts[1:]):
             raise ValueError("paired condition contracts differ")
 
@@ -122,15 +143,21 @@ def run_evaluation(index: int, training_campaign: Path, output_root: Path,
     result_dir = Path(output_root) / "evaluations" / f"seed-{spec['seed']}"
     if result_dir.exists():
         raise FileExistsError(f"refusing to overwrite paired evaluation: {result_dir}")
+    # Reserve the checkpoint directory exclusively before either launch. Partial
+    # runs retain their evidence and cannot be silently reused on a retry.
     result_dir.parent.mkdir(parents=True, exist_ok=True)
-    command = evaluation_command(checkpoint, result_dir, Path(evaluator_script))
-    subprocess.run(command, check=True)
-
-    summary_path = result_dir / "summary.json"
-    if not summary_path.is_file():
-        raise FileNotFoundError("paired evaluator did not produce summary.json")
-    summary = json.loads(summary_path.read_text())
-    validate_summary(summary, checkpoint_hash)
+    result_dir.mkdir(exist_ok=False)
+    summaries = {}
+    for protocol in MEASUREMENT_PROTOCOLS:
+        protocol_dir = result_dir / protocol
+        command = evaluation_command(checkpoint, protocol_dir, Path(evaluator_script), protocol)
+        subprocess.run(command, check=True)
+        summary_path = protocol_dir / "summary.json"
+        if not summary_path.is_file():
+            raise FileNotFoundError(f"paired evaluator did not produce {protocol}/summary.json")
+        summary = json.loads(summary_path.read_text())
+        validate_summary(summary, checkpoint_hash, protocol)
+        summaries[protocol] = str(summary_path.relative_to(result_dir))
 
     manifest = {
         "status": "completed",
@@ -142,10 +169,10 @@ def run_evaluation(index: int, training_campaign: Path, output_root: Path,
         "evaluation_seed": EVALUATION_SEED,
         "worlds_per_condition": EVALUATION_WORLDS,
         "conditions": [None, *GOALS],
-        "measurement_protocol": "common-window",
+        "measurement_protocols": list(MEASUREMENT_PROTOCOLS),
         "gain_mode": "variable sampled joint impedance",
         "learning_updates": 0,
-        "summary": "summary.json",
+        "summaries": summaries,
     }
     (result_dir / "completion.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return manifest
