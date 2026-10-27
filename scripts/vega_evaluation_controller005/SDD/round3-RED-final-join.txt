@@ -1,0 +1,18 @@
+test_final_guardian_observation_gates_success_before_join (test_coordinator.GuardianIOTests.test_final_guardian_observation_gates_success_before_join) ... FAIL
+
+======================================================================
+FAIL: test_final_guardian_observation_gates_success_before_join (test_coordinator.GuardianIOTests.test_final_guardian_observation_gates_success_before_join)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 586, in test_final_guardian_observation_gates_success_before_join
+    self.assertEqual(result['status'],'HOLD',repr(result))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'COMPLETE' != 'HOLD'
+- COMPLETE
++ HOLD
+ : {'status': 'COMPLETE', 'reason': None, 'drained': True, 'halt_observed_at': None}
+
+----------------------------------------------------------------------
+Ran 1 test in 0.218s
+
+FAILED (failures=1)

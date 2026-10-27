@@ -1,0 +1,10 @@
+test_final_guardian_observation_gates_success_before_join (test_coordinator.GuardianIOTests.test_final_guardian_observation_gates_success_before_join) ... ok
+test_guardian_is_joined_when_journal_creation_fails (test_coordinator.GuardianIOTests.test_guardian_is_joined_when_journal_creation_fails) ... ok
+test_guardian_stop_during_complete_fsync_cannot_return_complete (test_coordinator.GuardianIOTests.test_guardian_stop_during_complete_fsync_cannot_return_complete) ... ok
+test_guardian_stop_during_submit_intent_fsync_prevents_issue (test_coordinator.GuardianIOTests.test_guardian_stop_during_submit_intent_fsync_prevents_issue) ... ok
+test_resource_observation_continues_during_slow_durable_quiesce_and_cancel (test_coordinator.GuardianIOTests.test_resource_observation_continues_during_slow_durable_quiesce_and_cancel) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 2.519s
+
+OK

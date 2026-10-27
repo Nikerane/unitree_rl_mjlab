@@ -481,4 +481,111 @@ class LifecycleReviewTests(Fixture):
         self.assertEqual([r['reason'] for r in unknown],['terminal drain deadline'],diagnostic)
         self.assertFalse(any(r['event']['kind'] in ('SLOT_COMPLETE','TERMINAL_PROCESSED') for r in rows),diagnostic)
 
+class GuardianIOTests(Fixture):
+    def test_resource_observation_continues_during_slow_durable_quiesce_and_cancel(self):
+        times=[]; callback_threads=[]; append_threads=[]; slow_spans=[]
+        callback_lock=threading.Lock(); concurrency=[0,0]
+        class Adapter(FakeAdapter):
+            def resource_check(self,*args):
+                with callback_lock:
+                    concurrency[0]+=1; concurrency[1]=max(concurrency)
+                try:
+                    times.append(time.monotonic()); callback_threads.append(threading.get_ident())
+                    return super().resource_check(*args)
+                finally:
+                    with callback_lock: concurrency[0]-=1
+        adapter=Adapter()
+        class BreachScheduler(FakeScheduler):
+            def observe(self,submission):
+                adapter.bad=True
+                return super().observe(submission)
+        sched=BreachScheduler(('RUNNING',),delay=.2)
+        local=threading.local(); delayed=set()
+        original_append=journal.Journal.append; original_fsync=os.fsync
+        def append(j,event,**kwargs):
+            append_threads.append(threading.get_ident()); local.kind=event['kind']
+            try: return original_append(j,event,**kwargs)
+            finally: local.kind=None
+        def fsync(fd):
+            kind=getattr(local,'kind',None)
+            if kind in ('QUIESCE','CANCEL_INTENT') and kind not in delayed:
+                delayed.add(kind); start=time.monotonic(); time.sleep(.35)
+                slow_spans.append((kind,start,time.monotonic()))
+            return original_fsync(fd)
+        with patch.object(journal.Journal,'append',append), patch.object(os,'fsync',fsync):
+            result=self.run_owner(adapter,sched)
+        diagnostic=repr({'result':result,'calls':sched.calls,'times':times,'slow_spans':slow_spans,
+                         'callback_threads':callback_threads,'append_threads':append_threads})
+        self.assertEqual(result['reason'],'resource gate: quota or role cap exceeded',diagnostic)
+        self.assertTrue(result['drained'],diagnostic)
+        self.assertEqual([c for c in sched.calls if c[0] in ('submit','cancel')],[('submit',3),('cancel','125')],diagnostic)
+        self.assertEqual(delayed,{'QUIESCE','CANCEL_INTENT'},diagnostic)
+        self.assertLess(max(y-x for x,y in zip(times,times[1:])),.25,diagnostic)
+        for kind,start,end in slow_spans:
+            self.assertGreaterEqual(sum(start<t<end for t in times),2,diagnostic)
+        self.assertEqual(set(append_threads),{threading.get_ident()},diagnostic)
+        self.assertEqual(concurrency[1],1,diagnostic)
+        self.assertEqual(len(set(callback_threads)),1,diagnostic)
+        self.assertNotIn(threading.get_ident(),callback_threads,diagnostic)
+        count=len(times); time.sleep(.12)
+        self.assertEqual(len(times),count,'resource observer survived run() return')
+
+    def test_guardian_stop_during_submit_intent_fsync_prevents_issue(self):
+        adapter=FakeAdapter(); sched=FakeScheduler(); local=threading.local()
+        original_append=journal.Journal.append; original_fsync=os.fsync
+        def append(j,event,**kwargs):
+            local.kind=event['kind']
+            try: return original_append(j,event,**kwargs)
+            finally: local.kind=None
+        def fsync(fd):
+            if getattr(local,'kind',None)=='SUBMIT_INTENT':
+                adapter.bad=True; time.sleep(.35)
+            return original_fsync(fd)
+        with patch.object(journal.Journal,'append',append), patch.object(os,'fsync',fsync):
+            result=self.run_owner(adapter,sched)
+        rows=journal.read_chain(self.root/'journal.jsonl')
+        diagnostic=repr({'result':result,'calls':sched.calls})
+        self.assertEqual(result['reason'],'resource gate: quota or role cap exceeded',diagnostic)
+        self.assertEqual([c for c in sched.calls if c[0] in ('submit','cancel')],[],diagnostic)
+        self.assertEqual(sum(r['event']['kind']=='SUBMIT_INTENT' for r in rows),1,diagnostic)
+        self.assertFalse(any(t.name=='evaluation005-resource-guardian' for t in threading.enumerate()))
+
+    def test_guardian_stop_during_complete_fsync_cannot_return_complete(self):
+        adapter=FakeAdapter(); local=threading.local()
+        original_append=journal.Journal.append; original_fsync=os.fsync
+        def append(j,event,**kwargs):
+            local.kind=event['kind']
+            try: return original_append(j,event,**kwargs)
+            finally: local.kind=None
+        def fsync(fd):
+            if getattr(local,'kind',None)=='COMPLETE':
+                adapter.bad=True; time.sleep(.35)
+            return original_fsync(fd)
+        with patch.object(journal.Journal,'append',append), patch.object(os,'fsync',fsync):
+            result=self.run_owner(adapter)
+        rows=journal.read_chain(self.root/'journal.jsonl')
+        self.assertEqual(result['status'],'HOLD',repr(result))
+        self.assertEqual(result['reason'],'resource gate: quota or role cap exceeded',repr(result))
+        self.assertEqual(rows[-1]['event']['kind'],'HOLD')
+        self.assertFalse(any(t.name=='evaluation005-resource-guardian' for t in threading.enumerate()))
+
+    def test_guardian_is_joined_when_journal_creation_fails(self):
+        with patch.object(journal.Journal,'__init__',side_effect=OSError('journal unavailable')):
+            with self.assertRaises(OSError): self.run_owner()
+        self.assertFalse(any(t.name=='evaluation005-resource-guardian' for t in threading.enumerate()))
+
+    def test_final_guardian_observation_gates_success_before_join(self):
+        adapter=FakeAdapter(); original=coordinator.Owner.execute
+        def execute(owner):
+            result=original(owner)
+            adapter.bad=True
+            return result
+        with patch.object(coordinator.Owner,'execute',execute):
+            result=self.run_owner(adapter)
+        rows=journal.read_chain(self.root/'journal.jsonl')
+        self.assertEqual(result['status'],'HOLD',repr(result))
+        self.assertEqual(result['reason'],'resource gate: quota or role cap exceeded',repr(result))
+        self.assertEqual(rows[-1]['event']['kind'],'HOLD')
+        self.assertFalse(any(t.name=='evaluation005-resource-guardian' for t in threading.enumerate()))
+
 if __name__=='__main__': unittest.main()

@@ -47,11 +47,19 @@ ID is materialized through genuine `sacct` numeric allocation rows and matching
 No array arithmetic, compressed pending placeholder or guessed cancellation ID
 is accepted. Empty/ambiguous accounting causes HOLD.
 
-All lease/journal decisions have one writer. Scheduler and bounded adapter work
-run in a worker returning observations; the controller thread checks resources
-every .1s, including during scheduler subprocess waits. Resource callbacks must
-finish within .1s, giving a <=.25s observation envelope under the reviewed
-bounded-I/O assumptions. Measured callback overruns HOLD. Scheduler calls are
+All lease/journal/submission/cancellation decisions have one owner. Scheduler
+and bounded adapter work return observations from a worker. One internal
+read-only resource guardian runs the resource callback serially, targeting .1s
+start intervals independently of owner journal writes/fsync and scheduler waits.
+It publishes versioned observations and latches a stop request; it never writes
+a journal/lease, submits or cancels. Callback overrun>.1s, unavailable current
+observation or a start gap reaching.25s latches a stop request/HOLD. No threshold
+is relaxed. The owner requires an observation for the current transaction and
+controller deadline before issue, and rechecks after durable SUBMIT_INTENT.
+The guardian keeps sampling through quiescence/drain and is stopped/joined before
+run returns, including exceptional journal initialization. Successful return
+requires a final fresh completed observation before the guardian joins; any final
+failed observation is durably recorded as HOLD while sampling remains alive. Scheduler calls are
 bounded (2s each, bounded inventory), snapshots have a 10.5s owner limit and a
 4s polling gap, therefore observation attempts are <=14.5s apart. Failure never
 falls through to another issue. A two-second IssuePermit rechecks quiescence and
@@ -202,10 +210,19 @@ Tests use actual filesystem fsync/hash chains, process/thread lease races, real
 child pipes/disconnect/late exit/timeout/output caps and real file/quota-marker
 growth synchronized to an issued slow observation, joined mutation threads,
 preissue breaches without submission/cancellation, terminal lifetime crossing and
-paced multi-observation drain. Scheduler responses and authority/phase
+paced multi-observation drain, and deterministic slow actual journal-fsync
+boundaries with continued <.25s resource observations, one callback at a time,
+one owner writer, and joined guardian lifecycle. Scheduler responses and authority/phase
 operations are closed pure fixtures. There is no SSH, real Slurm, root lease,
 remote staging, target import or physical rollout. Source tests stage disposable
 source-only copies and report the actual host/interpreter; native Linux/Ceph and
 Slurm identity formats/resource timing need root's integration gate. Root reports
 Task1's native18+18 tests pass; that does not activate Task2 or prove its native
 scheduler integration. Fresh quota/staging and every Task3 gate remain required.
+
+The guardian removes owner-I/O blocking from the observation schedule; it cannot
+make an OS/whole-process stall or a stuck read-only callback atomic or preemptible.
+The <=.1s callback and native scheduling/IO bounds remain activation requirements.
+Detected overruns/gaps HOLD, and shutdown joins an in-flight read-only callback
+rather than detaching it. Native timing gates remain required; a callback that
+violates its bound can delay that join. This does not grant quota atomicity.

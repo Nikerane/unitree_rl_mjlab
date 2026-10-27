@@ -1,0 +1,15 @@
+test_resource_observation_continues_during_slow_durable_quiesce_and_cancel (test_coordinator.GuardianIOTests.test_resource_observation_continues_during_slow_durable_quiesce_and_cancel) ... FAIL
+
+======================================================================
+FAIL: test_resource_observation_continues_during_slow_durable_quiesce_and_cancel (test_coordinator.GuardianIOTests.test_resource_observation_continues_during_slow_durable_quiesce_and_cancel)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 523, in test_resource_observation_continues_during_slow_durable_quiesce_and_cancel
+    self.assertLess(max(y-x for x,y in zip(times,times[1:])),.25,diagnostic)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0.35845995901036076 not less than 0.25 : {'result': {'status': 'HOLD', 'reason': 'resource gate: quota or role cap exceeded', 'drained': True, 'halt_observed_at': 95731.346217333}, 'calls': [('test', 3), ('test', 1), ('submit', 3), ('cancel', '125')], 'times': [95731.343241666, 95731.343322541, 95731.343925291, 95731.343927958, 95731.343977791, 95731.343986041, 95731.344021541, 95731.345367125, 95731.345834333, 95731.346213541, 95731.7046735, 95732.0614665, 95732.0655895, 95732.169906958, 95732.270033375], 'slow_spans': [('QUIESCE', 95731.346477916, 95731.701566875), ('CANCEL_INTENT', 95731.705517, 95732.060613375)], 'callback_threads': [8267439744, 8267439744, 8267439744, 8267439744, 8267439744, 8267439744, 8267439744, 8267439744, 8267439744, 8267439744, 8267439744, 8267439744, 8267439744, 8267439744, 8267439744], 'append_threads': [8267439744, 8267439744, 8267439744, 8267439744, 8267439744, 8267439744, 8267439744, 8267439744, 8267439744, 8267439744, 8267439744, 8267439744, 8267439744, 8267439744]}
+
+----------------------------------------------------------------------
+Ran 1 test in 0.933s
+
+FAILED (failures=1)

@@ -61,6 +61,88 @@ class Worker:
         self.thread=threading.Thread(target=invoke,daemon=True)
         self.thread.start()
 
+class ResourceGuardian:
+    """One read-only sampler; it reports/latches stop, never makes durable decisions."""
+    def __init__(self,adapter,stop,transaction,context):
+        self.adapter=adapter; self.stop=stop
+        self.condition=threading.Condition(); self.finished=False; self.demand=True
+        self.transaction=transaction; self.context=dict(context); self.generation=0
+        self.latest=None; self.failure=None; self.last_started=None; self.in_progress=False
+        self.thread=threading.Thread(target=self._run,name='evaluation005-resource-guardian',daemon=False)
+        self.thread.start()
+    def _latch(self,reason,observed_at):
+        # Called with condition held. This is a stop request, not a journal decision.
+        if self.failure is None:
+            self.failure={'reason':str(reason)[:2048],'observed_at':observed_at}
+            self.stop.set()
+        self.condition.notify_all()
+    def publish(self,transaction,context):
+        with self.condition:
+            if transaction is not self.transaction or context['deadline']!=self.context['deadline']:
+                self.generation+=1; self.demand=True
+            self.transaction=transaction; self.context=dict(context)
+            self.condition.notify_all()
+            return self.generation
+    def check(self,transaction,context):
+        generation=self.publish(transaction,context)
+        until=time.monotonic()+.25
+        with self.condition:
+            while self.failure is None and (self.latest is None or self.latest['generation']<generation):
+                remaining=until-time.monotonic()
+                if remaining<=0:
+                    self._latch('resource observation unavailable within .25s',time.monotonic()); break
+                self.condition.wait(min(.01,remaining))
+            if self.failure is None and time.monotonic()-self.last_started>=.25:
+                self._latch('resource observation interval reached .25s',time.monotonic())
+            return self.failure
+    def _run(self):
+        due=time.monotonic()
+        while True:
+            with self.condition:
+                while not self.finished and not self.demand and time.monotonic()<due:
+                    self.condition.wait(due-time.monotonic())
+                if self.finished: return
+                generation=self.generation; transaction=self.transaction; context=dict(self.context)
+                self.demand=False
+                started=time.monotonic()
+                if self.last_started is not None and started-self.last_started>=.25:
+                    self._latch('resource observation interval reached .25s',started)
+                self.last_started=started; self.in_progress=True
+            reason=None; result=None
+            try:
+                result=self.adapter.resource_check(transaction,context)
+                if not isinstance(result,dict): raise Hold('unknown resource observation')
+            except BaseException as exc:
+                reason='resource gate: '+str(exc)
+            completed=time.monotonic()
+            if completed-started>.1 and reason is None: reason='resource observation exceeded .1s'
+            with self.condition:
+                self.latest={'generation':generation,'started':started,'completed':completed,'value':result}
+                self.in_progress=False
+                if reason is not None: self._latch(reason,completed)
+                self.condition.notify_all()
+            due=started+LIVE_INTERVAL
+    def finish_success(self):
+        # Select a final completed observation while holding only the metadata lock.
+        # If it fails, leave sampling alive while the owner durably records HOLD.
+        with self.condition:
+            self.generation+=1; generation=self.generation; self.demand=True
+            self.condition.notify_all(); until=time.monotonic()+.25
+            while self.failure is None and (self.latest is None or self.latest['generation']<generation or self.in_progress):
+                remaining=until-time.monotonic()
+                if remaining<=0:
+                    self._latch('final resource observation unavailable within .25s',time.monotonic()); break
+                self.condition.wait(min(.01,remaining))
+            if self.failure is not None: return self.failure
+            self.finished=True; self.condition.notify_all()
+        self.thread.join()
+        return None
+    def close(self):
+        with self.condition:
+            self.finished=True; self.condition.notify_all()
+        # The existing <=.1s callback contract is required; never detach an observer.
+        self.thread.join()
+
 class Owner:
     def __init__(self,runtime,adapter,scheduler,stop,clock,controller):
         self.root=Path(runtime.root); self.adapter=adapter; self.scheduler=scheduler
@@ -68,18 +150,27 @@ class Owner:
         remaining=min(CONTROLLER_SECONDS,controller['end_epoch']-time.time())
         self.deadline=clock()+remaining
         self.context=dict(runtime.context,root=str(self.root),deadline=self.deadline,stop=stop)
-        self.journal=Journal(self.root/'journal.jsonl')
         self.transaction=None; self.identity=None; self.submission=None
         self.halt=None; self.halt_observed_at=None; self.cancelled=False; self.drained=False
         self.pending_started=None; self.lifecycle='UNISSUED'; self.post_deadline=None
-        self.journal.append({'kind':'ACTIVATE','context':runtime.context,'controller':controller,
-                             'requested_resources':{'seconds':28800,'cpus':1,'memory_mib':2048}})
-    def record(self,kind,**data): return self.journal.append(dict(data,kind=kind),emergency=self.halt is not None)
-    def halt_once(self,reason):
+        self.guardian=ResourceGuardian(adapter,stop,self.transaction,self.context)
+        try:
+            self.journal=Journal(self.root/'journal.jsonl')
+            self.journal.append({'kind':'ACTIVATE','context':runtime.context,'controller':controller,
+                                 'requested_resources':{'seconds':28800,'cpus':1,'memory_mib':2048}})
+        except BaseException:
+            self.guardian.close(); raise
+    def record(self,kind,**data):
+        self.guardian.publish(self.transaction,self.context)
+        return self.journal.append(dict(data,kind=kind),emergency=self.halt is not None)
+    def close(self): self.guardian.close()
+    def halt_once(self,reason,*,observed_at=None):
         if self.halt is None:
-            self.halt=str(reason)[:2048]; self.halt_observed_at=time.monotonic(); self.stop.set()
+            self.halt=str(reason)[:2048]; self.halt_observed_at=time.monotonic() if observed_at is None else observed_at; self.stop.set()
             self.record('QUIESCE',reason=self.halt)
     def live(self):
+        failure=self.guardian.check(self.transaction,self.context)
+        if failure is not None: self.halt_once(failure['reason'],observed_at=failure['observed_at'])
         if self.stop.is_set(): self.halt_once('shutdown signal')
         if self.lifecycle=='ACTIVE' and self.deadline-self.clock()<ACTIVE_SECONDS:
             self.halt_once('active remaining lifetime below1530')
@@ -87,12 +178,6 @@ class Owner:
             self.halt_once('pending exceeded900')
         if self.post_deadline is not None and self.clock()>=self.post_deadline:
             self.halt_once('postprocessing deadline exceeded')
-        started=time.monotonic()
-        try:
-            result=self.adapter.resource_check(self.transaction,self.context)
-            if not isinstance(result,dict): raise Hold('unknown resource observation')
-        except BaseException as exc: self.halt_once('resource gate: '+str(exc))
-        if time.monotonic()-started>.1: self.halt_once('resource observation exceeded .1s')
     def wait(self,operation,timeout,*,allow_halt=False):
         worker=Worker(operation); end=time.monotonic()+timeout
         while True:
@@ -220,6 +305,8 @@ class Owner:
         if self.halt or self.deadline-self.clock()<ISSUE_SECONDS: raise Hold(self.halt or 'issue lifetime below3630')
         self.pending_started=self.clock()
         self.record('SUBMIT_INTENT',phase=phase,index=index,name=name,log=str(log),reservation=reference)
+        self.live()  # A guardian stop during durable intent must revoke physical issue.
+        if self.halt: raise Hold(self.halt)
         # Once intent exists, ANY ambiguous result consumes this slot forever.
         permit=IssuePermit(self.stop,time.monotonic()+2)
         self.submission=self.wait(lambda:self.scheduler.submit(phase,index,name,str(log),permit=permit),10.5,allow_halt=True)
@@ -250,7 +337,10 @@ class Owner:
                 for index in indices: self.slot(phase,index)
                 self.gate(lambda context:self.adapter.phase_complete(phase,context))
                 self.record('PHASE_COMPLETE',phase=phase)
-            self.record('COMPLETE'); status='COMPLETE'
+            self.record('COMPLETE')
+            self.live()  # A stop request observed during final fsync still gates success.
+            if self.halt: raise Hold(self.halt)
+            status='COMPLETE'
         except BaseException as exc:
             self.halt_once(exc)
             self.record('HOLD',reason=self.halt,identity=self.identity,submission=self.submission)
@@ -283,10 +373,23 @@ def run(config,adapter,scheduler,*,stop=None,clock=time.monotonic):
     if threading.current_thread() is threading.main_thread():
         for sig in (signal.SIGUSR1,signal.SIGTERM,signal.SIGINT):
             previous[sig]=signal.signal(sig,lambda *_:stop.set())
-    try: return Owner(config,adapter,scheduler,stop,clock,controller).execute()
+    owner=None
+    try:
+        owner=Owner(config,adapter,scheduler,stop,clock,controller)
+        result=owner.execute()
+        if result['status']=='COMPLETE':
+            failure=owner.guardian.finish_success()
+            if failure is not None:
+                owner.halt_once(failure['reason'],observed_at=failure['observed_at'])
+                owner.record('HOLD',reason=owner.halt,identity=owner.identity,submission=owner.submission)
+                result={'status':'HOLD','reason':owner.halt,'drained':owner.drained,'halt_observed_at':owner.halt_observed_at}
+        return result
     finally:
-        for sig,handler in previous.items(): signal.signal(sig,handler)
-        lease.close()
+        try:
+            if owner is not None: owner.close()
+        finally:
+            for sig,handler in previous.items(): signal.signal(sig,handler)
+            lease.close()
 
 def reconcile(config):
     root=Path(config.root if isinstance(config,Runtime) else config)

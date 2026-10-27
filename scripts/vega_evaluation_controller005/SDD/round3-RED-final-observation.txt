@@ -1,0 +1,18 @@
+test_guardian_stop_during_complete_fsync_cannot_return_complete (test_coordinator.GuardianIOTests.test_guardian_stop_during_complete_fsync_cannot_return_complete) ... FAIL
+
+======================================================================
+FAIL: test_guardian_stop_during_complete_fsync_cannot_return_complete (test_coordinator.GuardianIOTests.test_guardian_stop_during_complete_fsync_cannot_return_complete)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 567, in test_guardian_stop_during_complete_fsync_cannot_return_complete
+    self.assertEqual(result['status'],'HOLD',repr(result))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'COMPLETE' != 'HOLD'
+- COMPLETE
++ HOLD
+ : {'status': 'COMPLETE', 'reason': None, 'drained': True, 'halt_observed_at': None}
+
+----------------------------------------------------------------------
+Ran 1 test in 0.540s
+
+FAILED (failures=1)
