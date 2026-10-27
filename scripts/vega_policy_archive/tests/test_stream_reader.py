@@ -10,7 +10,7 @@ import tarfile
 import time
 import unittest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 try:
     from vega_policy_archive.stream_reader import verify_stream
 except ModuleNotFoundError:
