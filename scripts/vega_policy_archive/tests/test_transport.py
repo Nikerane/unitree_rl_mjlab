@@ -65,8 +65,8 @@ class OuterGuardTests(unittest.TestCase):
         from unittest import mock
         from vega_policy_archive import resident_archive
         self.assertTrue(callable(getattr(resident_archive,'remote_program',None)),'remote bootstrap must be guarded before helper reads')
-        with mock.patch.object(resident_archive,'BOOTSTRAP',"import time\ndef load_verified_package(reference): time.sleep(20)\n"):
-            program=resident_archive.remote_program(dict(path='/unused',sha256='a'*64),1)
+        with mock.patch.object(resident_archive,'BOOTSTRAP',"import time\ndef load_verified_package(*args): time.sleep(20)\n"):
+            program=resident_archive.remote_program(dict(path='/unused',sha256='a'*64),1,{})
         start=time.monotonic()
         result=__import__('subprocess').run([sys.executable,'-B','-I','-S','-c',program],input=b'',capture_output=True,timeout=3)
         self.assertNotEqual(result.returncode,0);self.assertIn(b'outer remote bootstrap deadline',result.stderr)

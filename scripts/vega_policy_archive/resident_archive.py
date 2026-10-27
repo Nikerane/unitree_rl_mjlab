@@ -102,7 +102,54 @@ BOOTSTRAP=r'''
 import hashlib,json,os,stat,sys,types
 from pathlib import Path
 
-def load_verified_package(reference):
+def authenticate_package_authority(reference,request,base,remote=False):
+    """Trusted stdlib preflight; candidate bytes cannot supply this decision."""
+    def need(ok,message):
+        if not ok:raise ValueError('package preservation authority: '+message)
+    def bound(spec):
+        need(isinstance(spec,dict) and set(spec)=={'path','sha256'},'exact bound reference required')
+        path=Path(spec['path'])
+        if not path.is_absolute():path=Path(base)/path
+        need(path.is_absolute() and '..' not in path.parts,'canonical bound path required')
+        for parent in reversed(path.parents):need(stat.S_ISDIR(parent.lstat().st_mode),'bound parent symlink forbidden')
+        fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+        with os.fdopen(fd,'rb') as stream:
+            before=os.fstat(stream.fileno());need(stat.S_ISREG(before.st_mode) and before.st_size<=8388608,'bounded regular authority required')
+            body=stream.read(8388609);after=os.fstat(stream.fileno())
+        fields=('st_mode','st_dev','st_ino','st_nlink','st_size','st_mtime_ns','st_ctime_ns')
+        need(len(body)<=8388608 and tuple(getattr(before,k) for k in fields)==tuple(getattr(after,k) for k in fields),'authority descriptor drift')
+        need(hashlib.sha256(body).hexdigest()==spec['sha256'],'authority SHA differs')
+        def pairs(items):
+            result={}
+            for key,value in items:need(key not in result,'duplicate authority JSON key');result[key]=value
+            return result
+        def invalid(_value):raise ValueError('nonfinite authority JSON')
+        return json.loads(body,object_pairs_hook=pairs,parse_constant=invalid)
+    try:
+        need(request.get('schema')=='z1_horizon_vega_resident_archive_request_v1','resident request required')
+        need(request['backend_mode']=='VEGA_RESIDENT_FULL_ARCHIVE_MAC_STREAM_V1','backend mode differs')
+        local=request['helper_package_reference'];remote_ref=request['remote_helper_package_reference']
+        expected=remote_ref if remote else dict(local,path=str(Path(local['path']) if Path(local['path']).is_absolute() else Path(base)/local['path']))
+        need(reference==expected and local['sha256']==remote_ref['sha256'],'candidate differs from requested package')
+        release_ref=request['remote_supervisor_release'] if remote else request['cpu_supervisor_release']
+        release=bound(release_ref)
+        need(release.get('status')=='ADMITTED_ONCE' and release.get('manifest',{}).get('sha256')==request['cpu_supervisor_manifest']['sha256'],'actual release/manifest closure differs')
+        need(request['remote_supervisor_release']['sha256']==request['cpu_supervisor_release']['sha256'],'local/remote release differs')
+        manifest=bound(release['manifest'] if remote else request['cpu_supervisor_manifest'])
+        need(manifest.get('schema')=='z1_horizon_cpu_supervisor_v1','actual CPU manifest required')
+        need(manifest.get('supervisor_sha256')=='565bb43027d8c9a98505603985d7a95b8f54c093c51e6cbcb2ba947f1507c4fd','actual CPU supervisor binding differs')
+        backup='/cephhome/eunikhilr/campaign-backups/z1-horizon-evaluation-20261027-resident004'
+        capacity=request['remote_capacity_contract_reference']
+        need(request['capacity_contract_reference']['sha256']==capacity['sha256'],'local/remote capacity differs')
+        expected_contract=dict(schema='z1_vega_resident_preservation_contract_v1',mode='VEGA_RESIDENT_FULL_ARCHIVE_MAC_STREAM_V1',backend_package=remote_ref,capacity_contract=capacity,backup_root=backup,mac_control_root=request['mac_control_root'])
+        need(request['remote_archive_root']==backup and manifest.get('preservation_contract')==expected_contract,'actual manifest preservation contract differs')
+        cpu='/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002'
+        need(request['remote_supervisor_release']['path'] in {cpu+'/admission-staged-integration002/'+phase+'/release.json' for phase in ('first','remaining','science')},'closed actual phase release required')
+    except (KeyError,TypeError) as exc:raise ValueError('package preservation authority incomplete') from exc
+
+
+def load_verified_package(reference,request,base,remote=False):
+    authenticate_package_authority(reference,request,base,remote)
     def need(ok,msg):
         if not ok:raise ValueError(msg)
     def read(path,limit):
@@ -158,9 +205,9 @@ def load_verified_package(reference):
 '''
 
 
-def verify_package(reference):
+def verify_package(reference,*,authority_request,base):
     namespace={};exec(compile(BOOTSTRAP,'<bound-package-bootstrap>','exec'),namespace)
-    return namespace['load_verified_package'](reference)
+    return namespace['load_verified_package'](reference,authority_request,str(base))
 
 
 def dependencies():
@@ -236,12 +283,12 @@ def validate(request,request_path,deadline):
     return request
 
 
-def normalized_receipt(request,verified,before,after,created,*,primary_reference,provenance_reference):
+def normalized_receipt(request,verified,before,after,created,*,primary_reference,provenance_reference,protocol_stages,readback_identity):
     origins=verified['origin_map']
     def members(prefix):return {name[len(prefix)+1:]:row['sha256'] for name,row in origins.items() if name.startswith(prefix+'/') and row['type']=='file'}
     raw=members('policy-tree');private=members('private-tree')
     return dict(schema='z1_horizon_terminal_multiroot_archive_receipt_v1',status='PASS',independent_readback='PASS',
-        archive_only=True,readback_platform=sys.platform,readback_hostname=os.uname().nodename,
+        archive_only=True,readback_platform=readback_identity['platform'],readback_hostname=readback_identity['hostname'],
         technical_qualification=False,scientific_qualification=False,policy=request['policy'],scope=request['scope'],bank=request.get('bank'),
         run_root=request['source_root'],private_root=request['private_root'],members=raw,tree_sha256=digest(raw),
         private_members=private,private_tree_sha256=digest(private),training_manifest_sha256=request.get('training_manifest_sha256'),
@@ -250,7 +297,7 @@ def normalized_receipt(request,verified,before,after,created,*,primary_reference
         backend_mode=MODE,remote_archive_location=created['destination'],primary_verification=primary_reference,
         independent_stream=dict(status='PASS',archive_sha256=verified['archive_sha256'],archive_bytes=verified['archive_bytes'],transport_exit=0,complete_eof=True),
         helper_package=request['helper_package_reference'],capacity_ledger=request['capacity_ledger_reference'],
-        preservation_provenance=provenance_reference)
+        preservation_provenance=provenance_reference,protocol_stages=protocol_stages)
 
 
 def control_read(transport,request,reference,deadline):
@@ -308,17 +355,20 @@ def _coordinate(request,transport,guard,*,deadline,recheck):
     require(independent['origin_map']==controls['origin'],'independent origin map differs')
     modules['policy'].validate_archived_application_records(request,request['_bound_observation']['binding'],independent['origin_map'],None,deadline,
         record_reader=lambda _path,name,_deadline,_maximum:independent['application_records'][name])
-    fresh=transport.call('inspect',request,deadline=deadline)
-    stability=store.compare_source_inventories(before,fresh)
+    stream_value=stream_stage_record(request,created)
+    stream_ref=control_reference(destination/'stream-stage.json',stream_value)
+    require(control_read(transport,request,stream_ref,deadline)==stream_value,'completed stream stage differs')
+    inspected=transport.call('inspect',request,deadline=deadline,completed_stream_reference=stream_ref)
+    fresh=inspected['inventory'];stability=store.compare_source_inventories(before,fresh)
+    fresh_value=fresh_stage_record(request,stream_ref,fresh,stability)
+    fresh_ref=control_reference(destination/'fresh-source-stage.json',fresh_value)
+    require(inspected.get('stage')==fresh_ref and control_read(transport,request,fresh_ref,deadline)==fresh_value,'fresh source stage differs')
+    stages=dict(stream=stream_ref,fresh=fresh_ref)
     recheck();guard.check();check(deadline)
-    provenance=dict(schema='z1_vega_resident_preservation_provenance_v1',status='PASS',request_identity_sha256=request_identity(request),create_transport_exit=0,
-        create=created,source_stability=stability,helper_package=request['helper_package_reference'],capacity_ledger=request['capacity_ledger_reference'],
-        ledger=request.get('_ledger'),ledger_body_b64=request.get('_ledger_body_b64'),release_sha256=request['cpu_supervisor_release']['sha256'],
-        observation_binding=request['_bound_observation']['binding'],
-        request={k:v for k,v in request.items() if not k.startswith('_')},
-        independent_stream=dict(status='PASS',archive_sha256=independent['archive_sha256'],archive_bytes=independent['archive_bytes'],transport_exit=0,complete_eof=True))
+    readback=dict(platform=sys.platform,hostname=os.uname().nodename)
+    provenance=provenance_record(request,created,independent,stability,stages,readback)
     prov_ref=publish(transport,request,'preservation-provenance.json',provenance,deadline)
-    full=normalized_receipt(request,independent,before,fresh,created,primary_reference=refs['primary'],provenance_reference=prov_ref)
+    full=normalized_receipt(request,independent,before,fresh,created,primary_reference=refs['primary'],provenance_reference=prov_ref,protocol_stages=stages,readback_identity=readback)
     full_ref=publish(transport,request,'consumer-receipt.json',full,deadline)
     recheck();check(deadline)
     compact=dict(schema='z1_vega_resident_compact_receipt_v1',status='PASS',backend_mode=MODE,policy=request['policy'],scope=request['scope'],bank=request.get('bank'),
@@ -395,8 +445,8 @@ def _allocation_usage(destination,deadline):
     return dict(total=total,archive=archive,provenance=total-archive)
 
 
-def authenticate_credit(request,slot,role,item,compact,deadline):
-    """Authenticate one root-bound credit using current full remote closure.
+def _credit_closure(request,compact,deadline):
+    """Authenticate a compact proof once; retain its closure only for its group.
 
     Compact proof bytes are independently hash-bound on the Mac, then checked
     here against all retained Vega objects; only this action can authorize credit.
@@ -435,26 +485,45 @@ def authenticate_credit(request,slot,role,item,compact,deadline):
     dependencies()['policy'].validate_archived_application_records(previous_request,provenance['observation_binding'],primary['origin_map'],None,deadline,
         record_reader=lambda _path,name,_deadline,_maximum:primary['application_records'][name])
 
-    if slot is not None:
-        require((compact['policy']['policy_id'],compact['scope'],compact.get('bank'))==(slot['policy_id'],slot['scope'],slot['bank']),'credit ledger slot differs')
-        require(full['run_root']==slot['run_root'] and full['private_root']==slot['private_root'],'credit source roots differ')
     # Existing proof records must bind the same fixed rule and closed map. The
     # previous ledger is a concrete full Vega provenance object in this closure.
     prior=provenance.get('ledger')
     require(isinstance(prior,dict),'credit previous complete ledger required')
     dependencies()['capacity'].remaining_budget(prior)
+    previous_request=dict(previous_request,_ledger=prior,_ledger_body_b64=provenance.get('ledger_body_b64'),_bound_observation=dict(binding=provenance['observation_binding']))
+    protocol_created,protocol_controls,protocol_fresh,protocol_stability,protocol_stages=_publication_inputs(previous_request,previous_request,destination,deadline)
+    readback=_validate_provenance(provenance,previous_request,protocol_created,protocol_controls['primary'],protocol_stability,protocol_stages)
+    expected_full=normalized_receipt(previous_request,protocol_controls['primary'],protocol_controls['before'],protocol_fresh,protocol_created,
+        primary_reference=protocol_created['controls']['primary'],provenance_reference=compact['provenance'],protocol_stages=protocol_stages,readback_identity=readback)
+    require(full==expected_full,'credit exact normalized protocol closure differs')
     prior_body=base64.b64decode(provenance.get('ledger_body_b64',''),validate=True)
     require(len(prior_body)<=EVIDENCE and parse_json(prior_body)==prior and hashlib.sha256(prior_body).hexdigest()==full['capacity_ledger']['sha256']==previous_request['capacity_ledger_reference']['sha256'],'credit previous ledger hash/bytes differ')
     archive_path=plain(created['archive_path']);archive_info=archive_path.lstat()
     require(stat.S_ISREG(archive_info.st_mode) and archive_info.st_nlink==1 and archive_info.st_size==created['archive_bytes'],'credited separate archive missing/changed')
     require(hashlib.sha256(read_bytes(archive_path,201326592,deadline)).hexdigest()==created['archive_sha256'],'credited separate archive SHA changed')
     require(prior['request_identity_sha256']==compact['request_identity_sha256'] and prior['release_sha256']==provenance.get('release_sha256'),'credit release/ledger proof differs')
-    source_nodes=controls['before']['nodes']
+    archive_identity=dependencies()['store']._descriptor_identity(archive_info)
+    require(archive_identity==dependencies()['store']._descriptor_identity(archive_path.lstat()),'credited archive identity changed during proof authentication')
+    return dict(compact=compact,full=full,created=created,refs=refs,source_nodes=controls['before']['nodes'],
+                protocol_stages=protocol_stages,archive_identity=archive_identity)
+
+
+def _authenticate_credit_item(slot,role,item,verified,deadline):
+    check(deadline)
+    compact=verified['compact'];full=verified['full'];created=verified['created'];refs=verified['refs']
+    source_nodes=verified['source_nodes'];protocol_stages=verified['protocol_stages']
+    if slot is not None:
+        require((compact['policy']['policy_id'],compact['scope'],compact.get('bank'))==(slot['policy_id'],slot['scope'],slot['bank']),'credit ledger slot differs')
+        require(full['run_root']==slot['run_root'] and full['private_root']==slot['private_root'],'credit source roots differ')
     path=plain(item['path']);info=path.lstat()
     require(stat.S_ISREG(info.st_mode),'credited object missing/not regular')
     actual=dict(bytes=info.st_size,device=info.st_dev,inode=info.st_ino,link_count=info.st_nlink)
     require(all(actual[k]==item[k] for k in actual),'credited retained identity/bytes changed')
-    require(hashlib.sha256(read_bytes(path,201326592,deadline)).hexdigest()==item['sha256'],'credited retained SHA changed')
+    if str(path)==created['archive_path']:
+        require(dependencies()['store']._descriptor_identity(info)==verified['archive_identity'],'credited archive identity changed after proof authentication')
+        require(item['sha256']==created['archive_sha256'],'credited archive SHA binding differs')
+    else:
+        require(hashlib.sha256(read_bytes(path,201326592,deadline)).hexdigest()==item['sha256'],'credited retained SHA changed')
     if role=='raw':
         matches=[row for row in source_nodes.values() if row.get('type')=='file' and row.get('source_path')==str(path)]
         require(len(matches)==1 and dependencies()['store']._stable(dependencies()['store']._metadata(path))==dependencies()['store']._stable({k:v for k,v in matches[0].items() if k!='sha256'}),'credited raw metadata/identity changed')
@@ -462,9 +531,15 @@ def authenticate_credit(request,slot,role,item,compact,deadline):
     elif role=='archive':
         require(str(path)==created['archive_path'] and item['sha256']==created['archive_sha256'] and item['bytes']==created['archive_bytes'] and item['link_count']==1,'credited archive differs')
     else:
-        allowed=[*refs.values(),compact['provenance'],compact['independent_backup']]
+        allowed=[*refs.values(),compact['provenance'],compact['independent_backup'],*protocol_stages.values()]
         require(any(ref['path']==str(path) and ref['sha256']==item['sha256'] for ref in allowed),'provenance/shared credit lacks complete retained proof')
     return dict(status='VERIFIED',path=str(path),sha256=item['sha256'],**actual)
+
+
+
+def authenticate_credit(request,slot,role,item,compact,deadline):
+    """Standalone authentication; remote_validate groups shared proofs per RPC."""
+    return _authenticate_credit_item(slot,role,item,_credit_closure(request,compact,deadline),deadline)
 
 
 def remote_validate(request,deadline,credit_proofs):
@@ -479,27 +554,134 @@ def remote_validate(request,deadline,credit_proofs):
     ledger=parse_json(ledger_body);capacity_contract(request,contract,ledger)
     modules=dependencies();modules['contract'].validate_paths(request);modules['store']._bounds(request)
     require(request['remote_archive_destination']==str(modules['store'].validate_destination(request)),'remote destination differs')
+    groups={}
     for slot,role,item in modules['capacity'].retained_objects(ledger):
-        key=item['proof']['sha256'];raw=base64.b64decode(credit_proofs.get(key,''),validate=True)
+        groups.setdefault(item['proof']['sha256'],[]).append((slot,role,item))
+    # Grouping is a bounded per-RPC cache: one full immutable proof/archive is
+    # authenticated once, all current items are checked, then its maps released.
+    # Do not retain eighteen complete inventories just to avoid repeated work.
+    for key,items in groups.items():
+        raw=base64.b64decode(credit_proofs.get(key,''),validate=True)
         require(len(raw)<=MIB and hashlib.sha256(raw).hexdigest()==key,'hash-bound compact credit proof missing')
-        authenticate_credit(request,slot,role,item,parse_json(raw),deadline)
+        verified=_credit_closure(request,parse_json(raw),deadline)
+        for slot,role,item in items:_authenticate_credit_item(slot,role,item,verified,deadline)
+        del verified
     return ledger
+
+
+def control_reference(path,value):
+    body=json_bytes(value)
+    return dict(path=str(path),sha256=hashlib.sha256(body).hexdigest(),bytes=len(body))
+
+
+def stream_stage_record(request,created):
+    """Server transmission evidence; this is not a Mac verification verdict."""
+    return dict(schema='z1_vega_resident_stream_stage_v1',status='STREAM_TRANSMITTED',
+        request_identity_sha256=request_identity(request),policy=request['policy'],scope=request['scope'],bank=request.get('bank'),
+        job_id=request['job_id'],source_root=request['source_root'],private_root=request['private_root'],
+        helper_package=request['remote_helper_package_reference'],capacity_ledger=request['capacity_ledger_reference'],
+        release=request['remote_supervisor_release'],create=created)
+
+
+def fresh_stage_record(request,stream_ref,inventory,stability):
+    return dict(schema='z1_vega_resident_fresh_source_stage_v1',status='SOURCE_STABLE',
+        request_identity_sha256=request_identity(request),completed_stream_reference=stream_ref,
+        inventory=inventory,source_stability=stability)
+
+
+def provenance_record(request,created,independent,stability,stages,readback):
+    """Exact publication contract; independent verdict is a trusted Mac assertion."""
+    return dict(schema='z1_vega_resident_preservation_provenance_v1',status='PASS',request_identity_sha256=request_identity(request),create_transport_exit=0,
+        create=created,source_stability=stability,helper_package=request['helper_package_reference'],capacity_ledger=request['capacity_ledger_reference'],
+        ledger=request.get('_ledger'),ledger_body_b64=request.get('_ledger_body_b64'),release_sha256=request['cpu_supervisor_release']['sha256'],
+        observation_binding=request['_bound_observation']['binding'],request={k:v for k,v in request.items() if not k.startswith('_')},
+        protocol_stages=stages,independent_stream=dict(status='PASS',archive_sha256=independent['archive_sha256'],archive_bytes=independent['archive_bytes'],
+            transport_exit=0,complete_eof=True,readback_platform=readback['platform'],readback_hostname=readback['hostname']))
+
+
+def _archive_closure(request,destination,index_ref,deadline):
+    """Reconstruct the exact successful backend result from bound retained files."""
+    require(not os.path.lexists(destination/'failure.json'),'archive has retained failure evidence')
+    require(isinstance(index_ref,dict) and index_ref.get('path')==str(destination/'index.json'),'exact archive index reference required')
+    index_body=bound_bytes({k:index_ref[k] for k in ('path','sha256')},deadline,META)
+    require(index_ref.get('bytes')==len(index_body),'index byte binding differs')
+    index=parse_json(index_body)
+    require(index.get('status')=='ARCHIVE_BOUND' and index.get('archive_name')=='terminal-policy-full.tar.gz' and index.get('policy_id')==request['policy_id'] and index.get('job_id')==request['job_id'],'archive index identity differs')
+    names=dict(attempt='attempt.json',before='before.json',after='after.json',primary='verification.json',origin='origin.json')
+    refs=index.get('controls',{});require(set(refs)==set(names),'complete backend control closure required')
+    controls={}
+    for key,name in names.items():
+        ref=refs[key];require(ref.get('path')==str(destination/name),'foreign backend control reference')
+        body=bound_bytes({k:ref[k] for k in ('path','sha256')},deadline,META)
+        require(ref.get('bytes')==len(body),'backend control bytes differ')
+        controls[key]=parse_json(body)
+    primary=controls['primary'];before=controls['before'];after=controls['after']
+    require(primary.get('origin_map')==controls['origin'],'primary/origin closure differs')
+    for inv in (before,after):
+        for key in ('policy_id','scope','source_root','private_root'):require(inv.get(key)==request[key],'backend inventory request differs')
+        require(inv.get('job',{}).get('job_id')==request['job_id'],'backend scheduler differs')
+        dependencies()['remote'].validate_guard(request,inv['job'])
+    dependencies()['store'].compare_source_inventories(before,after)
+    for key in ('archive_sha256','archive_bytes'):require(index.get(key)==primary.get(key),'backend archive identity differs')
+    dependencies()['policy'].validate_archived_application_records(request,request['_bound_observation']['binding'],primary['origin_map'],None,deadline,
+        record_reader=lambda _path,name,_deadline,_maximum:primary['application_records'][name])
+    created=dict(status='COMPLETE',destination=str(destination),archive_path=str(destination/'terminal-policy-full.tar.gz'),
+        archive_sha256=primary['archive_sha256'],archive_bytes=primary['archive_bytes'],node_count=primary['node_count'],
+        file_count=primary['file_count'],regular_bytes=primary['regular_bytes'],controls=dict(refs,index=index_ref),created_parents=index['created_parents'])
+    return created,controls
+
+
+def _load_stage(destination,name,deadline):
+    try:body=read_bytes(destination/name,META,deadline)
+    except FileNotFoundError as exc:raise ValueError('completed '+name+' protocol stage required') from exc
+    value=parse_json(body)
+    require(body==json_bytes(value),'protocol stage canonical bytes differ')
+    return value,control_reference(destination/name,value)
+
+
+def _stream_stage(request,destination,deadline):
+    value,reference=_load_stage(destination,'stream-stage.json',deadline)
+    try:index_ref=value['create']['controls']['index']
+    except (KeyError,TypeError) as exc:raise ValueError('completed stream stage closure required') from exc
+    created,controls=_archive_closure(request,destination,index_ref,deadline)
+    require(value==stream_stage_record(request,created),'completed stream stage binding differs')
+    return reference,created,controls
+
+
+def _publication_inputs(request,effective,destination,deadline):
+    stream_ref,created,controls=_stream_stage(request,destination,deadline)
+    fresh,fresh_ref=_load_stage(destination,'fresh-source-stage.json',deadline)
+    inventory=fresh.get('inventory');require(isinstance(inventory,dict),'complete fresh source inventory required')
+    stability=dependencies()['store'].compare_source_inventories(controls['before'],inventory)
+    require(fresh==fresh_stage_record(request,stream_ref,inventory,stability),'fresh source stage binding differs')
+    current=dependencies()['store'].inspect_source(effective,inventory_reader=dependencies()['remote'].inventory,deadline=deadline)
+    dependencies()['store'].compare_source_inventories(inventory,current)
+    return created,controls,inventory,stability,dict(stream=stream_ref,fresh=fresh_ref)
+
+
+def _validate_provenance(value,request,created,primary,stability,stages):
+    require(isinstance(value,dict),'complete preservation provenance required')
+    attestation=value.get('independent_stream',{})
+    require(isinstance(attestation,dict) and attestation.get('readback_platform')=='darwin' and isinstance(attestation.get('readback_hostname'),str) and 0<len(attestation['readback_hostname'])<=255,'admitted Mac readback attestation required')
+    readback=dict(platform=attestation['readback_platform'],hostname=attestation['readback_hostname'])
+    require(value==provenance_record(request,created,primary,stability,stages,readback),'exact preservation provenance closure differs')
+    return readback
 
 
 def remote_dispatch(packet,*,deadline,sink=None):
     """Closed operations; every effect follows actual authority/ledger checks."""
     action=packet.get('action')
     require(action in ('create','readcontrol','stream','inspect','publish'),'closed remote action required')
-    request=packet['request'];ledger=remote_validate(request,deadline,packet.get('credit_proofs',{}))
+    request=packet['request'];ledger=remote_validate(request,deadline,packet.get('credit_proofs',{}));original_request=request
     modules=dependencies();store=modules['store'];capacity=modules['capacity'];destination=store.validate_destination(request)
     chosen=next(row for row in ledger['slots'] if (row['policy_id'],row['scope'],row['bank'])==(request['policy_id'],request['scope'],request.get('bank')))
     residual={role:chosen['caps'][role]-sum(x['bytes'] for x in chosen['retained'][role]) for role in capacity.CAPS}
     growth=request['operation_growth_bytes'];require(type(growth) is int and 0<growth<=residual['archive']+residual['provenance'],'operation growth exceeds selected residual caps')
     budget=capacity.operation_budget(ledger,growth)
-    # There are at most nine closed control filenames including failure.json.
+    # There are at most eleven closed control filenames including failure.json.
     # Conservative per-file caps enforce each role *before* a write, even with
     # retained provenance credits; the aggregate free-reader guard enforces G.
-    metadata_cap=min(request['max_metadata_bytes'],residual['provenance']//9)
+    metadata_cap=min(request['max_metadata_bytes'],residual['provenance']//11)
     archive_cap=min(request['max_archive_bytes'],residual['archive'])
     require(metadata_cap>0 and archive_cap>0,'selected archive/control residual allocation exhausted')
     request=dict(request,future_reserve_bytes=max(request['remote_future_reserve_bytes'],budget['future_reserve_bytes']),
@@ -515,36 +697,57 @@ def remote_dispatch(packet,*,deadline,sink=None):
     if action=='create':
         require(not os.path.lexists(destination),'exclusive archive destination already exists')
         result=store.create_archive(request,destination,inventory_reader=modules['remote'].inventory,free_reader=free_reader,deadline=deadline)
-    elif action=='inspect':result=store.inspect_source(request,inventory_reader=modules['remote'].inventory,deadline=deadline)
+    elif action=='inspect':
+        payload=packet.get('payload',{});require(set(payload)=={'completed_stream_reference'},'completed stream protocol reference required before fresh inspection')
+        stream_ref,created,controls=_stream_stage(original_request,destination,deadline)
+        require(payload['completed_stream_reference']==stream_ref,'fresh inspection stream reference differs')
+        inventory=store.inspect_source(request,inventory_reader=modules['remote'].inventory,deadline=deadline)
+        stability=store.compare_source_inventories(controls['before'],inventory)
+        value=fresh_stage_record(original_request,stream_ref,inventory,stability)
+        body=json_bytes(value);require(len(body)<=request['max_metadata_bytes'],'fresh stage control cap exceeded')
+        ref=control_reference(destination/'fresh-source-stage.json',value)
+        result=dict(inventory=inventory,stage=dict(store.publish_control(destination/'fresh-source-stage.json',body,ref['sha256'],free_reader=free_reader,deadline=deadline,future_reserve_bytes=request['future_reserve_bytes']),path=ref['path']))
     elif action=='stream':
         require(sink is not None,'binary stream sink required')
         allowed=('expected_index_sha256','expected_archive_sha256','expected_archive_bytes')
         require(set(packet.get('payload',{}))==set(allowed),'exact stream bindings required')
-        return store.stream_back(request,destination,sink,deadline=deadline,**packet['payload'])
+        streamed=store.stream_back(request,destination,sink,deadline=deadline,**packet['payload'])
+        if hasattr(sink,'flush'):sink.flush()
+        check(deadline)
+        index_body=read_bytes(destination/'index.json',META,deadline)
+        index_ref=dict(path=str(destination/'index.json'),sha256=streamed['index_sha256'],bytes=len(index_body))
+        created,controls=_archive_closure(original_request,destination,index_ref,deadline)
+        value=stream_stage_record(original_request,created);body=json_bytes(value)
+        require(len(body)<=request['max_metadata_bytes'],'stream stage control cap exceeded')
+        store.publish_control(destination/'stream-stage.json',body,hashlib.sha256(body).hexdigest(),free_reader=free_reader,deadline=deadline,future_reserve_bytes=request['future_reserve_bytes'])
+        free_reader();return streamed
     elif action=='readcontrol':
         ref=packet['payload']['reference'];path=plain(ref['path'])
-        require(path.parent==destination and path.name in ('attempt.json','before.json','after.json','verification.json','origin.json','index.json','preservation-provenance.json','consumer-receipt.json'),'closed control name/path required')
+        require(path.parent==destination and path.name in ('attempt.json','before.json','after.json','verification.json','origin.json','index.json','preservation-provenance.json','consumer-receipt.json','stream-stage.json','fresh-source-stage.json'),'closed control name/path required')
         result=dict(body_b64=base64.b64encode(bound_bytes({k:ref[k] for k in ('path','sha256')},deadline,META)).decode())
     else:
         payload=packet['payload'];name=payload['name']
         require(name in ('preservation-provenance.json','consumer-receipt.json'),'closed publication name required')
         body=base64.b64decode(payload['body_b64'],validate=True);require(len(body)<=request['max_metadata_bytes'],'publication residual/control cap exceeded')
-        # A normalized consumer receipt may be published only with its bound full
-        # provenance; source/current request must still be authentic at this RPC.
+        created,controls,fresh,stability,stages=_publication_inputs(original_request,request,destination,deadline)
         value=parse_json(body)
-        if name=='consumer-receipt.json':
-            require(value.get('backend_mode')==MODE and value.get('policy')==request['policy'] and value.get('private_root')==request['private_root'] and value.get('run_root')==request['source_root'],'published receipt identity differs')
-            bound_bytes({k:value['preservation_provenance'][k] for k in ('path','sha256')},deadline,META)
+        if name=='preservation-provenance.json':
+            _validate_provenance(value,original_request,created,controls['primary'],stability,stages)
+        else:
+            provenance,prov_ref=_load_stage(destination,'preservation-provenance.json',deadline)
+            readback=_validate_provenance(provenance,original_request,created,controls['primary'],stability,stages)
+            expected=normalized_receipt(original_request,controls['primary'],controls['before'],fresh,created,primary_reference=created['controls']['primary'],provenance_reference=prov_ref,protocol_stages=stages,readback_identity=readback)
+            require(value==expected,'exact normalized consumer receipt closure differs')
         result=dict(store.publish_control(destination/name,body,hashlib.sha256(body).hexdigest(),free_reader=free_reader,deadline=deadline,future_reserve_bytes=request['future_reserve_bytes']),path=str(destination/name))
     free_reader();check(deadline)
     return result
 
 
-def remote_program(reference,seconds):
+def remote_program(reference,seconds,authority_request):
     require(type(seconds) is int and 0<seconds<=560,'bounded remote bootstrap wall required')
     return BOOTSTRAP+"\nimport signal,time\ndef bootstrap_alarm(_signum,_frame): raise TimeoutError('outer remote bootstrap deadline expired')\n"+\
         "signal.signal(signal.SIGALRM,bootstrap_alarm)\nremote_limit=time.monotonic()+"+str(seconds)+"\nsignal.setitimer(signal.ITIMER_REAL,"+str(seconds)+")\n"+\
-        "m=load_verified_package("+repr(reference)+")['vega_policy_archive.resident_archive']\nsignal.setitimer(signal.ITIMER_REAL,0)\nm.remote_main(outer_deadline=remote_limit)\n"
+        "m=load_verified_package("+repr(reference)+","+repr({k:v for k,v in authority_request.items() if not k.startswith('_')})+",'/',True)['vega_policy_archive.resident_archive']\nsignal.setitimer(signal.ITIMER_REAL,0)\nm.remote_main(outer_deadline=remote_limit)\n"
 
 
 class SSHTransport:
@@ -557,7 +760,7 @@ class SSHTransport:
         packet=dict(action=action,request=request,payload=payload,credit_proofs=self.credit_proofs,remote_wall_seconds=seconds)
         body=json_bytes(packet);require(len(body)<=8*MIB,'remote input packet cap exceeded')
         reference=request['remote_helper_package_reference']
-        program=remote_program(reference,seconds)
+        program=remote_program(reference,seconds,request)
         require(request['ssh_host']=='vega' and request['remote_python']==REMOTE_PYTHON,'closed approved SSH target required')
         argv=['ssh','-o','BatchMode=yes','-o','ConnectTimeout=20','-o','ServerAliveInterval=15','-o','ServerAliveCountMax=2','vega',
               shlex.join([REMOTE_PYTHON,'-B','-I','-S','-u','-c',program])]
@@ -611,7 +814,7 @@ def run(request_path,output):
         require(public.get('schema')==SCHEMA,'resident request required')
         package_ref=dict(public['helper_package_reference'])
         if not Path(package_ref['path']).is_absolute():package_ref['path']=str(request_path.parent/package_ref['path'])
-        loaded=verify_package(package_ref)
+        loaded=verify_package(package_ref,authority_request=public,base=request_path.parent)
         # Re-enter the verified source module. An imported unverified coordinator
         # cannot cause a dependency to load before this complete package check.
         implementation=loaded['vega_policy_archive.resident_archive']
@@ -637,7 +840,7 @@ def _run_verified(request_path,output,body,started,deadline):
         check(deadline)
         for ref in references:bound_bytes(ref,deadline,base=request_path.parent)
         # Includes the entry source and all helper bytes, not just the manifest.
-        verify_package(dict(path=str(Path(request['helper_package_reference']['path']) if Path(request['helper_package_reference']['path']).is_absolute() else request_path.parent/request['helper_package_reference']['path']),sha256=request['helper_package_reference']['sha256']))
+        verify_package(dict(path=str(Path(request['helper_package_reference']['path']) if Path(request['helper_package_reference']['path']).is_absolute() else request_path.parent/request['helper_package_reference']['path']),sha256=request['helper_package_reference']['sha256']),authority_request=public,base=request_path.parent)
     recheck()
     request['_ledger_body_b64']=base64.b64encode(bound_bytes(public['capacity_ledger_reference'],deadline,base=request_path.parent)).decode()
     proofs={}

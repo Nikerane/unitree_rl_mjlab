@@ -65,6 +65,14 @@ before helper modules execute. Only source bytes are loaded, including under
 `-B -I -S`; no unchecked pycache is consumed. Remote staging contains only the
 manifest and these production sources.
 
+Before candidate source loading, the reviewed stdlib bootstrap reads the bound
+release and CPU manifest and compares its actual `preservation_contract` package
+binding. Local copies must close the already root-bound release/manifest hashes;
+the remote bootstrap reads the actual Vega release and manifest. A candidate
+cannot authorize itself by rebinding its own source/hash manifest. Trust starts
+with the reviewed bootstrap and root-supplied release/request authority, rather
+than candidate code or its internally consistent hashes.
+
 ## Capacity ledger
 
 The exact contract is the object checked by `capacity_contract`: schema
@@ -94,7 +102,12 @@ record. Every nonzero credit is authenticated against its full Vega
 receipt/provenance, original request/release, complete before/after/origin/index/
 primary controls, successful create/stream exit bindings, current separate
 archive and current file descriptor identity/hash. Unsupported, stale, missing,
-or changed proofs reject. Raw hardlinks are credited once globally by
+or changed proofs reject. During one RPC, items are grouped by compact-proof SHA:
+the full proof, original authority and compressed archive are authenticated once
+per group, then its maps are released. Every item still receives a current
+identity/hash check; an archive item rechecks the full descriptor against the
+just-hashed archive binding. This avoids rehashing an archive for each raw file
+and avoids retaining all eighteen full inventories in memory. Raw hardlinks are credited once globally by
 (device,inode), preserving every path record; sharing an inode across roles
 rejects. New archives require `link_count=1`. Only concrete retained pipeline
 controls can earn provenance/shared credit; arbitrary declared occupied bytes
@@ -128,11 +141,37 @@ working files or raw archive payloads are written.
 Order: local validation/package/capacity check → exclusive remote create → read
 all individually bound controls → full independent nonseek Mac stream and EOF →
 exact primary/create SHA/size/count agreement → actual observed application
-records → fresh remote source comparison → full provenance and consumer receipt
+records → bound server stream record → fresh remote source comparison/record →
+full provenance and consumer receipt
 publication/readback → local compact final record. All request/bound inputs and
 helper sources are rechecked before and after publication. A failure withholds
 the usable local PASS reference; remote originals, partials and controls remain.
 No automatic retry or overwrite exists.
+
+The stream RPC writes exclusive `stream-stage.json` only after completing and
+flushing the exact bound archive transmission. Its status is
+`STREAM_TRANSMITTED`, not an independent-verification verdict. The inspect RPC
+requires that exact stream reference and writes `fresh-source-stage.json` with
+its complete stable inventory. Both records bind the same request/create/index,
+policy/job/roots, helper, release and ledger. They remain within the existing
+88 MiB provenance allocation: the conservative closed control-file count is
+**eleven**, including failure evidence, and every per-file cap is no larger than
+the residual provenance allocation divided by eleven.
+
+The publish RPC requires both completed records, all individually bound archive
+controls/application records, an unchanged current source, and exact provenance
+schema/field equality. It then compares the entire normalized full receipt with
+those proof objects. Missing stages, rebound foreign fields, arbitrary PASS JSON
+or incomplete/full-map substitutions reject before a publication write. The full
+provenance and receipt expose `protocol_stages={stream:<ref>,fresh:<ref>}`; these
+records also participate in later retained-byte credit authentication.
+
+The independent Mac verdict is an assertion from the admitted coordinator. Server
+transmission/source records establish sequence and exact proof closure; they
+cannot establish a hostile same-account client's actual Mac computation. This
+protocol does not provide cryptographic client attestation or protect against
+arbitrary same-account shell replacement of the trusted bootstrap, root authority
+or filesystem evidence.
 
 The full Vega receipt preserves
 `z1_horizon_terminal_multiroot_archive_receipt_v1`, complete unprefixed raw/private

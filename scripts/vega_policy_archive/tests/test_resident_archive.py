@@ -30,7 +30,8 @@ class PipelineTests(unittest.TestCase):
         records={name:dict(value=json.loads((self.f.raw/name).read_bytes()),sha256=hashlib.sha256((self.f.raw/name).read_bytes()).hexdigest()) for name in ('supervisor-terminal.json','intent.json','worker-result.json')}
         self.request.update(_bound_observation=dict(binding=dict(records=records)),
             shared_source=dict(archive_sha256='s'),backend_mode='VEGA_RESIDENT_FULL_ARCHIVE_MAC_STREAM_V1',
-            helper_package_reference=dict(path='/helper',sha256='a'*64),capacity_ledger_reference=dict(path='/ledger',sha256='b'*64))
+            helper_package_reference=dict(path='/helper',sha256='a'*64),capacity_ledger_reference=dict(path='/ledger',sha256='b'*64),
+            remote_helper_package_reference=dict(path='/remote-helper',sha256='a'*64),remote_supervisor_release=dict(path='/remote-release',sha256='abc'))
         self.output=self.f.root/'mac';self.output.mkdir()
         self.guard=archive.dependencies()['capacity'].ControlRoot(self.output,free_reader=lambda:10**12,deadline=self.f.deadline)
         self.transport=LocalTransport(self.f)
@@ -95,6 +96,10 @@ class LocalTransport:
             # Store's sink emits into a synchronous nonseek pipe substitute. Real
             # owned-process backpressure/deadline coverage lives in transport.
             sink=io.BytesIO();store.stream_back(request,destination,sink,deadline=deadline,**payload)
+            index_body=(destination/'index.json').read_bytes();index_ref=dict(path=str(destination/'index.json'),sha256=hashlib.sha256(index_body).hexdigest(),bytes=len(index_body))
+            created,_=archive._archive_closure(request,destination,index_ref,deadline)
+            stage=archive.stream_stage_record(request,created);stage_body=archive.json_bytes(stage)
+            store.publish_control(destination/'stream-stage.json',stage_body,hashlib.sha256(stage_body).hexdigest(),free_reader=lambda:10**12,deadline=deadline)
             data=sink.getvalue()
             class Nonseek:
                 def __init__(self):self.offset=0
@@ -105,7 +110,10 @@ class LocalTransport:
         if action=='inspect':
             value=store.inspect_source(request,inventory_reader=self.f.inventory,deadline=deadline)
             if self.fault=='source':value['nodes']['private-tree/cache']['sha256']='0'*64
-            return value
+            before=json.loads((destination/'before.json').read_bytes());stability=store.compare_source_inventories(before,value)
+            stage=archive.fresh_stage_record(request,payload['completed_stream_reference'],value,stability);body=archive.json_bytes(stage)
+            ref=dict(store.publish_control(destination/'fresh-source-stage.json',body,hashlib.sha256(body).hexdigest(),free_reader=lambda:10**12,deadline=deadline),path=str(destination/'fresh-source-stage.json'))
+            return dict(inventory=value,stage=ref)
         if action=='publish':
             if self.fault=='partial':raise RuntimeError('partial publication')
             body=__import__('base64').b64decode(payload['body_b64']);path=destination/payload['name']
@@ -129,7 +137,13 @@ class BootstrapAndAuthorityTests(unittest.TestCase):
             body=archive.json_bytes(dict(schema='z1_vega_policy_archive_package_v1',entrypoint='resident_archive.py',files=files))
             manifest=root/'package-manifest.json';manifest.write_bytes(body)
             ref=dict(path=str(manifest),sha256=hashlib.sha256(body).hexdigest())
-            program=archive.BOOTSTRAP+'\nm=load_verified_package('+repr(ref)+')["vega_policy_archive.resident_archive"]\nassert len(m.dependencies())==7\nprint(m.MODE)'
+            request,_=RequestBindingTests().fixture(Path(tmp).resolve())
+            request['helper_package_reference']=ref
+            request['remote_helper_package_reference']['sha256']=ref['sha256']
+            authority_path=Path(request['cpu_supervisor_manifest']['path']);authority=json.loads(authority_path.read_bytes());authority['preservation_contract']['backend_package']=request['remote_helper_package_reference'];authority_path.write_bytes(archive.json_bytes(authority))
+            request['cpu_supervisor_manifest']['sha256']=hashlib.sha256(authority_path.read_bytes()).hexdigest()
+            release_path=Path(request['cpu_supervisor_release']['path']);release=json.loads(release_path.read_bytes());release['manifest']=request['cpu_supervisor_manifest'];release_path.write_bytes(archive.json_bytes(release));request['cpu_supervisor_release']['sha256']=hashlib.sha256(release_path.read_bytes()).hexdigest();request['remote_supervisor_release']['sha256']=request['cpu_supervisor_release']['sha256']
+            program=archive.BOOTSTRAP+'\nm=load_verified_package('+repr(ref)+','+repr(request)+','+repr(tmp)+')["vega_policy_archive.resident_archive"]\nassert len(m.dependencies())==7\nprint(m.MODE)'
             result=subprocess.run([sys.executable,'-B','-I','-S','-c',program],capture_output=True,timeout=10)
             self.assertEqual(result.returncode,0,result.stderr.decode());self.assertEqual(result.stdout.strip(),archive.MODE.encode())
             for kind in ('source','extra','pyc','symlink'):
@@ -227,6 +241,7 @@ class RequestBindingTests(unittest.TestCase):
             remote_helper_package_reference=dict(path='/cephhome/eunikhilr/helper/package-manifest.json',sha256=package_ref['sha256']),
             capacity_contract_reference=bound('capacity.json',contract),operation_growth_bytes=280*1024**2)
         request['remote_capacity_contract_reference']=dict(path='/cephhome/eunikhilr/helper/capacity.json',sha256=request['capacity_contract_reference']['sha256'])
+        manifest['supervisor_sha256']=archive.SUPERVISOR_SHA
         manifest['preservation_contract']=dict(schema='z1_vega_resident_preservation_contract_v1',mode=archive.MODE,backend_package=request['remote_helper_package_reference'],capacity_contract=request['remote_capacity_contract_reference'],backup_root=request['remote_archive_root'],mac_control_root=str(root))
         request['cpu_supervisor_manifest']=bound('manifest.json',manifest)
         request['cpu_supervisor_release']=bound('release.json',dict(status='ADMITTED_ONCE',manifest=request['cpu_supervisor_manifest']))
@@ -317,7 +332,8 @@ class RemoteAuthorityTests(unittest.TestCase):
                     return consumer(io.BytesIO(sink.getvalue()))
                 return json.loads(archive.json_bytes(archive.remote_dispatch(packet,deadline=deadline)))
         guard=self.deps['capacity'].ControlRoot(self.output,free_reader=lambda:10**12,deadline=self.deadline)
-        result=archive.coordinate(self.request,Adapter(),guard,deadline=self.deadline,recheck=lambda:None)
+        with mock.patch.object(archive.sys,'platform','darwin'):
+            result=archive.coordinate(self.request,Adapter(),guard,deadline=self.deadline,recheck=lambda:None)
         self.assertEqual(result['status'],'PASS');self.assertEqual(calls.count('create'),1)
         full=json.loads(Path(result['independent_backup']['path']).read_bytes());self.assertEqual(full['archive_sha256'],result['archive_sha256'])
         return result
@@ -357,3 +373,128 @@ class RemoteAuthorityTests(unittest.TestCase):
         archived.write_bytes(saved)
         info=path.stat();os.chmod(path,0o400)
         with self.assertRaisesRegex(ValueError,'metadata|identity'):archive.remote_validate(request,self.deadline,proofs)
+
+    def dispatch(self,action,**payload):
+        return archive.remote_dispatch(dict(action=action,request=self.request,payload=payload,credit_proofs={}),deadline=self.deadline)
+    def test_direct_publication_without_stream_is_denied(self):
+        self.dispatch('create')
+        body=archive.json_bytes(dict(status='PASS',independent_stream='never performed'))
+        with self.assertRaisesRegex(ValueError,'stream|protocol|stage'):
+            self.dispatch('publish',name='preservation-provenance.json',body_b64=__import__('base64').b64encode(body).decode())
+        self.assertFalse((self.sf.destination/'preservation-provenance.json').exists())
+    def test_direct_publication_without_fresh_source_is_denied(self):
+        created=self.dispatch('create')
+        bindings=dict(expected_index_sha256=created['controls']['index']['sha256'],expected_archive_sha256=created['archive_sha256'],expected_archive_bytes=created['archive_bytes'])
+        archive.remote_dispatch(dict(action='stream',request=self.request,payload=bindings,credit_proofs={}),deadline=self.deadline,sink=io.BytesIO())
+        body=archive.json_bytes(dict(status='PASS',independent_stream='asserted but no fresh source'))
+        with self.assertRaisesRegex(ValueError,'fresh|protocol|stage'):
+            self.dispatch('publish',name='preservation-provenance.json',body_b64=__import__('base64').b64encode(body).decode())
+        self.assertFalse((self.sf.destination/'preservation-provenance.json').exists())
+    def test_rebound_forged_provenance_and_receipt_are_denied_after_real_stages(self):
+        self.assertTrue(callable(getattr(archive,'stream_stage_record',None)),'publication must bind completed server stages')
+        created=self.dispatch('create')
+        bindings=dict(expected_index_sha256=created['controls']['index']['sha256'],expected_archive_sha256=created['archive_sha256'],expected_archive_bytes=created['archive_bytes'])
+        archive.remote_dispatch(dict(action='stream',request=self.request,payload=bindings,credit_proofs={}),deadline=self.deadline,sink=io.BytesIO())
+        stream_value=archive.stream_stage_record(self.request,created)
+        stream_ref=archive.control_reference(self.sf.destination/'stream-stage.json',stream_value)
+        observed=self.dispatch('inspect',completed_stream_reference=stream_ref)
+        primary=json.loads((self.sf.destination/'verification.json').read_bytes());before=json.loads((self.sf.destination/'before.json').read_bytes())
+        readback=dict(platform='darwin',hostname='synthetic-admitted-mac')
+        stages=dict(stream=stream_ref,fresh=observed['stage'])
+        stability=self.deps['store'].compare_source_inventories(before,observed['inventory'])
+        provenance=archive.provenance_record(self.request,created,primary,stability,stages,readback)
+        for field in ('schema','request','create','helper_package','capacity_ledger','release_sha256','observation_binding','protocol_stages','source_stability','independent_stream'):
+            value=copy.deepcopy(provenance);value.pop(field)
+            with self.subTest(field=field),self.assertRaises(ValueError):
+                self.dispatch('publish',name='preservation-provenance.json',body_b64=__import__('base64').b64encode(archive.json_bytes(value)).decode())
+            self.assertFalse((self.sf.destination/'preservation-provenance.json').exists())
+        for field in ('create','helper_package','capacity_ledger','protocol_stages','independent_stream'):
+            forged=copy.deepcopy(provenance)
+            if field=='create':forged[field]['archive_sha256']='0'*64
+            if field in ('helper_package','capacity_ledger'):forged[field]['sha256']='0'*64
+            if field=='protocol_stages':forged[field]['stream']['sha256']='0'*64
+            if field=='independent_stream':forged[field]['archive_bytes']-=1
+            with self.subTest(rebound_field=field),self.assertRaises(ValueError):
+                self.dispatch('publish',name='preservation-provenance.json',body_b64=__import__('base64').b64encode(archive.json_bytes(forged)).decode())
+            self.assertFalse((self.sf.destination/'preservation-provenance.json').exists())
+        prov_ref=self.dispatch('publish',name='preservation-provenance.json',body_b64=__import__('base64').b64encode(archive.json_bytes(provenance)).decode())
+        full=archive.normalized_receipt(self.request,primary,before,observed['inventory'],created,primary_reference=created['controls']['primary'],provenance_reference=prov_ref,protocol_stages=stages,readback_identity=readback)
+        for field,value in [('members',{}),('private_members',{}),('node_metadata',{}),('archive_sha256','0'*64),('job_after',{}),('protocol_stages',{}),('readback_platform','foreign')]:
+            forged=copy.deepcopy(full);forged[field]=value
+            with self.subTest(field=field),self.assertRaises(ValueError):
+                self.dispatch('publish',name='consumer-receipt.json',body_b64=__import__('base64').b64encode(archive.json_bytes(forged)).decode())
+            self.assertFalse((self.sf.destination/'consumer-receipt.json').exists())
+        ref=self.dispatch('publish',name='consumer-receipt.json',body_b64=__import__('base64').b64encode(archive.json_bytes(full)).decode())
+        self.assertEqual(hashlib.sha256(Path(ref['path']).read_bytes()).hexdigest(),ref['sha256'])
+
+
+    def test_failed_stream_cannot_create_a_completed_protocol_record(self):
+        created=self.dispatch('create')
+        bindings=dict(expected_index_sha256=created['controls']['index']['sha256'],expected_archive_sha256=created['archive_sha256'],expected_archive_bytes=created['archive_bytes'])
+        class BrokenSink:
+            def write(self,data):return 0
+        with self.assertRaises(ValueError):
+            archive.remote_dispatch(dict(action='stream',request=self.request,payload=bindings),deadline=self.deadline,sink=BrokenSink())
+        self.assertFalse((self.sf.destination/'stream-stage.json').exists())
+        with self.assertRaisesRegex(ValueError,'stream.*stage'):
+            self.dispatch('inspect',completed_stream_reference=dict(path=str(self.sf.destination/'stream-stage.json'),sha256='0'*64,bytes=1))
+    def test_remote_bootstrap_checks_actual_manifest_before_foreign_candidate_reads(self):
+        backup=str(self.deps['store'].BACKUP_ROOT)
+        bootstrap=archive.BOOTSTRAP.replace('/cephhome/eunikhilr/campaign-backups/z1-horizon-evaluation-20261027-resident004',backup).replace('/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002',str(self.phase.cpu)).replace('565bb43027d8c9a98505603985d7a95b8f54c093c51e6cbcb2ba947f1507c4fd',archive.SUPERVISOR_SHA)
+        namespace={};exec(compile(bootstrap,'<translated-trusted-bootstrap>','exec'),namespace)
+        request=copy.deepcopy(self.request);request['remote_helper_package_reference']['sha256']='b'*64;request['helper_package_reference']['sha256']='b'*64
+        with self.assertRaisesRegex(ValueError,'actual manifest preservation contract differs'):
+            namespace['load_verified_package'](request['remote_helper_package_reference'],request,'/',True)
+
+
+    def credit_request(self,result):
+        compact_path=next(self.output.glob('*-receipt.json'));body=compact_path.read_bytes()
+        proof=dict(path=str(compact_path),sha256=hashlib.sha256(body).hexdigest());request=copy.deepcopy(self.request)
+        for role,path in [('raw',self.sf.raw/'intent.json'),('raw',self.sf.raw/'worker-result.json'),('archive',Path(result['create']['archive_path'])),('provenance',self.sf.destination/'stream-stage.json')]:
+            info=path.lstat();item=dict(path=str(path),bytes=info.st_size,sha256=hashlib.sha256(path.read_bytes()).hexdigest(),device=info.st_dev,inode=info.st_ino,link_count=info.st_nlink,proof=proof)
+            request['_ledger']['slots'][0]['retained'][role].append(item)
+        request['capacity_ledger_reference']=self.phase.put('multi-item-ledger.json',request['_ledger'])
+        request['_ledger_body_b64']=__import__('base64').b64encode(Path(request['capacity_ledger_reference']['path']).read_bytes()).decode()
+        return request,{proof['sha256']:__import__('base64').b64encode(body).decode()}
+    def test_multiple_items_share_one_full_proof_archive_authentication_per_rpc(self):
+        result=self.complete();request,proofs=self.credit_request(result);reads=[];real=archive.read_bytes
+        def counted(path,*args,**kwargs):reads.append(str(path));return real(path,*args,**kwargs)
+        with mock.patch.object(archive,'_publication_inputs',wraps=archive._publication_inputs) as closure,mock.patch.object(archive,'read_bytes',side_effect=counted):
+            archive.remote_validate(request,self.deadline,proofs)
+        self.assertEqual(closure.call_count,1,'one full protocol proof closure per compact proof, not per retained file')
+        self.assertEqual(reads.count(result['create']['archive_path']),1,'one full compressed archive hash per compact proof/RPC')
+        self.assertEqual(reads.count(str(self.sf.raw/'intent.json')),1)
+        self.assertEqual(reads.count(str(self.sf.raw/'worker-result.json')),1)
+    def test_shared_proof_does_not_skip_current_archive_item_identity(self):
+        result=self.complete();request,proofs=self.credit_request(result);real=archive.read_bytes;changed=[False]
+        def mutate_after_closure(path,*args,**kwargs):
+            if str(path)==str(self.sf.raw/'intent.json') and not changed[0]:
+                changed[0]=True;archived=Path(result['create']['archive_path']);body=archived.read_bytes();archived.write_bytes(bytes([body[0]^1])+body[1:])
+            return real(path,*args,**kwargs)
+        with mock.patch.object(archive,'read_bytes',side_effect=mutate_after_closure),self.assertRaisesRegex(ValueError,'archive|identity'):
+            archive.remote_validate(request,self.deadline,proofs)
+        self.assertTrue(changed[0])
+
+
+class BootstrapAuthorityRegressionTests(unittest.TestCase):
+    def test_rebound_foreign_package_rejects_before_any_candidate_execution(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp).resolve();request,_=RequestBindingTests().fixture(root)
+            candidate=root/'foreign-helper';candidate.mkdir();original=Path(archive.__file__).parent
+            for source in original.rglob('*.py'):
+                relative=source.relative_to(original)
+                if 'tests' in relative.parts:continue
+                path=candidate/relative;path.parent.mkdir(exist_ok=True);path.write_bytes(source.read_bytes())
+            marker=root/'foreign-executed'
+            with (candidate/'__init__.py').open('a') as stream:stream.write('\nfrom pathlib import Path\nPath('+repr(str(marker))+').write_text("candidate executed")\n')
+            files={p.relative_to(candidate).as_posix():dict(sha256=hashlib.sha256(p.read_bytes()).hexdigest(),bytes=p.stat().st_size) for p in candidate.rglob('*.py')}
+            body=archive.json_bytes(dict(schema='z1_vega_policy_archive_package_v1',entrypoint='resident_archive.py',files=files))
+            manifest=candidate/'package-manifest.json';manifest.write_bytes(body)
+            request['helper_package_reference']=dict(path=str(manifest),sha256=hashlib.sha256(body).hexdigest())
+            request['remote_helper_package_reference']['sha256']=request['helper_package_reference']['sha256']
+            path=root/'request.json';path.write_bytes(archive.json_bytes(request))
+            program='import importlib.util\ns=importlib.util.spec_from_file_location("trusted_entry",'+repr(str(Path(archive.__file__)))+');m=importlib.util.module_from_spec(s);s.loader.exec_module(m)\nm.run('+repr(str(path))+','+repr(str(root))+')'
+            result=subprocess.run([sys.executable,'-B','-I','-S','-c',program],capture_output=True,timeout=10)
+            self.assertNotEqual(result.returncode,0)
+            self.assertFalse(marker.exists(),'self-consistent foreign helper executed before preservation authority')
+            self.assertIn(b'preservation',result.stderr)
