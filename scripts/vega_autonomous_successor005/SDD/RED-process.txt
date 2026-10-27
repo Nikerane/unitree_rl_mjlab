@@ -1,0 +1,43 @@
+test_generic_preservation_is_implemented_without_cpu_release (test_preservation.ChildBoundaryTests.test_generic_preservation_is_implemented_without_cpu_release) ... ok
+test_real_child_complete_eof_and_exit_required (test_preservation.ChildBoundaryTests.test_real_child_complete_eof_and_exit_required) ... ok
+test_closed_linux_profile_and_all_sources_bound (test_preservation.ProfileTests.test_closed_linux_profile_and_all_sources_bound) ... ok
+test_actual_cpu_index_three_is_extended_seed_one (test_preservation.ReservationTests.test_actual_cpu_index_three_is_extended_seed_one) ... ok
+test_exact_free_equals_R_raw_then_archive_is_one_transaction (test_preservation.ReservationTests.test_exact_free_equals_R_raw_then_archive_is_one_transaction) ... ok
+test_overlap_foreign_slot_cap_and_ledger_rebinding_rejected (test_preservation.ReservationTests.test_overlap_foreign_slot_cap_and_ledger_rebinding_rejected) ... ok
+test_unproved_credit_and_foreign_archive_path_rejected (test_preservation.ReservationTests.test_unproved_credit_and_foreign_archive_path_rejected) ... ok
+test_actual_separate_writer_and_verifier_generic_full_closure (test_process_profile.ProcessProfileTests.test_actual_separate_writer_and_verifier_generic_full_closure) ... FAIL
+test_process_pid_collision_rejected (test_process_profile.ProcessProfileTests.test_process_pid_collision_rejected) ... ERROR
+test_source_rebound_extra_bytecode_foreign_authority_and_mac_operative_ref (test_process_profile.ProcessProfileTests.test_source_rebound_extra_bytecode_foreign_authority_and_mac_operative_ref) ... ok
+
+======================================================================
+ERROR: test_process_pid_collision_rejected (test_process_profile.ProcessProfileTests.test_process_pid_collision_rejected)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/tests/test_process_profile.py", line 43, in test_process_pid_collision_rejected
+    root,request,ref=generic(Path(tmp).resolve());loaded=entry.load_verified_package(request['helper_package_reference'],request,str(Path(ref['path']).parent));a=loaded['vega_policy_archive.resident_archive']
+                                                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/independent_verify.py", line 87, in load_verified_package
+    authenticate_package_authority(reference,request,base,remote)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/independent_verify.py", line 61, in authenticate_package_authority
+    need(str(Path(ref['path']).parent)==control and Path(ref['path']).name=='preservation-authority.json','closed root preservation authority required')
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/independent_verify.py", line 35, in need
+    if not ok:raise ValueError('package preservation authority: '+message)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: package preservation authority: closed root preservation authority required
+
+======================================================================
+FAIL: test_actual_separate_writer_and_verifier_generic_full_closure (test_process_profile.ProcessProfileTests.test_actual_separate_writer_and_verifier_generic_full_closure)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/tests/test_process_profile.py", line 18, in test_actual_separate_writer_and_verifier_generic_full_closure
+    self.assertEqual(result.returncode,0,result.stderr.decode())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 1 != 0 : ValueError: compatibility source size/SHA differs: archive_contract.py
+
+
+----------------------------------------------------------------------
+Ran 10 tests in 0.705s
+
+FAILED (failures=1, errors=1)

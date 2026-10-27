@@ -1,0 +1,46 @@
+{
+  "entrypoint": "resident_archive.py",
+  "files": {
+    "__init__.py": {
+      "bytes": 58,
+      "sha256": "95981fe91fddd0368ec83eaf697c6fb3c39f5902e816c6988b3ff61816589c83"
+    },
+    "capacity.py": {
+      "bytes": 11672,
+      "sha256": "5e9b0637a389abe598f2de24ed74aa9a1134a35808cb729c40ffac37aab17fc0"
+    },
+    "compat/__init__.py": {
+      "bytes": 2432,
+      "sha256": "8380e6021f009279a6bc5cce83c31d09677c506ae983b9352ceb770def8d7c74"
+    },
+    "compat/archive_contract.py": {
+      "bytes": 6220,
+      "sha256": "1f228baf0c004864c7974107f0792e710b70e18c6edbcd83bcd31f14c9f3ac24"
+    },
+    "compat/policy_archive.py": {
+      "bytes": 42052,
+      "sha256": "07c0f6b044e2d39277d294c1e774d883d6240b407f49847cd5a2c60e037abc3d"
+    },
+    "compat/remote_policy_archive.py": {
+      "bytes": 10658,
+      "sha256": "835af461be2ded473c7bcbe2d4bc9e9a30d26a188ab558b7442177a94c2cb9e7"
+    },
+    "resident_archive.py": {
+      "bytes": 66028,
+      "sha256": "858d70292cd9b0080a5a89f5cca2608c442ce19b993851e0a73dede78c1da115"
+    },
+    "resident_store.py": {
+      "bytes": 30936,
+      "sha256": "e229d6b4c9d88233804c7531f28a4a2639624e5df691de63fa357dd09912c73f"
+    },
+    "stream_reader.py": {
+      "bytes": 17539,
+      "sha256": "88d1ce78ddd41972525364e849ccf69bb6918191086eea2b9a04c71cb1efa603"
+    },
+    "transport.py": {
+      "bytes": 5986,
+      "sha256": "f87dcbaa666b229653758ff7482cad2a36161e00c884d179dfa332b4a0ffcb5d"
+    }
+  },
+  "schema": "z1_vega_policy_archive_package_v1"
+}

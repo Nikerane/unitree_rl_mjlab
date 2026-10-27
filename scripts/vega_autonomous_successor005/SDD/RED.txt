@@ -1,0 +1,45 @@
+test_closed_linux_profile_and_all_sources_bound (test_preservation.ProfileTests.test_closed_linux_profile_and_all_sources_bound) ... FAIL
+test_exact_free_equals_R_raw_then_archive_is_one_transaction (test_preservation.ReservationTests.test_exact_free_equals_R_raw_then_archive_is_one_transaction) ... FAIL
+test_overlap_foreign_slot_cap_and_ledger_rebinding_rejected (test_preservation.ReservationTests.test_overlap_foreign_slot_cap_and_ledger_rebinding_rejected) ... FAIL
+test_unproved_credit_and_foreign_archive_path_rejected (test_preservation.ReservationTests.test_unproved_credit_and_foreign_archive_path_rejected) ... FAIL
+
+======================================================================
+FAIL: test_closed_linux_profile_and_all_sources_bound (test_preservation.ProfileTests.test_closed_linux_profile_and_all_sources_bound)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/tests/test_preservation.py", line 59, in test_closed_linux_profile_and_all_sources_bound
+    self.assertIsNotNone(entry,'new Linux verifier entry required')
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: unexpectedly None : new Linux verifier entry required
+
+======================================================================
+FAIL: test_exact_free_equals_R_raw_then_archive_is_one_transaction (test_preservation.ReservationTests.test_exact_free_equals_R_raw_then_archive_is_one_transaction)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/tests/test_preservation.py", line 25, in setUp
+    self.assertIsNotNone(self.r, 'new reservation implementation required')
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: unexpectedly None : new reservation implementation required
+
+======================================================================
+FAIL: test_overlap_foreign_slot_cap_and_ledger_rebinding_rejected (test_preservation.ReservationTests.test_overlap_foreign_slot_cap_and_ledger_rebinding_rejected)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/tests/test_preservation.py", line 25, in setUp
+    self.assertIsNotNone(self.r, 'new reservation implementation required')
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: unexpectedly None : new reservation implementation required
+
+======================================================================
+FAIL: test_unproved_credit_and_foreign_archive_path_rejected (test_preservation.ReservationTests.test_unproved_credit_and_foreign_archive_path_rejected)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/tests/test_preservation.py", line 25, in setUp
+    self.assertIsNotNone(self.r, 'new reservation implementation required')
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: unexpectedly None : new reservation implementation required
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.003s
+
+FAILED (failures=4)

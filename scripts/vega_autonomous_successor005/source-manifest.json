@@ -1,0 +1,58 @@
+{
+  "entrypoint": "independent_verify.py",
+  "files": {
+    "archive/__init__.py": {
+      "bytes": 58,
+      "sha256": "95981fe91fddd0368ec83eaf697c6fb3c39f5902e816c6988b3ff61816589c83"
+    },
+    "archive/capacity.py": {
+      "bytes": 11714,
+      "sha256": "4a57aca180fd19233f9be858eb9532400f9fee7a08434b0aefa80575eb0142a5"
+    },
+    "archive/compat/__init__.py": {
+      "bytes": 2432,
+      "sha256": "7f60ba93595bd70e8054aceecd187bb8d83b647cfe33e93d03e65b22fbe789a7"
+    },
+    "archive/compat/archive_contract.py": {
+      "bytes": 6220,
+      "sha256": "1f228baf0c004864c7974107f0792e710b70e18c6edbcd83bcd31f14c9f3ac24"
+    },
+    "archive/compat/policy_archive.py": {
+      "bytes": 42053,
+      "sha256": "c8e093626dc07ca77aae7b326895f7f130185aed24f822fdce04a51c98ebcc25"
+    },
+    "archive/compat/remote_policy_archive.py": {
+      "bytes": 10658,
+      "sha256": "835af461be2ded473c7bcbe2d4bc9e9a30d26a188ab558b7442177a94c2cb9e7"
+    },
+    "archive/resident_archive.py": {
+      "bytes": 70336,
+      "sha256": "2e2d3677f479583a106bd23e98fbd4313aaae96f5cc81ca8166fdaccaf6739a2"
+    },
+    "archive/resident_store.py": {
+      "bytes": 31877,
+      "sha256": "8c1d89d4321b013eab425e7e9d16d2b2750f67dd5722ae4db8f3b755e1d830c4"
+    },
+    "archive/stream_reader.py": {
+      "bytes": 17539,
+      "sha256": "88d1ce78ddd41972525364e849ccf69bb6918191086eea2b9a04c71cb1efa603"
+    },
+    "archive/transport.py": {
+      "bytes": 6211,
+      "sha256": "ccf141fe65e3335955a5654de068b1150c4062f5431264d0c7a6b0188915d4a2"
+    },
+    "control_preservation.py": {
+      "bytes": 13808,
+      "sha256": "6f3166775c0f7f3eccd50cf80a17744a087b3a1b4a99f74e3e1daaa0fb4380b9"
+    },
+    "independent_verify.py": {
+      "bytes": 12604,
+      "sha256": "0c92c980307fdb5b948ad0368dd241e21ca77443269335938a5442be6edff4c4"
+    },
+    "reservation.py": {
+      "bytes": 13798,
+      "sha256": "9429f5488aa9bdeb480adea4315d47262b70c544b5158ff78f524dd43a708aec"
+    }
+  },
+  "schema": "z1_vega_policy_archive_package_v1"
+}

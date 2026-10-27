@@ -1,0 +1,33 @@
+test_real_npz_full_receipt_accepted_by_actual_unchanged_sealer_consumer (test_consumer_compatibility.ConsumerTests.test_real_npz_full_receipt_accepted_by_actual_unchanged_sealer_consumer) ... ERROR
+
+======================================================================
+ERROR: test_real_npz_full_receipt_accepted_by_actual_unchanged_sealer_consumer (test_consumer_compatibility.ConsumerTests.test_real_npz_full_receipt_accepted_by_actual_unchanged_sealer_consumer)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/tests/test_consumer_compatibility.py", line 75, in test_real_npz_full_receipt_accepted_by_actual_unchanged_sealer_consumer
+    result=a.coordinate(request,transport,guard,deadline=fixture.deadline,recheck=lambda:None)
+  File "/private/var/folders/rp/p16f79hj673f0nx2bz0frx0m0000gn/T/tmpzdr8mh5v/helper/archive/resident_archive.py", line 352, in coordinate
+  File "/private/var/folders/rp/p16f79hj673f0nx2bz0frx0m0000gn/T/tmpzdr8mh5v/helper/archive/resident_archive.py", line 379, in _coordinate
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/tests/test_consumer_compatibility.py", line 72, in call
+    if action in ('create','stream'):return child(action,payload,consumer)
+                                            ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/tests/test_consumer_compatibility.py", line 69, in child
+    result=m['transport'].run_process([sys.executable,'-B','-I','-S','-c',code],body(packet),deadline=fixture.deadline,stdout_cap=request['max_archive_bytes'],consumer=consumer)
+  File "/private/var/folders/rp/p16f79hj673f0nx2bz0frx0m0000gn/T/tmpzdr8mh5v/helper/archive/transport.py", line 117, in run_process
+  File "/private/var/folders/rp/p16f79hj673f0nx2bz0frx0m0000gn/T/tmpzdr8mh5v/helper/archive/transport.py", line 85, in finish
+  File "/private/var/folders/rp/p16f79hj673f0nx2bz0frx0m0000gn/T/tmpzdr8mh5v/helper/archive/transport.py", line 20, in _require
+ValueError: owned child exit 1
+Traceback (most recent call last):
+  File "<string>", line 14, in <module>
+    s.stream_back(r,d,sys.stdout.buffer,deadline=deadline,**packet['payload']);sys.stdout.buffer.flush();idx=(d/'index.json').read_bytes();created,_=a._archive_closure(r,d,dict(path=str(d/'index.json'),sha256=hashlib.sha256(idx).hexdigest(),bytes=len(idx)),deadline);b=a.json_bytes(a.stream_stage_record(r,created));s.publish_control(d/'stream-stage.json',b,hashlib.sha256(b).hexdigest(),free_reader=lambda:10**12,deadline=deadline)
+                                                                                                                                                                                                                                                                                          ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/private/var/folders/rp/p16f79hj673f0nx2bz0frx0m0000gn/T/tmpzdr8mh5v/helper/archive/resident_archive.py", line 612, in stream_stage_record
+    release=request['remote_supervisor_release'],create=created)
+            ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyError: 'remote_supervisor_release'
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.340s
+
+FAILED (errors=1)
