@@ -1,0 +1,25 @@
+test_binary_scheduler_output_retains_exact_bytes_and_timeout_evidence (test_coordinator.FailureEvidenceTests.test_binary_scheduler_output_retains_exact_bytes_and_timeout_evidence) ... ERROR
+test_hash_valid_duplicate_intent_is_not_reconciled_as_clean (test_coordinator.FailureEvidenceTests.test_hash_valid_duplicate_intent_is_not_reconciled_as_clean) ... FAIL
+
+======================================================================
+ERROR: test_binary_scheduler_output_retains_exact_bytes_and_timeout_evidence (test_coordinator.FailureEvidenceTests.test_binary_scheduler_output_retains_exact_bytes_and_timeout_evidence)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 309, in test_binary_scheduler_output_retains_exact_bytes_and_timeout_evidence
+    self.assertEqual(base64.b64decode(r['stdout_base64']),b'\xff\x00')
+                                      ~^^^^^^^^^^^^^^^^^
+KeyError: 'stdout_base64'
+
+======================================================================
+FAIL: test_hash_valid_duplicate_intent_is_not_reconciled_as_clean (test_coordinator.FailureEvidenceTests.test_hash_valid_duplicate_intent_is_not_reconciled_as_clean)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 320, in test_hash_valid_duplicate_intent_is_not_reconciled_as_clean
+    with self.assertRaises(journal.Hold): journal.read_chain(j.path)
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+AssertionError: Hold not raised
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.024s
+
+FAILED (failures=1, errors=1)

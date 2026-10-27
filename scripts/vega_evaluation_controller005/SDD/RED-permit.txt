@@ -1,0 +1,15 @@
+test_revoked_or_expired_permit_never_starts_scheduler_child (test_coordinator.LateIssueTests.test_revoked_or_expired_permit_never_starts_scheduler_child) ... ERROR
+
+======================================================================
+ERROR: test_revoked_or_expired_permit_never_starts_scheduler_child (test_coordinator.LateIssueTests.test_revoked_or_expired_permit_never_starts_scheduler_child)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 335, in test_revoked_or_expired_permit_never_starts_scheduler_child
+    permit=scheduler.IssuePermit(stop,time.monotonic()+5)
+           ^^^^^^^^^^^^^^^^^^^^^
+AttributeError: module 'scheduler' has no attribute 'IssuePermit'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+FAILED (errors=1)

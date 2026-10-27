@@ -1,0 +1,14 @@
+test_changed_batch_is_rejected_before_transport (test_coordinator.BoundBatchTests.test_changed_batch_is_rejected_before_transport) ... ERROR
+
+======================================================================
+ERROR: test_changed_batch_is_rejected_before_transport (test_coordinator.BoundBatchTests.test_changed_batch_is_rejected_before_transport)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 327, in test_changed_batch_is_rejected_before_transport
+    sched=scheduler.Scheduler('900',str(os.getuid()),refs)
+TypeError: Scheduler.__init__() takes 3 positional arguments but 4 were given
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+FAILED (errors=1)

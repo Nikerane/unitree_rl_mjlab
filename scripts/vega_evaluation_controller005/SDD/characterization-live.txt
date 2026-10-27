@@ -1,0 +1,8 @@
+test_actual_log_and_quota_growth_during_real_child_wait_are_observed (test_coordinator.LiveResourceTests.test_actual_log_and_quota_growth_during_real_child_wait_are_observed) ... ok
+test_bounded_journal_exhaustion_drains_existing_child (test_coordinator.LiveResourceTests.test_bounded_journal_exhaustion_drains_existing_child) ... ok
+test_real_usr1_during_preissue_gate_prevents_submission (test_coordinator.LiveResourceTests.test_real_usr1_during_preissue_gate_prevents_submission) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 2.884s
+
+OK

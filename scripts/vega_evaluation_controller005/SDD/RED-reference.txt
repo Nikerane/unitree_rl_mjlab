@@ -1,0 +1,19 @@
+test_reservation_reference_is_actual_reservation_not_wrapper (test_coordinator.AdditionalBoundaries.test_reservation_reference_is_actual_reservation_not_wrapper) ... FAIL
+
+======================================================================
+FAIL: test_reservation_reference_is_actual_reservation_not_wrapper (test_coordinator.AdditionalBoundaries.test_reservation_reference_is_actual_reservation_not_wrapper)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 226, in test_reservation_reference_is_actual_reservation_not_wrapper
+    self.assertEqual(frozen, {'index':3})
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+AssertionError: {'descriptor': {'index': 3, 'nonce': 'aaaaa[81 chars]: 3}} != {'index': 3}
++ {'index': 3}
+- {'descriptor': {'index': 3, 'nonce': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'},
+-  'ledger': {'all18': True},
+-  'reservation': {'index': 3}}
+
+----------------------------------------------------------------------
+Ran 1 test in 0.049s
+
+FAILED (failures=1)

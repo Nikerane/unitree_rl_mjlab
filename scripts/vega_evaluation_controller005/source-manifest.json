@@ -1,0 +1,25 @@
+{
+  "schema": "z1_vega_controller_source_v1",
+  "sources": {
+    "controller.sbatch": {
+      "bytes": 1214,
+      "sha256": "dfbe2715e6f355e6c42ba112f03482ce004547ab193785021c51dccddd3e3b9a"
+    },
+    "coordinator.py": {
+      "bytes": 15781,
+      "sha256": "1560f73d224d9d7415740cfdcb1a187c954319e7ea13a1330b5e57fbde68169b"
+    },
+    "entry.py": {
+      "bytes": 8197,
+      "sha256": "dbb948814192ce0ead7f9d9ced1737357f4368175b166507b7e89977f2699702"
+    },
+    "journal.py": {
+      "bytes": 7541,
+      "sha256": "eea1d794eceeafa51da3fe504164d93c08144da398ec94434520e5c13a1f3c0f"
+    },
+    "scheduler.py": {
+      "bytes": 9738,
+      "sha256": "eee354cb79848e0d0fa1b5ad921c415f1a782d01b4f324003d78b2db2a134b96"
+    }
+  }
+}

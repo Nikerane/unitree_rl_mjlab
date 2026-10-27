@@ -1,0 +1,22 @@
+test_reconcile_is_read_only_and_restart_denies_submit (test_coordinator.JournalTests.test_reconcile_is_read_only_and_restart_denies_submit) ... FAIL
+
+======================================================================
+FAIL: test_reconcile_is_read_only_and_restart_denies_submit (test_coordinator.JournalTests.test_reconcile_is_read_only_and_restart_denies_submit)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 118, in test_reconcile_is_read_only_and_restart_denies_submit
+    self.assertEqual(s.calls,[])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+AssertionError: Lists differ: [('test', 3), ('test', 1)] != []
+
+First list contains 2 additional elements.
+First extra element 0:
+('test', 3)
+
+- [('test', 3), ('test', 1)]
++ []
+
+----------------------------------------------------------------------
+Ran 1 test in 0.153s
+
+FAILED (failures=1)

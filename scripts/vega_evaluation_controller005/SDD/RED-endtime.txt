@@ -1,0 +1,18 @@
+test_controller_end_shortening_causes_one_owned_drain (test_coordinator.AdditionalBoundaries.test_controller_end_shortening_causes_one_owned_drain) ... FAIL
+
+======================================================================
+FAIL: test_controller_end_shortening_causes_one_owned_drain (test_coordinator.AdditionalBoundaries.test_controller_end_shortening_causes_one_owned_drain)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 242, in test_controller_end_shortening_causes_one_owned_drain
+    self.assertEqual(r['status'],'HOLD')
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'COMPLETE' != 'HOLD'
+- COMPLETE
++ HOLD
+
+
+----------------------------------------------------------------------
+Ran 1 test in 10.088s
+
+FAILED (failures=1)

@@ -1,0 +1,17 @@
+{
+  "argv": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-B",
+    "-I",
+    "-S",
+    "/private/var/folders/rp/p16f79hj673f0nx2bz0frx0m0000gn/T/tmp68dq9v7q/entry.py",
+    "--check-source",
+    "/private/var/folders/rp/p16f79hj673f0nx2bz0frx0m0000gn/T/tmp68dq9v7q/source-manifest.json",
+    "--manifest-sha256",
+    "2ba48eb56047f4a03a549bc2306a6cd54848e481e177878ca8a778f2e5e2b773"
+  ],
+  "returncode": 0,
+  "stdout": "{\"status\": \"SOURCE_VERIFIED\"}\n",
+  "stderr": "",
+  "compiled_sources": 6
+}

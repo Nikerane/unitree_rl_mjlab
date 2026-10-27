@@ -1,0 +1,18 @@
+test_bounded_journal_exhaustion_drains_existing_child (test_coordinator.LiveResourceTests.test_bounded_journal_exhaustion_drains_existing_child) ... FAIL
+
+======================================================================
+FAIL: test_bounded_journal_exhaustion_drains_existing_child (test_coordinator.LiveResourceTests.test_bounded_journal_exhaustion_drains_existing_child)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 301, in test_bounded_journal_exhaustion_drains_existing_child
+    self.assertEqual(r['status'],'HOLD')
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'COMPLETE' != 'HOLD'
+- COMPLETE
++ HOLD
+
+
+----------------------------------------------------------------------
+Ran 1 test in 7.016s
+
+FAILED (failures=1)
