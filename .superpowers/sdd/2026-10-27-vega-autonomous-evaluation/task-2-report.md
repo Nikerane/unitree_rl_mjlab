@@ -351,3 +351,75 @@ checks, review/physics integration or delegated activation. Activation remains
 explicitly HOLD pending Task3. Full-campaign journal/control byte-budget
 integration remains root's separately declared Task3/4 gate; this round adds no
 new claim about that budget.
+
+## Fix round2/5 — residual T2-I2 refreshed-deadline branch
+
+Review base: `113ecccda7f2ff503250e5db80974a1c0f830a21`.
+Fix implementation commit: `b30c4c0ca046304b4095202e5d942eebcda94dfd`.
+Status: residual T2-I2 implemented and locally covered; scoped re-review pending.
+T2-I1 and T2-I3 were closed by the prior scoped review and are not reopened.
+
+The production change is one outer-drain-loop condition: before every further
+snapshot, check the **current refreshed** controller-minus120s boundary as well
+as the originally captured bounded drain deadline. The inner real-sleep pause
+already respected this boundary; the outer loop now stops too, preventing a
+shortened controller end from turning its early return into a scheduler/journal
+spin. The existing final DRAIN_UNKNOWN/HOLD path records the unresolved outcome.
+It does not claim terminal drain, accept a terminal receipt, issue again, or
+repeat cancellation after the boundary. Ordinary paced quiescent drain is
+unchanged.
+
+The added focused regression starts quiescence from an issued RUNNING
+observation, cancels once, then makes the first post-cancel snapshot shorten the
+controller's remaining lifetime to100s. Its scheduler would otherwise report
+three COMPLETING states then CANCELLED. Before the fix it made four immediate
+post-cancel observations (RED,4!=1, drained=true). After the fix it makes only
+that first post-cancel observation, records DRAIN_UNKNOWN/terminal drain deadline,
+returns HOLD/drained=false, and makes neither terminal-processing acceptance nor
+SLOT_COMPLETE. The test retains the actual submit/cancel sequence and observation
+timestamps in diagnostics. Existing four-observation pacing and both terminal
+lifetime regressions remain green.
+
+Current exact five-file controller manifest SHA256:
+`b66bfbe6500bc82b66eda98c027a83ea4b4e4f28ae7157448596777a446a89be`.
+Only coordinator source changed in the operative graph (16882bytes); all other
+operative source bytes, source inventory, adapter/config signatures, physics,
+all budget/cap constants and preservation13-source package remain unchanged.
+README documents the outer refreshed-boundary check. No journal externalization,
+credit changes, SSH, live scheduler/authority operation or agent was introduced.
+
+Exact covering commands/output (a370 local actual host/interpreter):
+
+```text
+python3 -B -m unittest discover -s scripts/vega_evaluation_controller005/tests -k refreshed_controller_reaches -v
+RED: Ran1test in0.009s; FAILED(failures=1),4 post-cancel observations instead of1.
+SDD/round2-RED-refreshed-drain.txt.
+
+python3 -B -m unittest discover -s scripts/vega_evaluation_controller005/tests -k LifecycleReviewTests -v
+Ran4tests in0.427s; OK. SDD/round2-GREEN-lifecycle-normal.txt.
+
+python3 -B -O -m unittest discover -s scripts/vega_evaluation_controller005/tests -k LifecycleReviewTests -v
+Ran4tests in0.420s; OK. SDD/round2-GREEN-lifecycle-optimized.txt.
+
+python3 -B -m unittest discover -s scripts/vega_evaluation_controller005/tests -p test_entry.py -v
+Ran3tests in0.259s; OK. SDD/round2-GREEN-entry-normal.txt.
+
+python3 -B -O -m unittest discover -s scripts/vega_evaluation_controller005/tests -p test_entry.py -v
+Ran3tests in0.262s; OK. SDD/round2-GREEN-entry-optimized.txt.
+```
+
+These are the amended lifecycle tests in `test_coordinator.py` plus source-entry
+manifest tests in `test_entry.py`,7passing normal and7optimized. No full34/35
+suite was repeated in this narrow round. The exact new manifest's five byte/size
+records were checked and all six production/test Python files compiled directly
+without bytecode; output is retained in `SDD/round2-source-verification.txt`.
+`git diff --cached --check` passed before the implementation commit.
+
+Root separately reports that the prior b0ec09d source's corrected growth and
+preissue cases passed on actual Linux/Ceph. Its prior native lifecycle selector
+used `LifecycleReview` instead of the actual `LifecycleReviewTests` class and
+produced three harness-load errors; this is not a full native34-test pass. Root
+retains that failed harness evidence in OPS005/controller-native-pure002 and will
+correct the selector against this new source. This implementer performed no
+native/live operation. Final native gates, independent scoped acceptance and
+Task3 integration/delegated activation remain root-owned; activation stays HOLD.
