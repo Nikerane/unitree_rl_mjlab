@@ -71,7 +71,7 @@ class Owner:
         self.journal=Journal(self.root/'journal.jsonl')
         self.transaction=None; self.identity=None; self.submission=None
         self.halt=None; self.halt_observed_at=None; self.cancelled=False; self.drained=False
-        self.pending_started=None
+        self.pending_started=None; self.lifecycle='UNISSUED'; self.post_deadline=None
         self.journal.append({'kind':'ACTIVATE','context':runtime.context,'controller':controller,
                              'requested_resources':{'seconds':28800,'cpus':1,'memory_mib':2048}})
     def record(self,kind,**data): return self.journal.append(dict(data,kind=kind),emergency=self.halt is not None)
@@ -81,10 +81,12 @@ class Owner:
             self.record('QUIESCE',reason=self.halt)
     def live(self):
         if self.stop.is_set(): self.halt_once('shutdown signal')
-        if self.submission and self.deadline-self.clock()<ACTIVE_SECONDS:
+        if self.lifecycle=='ACTIVE' and self.deadline-self.clock()<ACTIVE_SECONDS:
             self.halt_once('active remaining lifetime below1530')
         if self.pending_started is not None and self.clock()-self.pending_started>PENDING_SECONDS:
             self.halt_once('pending exceeded900')
+        if self.post_deadline is not None and self.clock()>=self.post_deadline:
+            self.halt_once('postprocessing deadline exceeded')
         started=time.monotonic()
         try:
             result=self.adapter.resource_check(self.transaction,self.context)
@@ -127,6 +129,9 @@ class Owner:
             identity.get('name')!=self.submission['name'] or identity.get('user')!=self.context['uid']):
             raise Hold('unowned materialized identity')
         if self.identity and self.identity!=identity: raise Hold('materialized identity changed')
+        state=observation['state']
+        if observation['terminal'] is not (state in TERMINAL): raise Hold('contradictory terminal observation')
+        self.lifecycle='TERMINAL' if observation['terminal'] else 'ACTIVE'
         self.identity=identity
         self.record('CONTROLLER_OBSERVATION',controller=controller)
         self.record('OBSERVATION',observation=observation)
@@ -134,7 +139,6 @@ class Owner:
         if state=='PENDING':
             if self.pending_started is None: self.pending_started=self.clock()
         else: self.pending_started=None
-        if observation['terminal'] is not (state in TERMINAL): raise Hold('contradictory terminal observation')
         return observation
     def drain(self,observation=None):
         self.halt_once(self.halt or 'drain requested')
@@ -162,7 +166,7 @@ class Owner:
                 self.record('DRAIN_UNKNOWN',reason=str(exc)); return None
             if observation['terminal']:
                 self.drained=True; return observation
-            self.pause(min(SCHEDULER_INTERVAL,max(0,drain_deadline-time.monotonic())))
+            self.pause_drain(SCHEDULER_INTERVAL,drain_deadline)
         self.record('DRAIN_UNKNOWN',reason='terminal drain deadline'); return None
     def pause(self,seconds):
         end=time.monotonic()+seconds
@@ -170,17 +174,30 @@ class Owner:
             self.live()
             if self.halt: return
             self.stop.wait(min(LIVE_INTERVAL,max(0,end-time.monotonic())))
+    def pause_drain(self,seconds,drain_deadline):
+        # Quiescence is already latched: Event.wait would return immediately.
+        end=min(time.monotonic()+seconds,drain_deadline)
+        while time.monotonic()<end and self.deadline-self.clock()>FINAL_SECONDS:
+            self.live()
+            time.sleep(min(LIVE_INTERVAL,max(0,end-time.monotonic())))
     def preserve(self,phase,index,observation):
         # This includes failed/cancelled outcomes. The adapter cannot qualify them.
         context=dict(self.context,deadline=min(self.deadline-FINAL_SECONDS,self.clock()+POST_SECONDS))
-        result=self.wait(lambda:self.adapter.terminal(phase,index,self.transaction,self.identity,observation,context),
-                         max(.001,min(POST_SECONDS,self.deadline-self.clock()-FINAL_SECONDS)),allow_halt=True)
+        self.post_deadline=context['deadline']
+        try:
+            if self.clock()>=self.post_deadline: raise Hold('postprocessing deadline exceeded')
+            result=self.wait(lambda:self.adapter.terminal(phase,index,self.transaction,self.identity,observation,context),
+                             max(.001,min(POST_SECONDS,self.deadline-self.clock()-FINAL_SECONDS)),allow_halt=True)
+            if self.clock()>=self.post_deadline: raise Hold('postprocessing deadline exceeded')
+        finally:
+            self.post_deadline=None
         self.record('TERMINAL_PROCESSED',index=index,result=result)
         if observation['state']!='COMPLETED' or observation.get('exit_code','0:0')!='0:0' or not isinstance(result,dict) or result.get('qualified') is not True:
             raise Hold('terminal technical gate failed')
     def slot(self,phase,index):
         self.transaction=None; self.identity=None; self.submission=None
         self.cancelled=False; self.pending_started=None; self.drained=False
+        self.lifecycle='UNISSUED'; self.post_deadline=None
         self.live()
         if self.halt or self.deadline-self.clock()<ISSUE_SECONDS: raise Hold(self.halt or 'issue lifetime below3630')
         self.gate(lambda context:self.adapter.preflight_current(phase,index,context))
@@ -206,6 +223,7 @@ class Owner:
         # Once intent exists, ANY ambiguous result consumes this slot forever.
         permit=IssuePermit(self.stop,time.monotonic()+2)
         self.submission=self.wait(lambda:self.scheduler.submit(phase,index,name,str(log),permit=permit),10.5,allow_halt=True)
+        self.lifecycle='ACTIVE'
         observation=None
         try:
             self.record('SUBMIT_RESULT',submission=self.submission)

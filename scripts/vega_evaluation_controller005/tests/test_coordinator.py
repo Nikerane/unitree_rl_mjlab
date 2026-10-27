@@ -263,20 +263,46 @@ class LiveResourceTests(Fixture):
                         self.observed.append(time.monotonic())
                         if owned.stat().st_size>10 or int(quota.read_text())<50: raise ValueError(resource+' breach')
                         return {'bytes':owned.stat().st_size}
+                observation_entered=threading.Event(); mutated=threading.Event(); errors=[]
                 class SlowScheduler(FakeScheduler):
                     def observe(self,submission):
-                        # Actual bounded child, not a fake blocking Python sleep.
+                        # Barrier is inside the issued observation, never preissue.
+                        observation_entered.set()
                         raw=scheduler.run_process([sys.executable,'-c','import time;time.sleep(.35)'],timeout=2)
                         result=super().observe(submission); result['raw'].append(raw); return result
                 a=Adapter(); s=SlowScheduler(('RUNNING',))
                 def grow():
-                    if resource=='quota': quota.write_text('0')
-                    else: owned.write_bytes(b'x'*11)
-                threading.Timer(.12,grow).start()
-                r=coordinator.run(coordinator.Runtime(root,dict(self.context,log_root=str(root/'evidence'))),a,s)
-                self.assertEqual(r['status'],'HOLD'); self.assertTrue(r['drained'])
-                self.assertEqual([c for c in s.calls if c[0]=='cancel'],[('cancel','125')])
-                self.assertLess(max(y-x for x,y in zip(a.observed,a.observed[1:])),.25)
+                    try:
+                        if not observation_entered.wait(timeout=5): return
+                        if resource=='quota':
+                            pending=root/'quota-next'; pending.write_text('0'); pending.replace(quota)
+                        else: owned.write_bytes(b'x'*11)
+                        mutated.set()
+                    except BaseException as exc: errors.append(repr(exc))
+                mutation=threading.Thread(target=grow)
+                mutation.start()
+                try:
+                    r=coordinator.run(coordinator.Runtime(root,dict(self.context,log_root=str(root/'evidence'))),a,s)
+                finally:
+                    mutation.join(timeout=6)
+                diagnostic=repr({'result':r,'calls':s.calls,'resource_times':a.observed,
+                                 'observation_entered':observation_entered.is_set(),'mutated':mutated.is_set(),'errors':errors})
+                self.assertFalse(mutation.is_alive(),diagnostic)
+                self.assertFalse(errors,diagnostic)
+                self.assertTrue(mutated.is_set(),diagnostic)
+                self.assertEqual(r['status'],'HOLD',diagnostic)
+                self.assertEqual(r['reason'],'resource gate: '+resource+' breach',diagnostic)
+                self.assertTrue(r['drained'],diagnostic)
+                self.assertEqual([c for c in s.calls if c[0] in ('submit','cancel')],[('submit',3),('cancel','125')],diagnostic)
+                self.assertLess(max(y-x for x,y in zip(a.observed,a.observed[1:])),.25,diagnostic)
+    def test_preissue_resource_breach_holds_without_submit_or_cancel(self):
+        adapter=FakeAdapter(); adapter.bad=True; sched=FakeScheduler()
+        result=self.run_owner(adapter,sched)
+        diagnostic=repr({'result':result,'calls':sched.calls})
+        self.assertEqual(result['status'],'HOLD',diagnostic)
+        self.assertEqual(result['reason'],'resource gate: quota or role cap exceeded',diagnostic)
+        self.assertFalse(result['drained'],diagnostic)
+        self.assertEqual([c for c in sched.calls if c[0] in ('submit','cancel')],[],diagnostic)
     def test_real_usr1_during_preissue_gate_prevents_submission(self):
         class Adapter(FakeAdapter):
             def reserve(self,*args):
@@ -340,5 +366,89 @@ class LateIssueTests(Fixture):
         with patch.object(subprocess,'Popen',side_effect=AssertionError('expired child spawn')):
             r=scheduler.run_process(['/usr/bin/sbatch'],timeout=2,permit=permit)
         self.assertEqual(r['outcome'],'NOT_STARTED')
+
+class LifecycleReviewTests(Fixture):
+    def test_terminal_preservation_crossing1530_completes_slot(self):
+        class Clock:
+            value=0
+            def __call__(self): return self.value
+        clock=Clock()
+        class BudgetScheduler(FakeScheduler):
+            def __init__(self): super().__init__(('PENDING','RUNNING','COMPLETED'))
+            def controller(self):
+                return dict(super().controller(),end_epoch=time.time()+3635-clock.value)
+            def observe(self,submission):
+                result=super().observe(submission)
+                if result['state']=='PENDING': clock.value=899
+                elif result['state']=='COMPLETED': clock.value=2099
+                return result
+        class Adapter(FakeAdapter):
+            def terminal(self,*args):
+                self.processing_deadline=args[-1]['deadline']
+                clock.value=2109
+                return super().terminal(*args)
+        adapter=Adapter(); sched=BudgetScheduler()
+        with patch.object(coordinator,'SCHEDULER_INTERVAL',0):
+            result=self.run_owner(adapter,sched,clock=clock)
+        rows=journal.read_chain(self.root/'journal.jsonl')
+        completed=[r['event']['index'] for r in rows if r['event']['kind']=='SLOT_COMPLETE']
+        diagnostic=repr({'result':result,'calls':sched.calls,'completed':completed})
+        self.assertEqual(completed,[3],diagnostic)
+        self.assertEqual(result['reason'],'issue lifetime below3630',diagnostic)
+        self.assertEqual([c for c in sched.calls if c[0] in ('submit','cancel')],[('submit',3)],diagnostic)
+        self.assertAlmostEqual(adapter.processing_deadline,3299,delta=.05)
+
+    def test_terminal_postprocessing_must_finish_before_its_clamped_deadline(self):
+        class Clock:
+            value=0
+            def __call__(self): return self.value
+        clock=Clock()
+        class Adapter(FakeAdapter):
+            def terminal(self,*args):
+                clock.value=args[-1]['deadline']+1
+                return super().terminal(*args)
+        sched=FakeScheduler()
+        result=self.run_owner(Adapter(),sched,clock=clock)
+        rows=journal.read_chain(self.root/'journal.jsonl')
+        diagnostic=repr({'result':result,'calls':sched.calls})
+        self.assertEqual(result['status'],'HOLD',diagnostic)
+        self.assertIn('postprocessing deadline',result['reason'],diagnostic)
+        self.assertFalse(any(r['event']['kind']=='SLOT_COMPLETE' for r in rows),diagnostic)
+        self.assertEqual([c for c in sched.calls if c[0] in ('submit','cancel')],[('submit',3)],diagnostic)
+
+    def test_quiescent_drain_paces_multiple_nonterminal_observations(self):
+        stop=threading.Event(); drain_times=[]; resource_times=[]
+        class Adapter(FakeAdapter):
+            def resource_check(self,*args):
+                resource_times.append(time.monotonic())
+                return super().resource_check(*args)
+        class DelayedCancelScheduler(FakeScheduler):
+            def observe(self,submission):
+                if not self.cancelled:
+                    result=super().observe(submission)
+                    stop.set()
+                    return result
+                drain_times.append(time.monotonic())
+                self.cancelled=False
+                result=super().observe(submission)
+                self.cancelled=True
+                result['state']='CANCELLED' if len(drain_times)==4 else 'COMPLETING'
+                result['terminal']=result['state']=='CANCELLED'
+                return result
+        sched=DelayedCancelScheduler(('RUNNING',))
+        with patch.object(coordinator,'SCHEDULER_INTERVAL',.12), patch.object(coordinator,'DRAIN_SECONDS',.8):
+            result=self.run_owner(Adapter(),sched,stop=stop)
+        rows=journal.read_chain(self.root/'journal.jsonl')
+        gaps=[y-x for x,y in zip(drain_times,drain_times[1:])]
+        first_quiesce=next(i for i,row in enumerate(rows) if row['event']['kind']=='QUIESCE')
+        emergency_bytes=sum(len(line) for line in (self.root/'journal.jsonl').read_bytes().splitlines(keepends=True)[first_quiesce:])
+        diagnostic=repr({'result':result,'calls':sched.calls,'gaps':gaps,'resources':resource_times,'emergency_bytes':emergency_bytes})
+        self.assertEqual(len(drain_times),4,diagnostic)
+        self.assertTrue(all(gap>=.10 for gap in gaps),diagnostic)
+        self.assertTrue(result['drained'],diagnostic)
+        self.assertEqual([c for c in sched.calls if c[0] in ('submit','cancel')],[('submit',3),('cancel','125')],diagnostic)
+        self.assertLess(emergency_bytes,32768,diagnostic)
+        self.assertEqual(rows[-1]['event']['kind'],'HOLD',diagnostic)
+        self.assertLess(max(y-x for x,y in zip(resource_times,resource_times[1:])),.25,diagnostic)
 
 if __name__=='__main__': unittest.main()

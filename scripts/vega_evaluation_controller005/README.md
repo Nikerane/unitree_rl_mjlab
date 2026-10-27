@@ -59,7 +59,9 @@ expiry immediately before spawning the submission subprocess, preventing a
 stalled pre-spawn worker from issuing after quiescence.
 
 A positive owned identity authorizes one journaled `scancel CONCRETE_JOB_ID`,
-then <=180s terminal drain. Unknown cancellation stays HOLD and is never repeated.
+then <=180s terminal drain. Drain pauses retain the4s scheduler cadence while
+continuing live resource checks; a latched stop Event never turns that pause into
+a busy loop. Unknown cancellation stays HOLD and is never repeated.
 If submission or identity remains unknown there is no safe cancellation target;
 failed/partial evidence remains and root must reconcile. A hard kill/node loss
 can leave an independent child alive; permanent intent/ownership still forbids
@@ -177,7 +179,12 @@ The closed controller request is8h/1CPU/2048MiB/no-requeue with B:USR1@180;
 requested resources and genuine scontrol actual CPUs/memory/end time are recorded
 separately (the site hook may assign2CPUs). The controller's local monotonic
 lifetime is clamped to actual Slurm end time and refreshed while observing.
-New issue needs>=3630s; pending>900s or active remaining<1530s quiesces/drains.
+New issue needs>=3630s; pending>900s or known-active remaining<1530s
+quiesces/drains. A validated terminal observation changes the lifecycle to
+TERMINAL while retaining submission/identity provenance. Terminal preservation
+uses its separate1200s/controller-minus120s deadline; crossing1530s after a known
+terminal outcome does not itself quiesce. Late postprocessing results cannot
+complete the slot.
 The budgets are policy1200/post1200/drain180/final120/lag30. USR1/TERM/INT latch
 stop and prohibit any later issue. Nested compute `sbatch --test-only` for both
 bound batches must return complete observed exit0 before permanent lease.
@@ -191,7 +198,9 @@ python3 -B -O -m unittest discover -s scripts/vega_evaluation_controller005/test
 
 Tests use actual filesystem fsync/hash chains, process/thread lease races, real
 child pipes/disconnect/late exit/timeout/output caps and real file/quota-marker
-growth during a slow actual child wait. Scheduler responses and authority/phase
+growth synchronized to an issued slow observation, joined mutation threads,
+preissue breaches without submission/cancellation, terminal lifetime crossing and
+paced multi-observation drain. Scheduler responses and authority/phase
 operations are closed pure fixtures. There is no SSH, real Slurm, root lease,
 remote staging, target import or physical rollout. Source tests stage disposable
 source-only copies and report the actual host/interpreter; native Linux/Ceph and

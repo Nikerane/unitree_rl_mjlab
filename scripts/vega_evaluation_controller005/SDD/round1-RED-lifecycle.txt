@@ -1,0 +1,47 @@
+test_quiescent_drain_paces_multiple_nonterminal_observations (test_coordinator.LifecycleReviewTests.test_quiescent_drain_paces_multiple_nonterminal_observations) ... FAIL
+test_terminal_postprocessing_must_finish_before_its_clamped_deadline (test_coordinator.LifecycleReviewTests.test_terminal_postprocessing_must_finish_before_its_clamped_deadline) ... FAIL
+test_terminal_preservation_crossing1530_completes_slot (test_coordinator.LifecycleReviewTests.test_terminal_preservation_crossing1530_completes_slot) ... FAIL
+
+======================================================================
+FAIL: test_quiescent_drain_paces_multiple_nonterminal_observations (test_coordinator.LifecycleReviewTests.test_quiescent_drain_paces_multiple_nonterminal_observations)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 421, in test_quiescent_drain_paces_multiple_nonterminal_observations
+    self.assertTrue(all(gap>=.10 for gap in gaps),diagnostic)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: False is not true : {'result': {'status': 'HOLD', 'reason': 'shutdown signal', 'drained': True, 'halt_observed_at': 94412.492462666}, 'calls': [('test', 3), ('test', 1), ('submit', 3), ('cancel', '125')], 'gaps': [0.0007401670009130612, 0.0006522080075228587, 0.0006690419977530837], 'resources': [94412.489196125, 94412.489295541, 94412.489953916, 94412.489956041, 94412.490010041, 94412.490019541, 94412.49006, 94412.49128275, 94412.491606583, 94412.491915958, 94412.4927155, 94412.492996708, 94412.493295375, 94412.49397875, 94412.494040291, 94412.494647, 94412.494688083, 94412.495282583, 94412.495377666, 94412.496039416], 'emergency_bytes': 4944}
+
+======================================================================
+FAIL: test_terminal_postprocessing_must_finish_before_its_clamped_deadline (test_coordinator.LifecycleReviewTests.test_terminal_postprocessing_must_finish_before_its_clamped_deadline)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 388, in test_terminal_postprocessing_must_finish_before_its_clamped_deadline
+    self.assertEqual(result['status'],'HOLD',diagnostic)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'COMPLETE' != 'HOLD'
+- COMPLETE
++ HOLD
+ : {'result': {'status': 'COMPLETE', 'reason': None, 'drained': True, 'halt_observed_at': None}, 'calls': [('test', 3), ('test', 1), ('submit', 3), ('submit', 6), ('submit', 9), ('submit', 12), ('submit', 15), ('submit', 1), ('submit', 2), ('submit', 4), ('submit', 5), ('submit', 7), ('submit', 8), ('submit', 10), ('submit', 11), ('submit', 13), ('submit', 14), ('submit', 16), ('submit', 17)]}
+
+======================================================================
+FAIL: test_terminal_preservation_crossing1530_completes_slot (test_coordinator.LifecycleReviewTests.test_terminal_preservation_crossing1530_completes_slot)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 370, in test_terminal_preservation_crossing1530_completes_slot
+    self.assertEqual(completed,[3],diagnostic)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [] != [3]
+
+Second list contains 1 additional elements.
+First extra element 0:
+3
+
+- []
++ [3]
+?  +
+ : {'result': {'status': 'HOLD', 'reason': 'active remaining lifetime below1530', 'drained': True, 'halt_observed_at': 94412.652457833}, 'calls': [('test', 3), ('test', 1), ('submit', 3)], 'completed': []}
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.166s
+
+FAILED (failures=3)

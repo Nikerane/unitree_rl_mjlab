@@ -1,0 +1,36 @@
+test_actual_log_and_quota_growth_during_real_child_wait_are_observed (test_coordinator.LiveResourceTests.test_actual_log_and_quota_growth_during_real_child_wait_are_observed) ...
+  test_actual_log_and_quota_growth_during_real_child_wait_are_observed (test_coordinator.LiveResourceTests.test_actual_log_and_quota_growth_during_real_child_wait_are_observed) (resource='log') ... FAIL
+  test_actual_log_and_quota_growth_during_real_child_wait_are_observed (test_coordinator.LiveResourceTests.test_actual_log_and_quota_growth_during_real_child_wait_are_observed) (resource='quota') ... FAIL
+  test_actual_log_and_quota_growth_during_real_child_wait_are_observed (test_coordinator.LiveResourceTests.test_actual_log_and_quota_growth_during_real_child_wait_are_observed) (resource='raw') ... FAIL
+
+======================================================================
+FAIL: test_actual_log_and_quota_growth_during_real_child_wait_are_observed (test_coordinator.LiveResourceTests.test_actual_log_and_quota_growth_during_real_child_wait_are_observed) (resource='log')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 277, in test_actual_log_and_quota_growth_during_real_child_wait_are_observed
+    self.assertEqual(r['status'],'HOLD'); self.assertTrue(r['drained'])
+                                          ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+AssertionError: False is not true
+
+======================================================================
+FAIL: test_actual_log_and_quota_growth_during_real_child_wait_are_observed (test_coordinator.LiveResourceTests.test_actual_log_and_quota_growth_during_real_child_wait_are_observed) (resource='quota')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 277, in test_actual_log_and_quota_growth_during_real_child_wait_are_observed
+    self.assertEqual(r['status'],'HOLD'); self.assertTrue(r['drained'])
+                                          ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+AssertionError: False is not true
+
+======================================================================
+FAIL: test_actual_log_and_quota_growth_during_real_child_wait_are_observed (test_coordinator.LiveResourceTests.test_actual_log_and_quota_growth_during_real_child_wait_are_observed) (resource='raw')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 277, in test_actual_log_and_quota_growth_during_real_child_wait_are_observed
+    self.assertEqual(r['status'],'HOLD'); self.assertTrue(r['drained'])
+                                          ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+AssertionError: False is not true
+
+----------------------------------------------------------------------
+Ran 1 test in 0.787s
+
+FAILED (failures=3)

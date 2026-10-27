@@ -6,8 +6,8 @@
       "sha256": "dfbe2715e6f355e6c42ba112f03482ce004547ab193785021c51dccddd3e3b9a"
     },
     "coordinator.py": {
-      "bytes": 15781,
-      "sha256": "1560f73d224d9d7415740cfdcb1a187c954319e7ea13a1330b5e57fbde68169b"
+      "bytes": 16837,
+      "sha256": "aae183ac52b2d857f7a16b00853e12dfccc3fafe0ec7b591b702b5977c0b8083"
     },
     "entry.py": {
       "bytes": 8197,
