@@ -451,4 +451,34 @@ class LifecycleReviewTests(Fixture):
         self.assertEqual(rows[-1]['event']['kind'],'HOLD',diagnostic)
         self.assertLess(max(y-x for x,y in zip(resource_times,resource_times[1:])),.25,diagnostic)
 
+    def test_drain_stops_when_refreshed_controller_reaches_finalization_boundary(self):
+        stop=threading.Event(); drain_times=[]
+        class ShortenedController(FakeScheduler):
+            def controller(self):
+                result=super().controller()
+                if self.cancelled: result['end_epoch']=time.time()+100
+                return result
+            def observe(self,submission):
+                if not self.cancelled:
+                    result=super().observe(submission); stop.set(); return result
+                drain_times.append(time.monotonic())
+                self.cancelled=False
+                result=super().observe(submission)
+                self.cancelled=True
+                result['state']='CANCELLED' if len(drain_times)==4 else 'COMPLETING'
+                result['terminal']=result['state']=='CANCELLED'
+                return result
+        sched=ShortenedController(('RUNNING',))
+        with patch.object(coordinator,'SCHEDULER_INTERVAL',.12), patch.object(coordinator,'DRAIN_SECONDS',.8):
+            result=self.run_owner(sched=sched,stop=stop)
+        rows=journal.read_chain(self.root/'journal.jsonl')
+        diagnostic=repr({'result':result,'calls':sched.calls,'drain_times':drain_times})
+        self.assertEqual(len(drain_times),1,diagnostic)
+        self.assertFalse(result['drained'],diagnostic)
+        self.assertEqual(result['status'],'HOLD',diagnostic)
+        self.assertEqual([c for c in sched.calls if c[0] in ('submit','cancel')],[('submit',3),('cancel','125')],diagnostic)
+        unknown=[r['event'] for r in rows if r['event']['kind']=='DRAIN_UNKNOWN']
+        self.assertEqual([r['reason'] for r in unknown],['terminal drain deadline'],diagnostic)
+        self.assertFalse(any(r['event']['kind'] in ('SLOT_COMPLETE','TERMINAL_PROCESSED') for r in rows),diagnostic)
+
 if __name__=='__main__': unittest.main()

@@ -61,7 +61,9 @@ stalled pre-spawn worker from issuing after quiescence.
 A positive owned identity authorizes one journaled `scancel CONCRETE_JOB_ID`,
 then <=180s terminal drain. Drain pauses retain the4s scheduler cadence while
 continuing live resource checks; a latched stop Event never turns that pause into
-a busy loop. Unknown cancellation stays HOLD and is never repeated.
+a busy loop. The outer drain loop also checks the refreshed controller-minus120s
+boundary before every snapshot; a shortened controller end stops further polling
+with DRAIN_UNKNOWN/HOLD. Unknown cancellation stays HOLD and is never repeated.
 If submission or identity remains unknown there is no safe cancellation target;
 failed/partial evidence remains and root must reconcile. A hard kill/node loss
 can leave an independent child alive; permanent intent/ownership still forbids

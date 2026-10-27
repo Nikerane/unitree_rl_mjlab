@@ -160,7 +160,7 @@ class Owner:
                 self.record('CANCEL_UNKNOWN',reason=str(exc)); return None
         end=min(self.deadline-self.clock()-FINAL_SECONDS,DRAIN_SECONDS)
         drain_deadline=time.monotonic()+max(0,end)
-        while time.monotonic()<drain_deadline:
+        while time.monotonic()<drain_deadline and self.deadline-self.clock()>FINAL_SECONDS:
             try: observation=self.observe()
             except BaseException as exc:
                 self.record('DRAIN_UNKNOWN',reason=str(exc)); return None

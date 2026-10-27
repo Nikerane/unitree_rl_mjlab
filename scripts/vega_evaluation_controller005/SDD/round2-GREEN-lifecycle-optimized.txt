@@ -1,0 +1,9 @@
+test_drain_stops_when_refreshed_controller_reaches_finalization_boundary (test_coordinator.LifecycleReviewTests.test_drain_stops_when_refreshed_controller_reaches_finalization_boundary) ... ok
+test_quiescent_drain_paces_multiple_nonterminal_observations (test_coordinator.LifecycleReviewTests.test_quiescent_drain_paces_multiple_nonterminal_observations) ... ok
+test_terminal_postprocessing_must_finish_before_its_clamped_deadline (test_coordinator.LifecycleReviewTests.test_terminal_postprocessing_must_finish_before_its_clamped_deadline) ... ok
+test_terminal_preservation_crossing1530_completes_slot (test_coordinator.LifecycleReviewTests.test_terminal_preservation_crossing1530_completes_slot) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.420s
+
+OK

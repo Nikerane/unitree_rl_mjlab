@@ -1,0 +1,15 @@
+test_drain_stops_when_refreshed_controller_reaches_finalization_boundary (test_coordinator.LifecycleReviewTests.test_drain_stops_when_refreshed_controller_reaches_finalization_boundary) ... FAIL
+
+======================================================================
+FAIL: test_drain_stops_when_refreshed_controller_reaches_finalization_boundary (test_coordinator.LifecycleReviewTests.test_drain_stops_when_refreshed_controller_reaches_finalization_boundary)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 476, in test_drain_stops_when_refreshed_controller_reaches_finalization_boundary
+    self.assertEqual(len(drain_times),1,diagnostic)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 4 != 1 : {'result': {'status': 'HOLD', 'reason': 'shutdown signal', 'drained': True, 'halt_observed_at': 94836.17597575}, 'calls': [('test', 3), ('test', 1), ('submit', 3), ('cancel', '125')], 'drain_times': [94836.17732675, 94836.177893, 94836.178453416, 94836.178989166]}
+
+----------------------------------------------------------------------
+Ran 1 test in 0.009s
+
+FAILED (failures=1)

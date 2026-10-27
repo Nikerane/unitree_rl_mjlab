@@ -1,0 +1,8 @@
+test_activation_cannot_select_unbound_adapter_or_commands (test_entry.SourceEntryTests.test_activation_cannot_select_unbound_adapter_or_commands) ... ok
+test_rebound_extra_bytecode_and_symlink_source_fail (test_entry.SourceEntryTests.test_rebound_extra_bytecode_and_symlink_source_fail) ... ok
+test_source_only_entry_admits_exact_manifest_without_import_fallback (test_entry.SourceEntryTests.test_source_only_entry_admits_exact_manifest_without_import_fallback) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.259s
+
+OK
