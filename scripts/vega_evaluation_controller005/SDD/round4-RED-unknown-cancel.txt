@@ -1,0 +1,25 @@
+test_unknown_cancel_stays_hold (test_coordinator.OwnerTests.test_unknown_cancel_stays_hold) ... FAIL
+
+======================================================================
+FAIL: test_unknown_cancel_stays_hold (test_coordinator.OwnerTests.test_unknown_cancel_stays_hold)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 196, in test_unknown_cancel_stays_hold
+    self.assertEqual([c for c in s.calls if c[0] in ('submit','cancel')],
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                     [('submit',3),('cancel','125')],diagnostic)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [] != [('submit', 3), ('cancel', '125')]
+
+Second list contains 2 additional elements.
+First extra element 0:
+('submit', 3)
+
+- []
++ [('submit', 3), ('cancel', '125')] : {'result': {'status': 'HOLD', 'reason': 'resource gate: quota or role cap exceeded', 'drained': False, 'halt_observed_at': 97380.599708666}, 'calls': [('test', 3), ('test', 1)]}
+
+----------------------------------------------------------------------
+Ran 1 test in 0.130s
+
+FAILED (failures=1)
+unknown-cancel fixture: {'result': {'status': 'HOLD', 'reason': 'resource gate: quota or role cap exceeded', 'drained': False, 'halt_observed_at': 97380.599708666}, 'calls': [('test', 3), ('test', 1)]}

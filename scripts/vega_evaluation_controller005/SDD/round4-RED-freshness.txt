@@ -1,0 +1,89 @@
+test_intent_write_rejects_completed_same_generation_sample (test_coordinator.PreissueFreshnessTests.test_intent_write_rejects_completed_same_generation_sample) ... FAIL
+test_intent_write_rejects_inflight_old_sample (test_coordinator.PreissueFreshnessTests.test_intent_write_rejects_inflight_old_sample) ... FAIL
+test_log_write_rejects_completed_same_generation_sample (test_coordinator.PreissueFreshnessTests.test_log_write_rejects_completed_same_generation_sample) ... FAIL
+test_log_write_rejects_inflight_old_sample (test_coordinator.PreissueFreshnessTests.test_log_write_rejects_inflight_old_sample) ... FAIL
+
+======================================================================
+FAIL: test_intent_write_rejects_completed_same_generation_sample (test_coordinator.PreissueFreshnessTests.test_intent_write_rejects_completed_same_generation_sample)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 573, in test_intent_write_rejects_completed_same_generation_sample
+    self._breach_after_write('intent',False)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 563, in _breach_after_write
+    self.assertEqual([c for c in sched.calls if c[0] in ('submit','cancel')],[],diagnostic)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [('submit', 3)] != []
+
+First list contains 1 additional elements.
+First extra element 0:
+('submit', 3)
+
+- [('submit', 3)]
++ [] : {'result': {'status': 'HOLD', 'reason': 'resource gate: quota or role cap exceeded', 'drained': False, 'halt_observed_at': 97380.059038583}, 'calls': [('test', 3), ('test', 1), ('submit', 3)], 'submissions': [{'bad': True, 'permit_valid': True, 'at': 97380.057426083}], 'observations': [(97380.054662, False), (97380.056755166, True), (97380.057372541, True)], 'mutations': [97380.057383208], 'kinds': ['ACTIVATE', 'PHASE_PREPARED', 'RESERVATION', 'SUBMIT_INTENT', 'SUBMIT_RESULT', 'CONTROLLER_OBSERVATION', 'OBSERVATION', 'TERMINAL_PROCESSED', 'SLOT_COMPLETE', 'QUIESCE', 'HOLD']}
+
+======================================================================
+FAIL: test_intent_write_rejects_inflight_old_sample (test_coordinator.PreissueFreshnessTests.test_intent_write_rejects_inflight_old_sample)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 575, in test_intent_write_rejects_inflight_old_sample
+    self._breach_after_write('intent',True)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 563, in _breach_after_write
+    self.assertEqual([c for c in sched.calls if c[0] in ('submit','cancel')],[],diagnostic)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [('submit', 3)] != []
+
+First list contains 1 additional elements.
+First extra element 0:
+('submit', 3)
+
+- [('submit', 3)]
++ [] : {'result': {'status': 'HOLD', 'reason': 'resource gate: quota or role cap exceeded', 'drained': False, 'halt_observed_at': 97380.089637416}, 'calls': [('test', 3), ('test', 1), ('submit', 3)], 'submissions': [{'bad': True, 'permit_valid': True, 'at': 97380.064649}], 'observations': [(97380.06183325, False), (97380.063925625, True), (97380.064529958, True)], 'mutations': [97380.064537666], 'kinds': ['ACTIVATE', 'PHASE_PREPARED', 'RESERVATION', 'SUBMIT_INTENT', 'SUBMIT_RESULT', 'CONTROLLER_OBSERVATION', 'OBSERVATION', 'TERMINAL_PROCESSED', 'SLOT_COMPLETE', 'QUIESCE', 'HOLD']}
+
+======================================================================
+FAIL: test_log_write_rejects_completed_same_generation_sample (test_coordinator.PreissueFreshnessTests.test_log_write_rejects_completed_same_generation_sample)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 569, in test_log_write_rejects_completed_same_generation_sample
+    self._breach_after_write('log',False)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 563, in _breach_after_write
+    self.assertEqual([c for c in sched.calls if c[0] in ('submit','cancel')],[],diagnostic)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [('submit', 3)] != []
+
+First list contains 1 additional elements.
+First extra element 0:
+('submit', 3)
+
+- [('submit', 3)]
++ [] : {'result': {'status': 'HOLD', 'reason': 'resource gate: quota or role cap exceeded', 'drained': False, 'halt_observed_at': 97380.098249041}, 'calls': [('test', 3), ('test', 1), ('submit', 3)], 'submissions': [{'bad': True, 'permit_valid': True, 'at': 97380.096633083}], 'observations': [(97380.093603916, False), (97380.095904125, True), (97380.096270541, True)], 'mutations': [97380.096283], 'kinds': ['ACTIVATE', 'PHASE_PREPARED', 'RESERVATION', 'SUBMIT_INTENT', 'SUBMIT_RESULT', 'CONTROLLER_OBSERVATION', 'OBSERVATION', 'TERMINAL_PROCESSED', 'SLOT_COMPLETE', 'QUIESCE', 'HOLD']}
+
+======================================================================
+FAIL: test_log_write_rejects_inflight_old_sample (test_coordinator.PreissueFreshnessTests.test_log_write_rejects_inflight_old_sample)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 571, in test_log_write_rejects_inflight_old_sample
+    self._breach_after_write('log',True)
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_coordinator.py", line 563, in _breach_after_write
+    self.assertEqual([c for c in sched.calls if c[0] in ('submit','cancel')],[],diagnostic)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [('submit', 3)] != []
+
+First list contains 1 additional elements.
+First extra element 0:
+('submit', 3)
+
+- [('submit', 3)]
++ [] : {'result': {'status': 'HOLD', 'reason': 'resource gate: quota or role cap exceeded', 'drained': False, 'halt_observed_at': 97380.126843166}, 'calls': [('test', 3), ('test', 1), ('submit', 3)], 'submissions': [{'bad': True, 'permit_valid': True, 'at': 97380.103388291}], 'observations': [(97380.100580208, False), (97380.102562708, True), (97380.102946541, True)], 'mutations': [97380.102957666], 'kinds': ['ACTIVATE', 'PHASE_PREPARED', 'RESERVATION', 'SUBMIT_INTENT', 'SUBMIT_RESULT', 'CONTROLLER_OBSERVATION', 'OBSERVATION', 'TERMINAL_PROCESSED', 'SLOT_COMPLETE', 'QUIESCE', 'HOLD']}
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.076s
+
+FAILED (failures=4)
+preissue freshness: {'result': {'status': 'HOLD', 'reason': 'resource gate: quota or role cap exceeded', 'drained': False, 'halt_observed_at': 97380.059038583}, 'calls': [('test', 3), ('test', 1), ('submit', 3)], 'submissions': [{'bad': True, 'permit_valid': True, 'at': 97380.057426083}], 'observations': [(97380.054662, False), (97380.056755166, True), (97380.057372541, True)], 'mutations': [97380.057383208], 'kinds': ['ACTIVATE', 'PHASE_PREPARED', 'RESERVATION', 'SUBMIT_INTENT', 'SUBMIT_RESULT', 'CONTROLLER_OBSERVATION', 'OBSERVATION', 'TERMINAL_PROCESSED', 'SLOT_COMPLETE', 'QUIESCE', 'HOLD']}
+preissue freshness: {'result': {'status': 'HOLD', 'reason': 'resource gate: quota or role cap exceeded', 'drained': False, 'halt_observed_at': 97380.089637416}, 'calls': [('test', 3), ('test', 1), ('submit', 3)], 'submissions': [{'bad': True, 'permit_valid': True, 'at': 97380.064649}], 'observations': [(97380.06183325, False), (97380.063925625, True), (97380.064529958, True)], 'mutations': [97380.064537666], 'kinds': ['ACTIVATE', 'PHASE_PREPARED', 'RESERVATION', 'SUBMIT_INTENT', 'SUBMIT_RESULT', 'CONTROLLER_OBSERVATION', 'OBSERVATION', 'TERMINAL_PROCESSED', 'SLOT_COMPLETE', 'QUIESCE', 'HOLD']}
+preissue freshness: {'result': {'status': 'HOLD', 'reason': 'resource gate: quota or role cap exceeded', 'drained': False, 'halt_observed_at': 97380.098249041}, 'calls': [('test', 3), ('test', 1), ('submit', 3)], 'submissions': [{'bad': True, 'permit_valid': True, 'at': 97380.096633083}], 'observations': [(97380.093603916, False), (97380.095904125, True), (97380.096270541, True)], 'mutations': [97380.096283], 'kinds': ['ACTIVATE', 'PHASE_PREPARED', 'RESERVATION', 'SUBMIT_INTENT', 'SUBMIT_RESULT', 'CONTROLLER_OBSERVATION', 'OBSERVATION', 'TERMINAL_PROCESSED', 'SLOT_COMPLETE', 'QUIESCE', 'HOLD']}
+preissue freshness: {'result': {'status': 'HOLD', 'reason': 'resource gate: quota or role cap exceeded', 'drained': False, 'halt_observed_at': 97380.126843166}, 'calls': [('test', 3), ('test', 1), ('submit', 3)], 'submissions': [{'bad': True, 'permit_valid': True, 'at': 97380.103388291}], 'observations': [(97380.100580208, False), (97380.102562708, True), (97380.102946541, True)], 'mutations': [97380.102957666], 'kinds': ['ACTIVATE', 'PHASE_PREPARED', 'RESERVATION', 'SUBMIT_INTENT', 'SUBMIT_RESULT', 'CONTROLLER_OBSERVATION', 'OBSERVATION', 'TERMINAL_PROCESSED', 'SLOT_COMPLETE', 'QUIESCE', 'HOLD']}

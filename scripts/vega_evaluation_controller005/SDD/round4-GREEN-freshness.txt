@@ -1,0 +1,13 @@
+test_intent_write_rejects_completed_same_generation_sample (test_coordinator.PreissueFreshnessTests.test_intent_write_rejects_completed_same_generation_sample) ... ok
+test_intent_write_rejects_inflight_old_sample (test_coordinator.PreissueFreshnessTests.test_intent_write_rejects_inflight_old_sample) ... ok
+test_log_write_rejects_completed_same_generation_sample (test_coordinator.PreissueFreshnessTests.test_log_write_rejects_completed_same_generation_sample) ... ok
+test_log_write_rejects_inflight_old_sample (test_coordinator.PreissueFreshnessTests.test_log_write_rejects_inflight_old_sample) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.065s
+
+OK
+preissue freshness: {'result': {'status': 'HOLD', 'reason': 'resource gate: quota or role cap exceeded', 'drained': False, 'halt_observed_at': 97419.451450625}, 'calls': [('test', 3), ('test', 1)], 'submissions': [], 'observations': [(97419.44833675, False), (97419.450809708, True), (97419.451135166, True), (97419.451423708, True)], 'mutations': [97419.451433833], 'kinds': ['ACTIVATE', 'PHASE_PREPARED', 'RESERVATION', 'SUBMIT_INTENT', 'QUIESCE', 'HOLD']}
+preissue freshness: {'result': {'status': 'HOLD', 'reason': 'resource gate: quota or role cap exceeded', 'drained': False, 'halt_observed_at': 97419.480875875}, 'calls': [('test', 3), ('test', 1)], 'submissions': [], 'observations': [(97419.453707, False), (97419.455885, True), (97419.456248291, True), (97419.456549458, True)], 'mutations': [97419.456554875], 'kinds': ['ACTIVATE', 'PHASE_PREPARED', 'RESERVATION', 'SUBMIT_INTENT', 'QUIESCE', 'HOLD']}
+preissue freshness: {'result': {'status': 'HOLD', 'reason': 'resource gate: quota or role cap exceeded', 'drained': False, 'halt_observed_at': 97419.485680041}, 'calls': [('test', 3), ('test', 1)], 'submissions': [], 'observations': [(97419.483277708, False), (97419.485332958, True), (97419.485658958, True)], 'mutations': [97419.485671], 'kinds': ['ACTIVATE', 'PHASE_PREPARED', 'RESERVATION', 'QUIESCE', 'HOLD']}
+preissue freshness: {'result': {'status': 'HOLD', 'reason': 'resource gate: quota or role cap exceeded', 'drained': False, 'halt_observed_at': 97419.510582333}, 'calls': [('test', 3), ('test', 1)], 'submissions': [], 'observations': [(97419.487655416, False), (97419.489692291, True), (97419.490003708, True)], 'mutations': [97419.490008083], 'kinds': ['ACTIVATE', 'PHASE_PREPARED', 'RESERVATION', 'QUIESCE', 'HOLD']}

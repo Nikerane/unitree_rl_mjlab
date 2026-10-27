@@ -54,8 +54,12 @@ start intervals independently of owner journal writes/fsync and scheduler waits.
 It publishes versioned observations and latches a stop request; it never writes
 a journal/lease, submits or cancels. Callback overrun>.1s, unavailable current
 observation or a start gap reaching.25s latches a stop request/HOLD. No threshold
-is relaxed. The owner requires an observation for the current transaction and
-controller deadline before issue, and rechecks after durable SUBMIT_INTENT.
+is relaxed. The owner demands a newly started and completed observation for the
+current transaction and controller deadline after the log writes and again after durable
+SUBMIT_INTENT. Each boundary advances the observation generation; a previously
+completed sample or an old callback completing during the boundary cannot
+authorize issue. The same guardian serializes these demanded observations with
+its independent periodic sampling.
 The guardian keeps sampling through quiescence/drain and is stopped/joined before
 run returns, including exceptional journal initialization. Successful return
 requires a final fresh completed observation before the guardian joins; any final
@@ -123,7 +127,7 @@ exception, timeout, process partial output/late failure, or unknown blocks issue
 `context` contains nonce, controller_job_id, UID string, source_sha256,
 config_sha256, exact state root, exact `log_root`, controller monotonic `deadline`
 and threading `stop` Event. Non-resource methods run on a bounded worker; the
-resource callback runs on the owner thread concurrently and must be thread-safe,
+resource callback runs on the dedicated guardian thread and must be thread-safe,
 read-only, bounded and <=.1s. Honor deadline/stop before any new publication;
 terminal preservation after quiescence remains allowed within its clamped
 1200s/controller-minus120s deadline. Never allow background work after a method's

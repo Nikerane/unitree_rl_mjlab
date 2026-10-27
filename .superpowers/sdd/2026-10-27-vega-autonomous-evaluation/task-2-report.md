@@ -577,3 +577,226 @@ revokes new issue during that delay, and does not drop the durable intent to
 pretend the delay disappeared. No OS/Ceph atomic quota reservation is claimed.
 Activation remains HOLD pending root's gates and Task3; ledger/credit/journal
 externalization integration scope is unchanged.
+
+## Corrective round4/5 — T2-N2 freshness and deterministic cancellation fixture
+
+Baseline: `67ced6bce8039980d440b47afbe35d863e8d9c7a`. Status:
+DONE_WITH_CONCERNS; scoped review and root's native Linux/Python3.9/Ceph gate
+remain required. The implementation commit is recorded in the appended commit
+handoff below. This round owns only `scripts/vega_evaluation_controller005/`
+and this appended report. No SSH, real Slurm, operational lease, remote staging,
+authority/canonical/physical/model/environment work or subagent occurred.
+
+### Diagnosis and narrowly scoped changes
+
+T2-N2 is confirmed independently by four production-path RED cases. The prior
+`check()` accepted a successful current-generation sample made before the final
+owner writes. Both preintent and postintent `live()` could reuse it. The cases
+retain real log-directory fsync, real hash-chain journal/fsync, and the real
+IssuePermit, and change only the fake quota input after a successful sample.
+Both the log-write and SUBMIT_INTENT boundary were tested with (a) an already
+completed successful sample and (b) an old callback still in progress. All four
+RED cases submitted index3 with `bad=True` and `permit_valid=True`, then HOLDed
+later. Exact times, calls, permit state and journal kinds remain in
+`SDD/round4-RED-freshness.txt`; a later HOLD is not counted as a successful gate.
+
+`ResourceGuardian.check(..., fresh=True)` now increments the generation and
+requests an observation under the existing metadata condition. The sole sampler
+captures that generation before invoking the callback. The owner waits for a
+completed observation of that new generation; an older in-progress callback
+cannot qualify merely by completing after the boundary. `Owner.live` passes
+this internal flag at both the post-log/preintent and post-SUBMIT_INTENT gates.
+The same guardian remains live and serialized throughout owner IO. There is no
+second callback thread, callback under the metadata lock, sampler pause,
+externalized journal, or alternate issue path. The owner still fsyncs intent
+before the final fresh observation and creates the existing revocable permit
+only after that observation passes. Strict .25s interval/.1s callback bounds and
+all lifecycle/resource budgets are unchanged.
+
+The native004 transcript on manifest991 reports focused11 PASS, normal40 PASS,
+and optimized40 FAIL at `test_unknown_cancel_stays_hold` (one cancellation
+expected, zero observed). It does not retain the result reason/calls, so the
+exact cause of that native failure remains unproven. The local deterministic
+reproduction retains the old Timer(.05) and inserts .12s into real preissue
+prepare. It fails the expected submit/cancel assertion with an actual legitimate
+HOLD/resource-gate result and no submit or cancellation. This proves slow startup
+is sufficient to invalidate that fixture's intended ownership stage; it is not
+claimed as a forensic reconstruction of the saved native failure.
+
+The corrected unknown-cancel fixture keeps the .12s slow startup, then waits
+for the real `Owner.observe()` to validate and journal the issued job's positive
+identity before setting an Event. Its mutation thread waits for that Event,
+changes quota, and is joined before fixture teardown. It asserts and prints
+result, exact reason, positive ownership, mutation and scheduler sequence:
+`submit3 -> cancel125`, HOLD, drained=false, and exactly one durable
+CANCEL_UNKNOWN with `unknown cancellation`. No production cancellation code
+changed. Existing separate preissue no-submit/no-cancel coverage remains; the
+six new freshness cases additionally cover failed/unknown resource observations
+and a shutdown signal at the final boundary without submission or cancellation.
+
+The README's stale owner-thread sentence now correctly names the dedicated
+resource guardian, and documents the new generation boundary. Source-entry
+tests now stage the committed manifest bytes instead of synthesizing a fresh
+manifest inside the fixture. That test first failed with the intentionally stale
+manifest (`HOLD: reference SHA256 mismatch`), then passed after regeneration.
+The closed source inventory remains exactly five files. Only coordinator
+production bytes changed: 22938bytes,
+`11a1642ce2ee3d7f56ff202755bdea78ca199d8d8422ba1d0d7b593170ce8e77`.
+Current manifest SHA256:
+`a2eb3c80e0b9b7bf830c0fc8f1a2f581860ed4be8d3c4e016c3d651cfe9de78f`.
+
+### Exact commands and retained output
+
+All commands ran in a370 using local Python3.14.7/macOS26.5.1. These are pure
+fixtures, not native acceptance. Full outputs, including the rejected source
+staging attempt, are retained under `scripts/vega_evaluation_controller005/SDD/`.
+No prior failed transcript was overwritten or removed.
+
+```text
+python3 -B -m unittest discover -s scripts/vega_evaluation_controller005/tests -k PreissueFreshnessTests -v > scripts/vega_evaluation_controller005/SDD/round4-RED-freshness.txt 2>&1
+Exit1; Ran4tests in0.076s; FAILED(failures=4). Each actual sequence included
+submit3 despite bad=True and a valid real permit.
+
+python3 -B -O -m unittest discover -s scripts/vega_evaluation_controller005/tests -k unknown_cancel_stays_hold -v > scripts/vega_evaluation_controller005/SDD/round4-RED-unknown-cancel.txt 2>&1
+Exit1; Ran1test in0.130s; FAILED(failures=1). Result HOLD/resource gate,
+drained=false; calls test3,test1, with no submit/cancel under slow prepare.
+
+python3 -B -m unittest discover -s scripts/vega_evaluation_controller005/tests -k PreissueFreshnessTests -v > scripts/vega_evaluation_controller005/SDD/round4-GREEN-freshness.txt 2>&1
+Exit0; Ran4tests in0.065s; OK. No submit/cancel at either write boundary.
+
+python3 -B -O -m unittest discover -s scripts/vega_evaluation_controller005/tests -k unknown_cancel_stays_hold -v > scripts/vega_evaluation_controller005/SDD/round4-GREEN-unknown-cancel.txt 2>&1
+Exit0; Ran1test in0.501s; OK. owned=True, mutated=True, errors=[],
+HOLD/resource gate, drained=false, exact submit3/cancel125 sequence.
+
+python3 -B -m unittest discover -s scripts/vega_evaluation_controller005/tests -p test_entry.py -v > scripts/vega_evaluation_controller005/SDD/round4-RED-source-manifest.txt 2>&1
+Exit1; Ran3tests in0.256s; FAILED(failures=1). Persisted old manifest denied:
+return75, HOLD: reference SHA256 mismatch.
+
+python3 -B -m unittest discover -s scripts/vega_evaluation_controller005/tests -v > scripts/vega_evaluation_controller005/SDD/round4-GREEN-normal.txt 2>&1
+Exit0; Ran46tests in8.845s; OK. This initial full run was followed by a narrow
+fixture-handshake correction: compare guardian completion to the callback's
+start, rather than its earlier guardian start. The old comparison waited for
+an unnecessary subsequent periodic sample. Final covering runs follow.
+
+python3 -B -O -m unittest discover -s scripts/vega_evaluation_controller005/tests -v > scripts/vega_evaluation_controller005/SDD/round4-GREEN-optimized-final.txt 2>&1
+Exit0; Ran46tests in8.558s; OK.
+
+python3 -B -m unittest discover -s scripts/vega_evaluation_controller005/tests -v > scripts/vega_evaluation_controller005/SDD/round4-GREEN-normal-final.txt 2>&1
+Exit0; Ran46tests in8.545s; OK.
+```
+
+Final full runs include the five existing guardian lifecycle/strict slow-fsync
+checks, six new freshness checks, corrected unknown-cancel fixture, separate
+preissue no-owned-job test, all four lifecycle-review checks and all three
+persisted source-entry checks. No test skips or timing-threshold relaxations.
+
+Manifest regeneration used this exact stdin program with `python3 -B -`:
+
+```python
+import hashlib,json
+from pathlib import Path
+root=Path('scripts/vega_evaluation_controller005')
+p=root/'source-manifest.json'; manifest=json.loads(p.read_text())
+for name in manifest['sources']:
+    raw=(root/name).read_bytes()
+    manifest['sources'][name]={'bytes':len(raw),'sha256':hashlib.sha256(raw).hexdigest()}
+p.write_text(json.dumps(manifest,sort_keys=True,indent=2)+'\n')
+print('Manifest SHA256:',hashlib.sha256(p.read_bytes()).hexdigest())
+```
+
+The manifest byte records, all six production/test Python compilations and
+Python3.9 grammar checks passed, recorded in `SDD/round4-source-verification.txt`.
+The same check's first source-only subprocess exited75 with `HOLD: symlink
+reference`: the ad hoc staging program used the macOS `/var` temporary alias
+without resolving it. This is a harness-path error and correct admission denial,
+not a source or platform bypass. The failed argv/stdout/stderr are retained.
+The complete exact verification stdin was:
+
+```python
+import ast, hashlib, json, platform, shutil, subprocess, sys, tempfile
+from pathlib import Path
+root=Path('scripts/vega_evaluation_controller005')
+manifest_path=root/'source-manifest.json'
+manifest=json.loads(manifest_path.read_bytes())
+expected={'controller.sbatch','coordinator.py','entry.py','journal.py','scheduler.py'}
+if set(manifest['sources'])!=expected: raise SystemExit('unexpected source inventory')
+for name,record in manifest['sources'].items():
+    raw=(root/name).read_bytes()
+    if record!={'bytes':len(raw),'sha256':hashlib.sha256(raw).hexdigest()}:
+        raise SystemExit('source mismatch: '+name)
+    print(name,record)
+for path in sorted(root.glob('*.py'))+sorted((root/'tests').glob('*.py')):
+    raw=path.read_bytes(); compile(raw,str(path),'exec'); ast.parse(raw,feature_version=(3,9))
+    print('COMPILED and Python3.9 grammar:',path)
+sha=hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+print('manifest_sha256:',sha)
+print('local:',platform.platform(),sys.version,sys.executable)
+with tempfile.TemporaryDirectory() as directory:
+    stage=Path(directory)
+    for name in expected|{'source-manifest.json'}: shutil.copyfile(root/name,stage/name)
+    for mode in ([],['-O']):
+        argv=[sys.executable,'-B',*mode,'-I','-S',str(stage/'entry.py'),'--check-source',str(stage/'source-manifest.json'),'--manifest-sha256',sha]
+        result=subprocess.run(argv,capture_output=True,text=True)
+        print(json.dumps({'argv':argv,'returncode':result.returncode,'stdout':result.stdout,'stderr':result.stderr}))
+        if result.returncode!=0 or json.loads(result.stdout)['status']!='SOURCE_VERIFIED':
+            raise SystemExit('source-only admission failed')
+```
+
+Command: `python3 -B - > scripts/vega_evaluation_controller005/SDD/round4-source-verification.txt`
+with the preceding stdin. Exit1 from the rejected unresolved source staging.
+The corrected source-only check used the following exact stdin with
+`python3 -B - > scripts/vega_evaluation_controller005/SDD/round4-source-verification-resolved.txt`:
+
+```python
+import hashlib,json,shutil,subprocess,sys,tempfile
+from pathlib import Path
+root=Path('scripts/vega_evaluation_controller005')
+manifest=root/'source-manifest.json'; sha=hashlib.sha256(manifest.read_bytes()).hexdigest()
+with tempfile.TemporaryDirectory() as directory:
+    stage=Path(directory).resolve()
+    for name in set(json.loads(manifest.read_bytes())['sources'])|{'source-manifest.json'}:
+        shutil.copyfile(root/name,stage/name)
+    for mode in ([],['-O']):
+        argv=[sys.executable,'-B',*mode,'-I','-S',str(stage/'entry.py'),'--check-source',str(stage/'source-manifest.json'),'--manifest-sha256',sha]
+        result=subprocess.run(argv,capture_output=True,text=True)
+        print(json.dumps({'argv':argv,'returncode':result.returncode,'stdout':result.stdout,'stderr':result.stderr}))
+        if result.returncode!=0 or json.loads(result.stdout)['status']!='SOURCE_VERIFIED':
+            raise SystemExit('source-only admission failed')
+```
+
+Exit0. Both isolated normal and `-O` children returned0, SOURCE_VERIFIED and empty
+stderr; exact child argv/results are in the resolved transcript. The production
+admission code and platform checks were not changed. Python3.9 grammar parsing
+is not a substitute for executing on genuine Vega Python3.9.
+
+### Final API handoff and limitations
+
+Public `Runtime`, `run`, `reconcile`, lease/journal, scheduler, adapter and config
+signatures are unchanged. Only internal `Owner.live` and guardian `check` gain a
+keyword-only `fresh=False`. The public adapter still implements exactly:
+`prepare_once(phase,context)`, `preflight_current(phase,index,context)`,
+`reserve(phase,index,context)`, `resource_check(transaction_or_None,context)`,
+`terminal(phase,index,transaction,identity,observation,context)` and
+`phase_complete(phase,context)`. Resource checks run only on the single dedicated
+guardian, concurrently with owner/adapter IO, and must remain thread-safe,
+read-only and <=.1s. They must sample through quiescence. No journal, submission
+or cancellation authority moves to that thread. Task3 can use the existing
+context, three inline reservation objects and actual owner-published references
+without an adapter/config migration.
+
+This fixes observation freshness at the owner's issue boundary; it does not
+claim an atomic Ceph quota reservation against external writers or preemption
+of a whole-process/OS stall. Detection/cleanup still depend on the documented
+callback and scheduling bounds. The native004 failure remains historical;
+root must rerun its native gate against this manifest and obtain scoped review.
+Task3's full-campaign journal/control-budget externalization, ledger/credit and
+physical/authority integration remain unchanged activation gates. No automatic
+retry, claim reset, stale takeover, source closure expansion or Mac callback was
+introduced. All failed/partial transcripts remain.
+
+An outside-owned `git status --porcelain -z` comparison before/after found255
+unchanged entries (the assigned253 unrelated entries plus the two existing Task1
+review artifacts), with no additions/removals. Preservation manifest still hashes
+to `be0dca5fe9175b253b5c297ce3e67b72012678bee99389cea42d71e114aae47b`.
+Frozen002/004/c548 and physical sources were not edited. Explicit owned-path
+staging and whitespace verification are recorded with the commit handoff below.

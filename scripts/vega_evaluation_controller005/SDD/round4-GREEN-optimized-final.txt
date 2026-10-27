@@ -1,0 +1,58 @@
+test_controller_end_shortening_causes_one_owned_drain (test_coordinator.AdditionalBoundaries.test_controller_end_shortening_causes_one_owned_drain) ... ok
+test_duplicate_intent_cannot_be_durable_twice (test_coordinator.AdditionalBoundaries.test_duplicate_intent_cannot_be_durable_twice) ... ok
+test_lease_race_in_distinct_processes (test_coordinator.AdditionalBoundaries.test_lease_race_in_distinct_processes) ... ok
+test_reservation_reference_is_actual_reservation_not_wrapper (test_coordinator.AdditionalBoundaries.test_reservation_reference_is_actual_reservation_not_wrapper) ... ok
+test_changed_batch_is_rejected_before_transport (test_coordinator.BoundBatchTests.test_changed_batch_is_rejected_before_transport) ... ok
+test_binary_scheduler_output_retains_exact_bytes_and_timeout_evidence (test_coordinator.FailureEvidenceTests.test_binary_scheduler_output_retains_exact_bytes_and_timeout_evidence) ... ok
+test_hash_valid_duplicate_intent_is_not_reconciled_as_clean (test_coordinator.FailureEvidenceTests.test_hash_valid_duplicate_intent_is_not_reconciled_as_clean) ... ok
+test_final_guardian_observation_gates_success_before_join (test_coordinator.GuardianIOTests.test_final_guardian_observation_gates_success_before_join) ... ok
+test_guardian_is_joined_when_journal_creation_fails (test_coordinator.GuardianIOTests.test_guardian_is_joined_when_journal_creation_fails) ... ok
+test_guardian_stop_during_complete_fsync_cannot_return_complete (test_coordinator.GuardianIOTests.test_guardian_stop_during_complete_fsync_cannot_return_complete) ... ok
+test_guardian_stop_during_submit_intent_fsync_prevents_issue (test_coordinator.GuardianIOTests.test_guardian_stop_during_submit_intent_fsync_prevents_issue) ... ok
+test_resource_observation_continues_during_slow_durable_quiesce_and_cancel (test_coordinator.GuardianIOTests.test_resource_observation_continues_during_slow_durable_quiesce_and_cancel) ... ok
+test_chain_fsync_torn_and_modified_are_rejected (test_coordinator.JournalTests.test_chain_fsync_torn_and_modified_are_rejected) ... ok
+test_exclusive_lease_race_and_stale_never_reclaimed (test_coordinator.JournalTests.test_exclusive_lease_race_and_stale_never_reclaimed) ... ok
+test_reconcile_is_read_only_and_restart_denies_submit (test_coordinator.JournalTests.test_reconcile_is_read_only_and_restart_denies_submit) ... ok
+test_revoked_or_expired_permit_never_starts_scheduler_child (test_coordinator.LateIssueTests.test_revoked_or_expired_permit_never_starts_scheduler_child) ... ok
+test_drain_stops_when_refreshed_controller_reaches_finalization_boundary (test_coordinator.LifecycleReviewTests.test_drain_stops_when_refreshed_controller_reaches_finalization_boundary) ... ok
+test_quiescent_drain_paces_multiple_nonterminal_observations (test_coordinator.LifecycleReviewTests.test_quiescent_drain_paces_multiple_nonterminal_observations) ... ok
+test_terminal_postprocessing_must_finish_before_its_clamped_deadline (test_coordinator.LifecycleReviewTests.test_terminal_postprocessing_must_finish_before_its_clamped_deadline) ... ok
+test_terminal_preservation_crossing1530_completes_slot (test_coordinator.LifecycleReviewTests.test_terminal_preservation_crossing1530_completes_slot) ... ok
+test_actual_log_and_quota_growth_during_real_child_wait_are_observed (test_coordinator.LiveResourceTests.test_actual_log_and_quota_growth_during_real_child_wait_are_observed) ... ok
+test_bounded_journal_exhaustion_drains_existing_child (test_coordinator.LiveResourceTests.test_bounded_journal_exhaustion_drains_existing_child) ... ok
+test_preissue_resource_breach_holds_without_submit_or_cancel (test_coordinator.LiveResourceTests.test_preissue_resource_breach_holds_without_submit_or_cancel) ... ok
+test_real_usr1_during_preissue_gate_prevents_submission (test_coordinator.LiveResourceTests.test_real_usr1_during_preissue_gate_prevents_submission) ... ok
+test_empty_accounting_holds_and_never_guesses_cancel_id (test_coordinator.OwnerTests.test_empty_accounting_holds_and_never_guesses_cancel_id) ... ok
+test_exact_order_one_slot_current_preflight_and_prepare_once (test_coordinator.OwnerTests.test_exact_order_one_slot_current_preflight_and_prepare_once) ... ok
+test_failed_gate_and_failed_child_block_every_later_slot (test_coordinator.OwnerTests.test_failed_gate_and_failed_child_block_every_later_slot) ... ok
+test_low_issue_budget_has_no_submit_and_signal_has_no_late_issue (test_coordinator.OwnerTests.test_low_issue_budget_has_no_submit_and_signal_has_no_late_issue) ... ok
+test_nested_capability_failure_before_lease (test_coordinator.OwnerTests.test_nested_capability_failure_before_lease) ... ok
+test_pending_and_active_deadline_one_cancel (test_coordinator.OwnerTests.test_pending_and_active_deadline_one_cancel) ... ok
+test_resource_breach_during_slow_observation_cancels_once_and_drains (test_coordinator.OwnerTests.test_resource_breach_during_slow_observation_cancels_once_and_drains) ... ok
+test_unknown_cancel_stays_hold (test_coordinator.OwnerTests.test_unknown_cancel_stays_hold) ... ok
+test_unknown_submit_never_replayed_even_without_identity (test_coordinator.OwnerTests.test_unknown_submit_never_replayed_even_without_identity) ... ok
+test_intent_write_rejects_completed_same_generation_sample (test_coordinator.PreissueFreshnessTests.test_intent_write_rejects_completed_same_generation_sample) ... ok
+test_intent_write_rejects_inflight_old_sample (test_coordinator.PreissueFreshnessTests.test_intent_write_rejects_inflight_old_sample) ... ok
+test_log_write_rejects_completed_same_generation_sample (test_coordinator.PreissueFreshnessTests.test_log_write_rejects_completed_same_generation_sample) ... ok
+test_log_write_rejects_inflight_old_sample (test_coordinator.PreissueFreshnessTests.test_log_write_rejects_inflight_old_sample) ... ok
+test_signal_during_fresh_observation_after_intent_denies_issue (test_coordinator.PreissueFreshnessTests.test_signal_during_fresh_observation_after_intent_denies_issue) ... ok
+test_unknown_fresh_observation_after_intent_denies_issue (test_coordinator.PreissueFreshnessTests.test_unknown_fresh_observation_after_intent_denies_issue) ... ok
+test_environment_and_policy_argv_keep_resources_in_batch (test_coordinator.TransportTests.test_environment_and_policy_argv_keep_resources_in_batch) ... ok
+test_materialized_identity_cross_checks_both_sources (test_coordinator.TransportTests.test_materialized_identity_cross_checks_both_sources) ... ok
+test_real_child_exit_eof_late_failure_and_bounded_output (test_coordinator.TransportTests.test_real_child_exit_eof_late_failure_and_bounded_output) ... ok
+test_transport_survives_client_pipe_disconnect (test_coordinator.TransportTests.test_transport_survives_client_pipe_disconnect) ... ok
+test_activation_cannot_select_unbound_adapter_or_commands (test_entry.SourceEntryTests.test_activation_cannot_select_unbound_adapter_or_commands) ... ok
+test_rebound_extra_bytecode_and_symlink_source_fail (test_entry.SourceEntryTests.test_rebound_extra_bytecode_and_symlink_source_fail) ... ok
+test_source_only_entry_admits_exact_manifest_without_import_fallback (test_entry.SourceEntryTests.test_source_only_entry_admits_exact_manifest_without_import_fallback) ... ok
+
+----------------------------------------------------------------------
+Ran 46 tests in 8.558s
+
+OK
+unknown-cancel fixture: {'result': {'status': 'HOLD', 'reason': 'resource gate: quota or role cap exceeded', 'drained': False, 'halt_observed_at': 97519.217631625}, 'calls': [('test', 3), ('test', 1), ('submit', 3), ('cancel', '125')], 'owned': True, 'mutated': True, 'errors': []}
+preissue freshness: {'result': {'status': 'HOLD', 'reason': 'resource gate: quota or role cap exceeded', 'drained': False, 'halt_observed_at': 97519.402615708}, 'calls': [('test', 3), ('test', 1)], 'submissions': [], 'observations': [(97519.397882541, False), (97519.401471333, True), (97519.402044666, True), (97519.402573458, True)], 'mutations': [97519.402595458], 'kinds': ['ACTIVATE', 'PHASE_PREPARED', 'RESERVATION', 'SUBMIT_INTENT', 'QUIESCE', 'HOLD']}
+preissue freshness: {'result': {'status': 'HOLD', 'reason': 'resource gate: quota or role cap exceeded', 'drained': False, 'halt_observed_at': 97519.442791833}, 'calls': [('test', 3), ('test', 1)], 'submissions': [], 'observations': [(97519.406099083, False), (97519.409437208, True), (97519.410016541, True), (97519.4106715, True)], 'mutations': [97519.410684625], 'kinds': ['ACTIVATE', 'PHASE_PREPARED', 'RESERVATION', 'SUBMIT_INTENT', 'QUIESCE', 'HOLD']}
+preissue freshness: {'result': {'status': 'HOLD', 'reason': 'resource gate: quota or role cap exceeded', 'drained': False, 'halt_observed_at': 97519.460142125}, 'calls': [('test', 3), ('test', 1)], 'submissions': [], 'observations': [(97519.454049833, False), (97519.459137291, True), (97519.460043791, True)], 'mutations': [97519.460085166], 'kinds': ['ACTIVATE', 'PHASE_PREPARED', 'RESERVATION', 'QUIESCE', 'HOLD']}
+preissue freshness: {'result': {'status': 'HOLD', 'reason': 'resource gate: quota or role cap exceeded', 'drained': False, 'halt_observed_at': 97519.49287225}, 'calls': [('test', 3), ('test', 1)], 'submissions': [], 'observations': [(97519.463844833, False), (97519.467493666, True), (97519.467617833, True)], 'mutations': [97519.467624041], 'kinds': ['ACTIVATE', 'PHASE_PREPARED', 'RESERVATION', 'QUIESCE', 'HOLD']}
+preissue freshness: {'result': {'status': 'HOLD', 'reason': 'shutdown signal', 'drained': False, 'halt_observed_at': 97519.526274166}, 'calls': [('test', 3), ('test', 1)], 'submissions': [], 'observations': [(97519.497526833, False), (97519.500252708, True), (97519.500708833, True), (97519.501137541, True), (97519.526206458, True)], 'mutations': [97519.501153291], 'kinds': ['ACTIVATE', 'PHASE_PREPARED', 'RESERVATION', 'SUBMIT_INTENT', 'QUIESCE', 'HOLD']}
+preissue freshness: {'result': {'status': 'HOLD', 'reason': 'resource gate: unknown resource observation', 'drained': False, 'halt_observed_at': 97519.558674}, 'calls': [('test', 3), ('test', 1)], 'submissions': [], 'observations': [(97519.529556125, False), (97519.532534125, True), (97519.533050083, True), (97519.533505333, True)], 'mutations': [97519.533513083], 'kinds': ['ACTIVATE', 'PHASE_PREPARED', 'RESERVATION', 'SUBMIT_INTENT', 'QUIESCE', 'HOLD']}

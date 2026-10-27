@@ -1,0 +1,18 @@
+test_activation_cannot_select_unbound_adapter_or_commands (test_entry.SourceEntryTests.test_activation_cannot_select_unbound_adapter_or_commands) ... ok
+test_rebound_extra_bytecode_and_symlink_source_fail (test_entry.SourceEntryTests.test_rebound_extra_bytecode_and_symlink_source_fail) ... ok
+test_source_only_entry_admits_exact_manifest_without_import_fallback (test_entry.SourceEntryTests.test_source_only_entry_admits_exact_manifest_without_import_fallback) ... FAIL
+
+======================================================================
+FAIL: test_source_only_entry_admits_exact_manifest_without_import_fallback (test_entry.SourceEntryTests.test_source_only_entry_admits_exact_manifest_without_import_fallback)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_evaluation_controller005/tests/test_entry.py", line 27, in test_source_only_entry_admits_exact_manifest_without_import_fallback
+    self.assertEqual(result.returncode,0,result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 75 != 0 : HOLD: reference SHA256 mismatch
+
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.256s
+
+FAILED (failures=1)

@@ -179,13 +179,42 @@ class OwnerTests(Fixture):
                 self.assertEqual(len([c for c in s.calls if c[0]=='cancel']),1)
     def test_unknown_cancel_stays_hold(self):
         a=FakeAdapter(); s=FakeScheduler(('RUNNING',),delay=.15)
+        owned=threading.Event(); mutated=threading.Event(); errors=[]
         def cancel(identity):
             s.calls.append(('cancel',identity['job_id'])); raise TimeoutError('unknown cancellation')
         s.cancel=cancel
-        threading.Timer(.05, lambda:setattr(a,'bad',True)).start()
-        r=self.run_owner(a,s)
-        self.assertEqual(r['status'],'HOLD'); self.assertFalse(r['drained'])
-        self.assertEqual(len([c for c in s.calls if c[0]=='cancel']),1)
+        original_prepare=a.prepare_once; original_observe=coordinator.Owner.observe
+        def slow_prepare(*args):
+            # Longer than the removed pre-run Timer(.05): startup speed cannot
+            # choose whether this fixture tests preissue or owned cancellation.
+            time.sleep(.12)
+            return original_prepare(*args)
+        a.prepare_once=slow_prepare
+        def observe(owner):
+            result=original_observe(owner)  # validates AND journals ownership
+            owned.set()
+            if not mutated.wait(1): raise AssertionError('fixture mutation missing')
+            return result
+        def grow():
+            if not owned.wait(5):
+                errors.append('no positively owned observation'); return
+            a.bad=True; mutated.set()
+        mutation=threading.Thread(target=grow); mutation.start()
+        try:
+            with patch.object(coordinator.Owner,'observe',observe): r=self.run_owner(a,s)
+        finally: mutation.join(6)
+        rows=journal.read_chain(self.root/'journal.jsonl')
+        diagnostic=repr({'result':r,'calls':s.calls,'owned':owned.is_set(),
+                         'mutated':mutated.is_set(),'errors':errors})
+        print('unknown-cancel fixture: '+diagnostic)
+        self.assertFalse(mutation.is_alive(),diagnostic); self.assertFalse(errors,diagnostic)
+        self.assertTrue(owned.is_set(),diagnostic); self.assertTrue(mutated.is_set(),diagnostic)
+        self.assertEqual(r['status'],'HOLD',diagnostic); self.assertFalse(r['drained'],diagnostic)
+        self.assertEqual(r['reason'],'resource gate: quota or role cap exceeded',diagnostic)
+        self.assertEqual([c for c in s.calls if c[0] in ('submit','cancel')],
+                         [('submit',3),('cancel','125')],diagnostic)
+        self.assertEqual([row['event']['reason'] for row in rows if row['event']['kind']=='CANCEL_UNKNOWN'],
+                         ['unknown cancellation'],diagnostic)
     def test_nested_capability_failure_before_lease(self):
         s=FakeScheduler(); s.capability=lambda *a:{'returncode':1,'complete_eof':True}
         with self.assertRaises(journal.Hold): self.run_owner(sched=s)
@@ -480,6 +509,99 @@ class LifecycleReviewTests(Fixture):
         unknown=[r['event'] for r in rows if r['event']['kind']=='DRAIN_UNKNOWN']
         self.assertEqual([r['reason'] for r in unknown],['terminal drain deadline'],diagnostic)
         self.assertFalse(any(r['event']['kind'] in ('SLOT_COMPLETE','TERMINAL_PROCESSED') for r in rows),diagnostic)
+
+
+class PreissueFreshnessTests(Fixture):
+    def _breach_after_write(self, boundary, inflight, outcome="breach"):
+        # Keep real reservation/journal/log fsync and permit; only the read-only
+        # quota input changes, after a successful current-transaction sample.
+        sampled=threading.Event(); release=threading.Event(); owners=[]; submissions=[]
+        observations=[]; mutations=[]; timers=[]; sample_starts=[]
+        stop=threading.Event()
+        class Adapter(FakeAdapter):
+            armed=False
+            def resource_check(self,transaction,context):
+                started=time.monotonic()
+                if self.bad and outcome=="unknown": return None
+                result=super().resource_check(transaction,context)
+                observations.append((started,transaction is not None))
+                if self.armed:
+                    self.armed=False; sample_starts.append(started); sampled.set()
+                    if inflight and not release.wait(.08):
+                        raise ValueError('fixture did not release old observation')
+                return result
+        adapter=Adapter()
+        class Scheduler(FakeScheduler):
+            def submit(self,*args,**kwargs):
+                submissions.append({'bad':adapter.bad,'permit_valid':kwargs['permit'].valid(),
+                                    'at':time.monotonic()})
+                return super().submit(*args,**kwargs)
+        sched=Scheduler()
+        original_slot=coordinator.Owner.slot; original_live=coordinator.Owner.live
+        original_sync=coordinator.sync_directory; original_append=journal.Journal.append
+        def slot(owner,*args):
+            owners.append(owner)
+            return original_slot(owner,*args)
+        def breach():
+            guardian=owners[0].guardian
+            with guardian.condition:
+                # Ask the same serialized guardian for a successful sample now.
+                adapter.armed=True; guardian.demand=True; guardian.condition.notify_all()
+            if not sampled.wait(1): raise AssertionError('fixture sample did not start')
+            if not inflight:
+                with guardian.condition:
+                    if not guardian.condition.wait_for(lambda:guardian.latest is not None and guardian.latest['completed']>=sample_starts[0],1):
+                        raise AssertionError('fixture sample did not complete')
+            if outcome=="signal": stop.set()
+            else: adapter.bad=True
+            mutations.append(time.monotonic())
+        def sync(path):
+            original_sync(path)
+            if boundary=='log' and Path(path).name=='slurm': breach()
+        def append(j,event,**kwargs):
+            result=original_append(j,event,**kwargs)
+            if boundary=='intent' and event['kind']=='SUBMIT_INTENT': breach()
+            return result
+        def live(owner,*args,**kwargs):
+            if inflight and mutations and not timers:
+                # Finish the old successful snapshot AFTER the boundary check has
+                # entered. A completion-only freshness test would accept it.
+                timer=threading.Timer(.02,release.set); timers.append(timer); timer.start()
+            return original_live(owner,*args,**kwargs)
+        try:
+            with patch.object(coordinator.Owner,'slot',slot), patch.object(coordinator.Owner,'live',live), \
+                 patch.object(coordinator,'sync_directory',sync), patch.object(journal.Journal,'append',append):
+                result=self.run_owner(adapter,sched,stop=stop)
+        finally:
+            release.set()
+            for timer in timers: timer.join()
+        rows=journal.read_chain(self.root/'journal.jsonl')
+        kinds=[row['event']['kind'] for row in rows]
+        diagnostic=repr({'result':result,'calls':sched.calls,'submissions':submissions,
+                         'observations':observations,'mutations':mutations,'kinds':kinds})
+        print('preissue freshness: '+diagnostic)
+        self.assertTrue(mutations,diagnostic)
+        self.assertEqual(result['status'],'HOLD',diagnostic)
+        reasons={'breach':'resource gate: quota or role cap exceeded',
+                 'unknown':'resource gate: unknown resource observation','signal':'shutdown signal'}
+        self.assertEqual(result['reason'],reasons[outcome],diagnostic)
+        self.assertEqual([c for c in sched.calls if c[0] in ('submit','cancel')],[],diagnostic)
+        self.assertEqual(kinds.count('SUBMIT_INTENT'),int(boundary=='intent'),diagnostic)
+        self.assertFalse(result['drained'],diagnostic)
+        self.assertFalse(any(t.name=='evaluation005-resource-guardian' for t in threading.enumerate()),diagnostic)
+
+    def test_log_write_rejects_completed_same_generation_sample(self):
+        self._breach_after_write('log',False)
+    def test_log_write_rejects_inflight_old_sample(self):
+        self._breach_after_write('log',True)
+    def test_intent_write_rejects_completed_same_generation_sample(self):
+        self._breach_after_write('intent',False)
+    def test_intent_write_rejects_inflight_old_sample(self):
+        self._breach_after_write('intent',True)
+    def test_unknown_fresh_observation_after_intent_denies_issue(self):
+        self._breach_after_write('intent',True,'unknown')
+    def test_signal_during_fresh_observation_after_intent_denies_issue(self):
+        self._breach_after_write('intent',True,'signal')
 
 class GuardianIOTests(Fixture):
     def test_resource_observation_continues_during_slow_durable_quiesce_and_cancel(self):

@@ -83,10 +83,16 @@ class ResourceGuardian:
             self.transaction=transaction; self.context=dict(context)
             self.condition.notify_all()
             return self.generation
-    def check(self,transaction,context):
+    def check(self,transaction,context,*,fresh=False):
         generation=self.publish(transaction,context)
         until=time.monotonic()+.25
         with self.condition:
+            if fresh:
+                # A callback already running may have read before the owner's
+                # writes. Only a callback started with this new generation can
+                # satisfy the boundary, even if an older one completes later.
+                self.generation+=1; generation=self.generation; self.demand=True
+                self.condition.notify_all()
             while self.failure is None and (self.latest is None or self.latest['generation']<generation):
                 remaining=until-time.monotonic()
                 if remaining<=0:
@@ -168,8 +174,8 @@ class Owner:
         if self.halt is None:
             self.halt=str(reason)[:2048]; self.halt_observed_at=time.monotonic() if observed_at is None else observed_at; self.stop.set()
             self.record('QUIESCE',reason=self.halt)
-    def live(self):
-        failure=self.guardian.check(self.transaction,self.context)
+    def live(self,*,fresh=False):
+        failure=self.guardian.check(self.transaction,self.context,fresh=fresh)
         if failure is not None: self.halt_once(failure['reason'],observed_at=failure['observed_at'])
         if self.stop.is_set(): self.halt_once('shutdown signal')
         if self.lifecycle=='ACTIVE' and self.deadline-self.clock()<ACTIVE_SECONDS:
@@ -300,12 +306,12 @@ class Owner:
         log=Path(self.context['log_root'])/('slot%02d'%index)/'slurm'
         log.mkdir(mode=0o700,exist_ok=False)  # Phase adapter prepared exact provenance parent.
         sync_directory(log.parent); sync_directory(log)
-        # Last live/deadline/shutdown gate immediately before durable intent.
-        self.live()
+        # Newly started observation after log writes, before durable intent.
+        self.live(fresh=True)
         if self.halt or self.deadline-self.clock()<ISSUE_SECONDS: raise Hold(self.halt or 'issue lifetime below3630')
         self.pending_started=self.clock()
         self.record('SUBMIT_INTENT',phase=phase,index=index,name=name,log=str(log),reservation=reference)
-        self.live()  # A guardian stop during durable intent must revoke physical issue.
+        self.live(fresh=True)  # Observe again after durable intent, before issue.
         if self.halt: raise Hold(self.halt)
         # Once intent exists, ANY ambiguous result consumes this slot forever.
         permit=IssuePermit(self.stop,time.monotonic()+2)

@@ -17,11 +17,8 @@ class SourceEntryTests(unittest.TestCase):
         self.package=self.root/'source'; self.package.mkdir()
         for name in ('entry.py','journal.py','scheduler.py','coordinator.py','controller.sbatch'):
             if (ROOT/name).exists(): shutil.copyfile(ROOT/name,self.package/name)
-        self.manifest={'schema':'z1_vega_controller_source_v1','sources':{}}
-        for p in self.package.iterdir():
-            self.manifest['sources'][p.name]={'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()}
         self.manifest_path=self.package/'source-manifest.json'
-        self.manifest_path.write_text(json.dumps(self.manifest,sort_keys=True))
+        shutil.copyfile(ROOT/'source-manifest.json',self.manifest_path)
     def tearDown(self): self.tmp.cleanup()
     def invoke(self):
         return subprocess.run([sys.executable,'-B','-I','-S',str(self.package/'entry.py'),'--check-source',str(self.manifest_path),'--manifest-sha256',hashlib.sha256(self.manifest_path.read_bytes()).hexdigest()],capture_output=True,text=True)

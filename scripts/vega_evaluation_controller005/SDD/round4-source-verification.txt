@@ -1,0 +1,14 @@
+controller.sbatch {'bytes': 1214, 'sha256': 'dfbe2715e6f355e6c42ba112f03482ce004547ab193785021c51dccddd3e3b9a'}
+coordinator.py {'bytes': 22938, 'sha256': '11a1642ce2ee3d7f56ff202755bdea78ca199d8d8422ba1d0d7b593170ce8e77'}
+entry.py {'bytes': 8197, 'sha256': 'dbb948814192ce0ead7f9d9ced1737357f4368175b166507b7e89977f2699702'}
+journal.py {'bytes': 7541, 'sha256': 'eea1d794eceeafa51da3fe504164d93c08144da398ec94434520e5c13a1f3c0f'}
+scheduler.py {'bytes': 9738, 'sha256': 'eee354cb79848e0d0fa1b5ad921c415f1a782d01b4f324003d78b2db2a134b96'}
+COMPILED and Python3.9 grammar: scripts/vega_evaluation_controller005/coordinator.py
+COMPILED and Python3.9 grammar: scripts/vega_evaluation_controller005/entry.py
+COMPILED and Python3.9 grammar: scripts/vega_evaluation_controller005/journal.py
+COMPILED and Python3.9 grammar: scripts/vega_evaluation_controller005/scheduler.py
+COMPILED and Python3.9 grammar: scripts/vega_evaluation_controller005/tests/test_coordinator.py
+COMPILED and Python3.9 grammar: scripts/vega_evaluation_controller005/tests/test_entry.py
+manifest_sha256: a2eb3c80e0b9b7bf830c0fc8f1a2f581860ed4be8d3c4e016c3d651cfe9de78f
+local: macOS-26.5.1-arm64-arm-64bit-Mach-O 3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)] /opt/homebrew/opt/python@3.14/bin/python3.14
+{"argv": ["/opt/homebrew/opt/python@3.14/bin/python3.14", "-B", "-I", "-S", "/var/folders/rp/p16f79hj673f0nx2bz0frx0m0000gn/T/tmp6ksuwsn3/entry.py", "--check-source", "/var/folders/rp/p16f79hj673f0nx2bz0frx0m0000gn/T/tmp6ksuwsn3/source-manifest.json", "--manifest-sha256", "a2eb3c80e0b9b7bf830c0fc8f1a2f581860ed4be8d3c4e016c3d651cfe9de78f"], "returncode": 75, "stdout": "", "stderr": "HOLD: symlink reference\n"}
