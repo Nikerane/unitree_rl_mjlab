@@ -1,0 +1,19 @@
+test_actual_separate_writer_and_verifier_generic_full_closure (test_process_profile.ProcessProfileTests.test_actual_separate_writer_and_verifier_generic_full_closure) ... FAIL
+test_crc_trailer_and_full_private_metadata_gates (test_process_profile.ProcessProfileTests.test_crc_trailer_and_full_private_metadata_gates) ... ok
+test_late_writer_exit_partial_json_and_source_freshness_hold (test_process_profile.ProcessProfileTests.test_late_writer_exit_partial_json_and_source_freshness_hold) ... ok
+test_process_pid_collision_rejected (test_process_profile.ProcessProfileTests.test_process_pid_collision_rejected) ... ok
+test_source_rebound_extra_bytecode_foreign_authority_and_mac_operative_ref (test_process_profile.ProcessProfileTests.test_source_rebound_extra_bytecode_foreign_authority_and_mac_operative_ref) ... ok
+
+======================================================================
+FAIL: test_actual_separate_writer_and_verifier_generic_full_closure (test_process_profile.ProcessProfileTests.test_actual_separate_writer_and_verifier_generic_full_closure)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/tests/test_process_profile.py", line 23, in test_actual_separate_writer_and_verifier_generic_full_closure
+    self.assertEqual(writer.get('invocation',{}).get('argv0'),'-c');self.assertEqual(writer['entrypoint']['path'],str(root/'archive/resident_archive.py'));self.assertEqual(writer['platform'],sys.platform);self.assertEqual(verifier['platform'],sys.platform);self.assertEqual(writer['ppid'],verifier['pid']);self.assertNotEqual(writer['pid'],verifier['pid'])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: None != '-c'
+
+----------------------------------------------------------------------
+Ran 5 tests in 5.250s
+
+FAILED (failures=1)

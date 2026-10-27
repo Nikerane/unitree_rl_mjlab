@@ -728,7 +728,7 @@ def remote_dispatch(packet,*,deadline,sink=None):
     if action=='create':
         require(not os.path.lexists(destination),'exclusive archive destination already exists')
         result=store.create_archive(request,destination,inventory_reader=modules['remote'].inventory,free_reader=free_reader,deadline=deadline)
-        result['writer_identity']=process_identity(request)
+        result['writer_identity']=process_identity(request,role='writer')
         writer=control_reference(destination/'writer-process.json',result['writer_identity'])
         store.publish_control(destination/'writer-process.json',json_bytes(result['writer_identity']),writer['sha256'],free_reader=free_reader,deadline=deadline,future_reserve_bytes=request['future_reserve_bytes'])
     elif action=='inspect':
@@ -805,12 +805,13 @@ finally:
 '''
 
 
-def process_identity(request):
+def process_identity(request,*,role='verifier'):
     require(sys.platform=='linux','actual Linux process required')
     interpreter=Path(sys.executable).resolve(strict=True)
     package=request['helper_package_reference']
-    entry=Path(package['path']).parent/'independent_verify.py'
-    return dict(platform=sys.platform,hostname=os.uname().nodename,pid=os.getpid(),ppid=os.getppid(),interpreter=dict(path=str(interpreter),sha256=hashlib.sha256(read_bytes(interpreter,64*MIB,time.monotonic()+5)).hexdigest()),entrypoint=dict(path=str(entry),sha256=hashlib.sha256(read_bytes(entry,131072,time.monotonic()+5)).hexdigest()),source_manifest=package)
+    require(role in ('writer','verifier'),'closed process role required')
+    entry=Path(package['path']).parent/('archive/resident_archive.py' if role=='writer' else 'independent_verify.py')
+    return dict(role=role,invocation=dict(argv0=sys.argv[0]),platform=sys.platform,hostname=os.uname().nodename,pid=os.getpid(),ppid=os.getppid(),interpreter=dict(path=str(interpreter),sha256=hashlib.sha256(read_bytes(interpreter,64*MIB,time.monotonic()+5)).hexdigest()),entrypoint=dict(path=str(entry),sha256=hashlib.sha256(read_bytes(entry,131072,time.monotonic()+5)).hexdigest()),source_manifest=package)
 
 
 def validate_process_pair(writer,verifier):
@@ -821,7 +822,11 @@ def validate_process_pair(writer,verifier):
         for key in ('interpreter','entrypoint','source_manifest'):
             ref=value.get(key);require(isinstance(ref,dict) and set(ref)=={'path','sha256'} and re.fullmatch('[0-9a-f]{64}',ref['sha256']),'complete process source pin required')
     require(writer['hostname']==verifier['hostname'] and writer['pid']!=verifier['pid'] and writer['ppid']==verifier['pid'],'distinct owned writer child required')
-    require(all(writer[key]==verifier[key] for key in ('interpreter','entrypoint','source_manifest')),'writer/verifier source identity differs')
+    require(all(writer[key]==verifier[key] for key in ('interpreter','source_manifest')),'writer/verifier source identity differs')
+    require(writer.get('role')=='writer' and verifier.get('role')=='verifier' and writer.get('invocation',{}).get('argv0')=='-c','actual writer bootstrap invocation required')
+    manifest=parse_json(bound_bytes(writer['source_manifest'],time.monotonic()+5,131072));base=Path(writer['source_manifest']['path']).parent
+    for value,name in ((writer,'archive/resident_archive.py'),(verifier,'independent_verify.py')):
+        require(value['entrypoint']==dict(path=str(base/name),sha256=manifest['files'][name]['sha256']),'actual process source entry differs')
 
 
 class LocalTransport:

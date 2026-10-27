@@ -73,7 +73,10 @@ checks full gzip CRC, tar/PAX/member/restore/source-identity metadata and EOF,
 compares primary and independent results, checks application JSON and source
 freshness, then publishes closed stream/fresh/provenance/full-receipt stages.
 Provenance records actual Linux hostname/PID/PPID, resolved interpreter hash,
-entrypoint hash, source-manifest reference, observed writer PID and writer exit0.
+role and actual invocation argv0, source entry hash, source-manifest reference,
+observed writer PID and writer exit0. Writer invocation is `-c` with the pinned
+`archive/resident_archive.py` source entry; verifier entry is the pinned
+`independent_verify.py`.
 The creator PID differs from the verifier and its PPID equals the verifier PID.
 The verifier's *own* successful exit is observed externally by the controller.
 

@@ -69,8 +69,8 @@
     "resident_archive.py": {
       "changed": true,
       "current": {
-        "bytes": 70336,
-        "sha256": "2e2d3677f479583a106bd23e98fbd4313aaae96f5cc81ca8166fdaccaf6739a2"
+        "bytes": 71089,
+        "sha256": "dea755031b0d8dfbed5ea2116c28b32ae2069293d94d801526d7cf0db74eb330"
       },
       "predecessor": {
         "bytes": 66028,
@@ -111,11 +111,11 @@
       }
     }
   },
-  "new_source_manifest_sha256": "0c32d5257352c103aebe70363d4828e8e378ef1f140a8b796611b2d433abe722",
+  "new_source_manifest_sha256": "0668288beef977189395f492a2990877b220ab008c19e496e068eb9098a1b0bc",
   "new_sources": {
     "control_preservation.py": {
-      "bytes": 13808,
-      "sha256": "6f3166775c0f7f3eccd50cf80a17744a087b3a1b4a99f74e3e1daaa0fb4380b9"
+      "bytes": 13822,
+      "sha256": "585b5f70220febb277822ad38a11e7f727d66bf03f804458f8c60f2fc62f2a8b"
     },
     "independent_verify.py": {
       "bytes": 12604,

@@ -20,7 +20,7 @@ class ProcessProfileTests(unittest.TestCase):
             receipt=json.loads(Path(reference['path']).read_bytes());self.assertEqual(receipt['kind'],'CONTROL_ONLY');self.assertFalse(receipt['technical_qualification'])
             self.assertIn('private-tree/metadata',receipt['node_metadata']);self.assertIn('policy-tree/empty',receipt['node_metadata'])
             provenance=json.loads(Path(receipt['provenance']['path']).read_bytes());writer=provenance['writer_identity'];verifier=provenance['verifier_identity']
-            self.assertEqual(writer['platform'],sys.platform);self.assertEqual(verifier['platform'],sys.platform);self.assertEqual(writer['ppid'],verifier['pid']);self.assertNotEqual(writer['pid'],verifier['pid'])
+            self.assertEqual(writer.get('invocation',{}).get('argv0'),'-c');self.assertEqual(writer['entrypoint']['path'],str(root/'archive/resident_archive.py'));self.assertEqual(writer['platform'],sys.platform);self.assertEqual(verifier['platform'],sys.platform);self.assertEqual(writer['ppid'],verifier['pid']);self.assertNotEqual(writer['pid'],verifier['pid'])
             self.assertEqual(verifier['interpreter']['sha256'],sha(Path(sys.executable).resolve()));self.assertEqual(provenance['stream_transport_exit'],0);self.assertTrue(provenance['complete_eof'])
             self.assertNotIn('cpu_supervisor_release',provenance['request'])
     def test_source_rebound_extra_bytecode_foreign_authority_and_mac_operative_ref(self):
@@ -48,7 +48,7 @@ class ProcessProfileTests(unittest.TestCase):
             with self.subTest(fault=fault),tempfile.TemporaryDirectory() as tmp:
                 root,request,ref=generic(Path(tmp).resolve());path=root/'control_preservation.py';source=path.read_text()
                 if fault=='late-exit':source=source.replace('free_reader();return result',"free_reader();raise SystemExit(1)")
-                if fault=='partial-json':source=source.replace("result['writer_identity']=a.process_identity(request);body=a.json_bytes(result['writer_identity'])","__import__('sys').stdout.write('{');raise SystemExit(0)\n        result['writer_identity']=a.process_identity(request);body=a.json_bytes(result['writer_identity'])")
+                if fault=='partial-json':source=source.replace("result['writer_identity']=a.process_identity(request,role='writer');body=a.json_bytes(result['writer_identity'])","__import__('sys').stdout.write('{');raise SystemExit(0)\n        result['writer_identity']=a.process_identity(request,role='writer');body=a.json_bytes(result['writer_identity'])")
                 if fault=='source-drift':source=source.replace("if action=='inspect':", "if action=='inspect':\n        (Path(request['private_root'])/'metadata').write_bytes(b'CHANGED')")
                 if fault=='missing-private':source=source.replace("if action=='inspect':", "if action=='inspect':\n        (Path(request['private_root'])/'metadata').unlink()")
                 path.write_text(source);reference=manifest(root);authority=json.loads(Path(request['preservation_authority']['path']).read_bytes());authority['helper_package']=reference;request['preservation_authority']=write(request['preservation_authority']['path'],authority);request['helper_package_reference']=reference;request['remote_helper_package_reference']=reference;ref=write(ref['path'],request)

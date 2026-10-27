@@ -16,6 +16,6 @@ test_process_pid_collision_rejected (test_process_profile.ProcessProfileTests.te
 test_source_rebound_extra_bytecode_foreign_authority_and_mac_operative_ref (test_process_profile.ProcessProfileTests.test_source_rebound_extra_bytecode_foreign_authority_and_mac_operative_ref) ... ok
 
 ----------------------------------------------------------------------
-Ran 16 tests in 6.426s
+Ran 16 tests in 6.439s
 
 OK

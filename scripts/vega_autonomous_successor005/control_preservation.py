@@ -94,7 +94,7 @@ def dispatch(packet,*,deadline,sink=None):
     free_reader();action=packet['action'];payload=packet.get('payload',{})
     if action=='create':
         result=m['store'].create_archive(effective,destination,inventory_reader=inventory,free_reader=free_reader,deadline=deadline)
-        result['writer_identity']=a.process_identity(request);body=a.json_bytes(result['writer_identity'])
+        result['writer_identity']=a.process_identity(request,role='writer');body=a.json_bytes(result['writer_identity'])
         m['store'].publish_control(destination/'writer-process.json',body,hashlib.sha256(body).hexdigest(),free_reader=free_reader,deadline=deadline,future_reserve_bytes=effective['future_reserve_bytes'])
         return result
     if action=='readcontrol':

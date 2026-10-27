@@ -62,7 +62,7 @@ def inventory(r):
  c=r['scheduler_identity_capture'];identity=m['contract'].accounting_identity(r['job_id'],c['accounting_job_id'],r['job_id'],c['capture'])
  return dict(nodes=nodes,policy_id=r['policy_id'],scope=r['scope'],source_root=r['source_root'],private_root=r['private_root'],job=dict(job_id=r['job_id'],terminal=True,state='COMPLETED',exit_code='0:0',identity=identity))
 if packet['action']=='create':
- result=s.create_archive(r,d,inventory_reader=inventory,free_reader=lambda:10**12,deadline=deadline);result['writer_identity']=a.process_identity(r);b=a.json_bytes(result['writer_identity']);s.publish_control(d/'writer-process.json',b,hashlib.sha256(b).hexdigest(),free_reader=lambda:10**12,deadline=deadline);sys.stdout.buffer.write(a.json_bytes(result))
+ result=s.create_archive(r,d,inventory_reader=inventory,free_reader=lambda:10**12,deadline=deadline);result['writer_identity']=a.process_identity(r,role='writer');b=a.json_bytes(result['writer_identity']);s.publish_control(d/'writer-process.json',b,hashlib.sha256(b).hexdigest(),free_reader=lambda:10**12,deadline=deadline);sys.stdout.buffer.write(a.json_bytes(result))
 else:
  s.stream_back(r,d,sys.stdout.buffer,deadline=deadline,**packet['payload']);sys.stdout.buffer.flush();idx=(d/'index.json').read_bytes();created,_=a._archive_closure(r,d,dict(path=str(d/'index.json'),sha256=hashlib.sha256(idx).hexdigest(),bytes=len(idx)),deadline);b=a.json_bytes(a.stream_stage_record(r,created));s.publish_control(d/'stream-stage.json',b,hashlib.sha256(b).hexdigest(),free_reader=lambda:10**12,deadline=deadline)
 """
