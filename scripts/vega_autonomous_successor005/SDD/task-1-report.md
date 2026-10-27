@@ -183,3 +183,92 @@ SSH, scheduler submission or real authority mutation occurred.
 
 Root should dispatch independent review against the implementation commits and
 this exact source manifest before native staging or operational delegation.
+
+## Fix round1/5 — T1-I1 and T1-I2
+
+Review base: `0eb9d6b`. Fix implementation commit:
+`e04563eb8eb4f47ed748e22a7b05a422a011b2bb`.
+Status: both requested fixes implemented with focused RED/GREEN evidence;
+independent scoped re-review remains root-owned.
+
+**T1-I1:** the operative dispatcher now passes pending role/byte values to
+`check_reservation` through its owned `free_reader.check_write(role,size)` hook.
+The actual store invokes that hook before exclusive metadata-file creation and
+before every bounded `os.write`. Metadata, writer/stage/provenance/receipt and
+failure-file output is charged to provenance; gzip output is explicitly archive.
+The hook checks aggregate observed slot usage (including existing evidence/log
+files) plus pending bytes against the individual cap and G before allocation.
+Generic controls use the same pending-write hook for their combined shared cap.
+The plain no-argument free reader remains the existing pure-store test seam;
+closed operative policy/control dispatchers always install the pending hook.
+No reservation API/schema/cap or global-credit policy changed.
+
+The focused production regression drives actual `remote_dispatch` → owned
+reservation guard → actual `_write_file`/`_Output.write`, with only unrelated
+authority/archive assembly mocked. An existing sparse slot log accounts for
+aggregate provenance. It checks all12 metadata filenames at cap and cap-minus-one:
+at cap the first byte fails before file creation; at cap-minus-one exactly one
+byte is retained and the next byte fails before creating its next file. Existing
+logs/partial evidence stay intact. The retained RED run produced13 expected
+failures:12 cap-overrun assertions reporting `one byte was already written`,
+plus the then-missing generation gate. No production-failure exception was
+misclassified as a passing cap rejection.
+
+**T1-I2:** `archive/resident_archive.py`'s BOOTSTRAP literal is the maintained
+canonical security source. `tests/generate_bootstrap.py` reads that literal via
+AST without importing any candidate code, mechanically generates the marked
+isolated-entry region, and supplies an exact `--check`. The focused test checks
+full generated-region parity and proves an independently changed entry function
+is detected. Runtime still uses the isolated stdlib authority-before-source and
+bounded stdin path; there is no unchecked import fallback. The development
+utility is under tests and the production graph remains13 sources.
+
+Active source-manifest SHA256 after this fix:
+`be0dca5fe9175b253b5c297ce3e67b72012678bee99389cea42d71e114aae47b`.
+`SDD/source-delta.json` reflects these exact new bindings. Only new005 owned
+sources/tests/docs were changed; copied predecessor004/frozen source trees were
+not touched.
+
+Exact covering commands and observed output summaries:
+
+```text
+python3 -B -m unittest discover -s scripts/vega_autonomous_successor005/tests -p test_preservation.py -v
+RED: Ran11 tests; FAILED (failures=13), retained in SDD/round1-RED.txt.
+GREEN: Ran11 tests in1.605s; OK, SDD/round1-GREEN-preservation-normal.txt.
+
+python3 -B -O -m unittest discover -s scripts/vega_autonomous_successor005/tests -p test_preservation.py -v
+Ran11 tests in1.717s; OK, SDD/round1-GREEN-preservation-optimized.txt.
+
+python3 -B -m unittest discover -s scripts/vega_autonomous_successor005/tests -p test_process_profile.py -v
+Ran5 tests in5.370s; OK, SDD/round1-GREEN-process-normal.txt.
+
+python3 -B -O -m unittest discover -s scripts/vega_autonomous_successor005/tests -p test_process_profile.py -v
+Ran5 tests in5.976s; OK, SDD/round1-GREEN-process-optimized.txt.
+
+python3 -B -m unittest discover -s scripts/vega_autonomous_successor005/tests -p test_consumer_compatibility.py -v
+Ran2 tests in0.748s; OK, SDD/round1-GREEN-consumer-normal.txt.
+
+python3 -B -O -m unittest discover -s scripts/vega_autonomous_successor005/tests -p test_consumer_compatibility.py -v
+Ran2 tests in0.760s; OK, SDD/round1-GREEN-consumer-optimized.txt.
+
+python3 -B scripts/vega_autonomous_successor005/tests/generate_bootstrap.py --write
+python3 -B scripts/vega_autonomous_successor005/tests/generate_bootstrap.py --check
+isolated security bootstrap matches canonical source
+Retained in SDD/round1-bootstrap-parity.txt.
+```
+
+The changed store/dispatcher source graph justified rerunning the two focused
+unchanged-consumer/sealer tests; no historical broad or whole-repository suite
+was run. Full command outputs are the referenced transcripts. Overall18 focused
+tests pass normally and18 under `-O`. The raw RED transcript preserves one
+unittest-generated trailing space on its subtest heading; the commit's full
+`git diff --cached --check` reported that evidence-file whitespace. Source/docs
+whitespace is checked separately; no output content is silently normalized.
+
+No historical/shared import extension was added or requested in this fix round.
+Both remain conservative zero-credit. Root is investigating a separate storage
+remedy; the earlier quota measurement in this report is historical, not a fresh
+measurement from this round. Native Linux/Ceph/full policy CLI integration,
+controller ownership/deadlines and independent re-review remain root-owned.
+No SSH, Slurm/live job, authority mutation, deletion of campaign evidence, or
+subagent work was performed.
