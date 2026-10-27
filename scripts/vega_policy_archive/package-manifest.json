@@ -26,8 +26,8 @@
       "sha256": "835af461be2ded473c7bcbe2d4bc9e9a30d26a188ab558b7442177a94c2cb9e7"
     },
     "resident_archive.py": {
-      "bytes": 64833,
-      "sha256": "25412d78bd55dfef2dfd38953e76c10629ed360cfffc388a84443c961afa9636"
+      "bytes": 66028,
+      "sha256": "858d70292cd9b0080a5a89f5cca2608c442ce19b993851e0a73dede78c1da115"
     },
     "resident_store.py": {
       "bytes": 30936,

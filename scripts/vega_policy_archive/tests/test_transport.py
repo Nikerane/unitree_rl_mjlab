@@ -65,9 +65,88 @@ class OuterGuardTests(unittest.TestCase):
         from unittest import mock
         from vega_policy_archive import resident_archive
         self.assertTrue(callable(getattr(resident_archive,'remote_program',None)),'remote bootstrap must be guarded before helper reads')
-        with mock.patch.object(resident_archive,'BOOTSTRAP',"import time\ndef load_verified_package(*args): time.sleep(20)\n"):
-            program=resident_archive.remote_program(dict(path='/unused',sha256='a'*64),1,{})
+        with mock.patch.object(resident_archive,'BOOTSTRAP',resident_archive.BOOTSTRAP+"\nimport time\ndef load_verified_package(*args): time.sleep(20)\n"):
+            program=resident_archive.remote_program(1)
         start=time.monotonic()
-        result=__import__('subprocess').run([sys.executable,'-B','-I','-S','-c',program],input=b'',capture_output=True,timeout=3)
+        result=__import__('subprocess').run([sys.executable,'-B','-I','-S','-c',program],input=b'{"request":{"remote_helper_package_reference":{}},"remote_wall_seconds":1}',capture_output=True,timeout=3)
         self.assertNotEqual(result.returncode,0);self.assertIn(b'outer remote bootstrap deadline',result.stderr)
         self.assertLess(time.monotonic()-start,2)
+
+class LargeRemotePacketTests(unittest.TestCase):
+    """Exercise the SSH command construction using only actual owned children."""
+    def command(self,request,bootstrap=None):
+        from unittest import mock
+        from vega_policy_archive import resident_archive as archive
+        captured={}
+        def capture(argv,payload,**kwargs):
+            captured.update(argv=argv,payload=payload)
+            return dict(stdout=b'{}')
+        with mock.patch.object(transport,'run_process',side_effect=capture):
+            if bootstrap is None:archive.SSHTransport().call('inspect',request,deadline=time.monotonic()+5)
+            else:
+                with mock.patch.object(archive,'BOOTSTRAP',bootstrap):archive.SSHTransport().call('inspect',request,deadline=time.monotonic()+5)
+        program=__import__('shlex').split(captured['argv'][-1])[-1]
+        return program,captured
+    def request(self):
+        from vega_policy_archive import resident_archive as archive
+        return dict(ssh_host='vega',remote_python=archive.REMOTE_PYTHON,max_archive_bytes=201326592,
+            remote_helper_package_reference=dict(path='/unused/package-manifest.json',sha256='a'*64),
+            padding='accepted-public-data:'+('x'*(512*1024)))
+    def observed_bootstrap(self,marker):
+        from vega_policy_archive import resident_archive as archive
+        # Preserve the real trusted stdin parser; replace only the already pinned
+        # package loader boundary with a harmless test observer.
+        return archive.BOOTSTRAP+'''
+class OnceInput:
+    def __init__(self,stream):self.stream=stream;self.calls=0
+    def read(self,maximum):
+        self.calls+=1
+        if self.calls>1:raise AssertionError('stdin read more than once')
+        return self.stream.read(maximum)
+observed_input=OnceInput(sys.stdin.buffer)
+sys.stdin=types.SimpleNamespace(buffer=observed_input)
+def load_verified_package(reference,request,base,remote=False):
+    Path('''+repr(str(marker))+''').write_text('verified-loader-boundary-reached')
+    request['seen_by_loader']=True
+    def run(packet=None,*,outer_deadline=None):
+        if packet is None or packet['request'] is not request:raise AssertionError('same parsed packet was not passed onward')
+        print(json.dumps(dict(padding_bytes=len(packet['request']['padding']),reads=observed_input.calls,same_object=packet['request']['seen_by_loader'])))
+    return {'vega_policy_archive.resident_archive':types.SimpleNamespace(remote_main=run)}
+'''
+    def test_large_admitted_public_request_does_not_expand_python_or_ssh_argv(self):
+        request=self.request();program,captured=self.command(request)
+        self.assertLess(len(captured['argv'][-1].encode()),64*1024,'stdin-admitted public data leaked into SSH/Python argv')
+        self.assertNotIn(request['padding'],program)
+        packet=__import__('json').loads(captured['payload'])
+        self.assertEqual(packet['request'],request)
+        self.assertGreater(len(captured['payload']),512*1024)
+        self.assertLess(len(captured['payload']),8*1024**2)
+    def test_owned_child_accepts_large_packet_once_and_passes_same_parsed_object(self):
+        import tempfile
+        import subprocess
+        with tempfile.TemporaryDirectory() as tmp:
+            marker=Path(tmp)/'loader-reached';request=self.request()
+            program,captured=self.command(request,self.observed_bootstrap(marker))
+            try:result=subprocess.run([sys.executable,'-B','-I','-S','-c',program],input=captured['payload'],capture_output=True,timeout=10)
+            except OSError as exc:self.fail('accepted stdin packet overflowed argv before owned child start: '+str(exc))
+            self.assertEqual(result.returncode,0,result.stderr.decode())
+            value=__import__('json').loads(result.stdout)
+            self.assertEqual(value,dict(padding_bytes=len(request['padding']),reads=1,same_object=True))
+            self.assertTrue(marker.is_file())
+    def test_duplicate_nonfinite_and_oversize_packets_reject_before_loader(self):
+        import tempfile
+        import subprocess
+        with tempfile.TemporaryDirectory() as tmp:
+            marker=Path(tmp)/'loader-reached';request=self.request();request['padding']='small'
+            program,_=self.command(request,self.observed_bootstrap(marker))
+            cases=[(b'{"request":{},"request":{},"remote_wall_seconds":5}',b'duplicate JSON key'),
+                   (b'{"request":{"x":1,"x":2},"remote_wall_seconds":5}',b'duplicate JSON key'),
+                   (b'{"request":{"x":NaN},"remote_wall_seconds":5}',b'nonfinite JSON'),
+                   (b'x'*(8*1024**2+1),b'stdin byte cap')]
+            for body,error in cases:
+                if marker.exists():marker.unlink()
+                result=subprocess.run([sys.executable,'-B','-I','-S','-c',program],input=body,capture_output=True,timeout=10)
+                with self.subTest(error=error):
+                    self.assertNotEqual(result.returncode,0)
+                    self.assertFalse(marker.exists(),'candidate loader ran before trusted packet rejection')
+                    self.assertIn(error,result.stderr)

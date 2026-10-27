@@ -180,6 +180,14 @@ record, scheduler and shared-source evidence, and explicit remote archive SHA/
 size plus independent Mac EOF readback. It is at most 4 MiB. Its seal reference
 is **exactly `{path,sha256}`**; a compact Mac receipt cannot replace it.
 
+Request, authority and proof data travel only over bounded stdin, with the
+unchanged **8 MiB** packet limit. The trusted stdlib bootstrap reads and strictly
+parses that packet once (duplicate keys and nonfinite values reject), authenticates
+its actual remote authority before candidate loading, and passes the same parsed
+packet to the verified remote entrypoint. Only the finite wall budget enters the
+constant-size command argument; large admitted requests do not enter SSH/Python
+argv or trigger platform argument-length limits.
+
 Owned SSH processes have bounded nonblocking stdin/stdout/stderr, concurrent
 stderr drainage and request backpressure, EOF plus exit-zero enforcement,
 timeout/cancellation group kill and leader reap. The overall Mac wall is at most

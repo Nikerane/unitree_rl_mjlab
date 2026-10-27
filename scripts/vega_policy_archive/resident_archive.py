@@ -102,6 +102,24 @@ BOOTSTRAP=r'''
 import hashlib,json,os,stat,sys,types
 from pathlib import Path
 
+def read_remote_packet(stream):
+    """Read the admitted packet once, before any candidate module executes."""
+    body=stream.read(8388609)
+    if len(body)>8388608:raise ValueError('remote stdin byte cap exceeded')
+    def pairs(items):
+        result={}
+        for key,value in items:
+            if key in result:raise ValueError('duplicate JSON key')
+            result[key]=value
+        return result
+    def invalid(_value):raise ValueError('nonfinite JSON')
+    packet=json.loads(body,object_pairs_hook=pairs,parse_constant=invalid)
+    if not isinstance(packet,dict) or not isinstance(packet.get('request'),dict):raise ValueError('remote packet/request object required')
+    seconds=packet.get('remote_wall_seconds')
+    if type(seconds)is not int or not 0<seconds<=560:raise ValueError('bounded remote wall seconds required')
+    return packet
+
+
 def authenticate_package_authority(reference,request,base,remote=False):
     """Trusted stdlib preflight; candidate bytes cannot supply this decision."""
     def need(ok,message):
@@ -743,11 +761,32 @@ def remote_dispatch(packet,*,deadline,sink=None):
     return result
 
 
-def remote_program(reference,seconds,authority_request):
+def remote_program(seconds):
     require(type(seconds) is int and 0<seconds<=560,'bounded remote bootstrap wall required')
-    return BOOTSTRAP+"\nimport signal,time\ndef bootstrap_alarm(_signum,_frame): raise TimeoutError('outer remote bootstrap deadline expired')\n"+\
-        "signal.signal(signal.SIGALRM,bootstrap_alarm)\nremote_limit=time.monotonic()+"+str(seconds)+"\nsignal.setitimer(signal.ITIMER_REAL,"+str(seconds)+")\n"+\
-        "m=load_verified_package("+repr(reference)+","+repr({k:v for k,v in authority_request.items() if not k.startswith('_')})+",'/',True)['vega_policy_archive.resident_archive']\nsignal.setitimer(signal.ITIMER_REAL,0)\nm.remote_main(outer_deadline=remote_limit)\n"
+    # Only a finite wall budget enters argv. All request/authority data travels
+    # once over bounded stdin, including inputs larger than platform argv limits.
+    return BOOTSTRAP+'''
+import signal,time
+def bootstrap_alarm(_signum,_frame):raise TimeoutError('outer remote bootstrap deadline expired')
+signal.signal(signal.SIGALRM,bootstrap_alarm)
+remote_limit=time.monotonic()+'''+str(seconds)+'''
+signal.setitimer(signal.ITIMER_REAL,'''+str(seconds)+''')
+try:
+    packet=read_remote_packet(sys.stdin.buffer)
+    remote_limit=min(remote_limit,time.monotonic()+packet['remote_wall_seconds'])
+    signal.setitimer(signal.ITIMER_REAL,max(.000001,remote_limit-time.monotonic()))
+    request=packet['request']
+    m=load_verified_package(request['remote_helper_package_reference'],request,'/',True)['vega_policy_archive.resident_archive']
+    signal.setitimer(signal.ITIMER_REAL,0)
+    m.remote_main(packet,outer_deadline=remote_limit)
+except SystemExit:
+    raise
+except BaseException as exc:
+    sys.stderr.write((type(exc).__name__+': '+str(exc))[:4096]+chr(10))
+    raise SystemExit(1)
+finally:
+    signal.setitimer(signal.ITIMER_REAL,0)
+'''
 
 
 class SSHTransport:
@@ -759,8 +798,7 @@ class SSHTransport:
         require(seconds>0,'deadline expired before remote dispatch')
         packet=dict(action=action,request=request,payload=payload,credit_proofs=self.credit_proofs,remote_wall_seconds=seconds)
         body=json_bytes(packet);require(len(body)<=8*MIB,'remote input packet cap exceeded')
-        reference=request['remote_helper_package_reference']
-        program=remote_program(reference,seconds,request)
+        program=remote_program(seconds)
         require(request['ssh_host']=='vega' and request['remote_python']==REMOTE_PYTHON,'closed approved SSH target required')
         argv=['ssh','-o','BatchMode=yes','-o','ConnectTimeout=20','-o','ServerAliveInterval=15','-o','ServerAliveCountMax=2','vega',
               shlex.join([REMOTE_PYTHON,'-B','-I','-S','-u','-c',program])]
@@ -787,15 +825,14 @@ def _unwatch(previous):
     signal.setitimer(signal.ITIMER_REAL,0);signal.signal(signal.SIGALRM,previous)
 
 
-def remote_main(*,outer_deadline=None):
+def remote_main(packet,*,outer_deadline=None):
     previous=None
     try:
-        # The bootstrap itself has no payload read; cap/outer timeout starts
-        # before reading stdin, including a peer that never closes its input.
+        # Trusted bootstrap has already read/parsed/authenticated this same
+        # packet once. Never reread stdin or reconstruct a different request.
         outer_deadline=min(time.monotonic()+560,outer_deadline) if outer_deadline is not None else time.monotonic()+560
         previous=_watchdog(outer_deadline)
-        body=sys.stdin.buffer.read(8*MIB+1);require(len(body)<=8*MIB,'remote stdin byte cap exceeded')
-        packet=parse_json(body);deadline=min(outer_deadline,remote_deadline(packet['remote_wall_seconds']))
+        deadline=min(outer_deadline,remote_deadline(packet['remote_wall_seconds']))
         signal.setitimer(signal.ITIMER_REAL,max(.000001,deadline-time.monotonic()))
         result=remote_dispatch(packet,deadline=deadline,sink=sys.stdout.buffer)
         if packet['action']!='stream':
