@@ -227,3 +227,127 @@ The standalone staged-entry check returned0, stdout
    actual native interpreter and request before submission. No such request was
    staged or launched here. Resource-site hook assignment may differ from the
    one-CPU request, so the journal preserves genuine observed resources separately.
+
+## Fix round1/5 — T2-I1, T2-I2, T2-I3
+
+Review base: `19130c97e489b55d89b8b5eaafea242d58989144`.
+Fix implementation commit: `2ea22574362c4a586f5b1c7ca4704b60238f9b1a`.
+Status: all three requested findings implemented and covered locally; independent
+scoped re-review and root's corrected native rerun remain pending. No other
+feature, authority, credit or policy change is included.
+
+The **current** five-file controller manifest SHA256 is now
+`b0ec09d7dbe0cf1c9c20ada199cd6166e9adb4a41d902be51d0570188e2854ed`.
+Only `coordinator.py` changed in the operative source graph (now16837bytes).
+Its exact source SHA is in the regenerated manifest. Entry, scheduler, journal
+and controller request bytes are unchanged. The source graph remains four
+Python files plus the request source; preservation's13-source package is
+untouched. Adapter/config APIs, roots, exact index orders and all budget/cap
+constants are unchanged. README now records the corrected lifecycle and drain
+semantics. The initial pin/source sizes and30+30 host-specific results earlier
+in this report describe the prior reviewed head, not this fix head.
+
+**T2-I1:** owner now tracks UNISSUED/ACTIVE/TERMINAL explicitly. A genuine,
+validated terminal observation transitions to TERMINAL while retaining the
+submission and materialized identity for provenance. The1530s cutoff applies
+only to ACTIVE. Terminal work has its own stable deadline, the earlier of
+postprocessing1200s and controller end minus120s; live monitoring and the returned
+result boundary both reject an expired postprocessing deadline. No late result
+can complete the slot. The focused regression uses initial3635s lifetime,
+899pending,1200policy,10preservation: preservation crosses1530s remaining, slot3
+completes, and the next issue correctly HOLDs solely because it lacks3630s.
+A second regression rejects an adapter result beyond its clamped postprocessing
+deadline. Neither test constructs a target environment or policy.
+
+**T2-I2:** drain now calls a separate bounded `pause_drain`. It continues live
+resource checks and actual short sleeps while quiescence/stop is already set;
+it never uses the already-set Event as its sleep primitive. The pause respects
+the drain deadline and controller finalization boundary. Normal issue polling
+retains its previous stop-sensitive pause. A regression requires four drain
+observations, the first three nonterminal, and checks actual paced intervals,
+one submit/one cancel, <=.25s resource gaps, valid terminal/HOLD journal closure,
+and bounded retained emergency evidence. Its test interval is reduced to.12s;
+production remains4s, drain180s. Before the fix its observed gaps were
+0.000740/0.000652/0.000669s; the pacing assertion failed.
+
+**T2-I3:** resource growth waits for an explicit Event set **inside the issued
+slow scheduler observation**. The mutation thread is joined before assertions
+or temporary-root cleanup. Quota-marker replacement is atomic, so a transient
+empty text file cannot mask the intended quota-breach reason. Assertions retain
+the actual HOLD reason, full submit/cancel call sequence, mutation/barrier state,
+thread errors and resource timestamps on failure. A separate preissue-resource
+breach requires HOLD with no submission, no cancellation and no claimed drain.
+The old Timer(.12) fixture was deterministically reproduced with an otherwise
+valid.25s preissue reservation delay: all three resource subtests failed their
+unconditional drained assertion. The corrected post-submit barrier fixture passes
+under that **same** delay, demonstrating that it no longer depends on filesystem
+startup/fsync timing.
+
+Covering files: `tests/test_coordinator.py` (lifecycle/drain/resource fixture) and
+`tests/test_entry.py` (verified source inventory/entry). All commands below ran
+locally in a370, using actual host/interpreter, with no SSH, real Slurm, live
+job, authority mutation, target/model/Torch/MuJoCo import or subagent.
+
+Exact normal/optimized covering commands and observed outputs:
+
+```text
+python3 -B -m unittest discover -s scripts/vega_evaluation_controller005/tests -k LifecycleReview -v
+RED: Ran3tests; FAILED(failures=3): terminal active cutoff, late postprocessing
+acceptance, unpaced drain. SDD/round1-RED-lifecycle.txt.
+GREEN: Ran3tests in0.416s; OK. SDD/round1-GREEN-lifecycle.txt.
+
+python3 -B -m unittest discover -s scripts/vega_evaluation_controller005/tests -v
+Ran34tests in5.895s; OK. SDD/round1-GREEN-normal.txt.
+
+python3 -B -O -m unittest discover -s scripts/vega_evaluation_controller005/tests -v
+Ran34tests in5.848s; OK. SDD/round1-GREEN-optimized.txt.
+
+python3 -B -m unittest discover -s scripts/vega_evaluation_controller005/tests -p test_entry.py -v
+Ran3tests in0.264s; OK. SDD/round1-GREEN-entry-normal.txt.
+
+python3 -B -O -m unittest discover -s scripts/vega_evaluation_controller005/tests -p test_entry.py -v
+Ran3tests in0.258s; OK. SDD/round1-GREEN-entry-optimized.txt.
+```
+
+Exact command used unchanged before and after the I3 test correction:
+
+```sh
+python3 -B - <<'PY'
+import sys,time,unittest
+from pathlib import Path
+from unittest.mock import patch
+sys.path.insert(0,str(Path('scripts/vega_evaluation_controller005/tests').resolve()))
+import test_coordinator as tests
+original=tests.FakeAdapter.reserve
+def slow_reserve(self,*args):
+    time.sleep(.25)
+    return original(self,*args)
+suite=unittest.defaultTestLoader.loadTestsFromName('LiveResourceTests.test_actual_log_and_quota_growth_during_real_child_wait_are_observed',tests)
+with patch.object(tests.FakeAdapter,'reserve',slow_reserve):
+    result=unittest.TextTestRunner(verbosity=2).run(suite)
+raise SystemExit(not result.wasSuccessful())
+PY
+```
+
+Before: Ran1test/3subtest failures,0.787s; retained in
+`SDD/round1-RED-growth.txt` (trailing display whitespace normalized only).
+After: Ran1test in3.254s; OK; retained in
+`SDD/round1-GREEN-growth-slow-preissue.txt`. Final source-only staging check
+compiled the six production/test Python files without bytecode, staged the
+manifest's exact five source files, then ran isolated entry `--check-source`
+with the new manifest SHA. Return0, SOURCE_VERIFIED, empty stderr; exact final
+argv/stdout/stderr are retained in `SDD/round1-source-verification.txt`.
+`git diff --cached --check` passed before the implementation commit.
+
+Root-provided native evidence was read, not rerun or changed by this implementer:
+`evaluation-vega-autonomous-implementation005/controller-native-pure001/command-result001.json`
+records the prior manifest2ba48eb head on genuine Linux `/usr/bin/python3.9`,
+30tests/1failure in the quota live-growth subtest, no forbidden imports/modules
+or live commands, and no optimized follow-up. The outer extraction harness also
+reported its tarfile warning; it is retained as harness evidence, not described
+as a clean native pass. Root will rerun the corrected focused native case first,
+then final native gates. This local34+34 result does not replace those native
+checks, review/physics integration or delegated activation. Activation remains
+explicitly HOLD pending Task3. Full-campaign journal/control byte-budget
+integration remains root's separately declared Task3/4 gate; this round adds no
+new claim about that budget.
