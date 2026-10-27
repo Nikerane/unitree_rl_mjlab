@@ -274,7 +274,8 @@ class ResidentStoreTests(unittest.TestCase):
         stamp=1700000000123456789
         os.utime(path, ns=(stamp-100,stamp))
         self.create()
-        before=json.loads((self.destination/'before.json').read_bytes())['nodes']['private-tree/cache']
+        before_nodes=json.loads((self.destination/'before.json').read_bytes())['nodes']
+        before=before_nodes['private-tree/cache']
         self.assertEqual(before['restore_metadata']['atime_ns'], stamp-100)
         self.assertEqual(before['restore_metadata']['xattrs'][attr]['sha256'],hashlib.sha256(b'original\x00attribute').hexdigest())
         with tarfile.open(self.destination/'terminal-policy-full.tar.gz') as archive:
@@ -283,7 +284,12 @@ class ResidentStoreTests(unittest.TestCase):
             self.assertEqual(pax['z1.mtime_ns'],str(stamp))
             self.assertEqual(json.loads(pax['z1.restore_metadata']), before['restore_metadata'])
         index=json.loads((self.destination/'index.json').read_bytes())
-        self.assertIn('private-tree/cache',index['read_induced_atime_changes'])
+        after_nodes=json.loads((self.destination/'after.json').read_bytes())['nodes']
+        expected_changes={
+            name:dict(before=row['restore_metadata']['atime_ns'],after=after_nodes[name]['restore_metadata']['atime_ns'])
+            for name,row in before_nodes.items()
+            if row['restore_metadata']['atime_ns']!=after_nodes[name]['restore_metadata']['atime_ns']}
+        self.assertEqual(index['read_induced_atime_changes'],expected_changes)
 
     def test_source_xattr_drift_is_not_exempt(self):
         calls=0
@@ -569,6 +575,17 @@ class ResidentStoreTests(unittest.TestCase):
         def reader(request):
             value=self.inventory(request); value['job']['captured_epoch']=time.time(); return value
         self.create(inventory_reader=reader)
+
+    def test_compare_source_inventories_discloses_only_observed_atime_changes(self):
+        before=store.inspect_source(self.request,inventory_reader=self.inventory,deadline=self.deadline)
+        after=copy.deepcopy(before)
+        self.assertEqual(store.compare_source_inventories(before,after),
+                         dict(status='STABLE',read_induced_atime_changes={}))
+        name='private-tree/cache'
+        original=before['nodes'][name]['restore_metadata']['atime_ns']
+        after['nodes'][name]['restore_metadata']['atime_ns']=original+1
+        self.assertEqual(store.compare_source_inventories(before,after),
+                         dict(status='STABLE',read_induced_atime_changes={name:dict(before=original,after=original+1)}))
 
     def test_inspect_and_compare_source_interface(self):
         before=store.inspect_source(self.request,inventory_reader=self.inventory,deadline=self.deadline)
