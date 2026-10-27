@@ -457,6 +457,84 @@ class ResidentStoreTests(unittest.TestCase):
             store.stream_back(self.request,self.destination,output,expected_archive_sha256=result['archive_sha256'],expected_archive_bytes=result['archive_bytes'],expected_index_sha256=result['controls']['index']['sha256'],deadline=self.deadline)
         self.assertEqual(output.getvalue(),b'')
 
+    def test_stream_back_bounds_archive_growth_during_prehash(self):
+        self.request['max_archive_bytes']=4096
+        result=self.create()
+        path=self.destination/'terminal-policy-full.tar.gz'
+        archive_inode=path.stat().st_ino
+        real_fdopen=store.os.fdopen
+        reads=[]
+        class GrowingArchive:
+            def __init__(self, stream):
+                self.stream=stream
+                self.appended=False
+            def __enter__(self):
+                self.stream.__enter__()
+                return self
+            def __exit__(self,*args): return self.stream.__exit__(*args)
+            def __getattr__(self,key): return getattr(self.stream,key)
+            def read(self,size):
+                block=self.stream.read(size)
+                reads.append((size,len(block)))
+                if not self.appended:
+                    self.appended=True
+                    with path.open('ab') as growing: growing.write(b'x'*8192)
+                return block
+        def fdopen(fd,*args,**kwargs):
+            archive=os.fstat(fd).st_ino==archive_inode
+            stream=real_fdopen(fd,*args,**kwargs)
+            return GrowingArchive(stream) if archive else stream
+        output=io.BytesIO()
+        with mock.patch.object(store.os,'fdopen',side_effect=fdopen):
+            with self.assertRaises(ValueError):
+                store.stream_back(self.request,self.destination,output,
+                    expected_archive_sha256=result['archive_sha256'],expected_archive_bytes=result['archive_bytes'],
+                    expected_index_sha256=result['controls']['index']['sha256'],deadline=self.deadline)
+        self.assertEqual(output.getvalue(),b'')
+        self.assertLessEqual(sum(count for _,count in reads),result['archive_bytes']+1)
+        consumed=0
+        for requested,count in reads:
+            self.assertLessEqual(requested,min(store.CHUNK,result['archive_bytes']-consumed+1))
+            consumed+=count
+
+    def test_stream_back_bounds_archive_growth_during_emission(self):
+        self.request['max_archive_bytes']=4096
+        result=self.create()
+        path=self.destination/'terminal-policy-full.tar.gz'
+        output=io.BytesIO()
+        class GrowingSink:
+            appended=False
+            def write(self,data):
+                count=output.write(data)
+                if not self.appended:
+                    self.appended=True
+                    with path.open('ab') as growing: growing.write(b'x'*8192)
+                return count
+        with self.assertRaises(ValueError):
+            store.stream_back(self.request,self.destination,GrowingSink(),
+                expected_archive_sha256=result['archive_sha256'],expected_archive_bytes=result['archive_bytes'],
+                expected_index_sha256=result['controls']['index']['sha256'],deadline=self.deadline)
+        self.assertLessEqual(len(output.getvalue()),result['archive_bytes'])
+        self.assertLessEqual(len(output.getvalue()),self.request['max_archive_bytes'])
+
+    def test_stream_back_retains_final_descriptor_drift_check(self):
+        result=self.create()
+        path=self.destination/'terminal-policy-full.tar.gz'
+        output=io.BytesIO()
+        class ChangingSink:
+            changed=False
+            def write(self,data):
+                count=output.write(data)
+                if not self.changed:
+                    self.changed=True
+                    with path.open('r+b') as archive: archive.write(b'X')
+                return count
+        with self.assertRaisesRegex(ValueError,'drift during stream-back'):
+            store.stream_back(self.request,self.destination,ChangingSink(),
+                expected_archive_sha256=result['archive_sha256'],expected_archive_bytes=result['archive_bytes'],
+                expected_index_sha256=result['controls']['index']['sha256'],deadline=self.deadline)
+        self.assertEqual(len(output.getvalue()),result['archive_bytes'])
+
     def test_stream_back_ignores_only_read_induced_descriptor_atime(self):
         result=self.create()
         real=store.os.fstat

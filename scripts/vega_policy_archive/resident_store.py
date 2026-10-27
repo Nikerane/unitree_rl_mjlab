@@ -575,24 +575,27 @@ def stream_back(request, destination, sink, *, expected_index_sha256,
     with os.fdopen(fd, 'rb') as stream:
         info = os.fstat(stream.fileno())
         _require(stat.S_ISREG(info.st_mode) and info.st_size == expected_archive_bytes, 'stored archive size/type differs')
-        digest = hashlib.sha256()
+        digest, count = hashlib.sha256(), 0
         while True:
             _deadline(deadline)
-            block = stream.read(CHUNK)
+            block = stream.read(min(CHUNK, expected_archive_bytes - count + 1))
             if not block:
                 break
+            count += len(block)
+            _require(count <= expected_archive_bytes, 'stored archive exceeds byte binding during prehash')
             digest.update(block)
-        _require(digest.hexdigest() == expected_archive_sha256, 'stored archive SHA differs')
+        _require(count == expected_archive_bytes and digest.hexdigest() == expected_archive_sha256, 'stored archive SHA/size differs')
         _require(_descriptor_identity(os.fstat(stream.fileno())) == _descriptor_identity(info), 'archive identity changed before stream-back')
         stream.seek(0)
         digest, count = hashlib.sha256(), 0
         while True:
             _deadline(deadline)
-            block = stream.read(CHUNK)
+            block = stream.read(min(CHUNK, expected_archive_bytes - count + 1))
             if not block:
                 break
-            digest.update(block)
             count += len(block)
+            _require(count <= expected_archive_bytes, 'stored archive exceeds byte binding during emission')
+            digest.update(block)
             view = memoryview(block)
             while view:
                 _deadline(deadline)
