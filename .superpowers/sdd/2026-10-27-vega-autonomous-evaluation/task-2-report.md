@@ -423,3 +423,157 @@ retains that failed harness evidence in OPS005/controller-native-pure002 and wil
 correct the selector against this new source. This implementer performed no
 native/live operation. Final native gates, independent scoped acceptance and
 Task3 integration/delegated activation remain root-owned; activation stays HOLD.
+
+## Corrective round3/5 — native blocker T2-N1
+
+Review/native base: `b014c0fa0aa0841fa38481071011acb3b0fdfb2e`.
+Fix implementation commit: `3898654a664e6c32ba5e5b3a3cf50f46ef781984`.
+Status: N1 reproduced deterministically and corrected locally; scoped review and
+root's new native gate remain pending. Prior I1/I2/I3 closures remain intact.
+Only the implicated controller, tests, README, source manifest and local evidence
+changed. No preservation/c548/frozen/physical/canonical/authority changes, SSH,
+live Slurm, native retry or subagent occurred.
+
+### Precise diagnosis
+
+The root-provided b66 native run correctly HOLDed, drained, and cancelled once,
+but resource callbacks were on the same owner thread as durable journal writes.
+Its actual quota callback at728362.242665686 raised; owner `halt_once` entered at
+728362.242802057, synchronously called `record('QUIESCE')` and `Journal.append`,
+then the next callback did not start until728362.497603801. That boundary includes
+canonical JSON/hash work, `control_budget` walking/stats, bounded writes and
+`os.fsync`, followed by owner wait/control flow. The native log does **not**
+identify which individual syscall consumed how much time; this report does not
+invent such attribution. It does prove the owner-observer interval crossed a
+synchronous durable-write boundary. Scheduler worker concurrency alone did not
+protect the observer from that boundary.
+
+Ranked hypotheses were owner durable journal IO, another synchronous journal
+step such as the control-budget walk, then resource-callback/scheduler latency.
+A deterministic regression drives real `Journal.append` and injects.35s delay at
+actual `os.fsync` boundaries for QUIESCE and CANCEL_INTENT, then still calls the
+original fsync. It leaves the callback and scheduler behavior fixed. Before the
+fix it reproduced a0.358459959s callback gap, despite correct one submit/one
+cancel/drained=true. Thus the owner durable-IO coupling is sufficient to cause
+N1; no threshold, fsync, captured record or actual gate was removed to fix it.
+
+### Small concurrency change and preserved API
+
+`coordinator.py` now contains one internal `ResourceGuardian`. Its single thread
+is the only caller of `adapter.resource_check`; it serializes callbacks, targets
+.1s start intervals, and runs independently of owner fsync, scheduler/adapter
+waits, quiescence and drain. A small metadata condition protects transaction and
+controller-deadline snapshots plus versioned completed observations. No metadata
+lock is held across the resource callback or owner IO. A new transaction/deadline
+requires its corresponding completed observation before the owner proceeds;
+there are no overlapping callbacks during publication. Failed/unknown results,
+callback overrun>.1s, unavailable current observation or start gap reaching.25s
+latch a stop request. The strict native/test.25 threshold is unchanged.
+
+The guardian only reports observations and a latched stop request. It does not
+write lease/journal/authority, submit, cancel, retry or publish a logical durable
+decision. The owner still performs and fsyncs all of those decisions, retaining
+full genuine scheduler argv/return/stdout/stderr and all previous intent/raw
+records. A stop request revokes the existing IssuePermit while owner IO is
+blocked; owner rechecks after durable SUBMIT_INTENT before physical issue.
+Resource failure reporting is checked before the generic stop flag so the real
+quota/cap cause is retained. The first stop-observation timestamp can now come
+from the guardian report; the owner remains the durable decision writer.
+
+The guardian starts before owner journal initialization, continues after a
+latched stop through failure preservation/drain/final writes, and is always
+stopped/joined before `run` returns or fixture cleanup, including failed journal
+initialization. A successful return additionally forces a final completed
+resource observation, atomically stops new callbacks under the in-process
+metadata lock only after no callback is in progress, then joins. A failed final
+observation leaves sampling alive while the owner durably writes HOLD. A stop
+arriving during final COMPLETE fsync also cannot return COMPLETE. This is an
+in-process lifecycle handshake, not an atomicity claim about Ceph or the OS.
+
+Public adapter/config signatures and source inventory are unchanged. **Execution
+location changes:** `resource_check(transaction_or_None, context)` now runs only
+on the dedicated guardian thread, concurrently with owner/adapter work; its
+already explicit thread-safe/read-only/<=.1s contract remains required. It must
+keep sampling after a stop request. Other phase methods still run on bounded
+workers, and only the owner decides/journals issue/cancel/phase progression.
+README documents that exact Task3 handoff. No generic commands/plugins/callback
+selection or external services were introduced.
+
+### Exact source graph and covering evidence
+
+Current five-file controller manifest SHA256:
+`991a1be1e5da22ed233e811b4396377e7be21462891e67b8dc17b58b3fae9457`.
+Only coordinator production bytes changed (22513bytes). Journal/scheduler/entry/
+controller-request sources and preservation's13-source manifest are unchanged.
+The separate controller graph remains four Python sources plus request source.
+
+The deterministic guardian tests assert strict<.25 callback start gaps and at
+least two callbacks inside **each** delayed fsync span, serial callback count1,
+all journal append thread IDs equal the owner, one submit/one cancel, continued
+drain, no observer callbacks after return, preissue revocation during durable
+intent, final-write/final-observation failure gating, and joined cleanup on
+journal-init failure. The original live log/quota/raw-growth, pending/deadline,
+unknown submission/cancellation and all lifecycle regressions remain present.
+Widening to the entire isolated pure suite is justified because moving the
+sampler thread affects every owner lifecycle, not only the new slow-IO fixture.
+
+Exact commands/output (local a370, actual host/interpreter):
+
+```text
+python3 -B -m unittest discover -s scripts/vega_evaluation_controller005/tests -k GuardianIOTests -v
+Initial RED: Ran1test in0.933s; FAILED(failures=1),0.358459959s gap against strict.25.
+SDD/round3-RED-slow-fsync.txt.
+Final GREEN: Ran5tests in2.519s; OK. SDD/round3-GREEN-guardian.txt.
+
+python3 -B -m unittest discover -s scripts/vega_evaluation_controller005/tests -k guardian_stop_during_complete -v
+RED during new handshake development: Ran1test in0.540s; FAILED(failures=1),
+COMPLETE instead of HOLD for stop during final fsync.
+SDD/round3-RED-final-observation.txt. Covered by final GuardianIOTests/full GREEN.
+
+python3 -B -m unittest discover -s scripts/vega_evaluation_controller005/tests -k final_guardian_observation -v
+RED during new handshake development: Ran1test in0.218s; FAILED(failures=1),
+COMPLETE instead of HOLD for the final observer boundary.
+SDD/round3-RED-final-join.txt. Covered by final GuardianIOTests/full GREEN.
+
+python3 -B -m unittest discover -s scripts/vega_evaluation_controller005/tests -v
+Ran40tests in8.625s; OK. SDD/round3-GREEN-normal.txt.
+
+python3 -B -O -m unittest discover -s scripts/vega_evaluation_controller005/tests -v
+Ran40tests in8.754s; OK. SDD/round3-GREEN-optimized.txt.
+
+python3 -B -m unittest discover -s scripts/vega_evaluation_controller005/tests -p test_entry.py -v
+Ran3tests in0.653s; OK. SDD/round3-GREEN-entry-normal.txt.
+
+python3 -B -O -m unittest discover -s scripts/vega_evaluation_controller005/tests -p test_entry.py -v
+Ran3tests in0.626s; OK. SDD/round3-GREEN-entry-optimized.txt.
+```
+
+The exact manifest's five byte/size records were checked; six production/test
+Python files compiled without bytecode. The exact five-file source-only staging
+then executed pinned isolated entry `--check-source` with the current manifest:
+return0, SOURCE_VERIFIED, empty stderr. Exact child argv/return/stdout/stderr are
+in `SDD/round3-source-verification.txt`. `git diff --cached --check` passed before
+the implementation commit. No test skips, relaxed limits or lucky native retries
+were used; additional local runs followed substantive concurrency/handshake
+changes. Native evidence under root OPS005 was only read and remains unchanged.
+
+### Native gate and honest limits
+
+The prior corrected native focused run is
+OPS005/controller-native-pure003/command-result001.json, b66 source,
+Linux/usr/bin/python3.9,6tests/1failure/0errors, with no warnings, selector/harness
+errors, forbidden target imports/modules or live commands. Its quota subcase's
+strict0.254938115s failure is the blocker addressed here. Four lifecycle and the
+preissue case passed; no full35 or optimized native run followed that failure.
+Local40+40 does not replace root's new scoped review/native timing gates.
+
+The guardian removes owner durable-IO blocking from sampling; it cannot preempt
+a whole-process/OS stall or an in-process callback stuck in kernel IO. Its
+<=.1s read-only callback contract and real native scheduling/IO bounds remain
+activation conditions. Detected gaps/overruns HOLD; cleanup waits for a callback
+to return rather than detaching a live observer. Slow durable IO may still delay
+when the sole owner can persist a decision/cancel; this fix keeps observing and
+revokes new issue during that delay, and does not drop the durable intent to
+pretend the delay disappeared. No OS/Ceph atomic quota reservation is claimed.
+Activation remains HOLD pending root's gates and Task3; ledger/credit/journal
+externalization integration scope is unchanged.
