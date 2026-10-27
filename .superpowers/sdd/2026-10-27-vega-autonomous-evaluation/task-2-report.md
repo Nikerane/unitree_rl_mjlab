@@ -2,8 +2,8 @@
 
 Implementation is concrete and pure-tested in the assigned a370 worktree on
 `codex/vega-resident-20261027`, based on accepted Task1 commit
-`41d72c1fd21580ae339549fcaec50f1c6aed7633`. Implementation commit is recorded in
-the final response; this report is committed with the implementation. Only new
+`41d72c1fd21580ae339549fcaec50f1c6aed7633`. Implementation commit: `c88fc8e` (controller source, tests, manifest and initial
+report). The later report-only commit records this exact implementation ID. Only new
 `scripts/vega_evaluation_controller005/` source/tests/docs/evidence and this
 explicitly requested report are staged. No preservation005/002/004/c548 source,
 physical package, training/evaluation authority, canonical control or evidence
