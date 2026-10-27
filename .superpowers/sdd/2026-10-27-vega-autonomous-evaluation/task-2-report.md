@@ -800,3 +800,19 @@ review artifacts), with no additions/removals. Preservation manifest still hashe
 to `be0dca5fe9175b253b5c297ce3e67b72012678bee99389cea42d71e114aae47b`.
 Frozen002/004/c548 and physical sources were not edited. Explicit owned-path
 staging and whitespace verification are recorded with the commit handoff below.
+
+### Round4 commit handoff
+
+Implementation/evidence commit:
+`28b2f9aca2b8e727d7a606ed9b964aaf0dd22990`
+(`fix(controller): require fresh resource observations before issue`).
+It contains exactly the five changed controller source/docs/test/manifest files,
+ten round4 SDD evidence transcripts and this appended report. The five-file
+runtime closure and manifest SHA above are the final committed source bindings.
+`git diff --cached --check` passed with no output before commit. The commit used
+an explicit list of those16 paths; no directory-wide or all-worktree staging.
+The initial explicit `git add` printed the repository's ignored `.superpowers`
+directory warning, but the already tracked report was staged; cached diff and
+commit verify it is included. Immediately after commit, owned-path status and
+`git diff --cached --name-only` were both empty. This follow-up appends only the
+exact implementation commit identity and commit verification evidence.
