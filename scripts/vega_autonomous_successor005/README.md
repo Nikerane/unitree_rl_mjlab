@@ -22,6 +22,13 @@ and review source belongs in another separately pinned directory. Adding new
 Python alongside this profile intentionally invalidates its closed inventory.
 The direct entry itself must also be pinned by the caller before execution.
 
+The maintained security bootstrap is the `BOOTSTRAP` literal in
+`archive/resident_archive.py`. Its marked isolated-entry region is mechanically
+generated with `python3 -B tests/generate_bootstrap.py --write` from this source
+root; `--check` and the focused parity test reject drift. This development
+generator uses AST/source text only and lives under tests; runtime admission
+continues to use the isolated stdlib authority-before-source bootstrap.
+
 Closed roots:
 
 - CPU_ROOT `/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002`
@@ -202,6 +209,14 @@ remaining byte arithmetic (zero credit20887633920 plus uncovered staging).
 `required_free_bytes`, `remaining_growth_bytes` and fails unless current quota
 protects `max(11844714496,R-G)` and the remaining frozen reservation. At free==R,
 raw growth then archive growth consumes **one** G, while raw earns zero credit.
+The operative store callback supplies `check_write(role, bytes)`: both file
+preflight and every bounded `os.write` call validate observed usage plus pending
+bytes against that individual role cap and G, including existing slot logs and
+reviews. Metadata/failure/stage/writer/provenance/receipt bytes are provenance;
+gzip output bytes are archive. Generic controls apply the same pending hook to
+the combined64MiB shared allocation. The plain no-argument reader is retained
+only as the pure store test seam; closed dispatchers always install the hook.
+
 No deletion, whole-slot cap release, arbitrary-path credit or filesystem-wide
 free-space substitution is supported. Checks at observation/write boundaries
 are not atomic Ceph reservations against other same-account writers.

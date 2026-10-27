@@ -116,9 +116,15 @@ def _bounds(request):
                                 request.get('remote_future_reserve_bytes', 0))
 
 
-def _quota(free_reader, size, reserve, deadline):
+def _quota(free_reader, size, reserve, deadline, *, role='provenance'):
+    """Operative guards implement check_write(role, size) before allocation.
+
+    A plain no-argument reader remains the pure store quota-test seam; the
+    closed policy/control dispatchers always supply the pending-write guard.
+    """
     _deadline(deadline)
-    free = free_reader()
+    write_guard = getattr(free_reader, 'check_write', None)
+    free = write_guard(role, size) if write_guard is not None else free_reader()
     _deadline(deadline)
     _require(type(free) is int and free - size >= reserve, 'Ceph quota headroom below required future reserve')
 
@@ -136,7 +142,8 @@ def _fsync_dir(path):
 
 
 class _Output:
-    def __init__(self, fd, cap, free_reader, reserve, deadline):
+    def __init__(self, fd, cap, free_reader, reserve, deadline, *, role='provenance'):
+        self.role = role
         self.fd, self.cap, self.free_reader = fd, cap, free_reader
         self.reserve, self.deadline = reserve, deadline
         self.count, self.digest = 0, hashlib.sha256()
@@ -147,7 +154,7 @@ class _Output:
         _require(self.count + original <= self.cap, 'compressed/control byte cap exceeded')
         while view:
             piece = view[:CHUNK]
-            _quota(self.free_reader, len(piece), self.reserve, self.deadline)
+            _quota(self.free_reader, len(piece), self.reserve, self.deadline, role=self.role)
             count = os.write(self.fd, piece)
             _require(type(count) is int and 0 < count <= len(piece), 'zero/invalid short write')
             self.count += count
@@ -436,7 +443,7 @@ def create_archive(request, destination, *, inventory_reader, free_reader, deadl
         _quota(free_reader, 0, reserve, deadline)
         fd = os.open(archive_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         try:
-            output = _Output(fd, request['max_archive_bytes'], free_reader, reserve, deadline)
+            output = _Output(fd, request['max_archive_bytes'], free_reader, reserve, deadline, role='archive')
             with gzip.GzipFile(fileobj=output, mode='wb', filename='', mtime=0, compresslevel=1) as zipped:
                 with tarfile.open(fileobj=zipped, mode='w|', format=tarfile.PAX_FORMAT) as archive:
                     for name, row in sorted(before['nodes'].items()):

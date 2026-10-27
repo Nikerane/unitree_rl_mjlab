@@ -98,7 +98,9 @@ def bound_bytes(reference,deadline,maximum=EVIDENCE,base=None):
     return body
 
 
-# This exact bootstrap is sent as the SSH -c argument. Its manifest hash is the
+# Canonical security bootstrap. The isolated verifier region is mechanically
+# generated from this literal by tests/generate_bootstrap.py. This exact source
+# also runs as the local writer -c argument. Its manifest hash is the
 # caller's preservation-contract hash. No stage source executes before *all*
 # source bytes and compiled code objects have passed the complete inventory.
 BOOTSTRAP=r'''
@@ -718,12 +720,17 @@ def remote_dispatch(packet,*,deadline,sink=None):
     require((chosen['policy_id'],chosen['scope'],chosen['bank'])==(request['policy_id'],request['scope'],request.get('bank')),'reservation current slot differs')
     require(reservation['release']==request['cpu_supervisor_release'],'reservation release differs')
     request=dict(request,future_reserve_bytes=max(capacity.FUTURE,max(capacity.IMMUTABLE,reservation['R']-reservation['G'])-capacity.FLOOR),max_metadata_bytes=min(request['max_metadata_bytes'],capacity.CAPS['provenance']//13))
-    def free_reader():
+    def free_reader(*,pending_role=None,pending_bytes=0):
         usage=reservations.current_usage(reservation,deadline=deadline)
         actual=quota_headroom();check(deadline)
-        budget=reservations.check_reservation(reservation,usage,free_bytes=actual)
-        # Store checks pending bytes against protected reserve before each write.
+        pending={role:0 for role in reservations.CAPS}
+        if pending_role is not None:
+            require(pending_role in pending,'closed pending write role required');pending[pending_role]=pending_bytes
+        budget=reservations.check_reservation(reservation,usage,free_bytes=actual,pending=pending)
+        # The same observed usage checks the pending individual role and G before
+        # the store may create a file or write its next bounded piece.
         return min(actual,budget['protected_bytes']+reservation['G']-budget['consumed_bytes'])
+    free_reader.check_write=lambda role,size:free_reader(pending_role=role,pending_bytes=size)
     free_reader()
     if action=='create':
         require(not os.path.lexists(destination),'exclusive archive destination already exists')

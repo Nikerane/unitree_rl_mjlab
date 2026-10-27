@@ -1,0 +1,218 @@
+test_isolated_entry_is_mechanically_generated_from_canonical_bootstrap (test_preservation.BootstrapGenerationTests.test_isolated_entry_is_mechanically_generated_from_canonical_bootstrap) ... FAIL
+test_generic_preservation_is_implemented_without_cpu_release (test_preservation.ChildBoundaryTests.test_generic_preservation_is_implemented_without_cpu_release) ... ok
+test_real_child_complete_eof_and_exit_required (test_preservation.ChildBoundaryTests.test_real_child_complete_eof_and_exit_required) ... ok
+test_closed_current_usage_counts_raw_archive_logs_and_rejects_links (test_preservation.CurrentUsageTests.test_closed_current_usage_counts_raw_archive_logs_and_rejects_links) ... ok
+test_closed_linux_profile_and_all_sources_bound (test_preservation.ProfileTests.test_closed_linux_profile_and_all_sources_bound) ... ok
+test_actual_cpu_index_three_is_extended_seed_one (test_preservation.ReservationTests.test_actual_cpu_index_three_is_extended_seed_one) ... ok
+test_exact_free_equals_R_raw_then_archive_is_one_transaction (test_preservation.ReservationTests.test_exact_free_equals_R_raw_then_archive_is_one_transaction) ... ok
+test_explicit005_preissue_ledger_schema (test_preservation.ReservationTests.test_explicit005_preissue_ledger_schema) ... ok
+test_overlap_foreign_slot_cap_and_ledger_rebinding_rejected (test_preservation.ReservationTests.test_overlap_foreign_slot_cap_and_ledger_rebinding_rejected) ... ok
+test_unproved_credit_and_foreign_archive_path_rejected (test_preservation.ReservationTests.test_unproved_credit_and_foreign_archive_path_rejected) ... ok
+test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs)
+Production dispatch→guard→store: one byte at/below aggregate cap. ... 
+  test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='attempt.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap. ... FAIL
+  test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='before.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap. ... FAIL
+  test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='after.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap. ... FAIL
+  test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='verification.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap. ... FAIL
+  test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='origin.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap. ... FAIL
+  test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='index.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap. ... FAIL
+  test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='failure.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap. ... FAIL
+  test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='writer-process.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap. ... FAIL
+  test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='stream-stage.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap. ... FAIL
+  test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='fresh-source-stage.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap. ... FAIL
+  test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='preservation-provenance.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap. ... FAIL
+  test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='consumer-receipt.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap. ... FAIL
+
+======================================================================
+FAIL: test_isolated_entry_is_mechanically_generated_from_canonical_bootstrap (test_preservation.BootstrapGenerationTests.test_isolated_entry_is_mechanically_generated_from_canonical_bootstrap)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/tests/test_preservation.py", line 146, in test_isolated_entry_is_mechanically_generated_from_canonical_bootstrap
+    self.assertTrue(path.exists(),'canonical bootstrap generator required')
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: False is not true : canonical bootstrap generator required
+
+======================================================================
+FAIL: test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='attempt.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap.
+----------------------------------------------------------------------
+test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs.<locals>.StopAfterWrite: one byte was already written
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/tests/test_preservation.py", line 139, in test_provenance_prewrite_cap_includes_existing_slot_logs
+    with self.assertRaisesRegex(ValueError,'role cap'):a.remote_dispatch(dict(action='create',request=request),deadline=time.monotonic()+5)
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: "role cap" does not match "one byte was already written"
+
+======================================================================
+FAIL: test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='before.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap.
+----------------------------------------------------------------------
+test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs.<locals>.StopAfterWrite: one byte was already written
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/tests/test_preservation.py", line 139, in test_provenance_prewrite_cap_includes_existing_slot_logs
+    with self.assertRaisesRegex(ValueError,'role cap'):a.remote_dispatch(dict(action='create',request=request),deadline=time.monotonic()+5)
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: "role cap" does not match "one byte was already written"
+
+======================================================================
+FAIL: test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='after.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap.
+----------------------------------------------------------------------
+test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs.<locals>.StopAfterWrite: one byte was already written
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/tests/test_preservation.py", line 139, in test_provenance_prewrite_cap_includes_existing_slot_logs
+    with self.assertRaisesRegex(ValueError,'role cap'):a.remote_dispatch(dict(action='create',request=request),deadline=time.monotonic()+5)
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: "role cap" does not match "one byte was already written"
+
+======================================================================
+FAIL: test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='verification.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap.
+----------------------------------------------------------------------
+test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs.<locals>.StopAfterWrite: one byte was already written
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/tests/test_preservation.py", line 139, in test_provenance_prewrite_cap_includes_existing_slot_logs
+    with self.assertRaisesRegex(ValueError,'role cap'):a.remote_dispatch(dict(action='create',request=request),deadline=time.monotonic()+5)
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: "role cap" does not match "one byte was already written"
+
+======================================================================
+FAIL: test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='origin.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap.
+----------------------------------------------------------------------
+test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs.<locals>.StopAfterWrite: one byte was already written
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/tests/test_preservation.py", line 139, in test_provenance_prewrite_cap_includes_existing_slot_logs
+    with self.assertRaisesRegex(ValueError,'role cap'):a.remote_dispatch(dict(action='create',request=request),deadline=time.monotonic()+5)
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: "role cap" does not match "one byte was already written"
+
+======================================================================
+FAIL: test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='index.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap.
+----------------------------------------------------------------------
+test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs.<locals>.StopAfterWrite: one byte was already written
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/tests/test_preservation.py", line 139, in test_provenance_prewrite_cap_includes_existing_slot_logs
+    with self.assertRaisesRegex(ValueError,'role cap'):a.remote_dispatch(dict(action='create',request=request),deadline=time.monotonic()+5)
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: "role cap" does not match "one byte was already written"
+
+======================================================================
+FAIL: test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='failure.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap.
+----------------------------------------------------------------------
+test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs.<locals>.StopAfterWrite: one byte was already written
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/tests/test_preservation.py", line 139, in test_provenance_prewrite_cap_includes_existing_slot_logs
+    with self.assertRaisesRegex(ValueError,'role cap'):a.remote_dispatch(dict(action='create',request=request),deadline=time.monotonic()+5)
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: "role cap" does not match "one byte was already written"
+
+======================================================================
+FAIL: test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='writer-process.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap.
+----------------------------------------------------------------------
+test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs.<locals>.StopAfterWrite: one byte was already written
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/tests/test_preservation.py", line 139, in test_provenance_prewrite_cap_includes_existing_slot_logs
+    with self.assertRaisesRegex(ValueError,'role cap'):a.remote_dispatch(dict(action='create',request=request),deadline=time.monotonic()+5)
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: "role cap" does not match "one byte was already written"
+
+======================================================================
+FAIL: test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='stream-stage.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap.
+----------------------------------------------------------------------
+test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs.<locals>.StopAfterWrite: one byte was already written
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/tests/test_preservation.py", line 139, in test_provenance_prewrite_cap_includes_existing_slot_logs
+    with self.assertRaisesRegex(ValueError,'role cap'):a.remote_dispatch(dict(action='create',request=request),deadline=time.monotonic()+5)
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: "role cap" does not match "one byte was already written"
+
+======================================================================
+FAIL: test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='fresh-source-stage.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap.
+----------------------------------------------------------------------
+test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs.<locals>.StopAfterWrite: one byte was already written
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/tests/test_preservation.py", line 139, in test_provenance_prewrite_cap_includes_existing_slot_logs
+    with self.assertRaisesRegex(ValueError,'role cap'):a.remote_dispatch(dict(action='create',request=request),deadline=time.monotonic()+5)
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: "role cap" does not match "one byte was already written"
+
+======================================================================
+FAIL: test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='preservation-provenance.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap.
+----------------------------------------------------------------------
+test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs.<locals>.StopAfterWrite: one byte was already written
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/tests/test_preservation.py", line 139, in test_provenance_prewrite_cap_includes_existing_slot_logs
+    with self.assertRaisesRegex(ValueError,'role cap'):a.remote_dispatch(dict(action='create',request=request),deadline=time.monotonic()+5)
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: "role cap" does not match "one byte was already written"
+
+======================================================================
+FAIL: test_provenance_prewrite_cap_includes_existing_slot_logs (test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs) (name='consumer-receipt.json', remaining=0)
+Production dispatch→guard→store: one byte at/below aggregate cap.
+----------------------------------------------------------------------
+test_preservation.ReviewedWriteBoundaryTests.test_provenance_prewrite_cap_includes_existing_slot_logs.<locals>.StopAfterWrite: one byte was already written
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/scripts/vega_autonomous_successor005/tests/test_preservation.py", line 139, in test_provenance_prewrite_cap_includes_existing_slot_logs
+    with self.assertRaisesRegex(ValueError,'role cap'):a.remote_dispatch(dict(action='create',request=request),deadline=time.monotonic()+5)
+         ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: "role cap" does not match "one byte was already written"
+
+----------------------------------------------------------------------
+Ran 11 tests in 1.508s
+
+FAILED (failures=13)

@@ -87,10 +87,14 @@ def dispatch(packet,*,deadline,sink=None):
     a,r,m=_modules();request=packet['request'];destination,ledger,R=validate(request,deadline=deadline)
     protected=max(r.IMMUTABLE,R-r.SHARED['controls'])
     effective=dict(request,future_reserve_bytes=protected-m['capacity'].FLOOR,remote_future_reserve_bytes=protected-m['capacity'].FLOOR)
-    def free_reader():
+    def free_reader(*,pending_role=None,pending_bytes=0):
+        a.require(pending_role in (None,'archive','provenance') and type(pending_bytes)is int and pending_bytes>=0,'closed generic pending write required')
         used=_usage(deadline);actual=a.quota_headroom()
+        a.require(used+pending_bytes<=r.SHARED['controls'],'shared controls64MiB pending write exhausted')
+        a.require(actual-pending_bytes>=protected,'generic pending quota below protected reserve')
         a.require(actual>=max(protected,R-used),'generic current quota below reservation')
         return min(actual,protected+r.SHARED['controls']-used)
+    free_reader.check_write=lambda role,size:free_reader(pending_role=role,pending_bytes=size)
     free_reader();action=packet['action'];payload=packet.get('payload',{})
     if action=='create':
         result=m['store'].create_archive(effective,destination,inventory_reader=inventory,free_reader=free_reader,deadline=deadline)

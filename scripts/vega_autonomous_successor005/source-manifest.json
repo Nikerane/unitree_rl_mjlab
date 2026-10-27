@@ -26,12 +26,12 @@
       "sha256": "835af461be2ded473c7bcbe2d4bc9e9a30d26a188ab558b7442177a94c2cb9e7"
     },
     "archive/resident_archive.py": {
-      "bytes": 71089,
-      "sha256": "dea755031b0d8dfbed5ea2116c28b32ae2069293d94d801526d7cf0db74eb330"
+      "bytes": 71663,
+      "sha256": "5524e93cca50f584e3d5b2b5a13251988d9fdcbffaea3f44b7c0fc9b54e99135"
     },
     "archive/resident_store.py": {
-      "bytes": 31877,
-      "sha256": "8c1d89d4321b013eab425e7e9d16d2b2750f67dd5722ae4db8f3b755e1d830c4"
+      "bytes": 32332,
+      "sha256": "79ba9ff8a550cd8bf345c49e5af9a22ca27426ea541883141cbdf5f3961bcf11"
     },
     "archive/stream_reader.py": {
       "bytes": 17539,
@@ -42,12 +42,12 @@
       "sha256": "ccf141fe65e3335955a5654de068b1150c4062f5431264d0c7a6b0188915d4a2"
     },
     "control_preservation.py": {
-      "bytes": 13822,
-      "sha256": "585b5f70220febb277822ad38a11e7f727d66bf03f804458f8c60f2fc62f2a8b"
+      "bytes": 14314,
+      "sha256": "ba8f2b14bf0988e6c7ae04f73e00ef9ead875a3cb963e5c00272a9fc379a779c"
     },
     "independent_verify.py": {
-      "bytes": 12604,
-      "sha256": "0c92c980307fdb5b948ad0368dd241e21ca77443269335938a5442be6edff4c4"
+      "bytes": 12724,
+      "sha256": "83180099148552d35d99421f4da1a96800f6d79534305281b2ddcd3a42280554"
     },
     "reservation.py": {
       "bytes": 13798,

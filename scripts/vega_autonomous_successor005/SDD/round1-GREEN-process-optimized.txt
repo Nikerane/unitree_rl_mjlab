@@ -1,0 +1,10 @@
+test_actual_separate_writer_and_verifier_generic_full_closure (test_process_profile.ProcessProfileTests.test_actual_separate_writer_and_verifier_generic_full_closure) ... ok
+test_crc_trailer_and_full_private_metadata_gates (test_process_profile.ProcessProfileTests.test_crc_trailer_and_full_private_metadata_gates) ... ok
+test_late_writer_exit_partial_json_and_source_freshness_hold (test_process_profile.ProcessProfileTests.test_late_writer_exit_partial_json_and_source_freshness_hold) ... ok
+test_process_pid_collision_rejected (test_process_profile.ProcessProfileTests.test_process_pid_collision_rejected) ... ok
+test_source_rebound_extra_bytecode_foreign_authority_and_mac_operative_ref (test_process_profile.ProcessProfileTests.test_source_rebound_extra_bytecode_foreign_authority_and_mac_operative_ref) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 5.976s
+
+OK

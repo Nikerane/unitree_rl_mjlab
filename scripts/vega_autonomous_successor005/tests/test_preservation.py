@@ -103,3 +103,49 @@ class ChildBoundaryTests(unittest.TestCase):
         value=module('control_preservation')
         self.assertIsNotNone(value,'independent generic control preservation required')
         self.assertTrue(callable(getattr(value,'preserve_verified',None)))
+
+class ReviewedWriteBoundaryTests(unittest.TestCase):
+    def test_provenance_prewrite_cap_includes_existing_slot_logs(self):
+        """Production dispatch→guard→store: one byte at/below aggregate cap."""
+        from fixture_support import generic,load,write
+        from unittest import mock
+        import tempfile
+        class StopAfterWrite(ValueError):pass
+        names=('attempt.json','before.json','after.json','verification.json','origin.json','index.json','failure.json','writer-process.json','stream-stage.json','fresh-source-stage.json','preservation-provenance.json','consumer-receipt.json')
+        for name in names:
+            for remaining in (0,1):
+                with self.subTest(name=name,remaining=remaining),tempfile.TemporaryDirectory() as tmp:
+                    root,control,ref=generic(Path(tmp).resolve());entry=load(root/'independent_verify.py','prewrite_entry');loaded=entry.load_verified_package(control['helper_package_reference'],control,str(Path(ref['path']).parent));a=loaded['vega_policy_archive.resident_archive'];r=loaded['vega_policy_archive.reservation'];m=a.dependencies();store=m['store']
+                    release=dict(path=r.CPU_ROOT+'/admission-staged-integration002/remaining/release.json',sha256='b'*64);nonce='a'*32
+                    ledger=r.zero_ledger(preissue=r.preissue_descriptor(index=3,release=release,nonce=nonce),layout_sha256='c'*64)
+                    reservation=r.make_reservation(ledger,index=3,release=release,nonce=nonce,ledger_sha256=r.digest(ledger),active=[])
+                    evidence=Path(reservation['roots']['provenance']);evidence.mkdir(parents=True)
+                    log=evidence/'scheduler-and-review.log'
+                    with log.open('wb') as stream:stream.truncate(r.CAPS['provenance']-remaining)
+                    destination=Path(reservation['roots']['archive'])/'job-12345';destination.parent.mkdir(parents=True)
+                    request=dict(policy_id=reservation['slot']['policy_id'],scope='own_cpu32',bank=None,cpu_supervisor_release=release,reservation_reference=write(Path(tmp).resolve()/'reservation.json',reservation),max_metadata_bytes=4194304)
+                    def create(request,destination,*,free_reader,deadline,**kwargs):
+                        destination.mkdir();store._write_file(destination/name,b'x',free_reader,store._bounds(dict(max_source_bytes=167772160,max_archive_bytes=201326592,max_metadata_bytes=4194304,max_evidence_bytes=8388608,max_members=8192,future_reserve_bytes=request['future_reserve_bytes'])),deadline,4194304)
+                        if remaining:
+                            with self.assertRaisesRegex(ValueError,'role cap'):
+                                store._write_file(destination/(name+'.next'),b'y',free_reader,request['future_reserve_bytes']+store.FLOOR_CONTROLS,deadline,4194304)
+                            self.assertFalse((destination/(name+'.next')).exists())
+                        raise StopAfterWrite("one byte was already written")
+                    def quota():return reservation['R']-sum(r.current_usage(reservation,deadline=time.monotonic()+5).values())
+                    with mock.patch.object(a,'remote_validate',return_value=ledger),mock.patch.object(store,'validate_destination',return_value=destination),mock.patch.object(store,'create_archive',side_effect=create),mock.patch.object(a,'quota_headroom',side_effect=quota):
+                        if remaining:
+                            with self.assertRaises(StopAfterWrite):a.remote_dispatch(dict(action='create',request=request),deadline=time.monotonic()+5)
+                            self.assertEqual((destination/name).read_bytes(),b'x')
+                        else:
+                            with self.assertRaisesRegex(ValueError,'role cap'):a.remote_dispatch(dict(action='create',request=request),deadline=time.monotonic()+5)
+                            self.assertFalse((destination/name).exists())
+                    self.assertEqual(log.stat().st_size,r.CAPS['provenance']-remaining)
+
+class BootstrapGenerationTests(unittest.TestCase):
+    def test_isolated_entry_is_mechanically_generated_from_canonical_bootstrap(self):
+        path=ROOT/'tests/generate_bootstrap.py'
+        self.assertTrue(path.exists(),'canonical bootstrap generator required')
+        spec=importlib.util.spec_from_file_location('bootstrap_generator',path);generator=importlib.util.module_from_spec(spec);spec.loader.exec_module(generator)
+        resident=(ROOT/'archive/resident_archive.py').read_text();entry=(ROOT/'independent_verify.py').read_text()
+        self.assertEqual(generator.generated_entry(resident,entry),entry)
+        self.assertNotEqual(generator.generated_entry(resident,entry.replace('def read_remote_packet(stream):','def read_remote_packet(changed):')),entry.replace('def read_remote_packet(stream):','def read_remote_packet(changed):'))

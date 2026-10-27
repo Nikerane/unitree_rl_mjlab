@@ -9,6 +9,8 @@ import sys
 MODE='VEGA_RESIDENT_FULL_ARCHIVE_VEGA_PROCESS_V1'
 
 
+# BEGIN GENERATED SECURITY BOOTSTRAP — edit archive/resident_archive.py BOOTSTRAP
+
 import hashlib,json,os,stat,sys,types
 from pathlib import Path
 
@@ -138,6 +140,7 @@ def load_verified_package(reference,request,base,remote=False):
         sys.modules[name]=module
         exec(codes[relative],module.__dict__);result[name]=module
     return result
+# END GENERATED SECURITY BOOTSTRAP
 
 def preserve(request_path: str, output: str):
     path=Path(request_path)
