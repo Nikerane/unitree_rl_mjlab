@@ -269,7 +269,7 @@ def capacity_contract(request,contract,ledger):
 
 
 def validate(request,request_path,deadline):
-    """Retain unchanged CPU validator, then bind the resident-only contract."""
+    """Retain CPU validation with corrected capacity, then bind the resident contract."""
     require(request.get('schema')==SCHEMA,'resident archive request schema required')
     require(not any(key.startswith('_') for key in request),'caller internal fields forbidden')
     original=json.loads(json_bytes(request))

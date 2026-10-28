@@ -16,7 +16,9 @@ import stat
 import time
 
 MIB=1024**2
-FUTURE=11274289152
+# Retain the complete original four-cell training allowance. CPU evaluation and
+# derived allocations are reserved separately below, rather than counted twice.
+FUTURE=4563402752
 FLOOR=570425344
 IMMUTABLE=FUTURE+FLOOR
 CAPS=dict(raw=160*MIB,archive=192*MIB,provenance=88*MIB)
@@ -25,7 +27,7 @@ MAC_ENVELOPE=1400897536
 MAC_RETAINED=64*MIB
 MAC_WORKING=88*MIB
 CPU_ROOT='/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002'
-RULE='capacity-ledger-ruling002'
+RULE='capacity-ledger-ruling003'
 
 
 def require(value,message):

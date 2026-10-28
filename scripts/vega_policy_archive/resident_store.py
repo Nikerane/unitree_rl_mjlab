@@ -26,7 +26,7 @@ from .compat import load_modules
 from .stream_reader import verify_stream
 
 BACKUP_ROOT = Path('/cephhome/eunikhilr/campaign-backups/z1-horizon-evaluation-20261027-resident004')
-FUTURE_MIN = 11274289152
+FUTURE_MIN = 4563402752
 FLOOR_CONTROLS = 570425344
 SOURCE_CAP = 167772160
 ARCHIVE_CAP = 201326592

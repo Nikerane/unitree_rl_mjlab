@@ -28,7 +28,7 @@ FLOOR = 512 * 1024**2
 CONTROL_RESERVE = 32 * 1024**2
 MAX_WALL_SECONDS = 600
 SCOPES = {"training", "own_cpu32", "science160"}
-REMOTE_FUTURE_MIN_BYTES = 11274289152
+REMOTE_FUTURE_MIN_BYTES = 4563402752
 
 
 def require(condition, message):
@@ -149,7 +149,7 @@ def validate(request, request_path, deadline):
     require(request.get('scope')in('own_cpu32','science160'),'CPU-only capacity-split helper; training admission is outside this version')
     for key in ('max_source_bytes','max_archive_bytes','max_members','max_metadata_bytes','max_evidence_bytes','wall_seconds','future_reserve_bytes','remote_future_reserve_bytes'):
         require(type(request.get(key))is int and request[key]>0,'finite positive '+key+' required')
-    require(request['remote_future_reserve_bytes']>=REMOTE_FUTURE_MIN_BYTES,'remote future reserve must retain at least11274289152B')
+    require(request['remote_future_reserve_bytes']>=REMOTE_FUTURE_MIN_BYTES,'remote future reserve must retain at least4563402752B')
     require(request['max_members']<=100000 and request['max_metadata_bytes']<=16*1024**2 and request['max_evidence_bytes']<=16*1024**2 and request['wall_seconds']<=600,'hard bound exceeded')
     require(request.get('ssh_host')=='vega' and Path(request.get('remote_python','')).is_absolute(),'explicit Vega interpreter required')
     require(request.get('quota_root')=='/cephhome/eunikhilr','exact quota root required')
@@ -225,7 +225,7 @@ def remote_program(deadline, maximum):
 
 def remote_request_payload(request,payload):
     remote=request.get('remote_future_reserve_bytes')
-    require(type(remote)is int and remote>=REMOTE_FUTURE_MIN_BYTES,'remote_future_reserve_bytes must retain at least11274289152B')
+    require(type(remote)is int and remote>=REMOTE_FUTURE_MIN_BYTES,'remote_future_reserve_bytes must retain at least4563402752B')
     # The unchanged remote helper calls this field future_reserve_bytes. Its
     # inventory and every compressed stream write therefore retain Vega's gate.
     return {**payload,**{key:request.get(key)for key in('policy','private_root','bank','cpu_layout','scheduler_identity_capture')},

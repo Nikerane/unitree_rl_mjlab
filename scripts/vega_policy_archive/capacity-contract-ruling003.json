@@ -1,0 +1,145 @@
+{
+  "immutable_reserve_bytes": 5133828096,
+  "mac_envelope_bytes": 1400897536,
+  "mac_retained_bytes": 67108864,
+  "mac_working_bytes": 92274688,
+  "rule_version": "capacity-ledger-ruling003",
+  "schema": "z1_vega_resident_capacity_contract_v1",
+  "shared_caps": {
+    "controls": 67108864,
+    "derived": 671088640
+  },
+  "slot_caps": {
+    "archive": 201326592,
+    "provenance": 92274688,
+    "raw": 167772160
+  },
+  "slots": [
+    {
+      "bank": null,
+      "policy_id": "native50-seed2026102301",
+      "private_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/private/native50-seed2026102301/own_cpu32-staged-integration002",
+      "run_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/runs/native50-seed2026102301/own_cpu32-staged-integration002",
+      "scope": "own_cpu32"
+    },
+    {
+      "bank": 20261041,
+      "policy_id": "native50-seed2026102301",
+      "private_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/private/native50-seed2026102301/science160-bank20261041",
+      "run_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/runs/native50-seed2026102301/science160-bank20261041",
+      "scope": "science160"
+    },
+    {
+      "bank": 2026101601,
+      "policy_id": "native50-seed2026102301",
+      "private_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/private/native50-seed2026102301/science160-bank2026101601",
+      "run_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/runs/native50-seed2026102301/science160-bank2026101601",
+      "scope": "science160"
+    },
+    {
+      "bank": null,
+      "policy_id": "native50-seed2026102302",
+      "private_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/private/native50-seed2026102302/own_cpu32-staged-integration002",
+      "run_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/runs/native50-seed2026102302/own_cpu32-staged-integration002",
+      "scope": "own_cpu32"
+    },
+    {
+      "bank": 20261041,
+      "policy_id": "native50-seed2026102302",
+      "private_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/private/native50-seed2026102302/science160-bank20261041",
+      "run_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/runs/native50-seed2026102302/science160-bank20261041",
+      "scope": "science160"
+    },
+    {
+      "bank": 2026101601,
+      "policy_id": "native50-seed2026102302",
+      "private_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/private/native50-seed2026102302/science160-bank2026101601",
+      "run_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/runs/native50-seed2026102302/science160-bank2026101601",
+      "scope": "science160"
+    },
+    {
+      "bank": null,
+      "policy_id": "native50-seed2026102303",
+      "private_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/private/native50-seed2026102303/own_cpu32-staged-integration002",
+      "run_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/runs/native50-seed2026102303/own_cpu32-staged-integration002",
+      "scope": "own_cpu32"
+    },
+    {
+      "bank": 20261041,
+      "policy_id": "native50-seed2026102303",
+      "private_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/private/native50-seed2026102303/science160-bank20261041",
+      "run_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/runs/native50-seed2026102303/science160-bank20261041",
+      "scope": "science160"
+    },
+    {
+      "bank": 2026101601,
+      "policy_id": "native50-seed2026102303",
+      "private_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/private/native50-seed2026102303/science160-bank2026101601",
+      "run_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/runs/native50-seed2026102303/science160-bank2026101601",
+      "scope": "science160"
+    },
+    {
+      "bank": null,
+      "policy_id": "extended200-seed2026102301",
+      "private_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/private/extended200-seed2026102301/own_cpu32-staged-integration002",
+      "run_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/runs/extended200-seed2026102301/own_cpu32-staged-integration002",
+      "scope": "own_cpu32"
+    },
+    {
+      "bank": 20261041,
+      "policy_id": "extended200-seed2026102301",
+      "private_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/private/extended200-seed2026102301/science160-bank20261041",
+      "run_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/runs/extended200-seed2026102301/science160-bank20261041",
+      "scope": "science160"
+    },
+    {
+      "bank": 2026101601,
+      "policy_id": "extended200-seed2026102301",
+      "private_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/private/extended200-seed2026102301/science160-bank2026101601",
+      "run_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/runs/extended200-seed2026102301/science160-bank2026101601",
+      "scope": "science160"
+    },
+    {
+      "bank": null,
+      "policy_id": "extended200-seed2026102302",
+      "private_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/private/extended200-seed2026102302/own_cpu32-staged-integration002",
+      "run_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/runs/extended200-seed2026102302/own_cpu32-staged-integration002",
+      "scope": "own_cpu32"
+    },
+    {
+      "bank": 20261041,
+      "policy_id": "extended200-seed2026102302",
+      "private_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/private/extended200-seed2026102302/science160-bank20261041",
+      "run_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/runs/extended200-seed2026102302/science160-bank20261041",
+      "scope": "science160"
+    },
+    {
+      "bank": 2026101601,
+      "policy_id": "extended200-seed2026102302",
+      "private_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/private/extended200-seed2026102302/science160-bank2026101601",
+      "run_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/runs/extended200-seed2026102302/science160-bank2026101601",
+      "scope": "science160"
+    },
+    {
+      "bank": null,
+      "policy_id": "extended200-seed2026102303",
+      "private_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/private/extended200-seed2026102303/own_cpu32-staged-integration002",
+      "run_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/runs/extended200-seed2026102303/own_cpu32-staged-integration002",
+      "scope": "own_cpu32"
+    },
+    {
+      "bank": 20261041,
+      "policy_id": "extended200-seed2026102303",
+      "private_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/private/extended200-seed2026102303/science160-bank20261041",
+      "run_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/runs/extended200-seed2026102303/science160-bank20261041",
+      "scope": "science160"
+    },
+    {
+      "bank": 2026101601,
+      "policy_id": "extended200-seed2026102303",
+      "private_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/private/extended200-seed2026102303/science160-bank2026101601",
+      "run_root": "/cephhome/eunikhilr/campaigns/z1-horizon-evaluation-20261027-staged-integration002/runs/extended200-seed2026102303/science160-bank2026101601",
+      "scope": "science160"
+    }
+  ]
+}

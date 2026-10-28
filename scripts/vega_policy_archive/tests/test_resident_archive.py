@@ -360,7 +360,7 @@ class RemoteAuthorityTests(unittest.TestCase):
         request['_ledger_body_b64']=__import__('base64').b64encode(Path(request['capacity_ledger_reference']['path']).read_bytes()).decode()
         proofs={proof['sha256']:__import__('base64').b64encode(body).decode()}
         validated=archive.remote_validate(request,self.deadline,proofs)
-        self.assertEqual(self.deps['capacity'].remaining_budget(validated),20887633920-info.st_size)
+        self.assertEqual(self.deps['capacity'].remaining_budget(validated),14176747520-info.st_size)
         # A self-consistent changed PASS flag, even rebound by the ledger, cannot
         # replace the complete prior proof closure.
         forged=json.loads(body);forged['independent_backup']['sha256']='0'*64;forged_body=archive.json_bytes(forged)

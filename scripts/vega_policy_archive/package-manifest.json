@@ -6,32 +6,32 @@
       "sha256": "95981fe91fddd0368ec83eaf697c6fb3c39f5902e816c6988b3ff61816589c83"
     },
     "capacity.py": {
-      "bytes": 11672,
-      "sha256": "5e9b0637a389abe598f2de24ed74aa9a1134a35808cb729c40ffac37aab17fc0"
+      "bytes": 11831,
+      "sha256": "b4b2cfacbacfc141607056032d9d780a593226c36304c71b61858733a6865b2e"
     },
     "compat/__init__.py": {
-      "bytes": 2432,
-      "sha256": "8380e6021f009279a6bc5cce83c31d09677c506ae983b9352ceb770def8d7c74"
+      "bytes": 2441,
+      "sha256": "7dbe5cb788162475a1ddba8ca4c70d44bb48e7491238cdc28988c128d1aae127"
     },
     "compat/archive_contract.py": {
       "bytes": 6220,
       "sha256": "1f228baf0c004864c7974107f0792e710b70e18c6edbcd83bcd31f14c9f3ac24"
     },
     "compat/policy_archive.py": {
-      "bytes": 42052,
-      "sha256": "07c0f6b044e2d39277d294c1e774d883d6240b407f49847cd5a2c60e037abc3d"
+      "bytes": 42049,
+      "sha256": "e6328522d18568918df772a34285674968ec15fedbe3b6803a3a1b4a107e0358"
     },
     "compat/remote_policy_archive.py": {
       "bytes": 10658,
       "sha256": "835af461be2ded473c7bcbe2d4bc9e9a30d26a188ab558b7442177a94c2cb9e7"
     },
     "resident_archive.py": {
-      "bytes": 66028,
-      "sha256": "858d70292cd9b0080a5a89f5cca2608c442ce19b993851e0a73dede78c1da115"
+      "bytes": 66038,
+      "sha256": "8830ca2c80d01af74098254d6f6e82ec41bdbede7e5754fd01d26736362604ee"
     },
     "resident_store.py": {
-      "bytes": 30936,
-      "sha256": "e229d6b4c9d88233804c7531f28a4a2639624e5df691de63fa357dd09912c73f"
+      "bytes": 30935,
+      "sha256": "9aab8a651617d0df044426edd6fb7ceb385034fd0eb83613e8c61574b87d7d7a"
     },
     "stream_reader.py": {
       "bytes": 17539,

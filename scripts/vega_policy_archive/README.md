@@ -27,7 +27,7 @@ changed by this helper.
 
 Use schema `z1_horizon_vega_resident_archive_request_v1`, retaining every original
 CPU archive request field. The copied legacy-schema view is passed through the
-unchanged CPU request validator. Additional required public fields are:
+CPU request validator with the corrected reserve minimum. Additional required public fields are:
 
 - `backend_mode`: `VEGA_RESIDENT_FULL_ARCHIVE_MAC_STREAM_V1`.
 - `remote_archive_root`: the fixed `resident_store.BACKUP_ROOT`;
@@ -76,11 +76,21 @@ than candidate code or its internally consistent hashes.
 ## Capacity ledger
 
 The exact contract is the object checked by `capacity_contract`: schema
-`z1_vega_resident_capacity_contract_v1`, rule version `capacity-ledger-ruling002`,
+`z1_vega_resident_capacity_contract_v1`, rule version `capacity-ledger-ruling003`,
 all `capacity.layout_rows()` under the fixed original CPU root, `slot_caps` equal
 `{raw:167772160, archive:201326592, provenance:92274688}`, `shared_caps` equal
-`{derived:671088640, controls:67108864}`, immutable reserve `11844714496`, Mac
+`{derived:671088640, controls:67108864}`, immutable reserve `5133828096`, Mac
 envelope `1400897536`, retained limit `67108864` and working limit `92274688`.
+The reviewable object is `capacity-contract-ruling003.json`, bound separately
+from the Python package by the existing request/manifest authority chain.
+
+The immutable reserve retains all `4563402752` bytes of the original training
+allowance, including already completed training, plus the `570425344`-byte floor.
+All eighteen CPU raw/archive/provenance caps and both shared caps remain reserved
+separately. Ruling002 included the CPU raw/archive and derived allocations in the
+legacy future reserve as well; ruling003 removes that `6710886400`-byte overlap.
+Old ruling002 contracts, ledgers and receipts remain historical evidence and do
+not constitute ruling003 admission or retained-byte proof.
 
 Ledger schema `z1_vega_resident_capacity_ledger_v1` contains:
 
@@ -116,14 +126,14 @@ cannot earn credit. The default all-zero ledger is valid and conservative.
 All failed, pending, missing and unissued slots retain their allocations. Pure
 `remaining_budget(ledger)` validates structure/math; it does not authenticate IO.
 Production authenticates proof closure before using its result. Initial required
-headroom is `20887633920 + staging_bytes`. Completion releases only supported
+headroom is `14176747520 + staging_bytes`. Completion releases only supported
 materialized bytes, never a whole unused slot cap.
 
 For an operation, R is the remaining requirement and G is the declared total
-growth. Every write protects `max(11844714496, R-G)` and cumulative owned
+growth. Every write protects `max(5133828096, R-G)` and cumulative owned
 archive/control/publication growth remains at most G. The store adds the
 570425344-byte floor itself, so the supplied future reserve is
-`max(11274289152, protected-570425344)`, preserving a higher selected manifest
+`max(4563402752, protected-570425344)`, preserving a higher selected manifest
 reserve. Actual Ceph quota headroom is refreshed throughout; filesystem-wide free
 space cannot replace it. Partials remain on Vega and earn no credit.
 

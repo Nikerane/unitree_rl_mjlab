@@ -29,7 +29,7 @@ def ledger():
                     run_root=base+'/runs/'+policy+'/'+leaf, private_root=base+'/private/'+policy+'/'+leaf,
                     caps=dict(raw=160*1024**2, archive=192*1024**2, provenance=88*1024**2),
                     retained=dict(raw=[], archive=[], provenance=[])))
-    return dict(schema='z1_vega_resident_capacity_ledger_v1', rule_version='capacity-ledger-ruling002',
+    return dict(schema='z1_vega_resident_capacity_ledger_v1', rule_version='capacity-ledger-ruling003',
         request_identity_sha256='a'*64, release_sha256='b'*64, layout_sha256='c'*64,
         slots=rows, shared=dict(derived=dict(cap=640*1024**2, retained=[]), controls=dict(cap=64*1024**2, retained=[])),
         staging_bytes=0)
@@ -39,18 +39,18 @@ class CapacityTests(unittest.TestCase):
     def setUp(self): self.assertIsNotNone(capacity, 'capacity module is not implemented')
     def test_all_18_slots_and_unused_caps_stay_reserved(self):
         value=ledger()
-        self.assertEqual(capacity.remaining_budget(value), 20887633920)
+        self.assertEqual(capacity.remaining_budget(value), 14176747520)
         self.assertEqual(len(value['slots']),18)
         value['slots'][0]['status']='FAILED'
-        self.assertEqual(capacity.remaining_budget(value),20887633920)
+        self.assertEqual(capacity.remaining_budget(value),14176747520)
     def test_supported_bytes_only_and_global_inode_dedup(self):
         value=ledger(); ref=dict(path='/proof',sha256='d'*64)
         item=dict(path=value['slots'][0]['run_root']+'/a',bytes=31,sha256='e'*64,
                   device=1,inode=2,link_count=1,proof=ref)
         value['slots'][0]['retained']['raw']=[item]
-        self.assertEqual(capacity.remaining_budget(value),20887633920-31)
+        self.assertEqual(capacity.remaining_budget(value),14176747520-31)
         value['slots'][1]['retained']['raw']=[dict(item,path=value['slots'][1]['run_root']+'/b')]
-        self.assertEqual(capacity.remaining_budget(value),20887633920-31)
+        self.assertEqual(capacity.remaining_budget(value),14176747520-31)
         value['slots'][1]['retained']['provenance']=[value['slots'][1]['retained']['raw'].pop()]
         with self.assertRaisesRegex(ValueError,'inode'): capacity.remaining_budget(value)
     def test_invalid_slots_caps_and_unsupported_credits(self):
@@ -65,7 +65,7 @@ class CapacityTests(unittest.TestCase):
             with self.subTest(change=change),self.assertRaises(ValueError): capacity.remaining_budget(value)
     def test_growth_reserve_does_not_double_add_floor(self):
         result=capacity.operation_budget(ledger(),192*1024**2+88*1024**2)
-        self.assertEqual(result['protected_bytes'],20887633920-280*1024**2)
+        self.assertEqual(result['protected_bytes'],14176747520-280*1024**2)
         self.assertEqual(result['future_reserve_bytes']+570425344,result['protected_bytes'])
         with self.assertRaises(ValueError): capacity.operation_budget(ledger(),-1)
     def test_exclusive_controls_and_actual_64_mib_aggregate(self):

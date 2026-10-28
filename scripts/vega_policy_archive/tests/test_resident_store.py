@@ -157,6 +157,16 @@ class ResidentStoreTests(unittest.TestCase):
                                   deadline=self.deadline, future_reserve_bytes=10**13)
         self.assertFalse(path.exists())
 
+    def test_control_disjoint_minimum_keeps_training_and_floor_at_write_boundary(self):
+        data=b'abc'; path=self.backup/'ruling003-control.json'
+        result=store.publish_control(path,data,hashlib.sha256(data).hexdigest(),
+            free_reader=lambda:5133828099,deadline=self.deadline,future_reserve_bytes=4563402752)
+        self.assertEqual(result['bytes'],3)
+        with self.assertRaisesRegex(ValueError,'quota'):
+            store.publish_control(self.backup/'too-low.json',data,hashlib.sha256(data).hexdigest(),
+                free_reader=lambda:5133828098,deadline=self.deadline,future_reserve_bytes=4563402752)
+        self.assertFalse((self.backup/'too-low.json').exists())
+
     def test_control_bad_future_reserve(self):
         for reserve in (0, -1, True, float('inf')):
             with self.subTest(reserve=reserve), self.assertRaises(ValueError):
@@ -618,7 +628,7 @@ class CompatibilityTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError,'regular'): compat.load_modules()
             finally: os.close(fd)
 
-    def test_frozen_sources_exact_except_explicit_record_reader(self):
+    def test_frozen_sources_exact_except_record_reader_and_capacity_minimum(self):
         root=Path(__file__).resolve().parents[3]
         original=root/'.superpowers/sdd/2026-10-23-z1-overnight-execution/evaluation-staged-integration-repair-proposal002/archive-helper-candidate'
         copied=Path(store.__file__).parent/'compat'
@@ -628,6 +638,7 @@ class CompatibilityTests(unittest.TestCase):
         text=text.replace(', *, record_reader=None):', '):')
         text=text.replace('    reader = read_archive_json if record_reader is None else record_reader\n','')
         text=text.replace("actual=reader(archive_path,'policy-tree/'+relative", "actual=read_archive_json(archive_path,'policy-tree/'+relative")
+        text=text.replace('4563402752','11274289152')
         self.assertEqual(text,(original/'policy_archive.py').read_text())
 
     def test_record_reader_seam_and_legacy_default_match(self):

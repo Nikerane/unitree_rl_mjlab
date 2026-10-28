@@ -1,4 +1,4 @@
-"""Hash-pinned source-only loader for the frozen002 archive validators."""
+"""Hash-pinned source-only loader for the capacity-corrected archive validators."""
 import hashlib
 import os
 from pathlib import Path
@@ -10,7 +10,7 @@ import types
 _HASHES = {
     'archive_contract.py': '1f228baf0c004864c7974107f0792e710b70e18c6edbcd83bcd31f14c9f3ac24',
     'remote_policy_archive.py': '835af461be2ded473c7bcbe2d4bc9e9a30d26a188ab558b7442177a94c2cb9e7',
-    'policy_archive.py': '07c0f6b044e2d39277d294c1e774d883d6240b407f49847cd5a2c60e037abc3d',
+    'policy_archive.py': 'e6328522d18568918df772a34285674968ec15fedbe3b6803a3a1b4a107e0358',
 }
 _LOCK = threading.RLock()
 _MODULES = None
