@@ -32,15 +32,24 @@ def test_quota_remaining_does_not_double_count_consumed():
         with pytest.raises(ValueError):life.required_free(used)
 
 
-def test_global_clock_cannot_restart_or_use_local_clock(tmp_path):
-    l=module('lifecycle'); f=module('files')
-    clock=l.start_clock(tmp_path/'clock.json','a'*64,'123',1000,host='vgpu0001')
-    assert clock['deadline_epoch']==29800
-    with pytest.raises(FileExistsError):l.start_clock(tmp_path/'clock.json','a'*64,'124',2000,host='vgpu0001')
-    assert l.admit_time(clock,now=1001,allocation_end=17200,bound=16030)==17200
-    for now,end,bound in ((14000,30000,16030),(1000,17000,16030)):
+@pytest.fixture
+def original_clock(tmp_path,monkeypatch):
+    from tests.test_depth_admission031 import origin, FIRST
+    a,r,p=origin(monkeypatch,tmp_path)
+    def create(manifest_sha='a'*64):
+        return module('lifecycle').start_clock(tmp_path/'fixture-clock.json',manifest_sha,'123',FIRST+2000,host='gn52')
+    return create
+
+
+def test_global_clock_cannot_restart_or_use_local_clock(tmp_path,original_clock):
+    l=module('lifecycle');first=1793500613
+    clock=original_clock()
+    assert clock['deadline_epoch']==1793529413
+    with pytest.raises(FileExistsError):l.start_clock(tmp_path/'fixture-clock.json','a'*64,'124',first+2100,host='gn52')
+    assert l.admit_time(clock,now=first+2001,allocation_end=first+19000,bound=16030)==first+19000
+    for now,end,bound in ((first+14000,first+30000,16030),(first,first+16000,16030)):
         with pytest.raises(ValueError):l.admit_time(clock,now=now,allocation_end=end,bound=bound)
-    with pytest.raises(ValueError):l.start_clock(tmp_path/'bad.json','a'*64,'125',1000,host='MacBook')
+    with pytest.raises(ValueError):l.start_clock(tmp_path/'bad.json','a'*64,'125',first+2000,host='MacBook')
 
 
 def test_durable_exclusive_json_rejects_duplicates_and_symlinks(tmp_path):
@@ -208,8 +217,8 @@ def test_archive_rejects_symlink_and_duplicate_identity(tmp_path):
 
 def test_scheduler_epochs_parse_explicit_utc(monkeypatch):
     l=module('lifecycle')
-    monkeypatch.setenv('SLURM_JOB_ID','123');monkeypatch.setattr(l,'remote_host',lambda: 'vgpu0001');monkeypatch.setattr(l,'gpu_allocation_identity',lambda: {'gpu_uuid':'fixture'})
-    monkeypatch.setattr(l,'slurm_job',lambda _:dict(JobName='depth031-slot-0',UserId='eunikhilr(1)',JobState='RUNNING',Requeue='0',Restarts='0',Account='d2026d06-166-users',QOS='normal',Partition='gpu',NumCPUs='4',NumNodes='1',AllocTRES='cpu=4,mem=32G,node=1,gres/gpu=1',StartTime='2026-11-01T01:00:00',EndTime='2026-11-01T05:30:00',TimeLimit='04:30:00',Deadline='2026-11-01T09:00:00'))
+    monkeypatch.setenv('SLURM_JOB_ID','123');monkeypatch.setattr(l.socket,'gethostname',lambda:'gn52');monkeypatch.setattr(l,'gpu_allocation_identity',lambda: {'gpu_uuid':'fixture'})
+    monkeypatch.setattr(l,'slurm_job',lambda _:dict(NodeList='gn52',BatchHost='gn52',JobName='depth031-slot-0',UserId='eunikhilr(1)',JobState='RUNNING',Requeue='0',Restarts='0',Account='d2026d06-166-users',QOS='normal',Partition='gpu',NumCPUs='4',NumNodes='1',AllocTRES='cpu=4,mem=32G,node=1,gres/gpu=1',StartTime='2026-11-01T01:00:00',EndTime='2026-11-01T05:30:00',TimeLimit='04:30:00',Deadline='2026-11-01T09:00:00'))
     a=l.allocation('123','depth031-slot-0')
     from datetime import datetime,timezone
     assert a['start_epoch']==datetime(2026,11,1,1,tzinfo=timezone.utc).timestamp()
@@ -261,14 +270,14 @@ def test_copied_population_validator_keeps_censoring_and_unknown_semantics():
     with pytest.raises(ValueError):w.validate_population(rows,threshold=1.)
 
 
-def test_gpu_scheduler_deadline_is_absolute_even_without_live_controller():
+def test_gpu_scheduler_deadline_is_absolute_even_without_live_controller(original_clock):
     m=module('manifest');w=module('worker');f=module('files');r=m.template();r['python']={'path':'/python'}
-    clock=dict(manifest_sha256=f.digest(r),first_allocation_epoch=1793494800,deadline_epoch=1793523600)
+    clock=original_clock(f.digest(r))
     p=w.submission_plan(r,clock)
-    assert p['slurm_gpu_deadline_utc']=='2026-11-01T08:57:00'
+    assert p['slurm_gpu_deadline_utc']=='2026-11-01T10:33:53'
     for j in p['jobs']:
         if j['kind']=='training':
-            assert '--deadline=2026-11-01T08:57:00' in j['command']
+            assert '--deadline=2026-11-01T10:33:53' in j['command']
             assert '--time=04:30:00' in j['command'] and not any(x.startswith('--time-min') for x in j['command'])
 
 
@@ -296,13 +305,13 @@ def test_compiler_pch_private_cache_is_configured_before_scientific_imports(tmp_
     with pytest.raises(ValueError,match='after scientific'):c.configure(r,tmp_path/'private',out,'fixture',modules=modules,importer=lambda name:modules[name])
 
 
-def test_cpu_case_deadline_is_independent_of_controller_liveness():
+def test_cpu_case_deadline_is_independent_of_controller_liveness(original_clock):
     m=module('manifest');w=module('worker');f=module('files');r=m.template();r['python']={'path':'/python'}
-    clock=dict(manifest_sha256=f.digest(r),first_allocation_epoch=1793494800,deadline_epoch=1793523600)
+    clock=original_clock(f.digest(r))
     plan=w.submission_plan(r,clock)
-    assert plan['slurm_cpu_case_deadline_utc']=='2026-11-01T18:57:00'
+    assert plan['slurm_cpu_case_deadline_utc']=='2026-11-01T20:33:53'
     for job in plan['jobs']:
-        if job['kind']=='evaluation':assert '--deadline=2026-11-01T18:57:00' in job['command']
+        if job['kind']=='evaluation':assert '--deadline=2026-11-01T20:33:53' in job['command']
 
 
 def _publication_fixture(tmp_path):
@@ -367,8 +376,8 @@ def test_asset_copy_plan_matches_pinned_native_resolver_without_import(tmp_path)
     with pytest.raises(ValueError,match='resolver'):m.verify_asset_layout(r,source_tree=source)
 
 
-def _cpu_row(deadline='2026-11-01T18:57:00'):
-    return dict(JobName='depth031-eval-0',UserId='eunikhilr(1)',JobState='RUNNING',Requeue='0',Restarts='0',
+def _cpu_row(deadline='2026-11-01T20:33:53'):
+    return dict(NodeList='cn0001',BatchHost='cn0001',JobName='depth031-eval-0',UserId='eunikhilr(1)',JobState='RUNNING',Requeue='0',Restarts='0',
         Account='d2026d06-166-users',QOS='normal',Partition='cpu',NumCPUs='2',NumNodes='1',
         AllocTRES='cpu=2,mem=8G,node=1',TimeLimit='02:15:00',StartTime='2026-11-01T01:00:00',
         EndTime='2026-11-01T03:15:00',Deadline=deadline)
@@ -378,7 +387,7 @@ def _cpu_row(deadline='2026-11-01T18:57:00'):
 def test_cpu_allocation_requires_effective_scheduler_deadline(monkeypatch,deadline):
     l=module('lifecycle');row=_cpu_row(deadline)
     if deadline is None:row.pop('Deadline')
-    monkeypatch.setenv('SLURM_JOB_ID','123');monkeypatch.setattr(l,'remote_host',lambda:'vcpu0001')
+    monkeypatch.setenv('SLURM_JOB_ID','123');monkeypatch.setattr(l.socket,'gethostname',lambda:'cn0001')
     monkeypatch.setattr(l,'slurm_job',lambda _:row)
     with pytest.raises(ValueError,match='Deadline'):l.allocation('123','depth031-eval-0')
 
@@ -386,18 +395,17 @@ def test_cpu_allocation_requires_effective_scheduler_deadline(monkeypatch,deadli
 def test_cpu_allocation_reports_actual_deadline_and_time_limit(monkeypatch):
     from datetime import datetime,timezone
     l=module('lifecycle');monkeypatch.setenv('SLURM_JOB_ID','123')
-    monkeypatch.setattr(l,'remote_host',lambda:'vcpu0001');monkeypatch.setattr(l,'slurm_job',lambda _: _cpu_row())
+    monkeypatch.setattr(l.socket,'gethostname',lambda:'cn0001');monkeypatch.setattr(l,'slurm_job',lambda _: _cpu_row())
     allocation=l.allocation('123','depth031-eval-0')
-    assert allocation['deadline_epoch']==datetime(2026,11,1,18,57,tzinfo=timezone.utc).timestamp()
+    assert allocation['deadline_epoch']==datetime(2026,11,1,20,33,53,tzinfo=timezone.utc).timestamp()
     assert allocation['time_limit_seconds']==8100
 
 
 @pytest.mark.parametrize('fault',['missing','wrong','late','valid'])
-def test_cpu_entry_clamps_to_immutable_clock_before_any_claim(tmp_path,monkeypatch,fault):
+def test_cpu_entry_clamps_to_immutable_clock_before_any_claim(tmp_path,monkeypatch,fault,original_clock):
     w=module('worker');l=module('lifecycle');m=module('manifest');f=module('files');r=m.template()
-    clock=dict(schema='z1_depth_global_clock031',manifest_sha256=f.digest(r),first_allocation_epoch=1000,
-        deadline_epoch=29800,clock_domain='Vega_Slurm_epoch')
-    cutoff=1000+64800-180
+    clock=original_clock(f.digest(r))
+    cutoff=1793500613+64800-180
     f.write_once(tmp_path/'clock.json',clock);monkeypatch.setattr(w,'ROOT',str(tmp_path))
     monkeypatch.setattr(w,'verify_package',lambda _:None);monkeypatch.setattr(w,'verify_qualification',lambda _:None)
     monkeypatch.setenv('SLURM_JOB_ID','123')
@@ -421,7 +429,7 @@ def test_cpu_entry_clamps_to_immutable_clock_before_any_claim(tmp_path,monkeypat
 def test_controller_allocation_has_no_scheduler_deadline_requirement(monkeypatch):
     l=module('lifecycle');row=_cpu_row('N/A')
     row.update(JobName='depth031-controller',NumCPUs='1',AllocTRES='cpu=1,mem=2G,node=1',TimeLimit='18:00:00')
-    monkeypatch.setenv('SLURM_JOB_ID','123');monkeypatch.setattr(l,'remote_host',lambda:'vcpu0001')
+    monkeypatch.setenv('SLURM_JOB_ID','123');monkeypatch.setattr(l.socket,'gethostname',lambda:'cn0001')
     monkeypatch.setattr(l,'slurm_job',lambda _:row)
     allocation=l.allocation('123','depth031-controller')
     assert 'deadline_epoch' not in allocation

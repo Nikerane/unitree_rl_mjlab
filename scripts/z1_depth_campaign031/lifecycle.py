@@ -325,28 +325,33 @@ def current_quota():
     root='/cephhome/eunikhilr'
     maximum=int(os.getxattr(root,'ceph.quota.max_bytes'))
     used=int(os.getxattr(root,'ceph.dir.rbytes'))
-    consumed=sum(tree_bytes(path) for path in (ROOT,EVAL_ROOT) if Path(path).exists())
+    from .admission import scope_usage
+    consumed=scope_usage()['total_bytes']
     return admit_quota(maximum-used,consumed)
 
 
 def remote_host(host=None):
-    host=socket.gethostname().split('.')[0] if host is None else host
-    need(bool(re.fullmatch(r'v[a-z]+[0-9]+',host)), 'Vega/Slurm clock domain required')
-    return host
+    host=socket.gethostname() if host is None else host
+    need(type(host) is str and re.fullmatch(r'(gn(?:0[1-9]|[1-5][0-9]|60)|cn[0-9]{4})(?:\.vega\.izum\.si)?',host),
+         'Vega compute/Slurm clock domain required')
+    return host.split('.')[0]
 
 
 def start_clock(path, manifest_sha, job_id, allocation_start, *, host=None):
-    remote_host(host)
-    need(type(allocation_start) in (int,float) and math.isfinite(allocation_start) and allocation_start>0,'actual allocation epoch required')
-    need(bool(re.fullmatch('[1-9][0-9]*',job_id)),'Slurm job ID required')
+    from .admission import authenticate_origin, valid_replacement_start, FIRST, GPU_DEADLINE, ORIGIN_REF
+    remote_host(host);authenticate_origin()
+    need(valid_replacement_start(job_id,allocation_start),'replacement allocation epoch/identity required')
     row=dict(schema='z1_depth_global_clock031',manifest_sha256=manifest_sha,
-        qualification_job_id=job_id,first_allocation_epoch=allocation_start,
-        deadline_epoch=allocation_start+28800,clock_domain='Vega_Slurm_epoch')
+        qualification_job_id='49072485',first_allocation_epoch=FIRST,
+        deadline_epoch=GPU_DEADLINE,clock_domain='Vega_Slurm_epoch',origin=dict(ORIGIN_REF),
+        replacement_allocation=dict(job_id=job_id,start_epoch=allocation_start))
     write_once(path,row)
     return row
 
 
 def admit_time(clock, *, now, allocation_end, bound):
+    from .admission import validate_clock
+    validate_clock(clock)
     need(clock.get('schema')=='z1_depth_global_clock031' and clock.get('clock_domain')=='Vega_Slurm_epoch', '031 global clock required')
     need(clock['deadline_epoch']==clock['first_allocation_epoch']+28800,'global deadline drift')
     need(all(type(v) in (int,float) and math.isfinite(v) for v in (now,allocation_end,bound)) and bound>0,'finite clock bounds required')
@@ -356,6 +361,8 @@ def admit_time(clock, *, now, allocation_end, bound):
 
 
 def admit_evaluation_time(manifest,clock,allocation,grant,*,now):
+    from .admission import validate_clock
+    validate_clock(clock,digest(manifest))
     need(clock.get('schema')=='z1_depth_global_clock031' and clock.get('clock_domain')=='Vega_Slurm_epoch'
          and clock.get('manifest_sha256')==digest(manifest),'031 evaluation global clock required')
     first=clock['first_allocation_epoch']
@@ -390,13 +397,23 @@ def slurm_job(job_id):
 
 def allocation(job_id, expected_name):
     from datetime import datetime, timezone
-    remote_host();row=slurm_job(job_id)
+    host=remote_host();row=slurm_job(job_id)
+    gpu=expected_name=='depth031-qualification' or expected_name.startswith('depth031-slot-')
+    need(host.startswith('gn' if gpu else 'cn'),'compute family differs from allocation role')
+    need(type(row.get('NodeList')) is str and type(row.get('BatchHost')) is str
+         and remote_host(row['NodeList'])==host and remote_host(row['BatchHost'])==host,
+         'actual host differs from own single-node NodeList/BatchHost')
     need(row.get('JobName')==expected_name and row.get('UserId','').split('(')[0]=='eunikhilr','foreign allocation refused')
     need(row.get('JobState')=='RUNNING' and os.environ.get('SLURM_JOB_ID')==job_id,'running own allocation required')
     need(row.get('Requeue')=='0' and row.get('Restarts','0')=='0','requeue/restart prohibited')
     require_resource_shape(row,expected_name)
     parse=lambda key:datetime.fromisoformat(row[key]).replace(tzinfo=timezone.utc).timestamp()
     result=dict(job_id=job_id,name=expected_name,start_epoch=parse('StartTime'),end_epoch=parse('EndTime'),owner='eunikhilr')
+    if expected_name=='depth031-qualification':
+        from .admission import LATEST_QUALIFIER_END
+        need(row.get('Deadline') not in (None,'','N/A','Unknown'),'qualification Slurm Deadline required')
+        need(parse('Deadline')==LATEST_QUALIFIER_END,'qualification fixed latest-end Deadline differs')
+        result.update(deadline_epoch=parse('Deadline'),time_limit_seconds=2640)
     if expected_name.startswith('depth031-slot-'):
         need(row.get('TimeLimit')=='04:30:00' and row.get('Deadline') not in (None,'N/A','Unknown'),'fixed slot TimeLimit and Slurm Deadline required')
         result.update(deadline_epoch=parse('Deadline'),time_limit_seconds=16200)
@@ -505,7 +522,7 @@ def require_resource_shape(row,name):
     from .manifest import SLURM_ACCOUNT,SLURM_QOS
     gpu=name=='depth031-qualification' or name.startswith('depth031-slot-')
     controller=name=='depth031-controller'
-    cpus,memory,limit=(4,32,'00:45:00' if name=='depth031-qualification' else '04:30:00') if gpu else ((1,2,'18:00:00') if controller else (2,8,'02:15:00'))
+    cpus,memory,limit=(4,32,'00:44:00' if name=='depth031-qualification' else '04:30:00') if gpu else ((1,2,'18:00:00') if controller else (2,8,'02:15:00'))
     need(row.get('Account')==SLURM_ACCOUNT and row.get('QOS')==SLURM_QOS and row.get('Partition')==('gpu' if gpu else 'cpu'),'Slurm account/QOS/partition differs')
     need(row.get('NumCPUs')==str(cpus) and row.get('NumNodes')=='1' and row.get('TimeLimit')==limit,'Slurm CPU/node/time allocation differs')
     tres=dict(item.split('=',1) for item in row.get('AllocTRES',row.get('TRES','')).split(',') if '=' in item)

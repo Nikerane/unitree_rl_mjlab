@@ -7,8 +7,8 @@ from .files import canonical, digest, need, read_json, reference, relative_name,
 
 MIB = 1024**2
 GIB = 1024**3
-ROOT = '/cephhome/eunikhilr/campaigns/z1-depth-reward-20261101-v1'
-EVAL_ROOT = '/cephhome/eunikhilr/campaigns/z1-depth-evaluation-20261101-v1'
+ROOT = '/cephhome/eunikhilr/campaigns/z1-depth-reward-20261101-v2'
+EVAL_ROOT = '/cephhome/eunikhilr/campaigns/z1-depth-evaluation-20261101-v2'
 BACKUP_ROOT = '/Volumes/NikeraneSSD/Z1-campaign-backups/2026-11-01-depth-reward031'
 SLURM_ACCOUNT = 'd2026d06-166-users'
 SLURM_QOS = 'normal'
@@ -34,11 +34,12 @@ def training_cell(index):
 
 
 def template():
+    from .admission import origin_spec
     cells = [dict(training_cell(i), slot=2*(i//4)+(i%4)//2, reference_index=4*(i//4),
         output=f'{ROOT}/outputs/cell-{i:02d}', private=f'{ROOT}/private/cell-{i:02d}') for i in range(12)]
     return dict(schema='z1_depth_campaign031', status='PREPARED_UNISSUED', root=ROOT,
         evaluation_root=EVAL_ROOT, backup_root=BACKUP_ROOT, ssd_uuid=SSD_UUID,
-        source_root=ROOT+'/source', cells=cells,
+        source_root=ROOT+'/source', cells=cells, admission_recovery=origin_spec(),
         slots=[dict(index=s,cells=[4*(s//2)+2*(s%2),4*(s//2)+2*(s%2)+1]) for s in range(6)],
         cases=[dict(index=i,cell=i//2,label=(99,499)[i%2],counter=(2400,12000)[i%2],
                     output=f'{EVAL_ROOT}/outputs/case-{i:02d}',private=f'{EVAL_ROOT}/private/case-{i:02d}') for i in range(24)],
@@ -69,7 +70,7 @@ def qualification_recipe():
         updates=1,policy_steps=24,world_transitions=24576,constructor_worlds=1024),
         script='scripts/z1_depth_campaign031/probe.py',argv=[]))
     return dict(schema='z1_depth_qualification_recipe031',gates=gates,per_gate_overhead_seconds=70,
-        publication_cleanup_exit_seconds=270,total_bound_seconds=2470,allocation_seconds=2700,
+        publication_cleanup_exit_seconds=270,total_bound_seconds=2470,allocation_seconds=2640,
         native_autoresets='observed separately; bounded by physical transitions',retry=False)
 
 
@@ -143,9 +144,13 @@ def prepare(workspace, destination, evidence):
         need(sha_file(workspace/relative_name(name))==required.get(name,sha),'unreviewed source delta: '+name)
     names=list(content)
     names.extend(required)
-    names.extend(('src/tasks/hammer/mdp/depth_credit031.py','tests/test_depth_credit031.py','tests/test_depth_campaign031.py','tests/test_depth_join031.py'))
+    names.extend(('src/tasks/hammer/mdp/depth_credit031.py','tests/test_depth_credit031.py','tests/test_depth_campaign031.py','tests/test_depth_join031.py','tests/test_depth_admission031.py'))
     for p in (workspace/'scripts/z1_depth_campaign031').rglob('*'):
         if p.is_file() and '__pycache__' not in p.parts:names.append(str(p.relative_to(workspace)))
+    from .admission import ORIGIN_REF, validate_origin_record
+    origin=read_json(evidence/'first-gpu-allocation-accounting031.json')
+    need(origin['reference']==ORIGIN_REF,'first allocation reference differs')
+    validate_origin_record(origin['record'])
     destination.mkdir()
     pins=copy_sources(workspace,destination/'source',names)
     manifest=template();manifest['source_files']=pins
@@ -158,12 +163,12 @@ def prepare(workspace, destination, evidence):
     need(compiler_observation['all_match'] is True and {r['path']:r['sha256'] for r in compiler_observation['files']}==policy()['runtime_files'],'refreshed compiler bytes differ')
     manifest['compiler_policy']=policy();manifest['python']=identities['remote']['python']
     manifest['qualification_recipe']=qualification_recipe()
-    manifest['seed_history']=dict(scope='201 top-level Z1 roots and16 controls; bounded observation, not global uniqueness',
+    manifest['seed_history']=dict(scope='same unused technical-release labels; fresh claims/checkpoints proof required before admission',
         seeds=list(SEEDS),evidence=reference(evidence/'ops-task3-interface.md'))
     manifest['provenance']=dict(reviewed_task2=reference(evidence/'task-2-source-pins.json'),
         runtime_observation=reference(evidence/'runtime-assets-current-identities031.json'),
         compiler_observation=reference(evidence/'compiler-content-preflight031.json'),
-        workspace_bytes=True,authority=False)
+        first_allocation=dict(ORIGIN_REF),workspace_bytes=True,authority=False)
     manifest['vendor_files']=read_json(workspace/'scripts/z1_depth_campaign031/COPIED-SOURCES031.json')
     validate(manifest)
     write_once(destination/'manifest.json',manifest)
@@ -174,6 +179,9 @@ def prepare(workspace, destination, evidence):
 
 def verify_package(manifest):
     validate(manifest)
+    from .admission import authenticate_origin, ORIGIN_REF
+    need(manifest['provenance']['first_allocation']==ORIGIN_REF,'origin provenance differs')
+    authenticate_origin()
     need(len(manifest['runtime_files'])==375 and len(manifest['asset_files'])==32,'exact runtime/assets closure required')
     source=Path(manifest['source_root'])
     asset_root=verify_asset_layout(manifest)

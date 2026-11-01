@@ -294,6 +294,8 @@ def qualify(manifest,grant):
     verify_package(manifest)
     alloc=life.allocation(os.environ['SLURM_JOB_ID'],'depth031-qualification')
     life.validate_grant(manifest,grant,now=time.time(),scope='qualification');life.current_quota()
+    from .admission import admit_replacement, prove_unused
+    admit_replacement(alloc,now=time.time());prove_unused()
     clock=life.start_clock(Path(ROOT)/'clock.json',digest(manifest),alloc['job_id'],alloc['start_epoch'])
     deadline=life.admit_time(clock,now=time.time(),allocation_end=alloc['end_epoch'],bound=2470)
     results=[]
@@ -363,6 +365,8 @@ def submission_plan(manifest,clock=None):
     from datetime import datetime,timezone
     if clock is None and (Path(ROOT)/'clock.json').is_file():clock=read_json(Path(ROOT)/'clock.json')
     if clock is not None:
+        from .admission import validate_clock
+        validate_clock(clock,digest(manifest))
         need(clock['manifest_sha256']==digest(manifest) and clock['deadline_epoch']==clock['first_allocation_epoch']+28800,'submission global clock differs')
     cpu_deadline='CPU_UTC_DEADLINE_FROM_CLOCK' if clock is None else datetime.fromtimestamp(clock['first_allocation_epoch']+64800-180,timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
     gpu_deadline='GLOBAL_UTC_DEADLINE_FROM_CLOCK' if clock is None else datetime.fromtimestamp(clock['deadline_epoch']-180,timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
@@ -414,7 +418,10 @@ def controller(manifest,grant):
     need(any(ref['path']==ROOT+'/submission-manifest.json' and ref['sha256']==sha_file(ROOT+'/submission-manifest.json') for ref in grant['review_refs']),
          'grant must bind reviewed exact submission manifest')
     write_once(Path(ROOT)/'controller-claim.json',dict(schema='z1_depth_controller031',manifest_sha256=digest(manifest),allocation=alloc))
-    clock=read_json(Path(ROOT)/'clock.json');entries=[];submitted_slots=set();submitted_cases=set()
+    clock=read_json(Path(ROOT)/'clock.json')
+    from .admission import validate_clock
+    validate_clock(clock,digest(manifest))
+    entries=[];submitted_slots=set();submitted_cases=set()
     from .evaluation import initial_anchor,publish_seals
     deadline=min(alloc['end_epoch']-120,clock['first_allocation_epoch']+64800-180,grant['expires_epoch']-120)
     try:
