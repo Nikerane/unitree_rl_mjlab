@@ -32,7 +32,25 @@ def recipe():
         synthetic_label='SYNTHETIC_MANAGER_FIXTURE_NOT_A_PHYSICAL_STRIKE',
         synthetic_ticks_per_arm=882,synthetic_simulated_transitions=0,
         native_autoresets_upper_bound=24768,checkpoint_reuse_in_training=False,
-        production_trace=dict(depth_rows=1,population_rows=2,max_updates=1,additional_forwards=0))
+        production_trace=dict(depth_rows=1,population_rows=2,max_updates=1,schema_max_updates=500,additional_forwards=0))
+
+
+@contextmanager
+def qualification_depth_trace031(runner,output_path):
+    """Capture one joined update with the unchanged500-update training schema.
+
+    The recipe's production_trace.max_updates is the qualification capture cap;
+    schema_max_updates describes each row, never a completed500-update run.
+    """
+    from src.tasks.hammer.rl.depth_reward031_trace import attach_credit_training_trace
+    with attach_credit_training_trace(runner,output_path,max_updates=500) as trace:
+        need(trace.max_updates==500 and trace.updates==0 and not trace.buffer and trace.written==0
+             and trace.last_reward_call==trace.last_depth_call==0 and trace.attached and trace.stream is not None,
+             'fresh qualification depth trace required')
+        # Only this fresh qualification instance gets a stricter capture cap.
+        trace.max_updates=1
+        yield trace
+        need(trace.updates==1 and not trace.buffer,'qualification depth trace requires one completed joined update')
 
 
 def tensor_hash(value):
@@ -139,10 +157,10 @@ def counters(counts):
                  and not runner.alg.optimizer.state,'fresh production qualification only')
             cell=training_cell(3);cell['seed']=SEED
             runner._qualification_initial031=_initialize(runner,cell)
-            from src.tasks.hammer.rl.depth_reward031_trace import attach_credit_training_trace,validate_depth_trace_row031
+            from src.tasks.hammer.rl.depth_reward031_trace import validate_depth_trace_row031
             from src.tasks.hammer.rl.velocity_population_trace import attach_velocity_population_trace
             trace_root=Path(runner.logger.log_dir).parent
-            with attach_credit_training_trace(runner,trace_root/'qualification-depth-trace.jsonl',max_updates=1), \
+            with qualification_depth_trace031(runner,trace_root/'qualification-depth-trace.jsonl'), \
                  attach_velocity_population_trace(runner,trace_root/'qualification-population.jsonl',max_updates=1):
                 result=old(runner,num_learning_iterations,init_at_random_ep_len)
             import json
