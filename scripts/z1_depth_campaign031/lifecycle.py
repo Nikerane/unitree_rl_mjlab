@@ -325,7 +325,8 @@ def current_quota():
     root='/cephhome/eunikhilr'
     maximum=int(os.getxattr(root,'ceph.quota.max_bytes'))
     used=int(os.getxattr(root,'ceph.dir.rbytes'))
-    from .admission import scope_usage
+    from .admission import authenticate_origin, scope_usage
+    authenticate_origin()
     consumed=scope_usage()['total_bytes']
     return admit_quota(maximum-used,consumed)
 
@@ -338,13 +339,15 @@ def remote_host(host=None):
 
 
 def start_clock(path, manifest_sha, job_id, allocation_start, *, host=None):
-    from .admission import authenticate_origin, valid_replacement_start, FIRST, GPU_DEADLINE, ORIGIN_REF
+    from .admission import authenticate_origin, valid_replacement_start, FIRST, GPU_DEADLINE, ORIGIN_REF, SECOND_REF
     remote_host(host);authenticate_origin()
     need(valid_replacement_start(job_id,allocation_start),'replacement allocation epoch/identity required')
     row=dict(schema='z1_depth_global_clock031',manifest_sha256=manifest_sha,
         qualification_job_id='49072485',first_allocation_epoch=FIRST,
         deadline_epoch=GPU_DEADLINE,clock_domain='Vega_Slurm_epoch',origin=dict(ORIGIN_REF),
-        replacement_allocation=dict(job_id=job_id,start_epoch=allocation_start))
+        second_origin=dict(SECOND_REF),
+        prior_technical_allocation=dict(job_id='49072528',start_epoch=1793503232),
+        technical_allocation=dict(job_id=job_id,start_epoch=allocation_start))
     write_once(path,row)
     return row
 

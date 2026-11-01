@@ -37,7 +37,7 @@ def original_clock(tmp_path,monkeypatch):
     from tests.test_depth_admission031 import origin, FIRST
     a,r,p=origin(monkeypatch,tmp_path)
     def create(manifest_sha='a'*64):
-        return module('lifecycle').start_clock(tmp_path/'fixture-clock.json',manifest_sha,'123',FIRST+2000,host='gn52')
+        return module('lifecycle').start_clock(tmp_path/'fixture-clock.json',manifest_sha,'123',FIRST+3000,host='gn52')
     return create
 
 
@@ -45,7 +45,7 @@ def test_global_clock_cannot_restart_or_use_local_clock(tmp_path,original_clock)
     l=module('lifecycle');first=1793500613
     clock=original_clock()
     assert clock['deadline_epoch']==1793529413
-    with pytest.raises(FileExistsError):l.start_clock(tmp_path/'fixture-clock.json','a'*64,'124',first+2100,host='gn52')
+    with pytest.raises(FileExistsError):l.start_clock(tmp_path/'fixture-clock.json','a'*64,'124',first+3100,host='gn52')
     assert l.admit_time(clock,now=first+2001,allocation_end=first+19000,bound=16030)==first+19000
     for now,end,bound in ((first+14000,first+30000,16030),(first,first+16000,16030)):
         with pytest.raises(ValueError):l.admit_time(clock,now=now,allocation_end=end,bound=bound)
