@@ -65,3 +65,42 @@ def test_quota_reauthenticates_third_and_eight_root_sum(tmp_path,monkeypatch):
     monkeypatch.setattr(life.os,'getxattr',lambda _,key:str(0 if key=='ceph.dir.rbytes' else m.CAP_BYTES+3*m.GIB).encode(),raising=False)
     Path(a.THIRD_REF['path']).unlink()
     with pytest.raises(FileNotFoundError):life.current_quota()
+
+
+@pytest.mark.parametrize('index',range(6))
+@pytest.mark.parametrize('artifact',['model.pt','checkpoint.pt','gate-1.json','evaluation-receipt.json'])
+def test_every_preserved_root_rejects_unexplained_regular_artifact(tmp_path,monkeypatch,index,artifact):
+    _,roots=failed_lineage(tmp_path,monkeypatch)
+    assert a.prove_unused()['training_evaluation_claims_checkpoints']==0
+    (roots[index]/artifact).write_bytes(b'unexplained prior evidence')
+    with pytest.raises(ValueError,match='preserved root entry'):a.prove_unused()
+
+
+@pytest.mark.parametrize('index',range(6))
+@pytest.mark.parametrize('fault',['unknown_directory','directory_as_file','symlink'])
+def test_closed_preserved_root_entry_names_and_types(tmp_path,monkeypatch,index,fault):
+    _,roots=failed_lineage(tmp_path,monkeypatch);root=roots[index]
+    if fault=='unknown_directory':(root/'unexplained').mkdir()
+    else:
+        name='source' if index%2==0 else 'private'
+        if fault=='directory_as_file':(root/name).write_bytes(b'wrong type')
+        else:(root/name).symlink_to(tmp_path/'dangling')
+    with pytest.raises(ValueError):a.prove_unused()
+
+
+def test_exact_observed_root_classification_accepts_known_subsets(tmp_path,monkeypatch):
+    _,roots=failed_lineage(tmp_path,monkeypatch)
+    layout=f.read_json(EVIDENCE/'retained-root-layout031.json')['roots']
+    for index,remote in enumerate(a.FIRST_ROOTS+a.SECOND_ROOTS+a.THIRD_ROOTS):
+        for name,kind in layout[remote].items():
+            path=roots[index]/name
+            if path.exists():continue
+            if kind=='directory':path.mkdir()
+            else:path.write_bytes(b'known root metadata; completeness checked separately')
+    assert a.prove_unused()['training_evaluation_claims_checkpoints']==0
+
+
+def test_known_regular_metadata_name_requires_file(tmp_path,monkeypatch):
+    _,roots=failed_lineage(tmp_path,monkeypatch)
+    (roots[0]/'manifest.json').mkdir()
+    with pytest.raises(ValueError,match='preserved root entry'):a.prove_unused()

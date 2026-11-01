@@ -2,6 +2,7 @@
 import hashlib
 import math
 import re
+import stat
 from pathlib import Path
 from .files import canonical, digest, inventory, need, read_json, safe_path, verify_ref
 
@@ -222,10 +223,20 @@ def prove_unused():
     for index,name in enumerate(PRESERVED_ROOTS):
         root=safe_path(name);need(root.is_dir(),'preserved namespace missing')
         need(not safe_path(root/'qualification-receipt.json').exists(),'failed technical qualification receipt present')
+        # Closed observed top-level layout for these six retained roots only.
+        # Subsets support relocated fixtures; the proofs below check completeness.
+        directories={'claims','intents','outputs','private'}
+        files=set()
+        if index%2==0:
+            directories.update(('controls','qualification','safe_impact_manipulation','slurm','source','submissions'))
+            files.update(('asset-copy-plan.json','manifest.json','qualification-grant.json','qualification-recipe.json'))
+            if index in (2,4):files.add('clock.json')
         for path in root.iterdir():
-            need(not (path.name.startswith(('cell-','case-','model_','model-'))
-                 or path.name in ('controller-claim.json','campaign-grant.json','submission-manifest.json')),
-                 'unexpected prior policy/evaluation artifact')
+            safe_path(path)
+            mode=path.lstat().st_mode
+            need((path.name in directories and stat.S_ISDIR(mode))
+                 or (path.name in files and stat.S_ISREG(mode)),
+                 'unexpected preserved root entry name/type: '+str(path))
         for name in ('outputs','private'):_empty(root/name,directories=index>=2)
         if index==2:_failed_technical_tree(root,record)
         elif index==4:_failed_native_tree(root,native)
