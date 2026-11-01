@@ -65,6 +65,25 @@ def rng_hash():
         python=hashlib.sha256(repr(random.getstate()).encode()).hexdigest(),numpy=digest([np.random.get_state()[0],np.random.get_state()[1].tolist(),*np.random.get_state()[2:]]))
 
 
+def validate_optimizer_state031(state):
+    """Read the populated Adam state directly; unsupported state fails closed."""
+    import math
+    import torch
+    need(isinstance(state,dict) and bool(state),'malformed production optimizer state: populated mapping required')
+    for index,(parameter,values) in enumerate(state.items()):
+        where=f'production optimizer state[{index}]'
+        need(isinstance(parameter,torch.Tensor) and isinstance(values,dict) and bool(values),'malformed '+where)
+        for name,value in values.items():
+            need(type(name) is str and bool(name),'malformed '+where+' field name')
+            field=where+'.'+name
+            if isinstance(value,torch.Tensor):
+                need(value.numel()>0,'malformed '+field+': empty tensor')
+                need(bool(value.isfinite().all()),'nonfinite '+field)
+            else:
+                need(type(value) in (int,float),'unsupported '+field)
+                need(type(value) is int or math.isfinite(value),'nonfinite '+field)
+
+
 @contextmanager
 def counters(counts):
     """Count class seams before installation so sampled-controller identity stays exact."""
@@ -172,6 +191,7 @@ def counters(counts):
                  and runner.alg.storage.step==0 and runner.alg.optimizer.state,'production PPO completion differs')
             for model in (runner.alg.actor,runner.alg.critic):
                 need(all(bool(v.isfinite().all()) for v in model.state_dict().values()),'nonfinite production state')
+            validate_optimizer_state031(runner.alg.optimizer.state)
             return result
         return wrapped
     patch(HammerOnPolicyRunner,'learn',learn)
