@@ -40,10 +40,10 @@ def test_allocation_rejects_membership_and_shape(monkeypatch,change):
 
 def test_successor_namespace_and_aggregate_qualification():
     r=m.template();recipe=m.qualification_recipe()
-    assert r['root'].endswith('20261101-v3') and r['evaluation_root'].endswith('20261101-v3')
+    assert r['root'].endswith('20261101-v4') and r['evaluation_root'].endswith('20261101-v4')
     assert recipe['allocation_seconds']==2640
-    assert recipe['total_bound_seconds']==2470 and m.LIMITS['qualification_seconds']==2880
-    assert 190+recipe['allocation_seconds']==2830<=2880
+    assert recipe['total_bound_seconds']==2470 and m.LIMITS['qualification_seconds']==3240
+    assert 466+recipe['allocation_seconds']==3106<=3240
 
 def origin(monkeypatch,tmp_path):
     from scripts.z1_depth_campaign031 import admission as a
@@ -56,21 +56,24 @@ def origin(monkeypatch,tmp_path):
     assert q.read_bytes()==(EVIDENCE/'namespace-diagnosis031/second-technical-allocation-accounting-body031.json').read_bytes()
     assert q.stat().st_size==5013 and f.sha_file(q)==second['reference']['sha256']
     monkeypatch.setattr(a,'SECOND_REF',dict(second['reference'],path=str(q)),raising=False)
+    third=f.read_json(EVIDENCE/'third-qualification-accounting031.json')
+    t=tmp_path/'third.json';f.write_once(t,third['record'])
+    monkeypatch.setattr(a,'THIRD_REF',dict(third['reference'],path=str(t)),raising=False)
     r=m.template();return a,r,p
 
 def test_origin_clock_carry_forward_and_plan(tmp_path,monkeypatch):
     from scripts.z1_depth_campaign031 import worker
     a,r,p=origin(monkeypatch,tmp_path);r['python']={'path':'/python'}
-    clock=life.start_clock(tmp_path/'clock.json',f.digest(r),'123',FIRST+3000,host='gn52')
+    clock=life.start_clock(tmp_path/'clock.json',f.digest(r),'123',FIRST+6000,host='gn52')
     assert clock['first_allocation_epoch']==FIRST and clock['qualification_job_id']=='49072485'
-    assert clock['technical_allocation']==dict(job_id='123',start_epoch=FIRST+3000)
+    assert clock['technical_allocation']==dict(job_id='123',start_epoch=FIRST+6000)
     assert clock['prior_technical_allocation']==dict(job_id='49072528',start_epoch=1793503232)
     assert clock['second_origin']==a.SECOND_REF
     assert clock['deadline_epoch']==1793529413 and clock['origin']==f.reference(p)
     plan=worker.submission_plan(r,clock)
     assert plan['slurm_gpu_deadline_utc']=='2026-11-01T10:33:53'
     assert plan['slurm_cpu_case_deadline_utc']=='2026-11-01T20:33:53'
-    with pytest.raises(FileExistsError):life.start_clock(tmp_path/'clock.json',f.digest(r),'124',FIRST+3100,host='gn52')
+    with pytest.raises(FileExistsError):life.start_clock(tmp_path/'clock.json',f.digest(r),'124',FIRST+6100,host='gn52')
     for key,value in [('first_allocation_epoch',FIRST+1),('qualification_job_id','123'),('origin',{})]:
         bad=copy.deepcopy(clock);bad[key]=value
         with pytest.raises(ValueError):worker.submission_plan(r,bad)
@@ -82,15 +85,15 @@ def test_origin_missing_and_new_start_substitution(tmp_path,monkeypatch):
     for start in [FIRST-1,FIRST+11821,float('nan')]:
         with pytest.raises(ValueError):life.start_clock(tmp_path/'bad.json',f.digest(r),'123',start,host='gn52')
     p.unlink()
-    with pytest.raises((ValueError,FileNotFoundError)):life.start_clock(tmp_path/'bad.json',f.digest(r),'123',FIRST+3000,host='gn52')
+    with pytest.raises((ValueError,FileNotFoundError)):life.start_clock(tmp_path/'bad.json',f.digest(r),'123',FIRST+6000,host='gn52')
 
 def test_replacement_admission_budget_and_remaining_slot_margin(tmp_path,monkeypatch):
     a,r,p=origin(monkeypatch,tmp_path)
-    alloc=dict(job_id='123',start_epoch=FIRST+3000,end_epoch=FIRST+5640)
-    assert a.admit_replacement(alloc,now=FIRST+3010)==FIRST+5640
-    for changes,now in [({'end_epoch':FIRST+5700},FIRST+3010),({},FIRST+3200),
+    alloc=dict(job_id='123',start_epoch=FIRST+6000,end_epoch=FIRST+8640)
+    assert a.admit_replacement(alloc,now=FIRST+6010)==FIRST+8640
+    for changes,now in [({'end_epoch':FIRST+8700},FIRST+6010),({},FIRST+6200),
                          ({'start_epoch':FIRST+10000,'end_epoch':FIRST+12640},FIRST+10000),
-                         ({'job_id':'49072485'},FIRST+3010),({},FIRST-1)]:
+                         ({'job_id':'49072485'},FIRST+6010),({},FIRST-1)]:
         with pytest.raises(ValueError):a.admit_replacement(dict(alloc,**changes),now=now)
 
 def test_preserved_namespaces_count_once_and_source_cap(tmp_path,monkeypatch):
@@ -137,14 +140,19 @@ def test_qualify_rejects_late_origin_before_clock_claim_or_science(tmp_path,monk
 def failed_lineage(tmp_path,monkeypatch):
     import shutil
     a,r,p=origin(monkeypatch,tmp_path)
-    roots=[tmp_path/('root-'+str(i)) for i in range(6)]
+    roots=[tmp_path/('root-'+str(i)) for i in range(8)]
     for root in roots:root.mkdir()
     saved=EVIDENCE/'namespace-diagnosis031/saved-failure49072528'
     for name in ('claims','intents','qualification'):
         shutil.copytree(saved/name,roots[2]/name)
     for name in ('clock.json','manifest.json'):
         shutil.copyfile(saved/name,roots[2]/name)
-    monkeypatch.setattr(a,'PRESERVED_ROOTS',tuple(map(str,roots[:4])))
+    saved3=EVIDENCE/'qualification-failure49072580'
+    for name in ('claims','intents','qualification','slurm'):
+        shutil.copytree(saved3/name,roots[4]/name)
+    for name in ('clock.json','manifest.json','qualification-recipe.json','qualification-grant.json'):
+        shutil.copyfile(saved3/name,roots[4]/name)
+    monkeypatch.setattr(a,'PRESERVED_ROOTS',tuple(map(str,roots[:6])))
     monkeypatch.setattr(a,'SCOPE_ROOTS',tuple(map(str,roots)))
     return a,roots
 
@@ -153,31 +161,33 @@ def test_actual_consumed_technical_claims_are_retained_and_truthful(tmp_path,mon
     a,roots=failed_lineage(tmp_path,monkeypatch)
     proof=a.prove_unused()
     assert proof['training_evaluation_claims_checkpoints']==0
-    assert proof['gate_claims']==1 and proof['child_claims']==1
-    assert proof['failed_technical_job_ids']==['49072485','49072528']
+    assert proof['gate_claims']==2 and proof['child_claims']==2
+    assert proof['failed_technical_job_ids']==['49072485','49072528','49072580']
     assert len(a.authenticate_second()['failed_gate_files'])==14
     (roots[2]/'private').mkdir();(roots[2]/'private/empty').mkdir()
     assert a.prove_unused()==proof  # empty private directories are not starts
 
 
-@pytest.mark.parametrize('which',['first','second'])
+@pytest.mark.parametrize('which',['first','second','third'])
 @pytest.mark.parametrize('fault',['missing','bytes','job','counts','clock'])
-def test_both_records_authenticate_before_clock_or_admission(tmp_path,monkeypatch,which,fault):
+def test_all_three_records_authenticate_before_clock_or_admission(tmp_path,monkeypatch,which,fault):
     a,r,p=origin(monkeypatch,tmp_path)
-    q=Path(a.ORIGIN_REF['path'] if which=='first' else a.SECOND_REF['path'])
+    q=Path(dict(first=a.ORIGIN_REF,second=a.SECOND_REF,third=a.THIRD_REF)[which]['path'])
     if fault=='missing':q.unlink()
     elif fault=='bytes':q.write_bytes(q.read_bytes()+b' ')
     else:
         bad=f.read_json(q)
         if fault=='job':bad['accounting']['job_id']='123'
-        elif fault=='counts':bad['remote_model_or_physics_starts']=1
+        elif fault=='counts':
+            if which=='third':bad['actual_start_counts']['reset_worlds']=10
+            else:bad['remote_model_or_physics_starts']=1
         else:bad['first_allocation_epoch']=FIRST+1
         q.write_bytes(f.canonical(bad)+b'\n')
     with pytest.raises((ValueError,FileNotFoundError)):
-        life.start_clock(tmp_path/'clock.json',f.digest(r),'123',FIRST+3000,host='gn52')
+        life.start_clock(tmp_path/'clock.json',f.digest(r),'123',FIRST+6000,host='gn52')
     assert not (tmp_path/'clock.json').exists()
     with pytest.raises((ValueError,FileNotFoundError)):
-        a.admit_replacement(dict(job_id='123',start_epoch=FIRST+3000,end_epoch=FIRST+5640),now=FIRST+3001)
+        a.admit_replacement(dict(job_id='123',start_epoch=FIRST+6000,end_epoch=FIRST+8640),now=FIRST+6001)
 
 
 @pytest.mark.parametrize('fault',['extra_gate','empty_extra_gate','changed_claim','nonzero_counts',
@@ -200,30 +210,30 @@ def test_retained_failed_inventory_rejects_added_changed_or_scientific_members(t
     with pytest.raises(ValueError):a.prove_unused()
 
 
-@pytest.mark.parametrize('job',['49072485','49072528'])
-def test_third_allocation_cannot_reuse_either_prior_job(tmp_path,monkeypatch,job):
+@pytest.mark.parametrize('job',['49072485','49072528','49072580'])
+def test_fourth_allocation_cannot_reuse_any_prior_job(tmp_path,monkeypatch,job):
     a,r,p=origin(monkeypatch,tmp_path)
-    with pytest.raises(ValueError):life.start_clock(tmp_path/'clock.json',f.digest(r),job,FIRST+3000,host='gn52')
+    with pytest.raises(ValueError):life.start_clock(tmp_path/'clock.json',f.digest(r),job,FIRST+6000,host='gn52')
 
 
-def test_third_clock_binds_both_failures_and_cannot_reset(tmp_path,monkeypatch):
+def test_fourth_clock_binds_prior_failures_and_cannot_reset(tmp_path,monkeypatch):
     a,r,p=origin(monkeypatch,tmp_path)
-    clock=life.start_clock(tmp_path/'clock.json',f.digest(r),'123',FIRST+3000,host='gn52')
+    clock=life.start_clock(tmp_path/'clock.json',f.digest(r),'123',FIRST+6000,host='gn52')
     assert a.validate_clock(clock,f.digest(r))==clock
     for key,value in [('second_origin',{}),('prior_technical_allocation',{}),
-                      ('technical_allocation',dict(job_id='49072528',start_epoch=FIRST+3000)),
-                      ('first_allocation_epoch',FIRST+3000)]:
+                      ('technical_allocation',dict(job_id='49072528',start_epoch=FIRST+6000)),
+                      ('first_allocation_epoch',FIRST+6000)]:
         with pytest.raises(ValueError):a.validate_clock(dict(clock,**{key:value}))
 
 
-def test_fixed_six_root_components_and_failed_evidence_contingency(tmp_path,monkeypatch):
+def test_fixed_eight_root_components_and_failed_evidence_contingency(tmp_path,monkeypatch):
     a,roots=failed_lineage(tmp_path,monkeypatch)
-    assert len(a.origin_spec()['preserved_roots'])==4 and len(a.SCOPE_ROOTS)==6
-    assert m.LIMITS['source_assets_controls']==a.SOURCE_CAP==768*m.MIB
-    assert m.LIMITS['contingency']==256*m.MIB and m.CAP_BYTES==7918845952
+    assert len(a.origin_spec()['preserved_roots'])==6 and len(a.SCOPE_ROOTS)==8
+    assert m.LIMITS['source_assets_controls']==a.SOURCE_CAP==1024*m.MIB
+    assert m.LIMITS['contingency']==256*m.MIB and m.CAP_BYTES==8187281408
     for root in roots:(root/'source').mkdir();(root/'source/a').write_bytes(b'12345')
     used=a.scope_usage()
-    failed=life.tree_bytes(roots[2]/'qualification')
+    failed=life.tree_bytes(roots[2]/'qualification')+life.tree_bytes(roots[4]/'qualification')
     assert used['total_bytes']==sum(life.tree_bytes(root) for root in roots)
     assert used['failed_qualification_bytes']==failed
     assert used['remaining_contingency_bytes']==256*m.MIB-failed
@@ -248,9 +258,9 @@ def test_first_and_second_eval_cannot_contain_receipts(tmp_path,monkeypatch):
     with pytest.raises(ValueError):a.prove_unused()
 
 
-def test_live_quota_monitor_authenticates_both_records_before_any_claim(tmp_path,monkeypatch):
+def test_live_quota_monitor_authenticates_prior_records_before_any_claim(tmp_path,monkeypatch):
     a,r,p=origin(monkeypatch,tmp_path)
-    roots=[tmp_path/('quota-'+str(i)) for i in range(6)]
+    roots=[tmp_path/('quota-'+str(i)) for i in range(8)]
     for root in roots:root.mkdir()
     monkeypatch.setattr(a,'SCOPE_ROOTS',tuple(map(str,roots)))
     monkeypatch.setattr(life.os,'getxattr',lambda _,key:str(0 if key=='ceph.dir.rbytes' else m.CAP_BYTES+3*m.GIB).encode(),raising=False)

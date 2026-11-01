@@ -7,21 +7,21 @@ from .files import canonical, digest, need, read_json, reference, relative_name,
 
 MIB = 1024**2
 GIB = 1024**3
-ROOT = '/cephhome/eunikhilr/campaigns/z1-depth-reward-20261101-v3'
-EVAL_ROOT = '/cephhome/eunikhilr/campaigns/z1-depth-evaluation-20261101-v3'
+ROOT = '/cephhome/eunikhilr/campaigns/z1-depth-reward-20261101-v4'
+EVAL_ROOT = '/cephhome/eunikhilr/campaigns/z1-depth-evaluation-20261101-v4'
 BACKUP_ROOT = '/Volumes/NikeraneSSD/Z1-campaign-backups/2026-11-01-depth-reward031'
 SLURM_ACCOUNT = 'd2026d06-166-users'
 SLURM_QOS = 'normal'
 SSD_UUID = 'E345FED4-EE51-36D0-AB62-A4392E745189'
 SEEDS = (2026110101, 2026110102, 2026110103)
-CAP_BYTES = (12*256+12*128+24*16+24*32+768+768+256)*MIB
+CAP_BYTES = (12*256+12*128+24*16+24*32+768+1024+256)*MIB
 LIMITS = dict(training_output=256*MIB, trace=160*MIB, population=16*MIB, logs=32*MIB,
     checkpoints=8*MIB, other=40*MIB, training_private=128*MIB, eval_output=16*MIB,
-    eval_private=32*MIB, qualification=768*MIB, source_assets_controls=768*MIB,
+    eval_private=32*MIB, qualification=768*MIB, source_assets_controls=1024*MIB,
     contingency=256*MIB, cap=CAP_BYTES, free_floor=GIB, external_growth=2*GIB,
     gpu_concurrency=6, eval_concurrency=7, policy_seconds=7200, slot_seconds=16200,
     slot_required_seconds=16030, anchor_wait_seconds=600, global_gpu_seconds=28800, scheduler_exit_margin_seconds=180,
-    qualification_seconds=2880, eval_seconds=7200, eval_allocation_seconds=8100,
+    qualification_seconds=3240, eval_seconds=7200, eval_allocation_seconds=8100,
     eval_cpus=2, eval_memory_gib=8, controller_seconds=64800, controller_cpus=2,
     controller_memory_gib=2, maximum_case_cpu_hours=108)
 # Proposed allocation shape; local metadata does not establish runtime qualification.
@@ -158,10 +158,10 @@ def prepare(workspace, destination, evidence):
         need(sha_file(workspace/relative_name(name))==required.get(name,sha),'unreviewed source delta: '+name)
     names=list(content)
     names.extend(required)
-    names.extend(('src/tasks/hammer/mdp/depth_credit031.py','tests/test_depth_credit031.py','tests/test_depth_campaign031.py','tests/test_depth_join031.py','tests/test_depth_admission031.py','tests/test_depth_import_ownership031.py'))
+    names.extend(('src/tasks/hammer/mdp/depth_credit031.py','tests/test_depth_credit031.py','tests/test_depth_campaign031.py','tests/test_depth_join031.py','tests/test_depth_admission031.py','tests/test_depth_import_ownership031.py','tests/test_depth_census_cpu031.py','tests/test_depth_corrected_admission031.py'))
     for p in (workspace/'scripts/z1_depth_campaign031').rglob('*'):
         if p.is_file() and '__pycache__' not in p.parts:names.append(str(p.relative_to(workspace)))
-    from .admission import ORIGIN_REF, SECOND_REF, validate_origin_record, validate_second_record
+    from .admission import ORIGIN_REF, SECOND_REF, THIRD_REF, validate_origin_record, validate_second_record, validate_third_record
     origin=read_json(evidence/'first-gpu-allocation-accounting031.json')
     need(origin['reference']==ORIGIN_REF,'first allocation reference differs')
     validate_origin_record(origin['record'])
@@ -170,6 +170,10 @@ def prepare(workspace, destination, evidence):
     need((evidence/'namespace-diagnosis031/second-technical-allocation-accounting-body031.json').read_bytes()==canonical(second['record'])+b'\n',
          'second canonical body differs')
     validate_second_record(second['record'])
+    third=read_json(evidence/'third-qualification-accounting031.json')
+    need(third['reference']==THIRD_REF,'third allocation reference differs')
+    need((evidence/'third-qualification-accounting-body031.json').read_bytes()==canonical(third['record'])+b'\n','third canonical body differs')
+    validate_third_record(third['record'])
     destination.mkdir()
     pins=copy_sources(workspace,destination/'source',names)
     manifest=template();manifest['source_files']=pins
@@ -188,7 +192,7 @@ def prepare(workspace, destination, evidence):
     manifest['provenance']=dict(reviewed_task2=reference(evidence/'task-2-source-pins.json'),
         runtime_observation=reference(evidence/'runtime-assets-current-identities031.json'),
         compiler_observation=reference(evidence/'compiler-content-preflight031.json'),
-        first_allocation=dict(ORIGIN_REF),second_allocation=dict(SECOND_REF),workspace_bytes=True,authority=False)
+        first_allocation=dict(ORIGIN_REF),second_allocation=dict(SECOND_REF),third_allocation=dict(THIRD_REF),workspace_bytes=True,authority=False)
     manifest['vendor_files']=read_json(workspace/'scripts/z1_depth_campaign031/COPIED-SOURCES031.json')
     validate(manifest)
     write_once(destination/'manifest.json',manifest)
@@ -199,9 +203,10 @@ def prepare(workspace, destination, evidence):
 
 def verify_package(manifest):
     validate(manifest)
-    from .admission import authenticate_origin, ORIGIN_REF, SECOND_REF
+    from .admission import authenticate_origin, ORIGIN_REF, SECOND_REF, THIRD_REF
     need(manifest['provenance']['first_allocation']==ORIGIN_REF
-         and manifest['provenance']['second_allocation']==SECOND_REF,'two-failure provenance differs')
+         and manifest['provenance']['second_allocation']==SECOND_REF
+         and manifest['provenance']['third_allocation']==THIRD_REF,'three-failure provenance differs')
     authenticate_origin()
     need(len(manifest['runtime_files'])==377 and len(manifest['asset_files'])==32,'exact runtime/assets closure required')
     need(manifest['runtime_files']==runtime_files_with_virtual_owners(manifest['runtime_files'],manifest['python']),
