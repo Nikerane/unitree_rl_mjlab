@@ -513,3 +513,69 @@ def test_160mib_covers_pessimistic500_update_serialization_with_all_production_f
     assert upper_row_bytes*500 < 160*1024**2
     assert upper_row_bytes*500 > 96*1024**2
     (tmp_path/'bound-proof.json').write_text(json.dumps({'upper_row_bytes':upper_row_bytes,'updates':500,'upper_total_bytes':upper_row_bytes*500}))
+
+
+def test_shared_trace_customization_is_persisted_before_success_callback(tmp_path):
+    import json
+    from src.tasks.hammer.rl.split_credit_training_trace import _SplitCreditTrace
+    from tests.test_split_credit_trace021 import setup,collect
+    class CustomTrace(_SplitCreditTrace):
+        def _customize_envelope(self,envelope):
+            return dict(envelope,custom_observation='real_shared_write')
+        def _after_trace_write(self):
+            self.persisted_observation=json.loads(self.path.read_bytes())['custom_observation']
+    r,p=setup();trace=CustomTrace(r,tmp_path/'custom', (0,1),96*1024**2,500)
+    try:
+        trace.start();collect(r,p);r.alg.compute_returns(None)
+        assert json.loads(trace.path.read_bytes())['custom_observation']=='real_shared_write'
+        assert trace.persisted_observation=='real_shared_write'
+        assert trace.updates==1 and trace.buffer==[]
+    finally:trace.close()
+
+
+def test_shared_legacy_trace_matches_frozen_before_fix_bytes(tmp_path):
+    from pathlib import Path
+    from tests.test_split_credit_trace021 import setup,collect
+    from src.tasks.hammer.rl.split_credit_training_trace import _SplitCreditTrace
+    snapshot=Path('.superpowers/sdd/2026-11-01-z1-depth-reward031/baseline-source/split_credit_training_trace.before-fix1.py')
+    frozen={'__name__':'before031_fix1_trace'};exec(compile(snapshot.read_bytes(),str(snapshot),'exec'),frozen)
+    outputs=[]
+    for idx,cls in enumerate((frozen['_SplitCreditTrace'],_SplitCreditTrace)):
+        r,p=setup();path=tmp_path/str(idx);trace=cls(r,path,(0,1),96*1024**2,500)
+        try:trace.start();collect(r,p);r.alg.compute_returns(None)
+        finally:trace.close()
+        outputs.append(path.read_bytes())
+        assert r.alg.critic.calls==1
+    assert outputs[0]==outputs[1]
+
+
+@pytest.mark.parametrize('failure',[None,'cap','partial_write'])
+def test_depth_population_clears_only_after_complete_shared_write(tmp_path,failure):
+    import json
+    m=api('rl.depth_reward031_trace');r,p,depth=trace_setup();env=r.env.unwrapped
+    original_metrics=env.metrics_manager.compute;original_returns=r.alg.compute_returns
+    trace=m._DepthTrace031(r,tmp_path/'population',(0,1),64 if failure=='cap' else 160*1024**2,500)
+    class PartialWrite:
+        def __init__(self,stream):self.stream=stream;self.first=True
+        def write(self,body):
+            if not self.first:raise OSError('controlled partial-write failure')
+            self.first=False;return self.stream.write(body[:31])
+        def fileno(self):return self.stream.fileno()
+        def close(self):self.stream.close()
+    try:
+        trace.start();collect_depth_trace(r,p,depth);population=dict(trace.population)
+        assert population['completion_paid_units']==2.
+        if failure=='partial_write':trace.stream=PartialWrite(trace.stream)
+        if failure:
+            with pytest.raises(ValueError if failure=='cap' else OSError):r.alg.compute_returns(None)
+            assert trace.population==population and trace.updates==0 and len(trace.buffer)==24
+            assert env.metrics_manager.compute==original_metrics and r.alg.compute_returns==original_returns
+            assert trace.stream is None and not r.alg.critic._forward_hooks
+            assert trace.path.stat().st_size==(0 if failure=='cap' else 31)
+        else:
+            r.alg.compute_returns(None)
+            row=json.loads(trace.path.read_bytes())
+            assert row['schema']=='z1_depth_reward031_training_trace_v1'
+            assert row['depth_population031']==population
+            assert trace.population==dict.fromkeys(population,0) and trace.updates==1 and trace.buffer==[]
+    finally:trace.close()

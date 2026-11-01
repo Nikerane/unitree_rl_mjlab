@@ -7,7 +7,6 @@ from contextlib import contextmanager
 from copy import deepcopy
 import json
 import math
-import torch
 from src.tasks.hammer.rl.split_credit_training_trace import _SplitCreditTrace, _need, _LIMIT as _SPLIT_LIMIT
 from src.tasks.hammer.rl.depth_reward031_contract import depth_identity031, validate_depth_identity031
 from src.tasks.hammer.mdp.depth_reward031 import NativeDepthCreditObserver031
@@ -62,69 +61,12 @@ class _DepthTrace031(_SplitCreditTrace):
             self.close()
             raise
 
-    def returns(self, *args, **kwargs):
-        handle = None
-        try:
-            st = self.alg.storage
-            _need(self.updates < self.max_updates and len(self.buffer) == 24 and st.step == 24,
-                  'trace requires one full24-step rollout before returns')
-            captured = []
-            def observe(_model, _inputs, output):
-                self.take(output, vector=True)  # Validate the exact output already used by CaT.
-                captured.append(output.detach().clone())
-            handle = self.alg.critic.register_forward_hook(observe)
-            try:
-                result = self.original_returns(*args, **kwargs)
-            finally:
-                handle.remove()
-                handle = None
-            _need(len(captured) == 1, 'trace expected exactly one existing final critic forward')
-            for step, row in enumerate(self.buffer):
-                take = lambda value: self.take(value[step], vector=True)
-                values, rewards = take(st.values), take(st.rewards)
-                soft, done = take(st.soft_dones), take(st.dones)
-                returns = take(st.returns)
-                before = row['pre_reset']
-                _need(values == before['value_at_action'] and soft == before['delta']
-                      and done == before['native_reset'], 'trace join does not match collected transition')
-                if hasattr(st, 'actions'):
-                    _need(self.take(st.actions[step]) == before['latent_actions'], 'trace action join mismatch')
-                next_tensor = captured[0] if step == 23 else st.values[step + 1]
-                next_values = self.take(next_tensor, vector=True)
-                continuation = (1. - st.soft_dones[step]) * (1. - st.dones[step].float())
-                td_tensor = st.rewards[step] + continuation * self.alg.gamma * next_tensor - st.values[step]
-                td = self.take(td_tensor, vector=True)
-                advantage = self.take(st.returns[step] - st.values[step], vector=True)
-                row['stored'] = dict(values=values, rewards_after_cat_and_bootstrap=rewards,
-                    soft_dones=soft, hard_dones=done, returns=returns, next_values=next_values,
-                    raw_advantage=advantage, td_residual=td)
-            envelope = dict(schema='z1_depth_reward031_training_trace_v1', update=self.updates,
-                split_credit=self.split_marker, max_updates=500, physics_dt_s=self.env.physics_dt, policy_dt_s=self.env.step_dt,
-                world_ids=list(self.ids), scope='FIXED_TWO_WORLDS_NOT_POPULATION_STATISTICS',
-                gamma=self.alg.gamma, lam=self.alg.lam, steps=self.buffer,
-                final_values=self.take(captured[0], vector=True),
-                executed_action_semantics='ACTION_MANAGER_INPUT_AFTER_WRAPPER_CLIP_NOT_MOTOR_TORQUE',
-                storage_reward_semantics='ACTUAL_ALREADY_CAT_SCALED_AND_TIMEOUT_BOOTSTRAPPED',
-                raw_advantage_semantics='RETURNS_MINUS_VALUES_BEFORE_ADVANTAGE_NORMALIZATION')
-            envelope['spline_depth_reward031'] = self.depth_marker
-            envelope['depth_population031'] = dict(self.population)
-            body = (json.dumps(envelope, sort_keys=True, separators=(',', ':'), allow_nan=False) + '\n').encode()
-            _need(self.written + len(body) <= self.cap, 'trace byte cap would be exceeded')
-            offset = 0
-            while offset < len(body):
-                count = self.stream.write(body[offset:])
-                _need(type(count) is int and count > 0, 'trace write made no progress')
-                offset += count
-                self.written += count
-            self.population = dict.fromkeys(self.population, 0)
-            self.buffer = []
-            self.updates += 1
-            return result
-        except BaseException:
-            if handle is not None:
-                handle.remove()
-            self.close()
-            raise
+    def _customize_envelope(self, envelope):
+        return dict(envelope, schema='z1_depth_reward031_training_trace_v1',
+            spline_depth_reward031=self.depth_marker, depth_population031=dict(self.population))
+
+    def _after_trace_write(self):
+        self.population = dict.fromkeys(self.population, 0)
 
 
 @contextmanager
