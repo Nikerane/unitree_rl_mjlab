@@ -213,6 +213,7 @@ def initial_snapshot(raw):
 
 def native_tape(raw,vec):
     import torch
+    from src.tasks.hammer.cat.keys import CAT_DELTA_KEY,CAT_R_POS_KEY
     rows=[]
     for _ in range(16):
         action=torch.zeros((2,13),device='cuda:0')
@@ -224,7 +225,11 @@ def native_tape(raw,vec):
             row['controller/'+key]=getattr(raw._sampled_pd500,key).detach().cpu().clone()
         row['native_action_buffer']=raw.action_manager.action.detach().cpu().clone()
         for key,value in raw.obs_buf.items():row['observations/'+key]=value.detach().cpu().clone()
-        for key in ('delta','r_pos','reset_terminated','reset_time_outs'):
+        for key,extras_key in (('delta',CAT_DELTA_KEY),('r_pos',CAT_R_POS_KEY)):
+            value=extras.get(extras_key)
+            need(value is not None,'required native parity field missing: '+key)
+            row[key]=value.detach().cpu().clone()
+        for key in ('reset_terminated','reset_time_outs'):
             value=getattr(raw,key,None)
             need(value is not None,'required native parity field missing: '+key)
             row[key]=value.detach().cpu().clone()
