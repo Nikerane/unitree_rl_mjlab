@@ -1,0 +1,306 @@
+"""File-only pilot32 measurement audit. Returns evidence, NEVER writes a seal.
+
+019/e1/15e numeric and native-censor arithmetic is reused by pinned AST seams.
+No tensor/model/runtime imports, deserialization, policy calls or physics.
+"""
+import ast
+import copy
+import hashlib
+import json
+import math
+from pathlib import Path
+import types
+
+HERE=Path(__file__).resolve().parent
+PINS={'audit_own32_007.py':'15e220f75ae3bdf1d16454dfb68a5b98b47d27192e035f44c8afdaabcfed6e45',
+ 'audit_science_bank019.py':'83b7f8e583c71ad42e57602afd027358b7e4a57ee5ca1ab1cf0a3e452b419600',
+ 'build_own32_seal.py':'e1bc82fe9feb7a57ce6ea220fd502d07474eeb1397bd46da80af530e1ee52641',
+ 'fixture014/audit_science_bank014.py':'d7030182bc2e84b0c9a9f5be986c495bf815eb01bae6d3cfc01a4e7a775fa2dc'}
+CONTRACT_SHA='2b3b328c30399927b5f8095aef93a4d0e383319acf5d33ba58a97ffdf7e2eb1b'
+BANK_SHA='b0baebc9dee774c89091a16ed7ba6ce5bfb3df4e4a639b6faabf56ec9da43f22'
+SOURCE_WIRE_SHA='ba78b108bdcbf0ddf723ca2d39a1d2d26f1ba0890a96a15c6e4bbeaa07325ae2'
+FINITE_CONTRACT_SHA='da873fb10f8df87d77e0a1b42f81eafd6da062e37135fe22c531ea0d5c127b8f'
+CASE='pilot-bank32'
+
+
+def need(ok,message):
+    if not ok:raise ValueError(message)
+
+
+def canonical(v):return json.dumps(v,sort_keys=True,separators=(',',':'),allow_nan=False)
+def digest(v):return hashlib.sha256(canonical(v).encode()).hexdigest()
+def sha(path):
+    h=hashlib.sha256()
+    with Path(path).open('rb')as stream:
+        for block in iter(lambda:stream.read(1024**2),b''):h.update(block)
+    return h.hexdigest()
+def read(path):return json.loads(Path(path).read_text())
+
+
+def bound(ref,root=None):
+    need(type(ref)is dict and set(ref)=={'path','sha256'},'exact hashed reference required')
+    p=Path(ref['path']);need(p.is_absolute()and p.is_file()and not any(q.is_symlink()for q in(p,*p.parents)),'absolute regular nonsymlink file required')
+    need(sha(p)==ref['sha256'],'bound file hash differs: '+str(p))
+    if root is not None:need(p.resolve().is_relative_to(Path(root).resolve()),'producer reference escaped raw root')
+    return p
+
+
+def source(path,pin,name):
+    p=bound(dict(path=str(Path(path).resolve()),sha256=pin));body=p.read_bytes()
+    module=types.ModuleType(name);module.__file__=str(p)
+    exec(compile(body,str(p),'exec'),module.__dict__)
+    return module
+
+
+class MixedRoute(ast.NodeTransformer):
+    def __init__(self):self.count=0
+    def visit_Compare(self,node):
+        old=ast.parse("ep.get('route_sign')==route_sign",mode='eval').body
+        if ast.dump(node,include_attributes=False)==ast.dump(old,include_attributes=False):
+            self.count+=1
+            return ast.copy_location(ast.parse("ep.get('route_sign')==route_sign[i]",mode='eval').body,node)
+        return self.generic_visit(node)
+
+
+def dependencies():
+    origin=HERE/'qualified-origin'
+    for name,pin in PINS.items():bound(dict(path=str(origin/name),sha256=pin))
+    r19=source(origin/'audit_science_bank019.py',PINS['audit_science_bank019.py'],'pilot_pinned019')
+    w=r19.dependencies(origin/'build_own32_seal.py',origin/'audit_own32_007.py')
+    body=(origin/'audit_own32_007.py').read_text();tree=ast.parse(body)
+    native=r19.NativeSeams('own');tree=native.visit(tree)
+    node=next(copy.deepcopy(n)for n in tree.body if isinstance(n,ast.FunctionDef)and n.name=='audit_measurements')
+    old=r19.base.Adapt('own');node=old.visit(node)
+    route=MixedRoute();node=route.visit(node)
+    need(route.count==1 and old.counts==dict(own_case_literal=1,own_audit_call=1,own_route_compare=1),'mixed-route adaptation seam drift')
+    need(native.counts==dict(native_common_prefix_assignment=1,native_common_check_moved_to_regular_branch=1),'native measurement seams drift')
+    for name in ('case_id','route_sign'):node.args.args.append(ast.arg(arg=name))
+    own=source(origin/'audit_own32_007.py',PINS['audit_own32_007.py'],'pilot_pinned15e')
+    own.__dict__.update(native_common_metrics=r19.native_common_metrics)
+    exec(compile(ast.fix_missing_locations(ast.Module(body=[node],type_ignores=[])),'pilot_per_world_route_only','exec'),own.__dict__)
+    w.audit_case_measurements=own.audit_measurements;w.dense_metrics=own.dense_metrics
+    w.native_censor_coverage=r19.native_censor_coverage
+    r19.base.sha=sha  # Same SHA256 bytes; portable replacement for Python3.12 file_digest API.
+    w.producer_reference=r19.base.producer_reference
+    original=w.classify_world
+    def classify(ep,obs,boundary,count):
+        try:return original(ep,obs,boundary,count)
+        except ValueError as exc:
+            if str(exc)!='raw/accepted contact classification unresolved':raise
+            raw=obs.get('first_raw_contact_sample');native=boundary['native']
+            need(obs.get('accepted_contact_sample')is None and type(raw)is int and 0<raw<=native['observed_samples']
+                 and ep.get('hit')is False and count==0,'raw-unaccepted onset/lifecycle unresolved')
+            need(type(ep.get('timeout'))is bool,'raw-unaccepted timeout unknown')
+            if ep['timeout']:
+                need(ep['steps']==1000 and native['observed_samples']==80000 and native['termination_terms'].get('time_out')is True,'raw-unaccepted native timeout truncated')
+            return 'RAW_CONTACT_UNACCEPTED'
+    w.classify_world=classify
+    w.pilot_adaptation_counts=dict(per_world_route_compare=1,raw_unaccepted_classification=1)
+    return w
+
+
+def realized_bank(evidence,bank):
+    need(evidence.get('bank_sha256')==BANK_SHA and evidence.get('world_ids')==list(range(32)),'realized bank identity/worlds differ')
+    z=evidence['realized'];q=[r['qpos_rad']for r in bank['rows']];routes=[r['route_sign']for r in bank['rows']]
+    need(canonical(z.get('qpos_rad'))==canonical(q) and canonical(z.get('qvel_rad_s'))==canonical([[0.]*6 for _ in range(32)])and canonical(z.get('route_signs'))==canonical(routes),'actual reset qpos/qvel/route differs')
+    need(evidence.get('actual_qpos_sha256')==digest(q) and evidence.get('actual_qvel_sha256')==digest(z['qvel_rad_s'])
+         and evidence.get('actual_route_sha256')==digest(routes) and evidence.get('actual_state_sha256')==digest(z)
+         and evidence.get('actual_plant_sha256')==digest(bank['plant']),'realized state/plant hash differs')
+    need(evidence.get('actual_reference_recipe')==bank['reference'],'actual reference recipe differs')
+    for i in range(32):
+        need(z['nail_qpos_m'][i]==[0.]and z['nail_qvel_m_s'][i]==[0.],'actual nail reset differs')
+        for a,b in zip(z['nail_world_m'][i],bank['nail']['top_world_m']):need(abs(a-b)<=1e-6,'actual nail geometry differs')
+        for a,b in zip(z['reference_head0_world_m'][i],z['head_world_m'][i]):need(abs(a-b)<=1e-6,'stale reset reference anchor')
+        target=list(z['nail_world_m'][i]);target[2]-=.02
+        for a,b in zip(z['reference_target_world_m'][i],target):need(abs(a-b)<=1e-6,'reset reference target differs')
+    need(evidence.get('actual_reference_sha256')==digest(dict(recipe=bank['reference'],head0_world_m=z['reference_head0_world_m'],target_world_m=z['reference_target_world_m'])),'reference hash differs')
+    need(evidence.get('actual_nail_sha256')==digest(dict(qpos_m=z['nail_qpos_m'],qvel_m_s=z['nail_qvel_m_s'],world_m=z['nail_world_m'])),'nail hash differs')
+    canonical(evidence)
+    return routes
+
+
+def audit_measurements(w,intent,root,bank):
+    case=root/CASE;routes=[r['route_sign']for r in bank['rows']]
+    report=read(case/'report.json');worker=read(root/'worker-result.json');reset=read(case/'reset-observed.json')
+    need(worker.get('reports')and len(worker['reports'])==1 and worker['reports'][0].get('case_id')==CASE
+         and worker['reports'][0].get('report_sha256')==sha(case/'report.json'),'single bound pilot report required')
+    need(canonical(report.get('first_episode_route_signs'))==canonical(routes) and report.get('measurement',{}).get('protocol')=='native'
+         and report['measurement'].get('physics_dt_s')==.00025,'mixed native route report/physics differs')
+    for key,filename in [('observer_mapping','observer-mapping.json'),('native_onset_trace','onset-native-producers.npz'),('safety_endpoint_summary','inclusive-safety-endpoints.json')]:
+        exact=w.producer_reference(w,case,key,filename)
+        for record in (report,worker['reports'][0]):
+            ref=record[key];need(bound({'path':ref['path'],'sha256':ref['sha256']},root)==case/filename,'producer path differs')
+            need(canonical(ref)==canonical(exact),'producer descriptor differs')
+        for filename_rows in ('episodes.json','observer-records.json','native-boundary-records.json'):
+            need(all(canonical(row.get(key))==canonical(exact)for row in read(case/filename_rows)),'world producer descriptor differs')
+    ep_summary=read(case/'inclusive-safety-endpoints.json')
+    need(all(canonical(ep_summary.get(k))==canonical(report[k])for k in ('observer_mapping','native_onset_trace')),'endpoint producer descriptor differs')
+    mapping=read(case/'observer-mapping.json');imp=mapping.get('impulse_provenance',{})
+    need(mapping.get('joint_names')==['joint'+str(i)for i in range(1,7)]and all(mapping.get(k)==list(range(6))for k in ('entity_ids','native_joint_ids','qpos_ids','dof_ids'))and mapping.get('actuator_ids')==[0,5,1,2,3,4],'canonical mapping differs')
+    source_hashes={r['sha256']for r in intent['source_files']}
+    need(imp.get('window_substeps')==200 and imp.get('baseline_subtracted')is True and imp.get('thresholds_nms')==list(w.LOAD_CAPS)
+         and imp.get('enforced_relation')=='maximum(raw_load,held_load)'and imp.get('source_sha256')in source_hashes,'impulse source/semantics differ')
+    need(all(type(reset.get(k))is str and len(reset[k])==64 and all(c in '0123456789abcdef'for c in reset[k])for k in ('actor_sha256','normalizer_sha256')),'loaded actor/normalizer hashes missing')
+    need(reset.get('case_id')==CASE and reset.get('worlds')==list(range(32)),'actual reset lifecycle differs')
+    need(reset.get('geometry')==dict(reset_bank=intent['reset_bank'],actual_reset_evidence='pilot-reset-bank-evidence.json'),'bank reset evidence linkage differs')
+    evidence=read(case/'pilot-reset-bank-evidence.json');realized_bank(evidence,bank)
+    measurement=dict(intent,policy=dict(intent['policy'],native_window_s=.2))
+    result=w.audit_case_measurements(w,measurement,root,CASE,routes)
+    trace=w.read_trace(case/'onset-native-producers.npz')
+    observers=w.keyed(read(case/'observer-records.json'),'world_id');native=w.keyed(read(case/'native-boundary-records.json'),'world_id')
+    denominators=dict(all_first_episodes=32,accepted_contact_801=0,no_raw_contact=0,raw_contact_unaccepted=0,productive_accepted_contact=0)
+    for row in result['worlds']:
+        i=row['world_id'];obs=observers[i];n=native[i]['native'];raw,accepted=obs['first_raw_contact_sample'],obs['accepted_contact_sample']
+        whole=n['boundary_measurement'];need(whole.get('complete')is True and whole.get('samples')==n['observed_samples'],'whole native attempt measurement absent')
+        for key in ('joint_velocity_peak_rad_s','joint_load_peak_nms','joint_velocity_exceedance_samples','joint_load_exceedance_samples'):
+            need(type(whole.get(key))is list and len(whole[key])==6 and all(type(v)in(int,float)and math.isfinite(v)and v>=0 for v in whole[key]),'whole-native risk vector absent/nonfinite')
+        if accepted is not None:
+            need(type(raw)is int and 0<raw<=accepted,'accepted contact lacks measured raw onset')
+            denominators['accepted_contact_801']+=1
+            row['literal_joint_metrics']={name:w.dense_metrics(w,trace,i,a,b)for name,(a,b)in w.WINDOWS.items()}
+            if row['productive']is True:denominators['productive_accepted_contact']+=1
+            if 1<=n['contact_samples']<=800:
+                r=n['contact_samples'];row['native_censor019']=dict(native_horizon_censored=True,native_horizon_required_ticks=800,native_contact_observed_points=r,common50_censored=r<200,common50_observed_points=min(r,200),reason='time_out',fixed801_shadow_complete=True)
+        else:
+            need(row['productive']is not True,'productive outcome without accepted onset')
+            key='no_raw_contact'if raw is None else'raw_contact_unaccepted';denominators[key]+=1
+            row['literal_joint_metrics']=None
+            if raw is not None:
+                row['safety_0_200ms']='UNKNOWN_NO_ACCEPTED_ONSET_RAW_CONTACT'
+                result['world_classifications'][i]['contact_endpoint']='UNKNOWN_NO_ACCEPTED_ONSET_RAW_CONTACT'
+        row.update(route_sign=routes[i],first_raw_contact_sample=raw,accepted_contact_sample=accepted,whole_native_attempt_measurement=whole)
+    need(denominators['accepted_contact_801']+denominators['no_raw_contact']+denominators['raw_contact_unaccepted']==32,'all-start denominator conservation differs')
+    result['denominators']=denominators
+    for metric in result['window_metrics'].values():
+        metric['unknown_no_accepted_contact_worlds']=metric.pop('unknown_no_contact_worlds')
+        metric['raw_contact_unaccepted_worlds']=denominators['raw_contact_unaccepted']
+    result.pop('unsafe_allowed_for_technical_qualification',None)
+    result.update(reset_bank_sha256=BANK_SHA,pilot_adaptation_counts=w.pilot_adaptation_counts,native_adaptation_counts=w.native_adaptation_counts,qualified_adaptation_counts=w.adaptation_counts)
+    return result
+
+
+def backup_receipt(ref,root,members):
+    path=bound(ref);need(not path.resolve().is_relative_to(root),'backup receipt must be outside raw tree')
+    b=read(path);tree=digest(members)
+    need(b.get('schema')=='z1_pilot_cpu32_preservation_v1'and b.get('status')=='HASH_VERIFIED'and b.get('raw_root')==str(root)
+         and b.get('members')==members and b.get('tree_sha256')==tree,'complete exact raw preservation receipt required')
+    d=b.get('destination',{});archive=d.get('archive',{})
+    need(type(archive.get('path'))is str and Path(archive['path']).is_absolute()and not Path(archive['path']).is_relative_to(root)
+         and type(archive.get('sha256'))is str and len(archive['sha256'])==64 and type(d.get('archive_bytes'))is int and d['archive_bytes']>0,'independent archive provenance required')
+    need(d.get('verified_extraction')is True and d.get('verified_members')==members and d.get('verified_tree_sha256')==tree,'archive extraction/member verification required')
+    need(type(d.get('raw_filesystem_id'))is str and d['raw_filesystem_id'] and type(d.get('filesystem_id'))is str
+         and d['filesystem_id'] and d['filesystem_id']!=d['raw_filesystem_id'],'independent destination filesystem identity required')
+    return b
+
+
+
+def validate_training_metadata(p,manifest,manifest_file_sha,complete,terminal_train,audit):
+    need(p['source_manifest_sha256']==digest(manifest['source_files'])==SOURCE_WIRE_SHA,'canonical source-map digest differs')
+    need(complete.get('status')=='COMPLETE'and complete.get('manifest_sha256')==manifest_file_sha and terminal_train.get('status')=='COMPLETE','training completion/terminal not complete')
+    settings=('vic_baseline','vic_position_low','vic_gain_mean','fixed_nominal');slot=p['training_seed']-2026102902;index=slot*4+settings.index(p['setting'])
+    cells=[dict(index=slot*4+j,setting=name,seed=p['training_seed'],credit_deadline_ms=200,critic_mode='current',updates=100,worlds=1024,rollout_steps=24)for j,name in enumerate(settings)]
+    need(manifest.get('schema')=='z1_exploration_pilot_campaign_v1'and manifest.get('worker_sha256')=='60507ea8023fdb713cacc16c5ccc57a35ebdaad2f05dd2e679b65a071962f05a'
+         and canonical(manifest.get('study_anchor'))==canonical(dict(credit_deadline_ms=200,critic_mode='current'))and type(manifest.get('seed_slot'))is int and manifest['seed_slot']==slot
+         and canonical(manifest.get('cells'))==canonical(cells),'actual training campaign identity/cells differ')
+    need(type(complete.get('cell'))is int and complete['cell']==index and type(terminal_train.get('cell'))is int and terminal_train['cell']==index
+         and type(complete.get('allocation'))is dict and complete['allocation']and complete['allocation']==terminal_train.get('allocation'),'training terminal cell/allocation differs')
+    artifacts=complete['artifacts'];need(artifacts.get('updates')==100 and artifacts.get('common_step_counter')==2400
+        and artifacts['checkpoint_sha256'].get('model_99.pt')==p['checkpoint_sha256'],'actual final training artifacts differ')
+    expected=dict(status='PASS_FINAL_PILOT_ARTIFACTS',policy_id=p['policy_id'],setting=p['setting'],training_seed=p['training_seed'],iteration=99,
+        common_step_counter=2400,checkpoint_sha256=p['checkpoint_sha256'],training_manifest_sha256=manifest_file_sha,canonical_source_map_sha256=SOURCE_WIRE_SHA,artifacts=artifacts)
+    need(all(canonical(audit.get(k))==canonical(v)for k,v in expected.items()),'actual finite training audit differs')
+    return artifacts
+
+
+def hardware_and_claims(intent,root,intent_sha,hardware):
+    guard_sha='f4b40175786581063848c8b8d9b40651f203f9670418fcbe6d3da7274f3af449'
+    guards=[r for r in intent['package_files']if Path(r['path']).name=='cpu_supervisor.py'and r['sha256']==guard_sha]
+    need(len(guards)==1,'one pinned qualified hardware guard required')
+    guard=source(bound(guards[0]),guard_sha,'pilot_cold_qualified_hardware')
+    guard.validate_hardware_prolog(root/'hardware-prolog.json',live=False,intent=intent)
+    p=intent['policy'];ctx=intent['supervisor_context'];index=(p['training_seed']-2026102902)*4+('vic_baseline','vic_position_low','vic_gain_mean','fixed_nominal').index(p['setting'])
+    key=p['policy_id']+'-bank32';path=root.parent.parent/'claims'/(key+'.json')
+    need(intent.get('claim_path')==str(path)and intent.get('claim_key')==key,'physical claim escaped exact campaign ledger')
+    need(type(ctx.get('parent'))is int and ctx['parent']>1 and type(ctx.get('slot'))is int and ctx['slot']==index,'supervisor claim context differs')
+    physical_ref=dict(path=str(path),sha256=sha(path));claim=read(bound(physical_ref))
+    wanted=dict(schema='z1_pilot_eval_physical_claim_v1',attempts=32,intent_sha256=intent_sha,policy_id=p['policy_id'],bank=intent['reset_bank'],retry_allowed=False)
+    need(canonical(claim)==canonical(wanted),'physical claim content/intent/policy/bank differs')
+    supervisor_ref=dict(path=str(path.with_suffix('.supervisor.json')),sha256=ctx['supervisor_claim_sha256'])
+    sup=read(bound(supervisor_ref))
+    # Exact finite_worker.supervisor_intent_digest convention: exclude only its
+    # own claim SHA to avoid the intentional intent/claim hash cycle.
+    binding=dict(intent,supervisor_context={k:v for k,v in ctx.items()if k!='supervisor_claim_sha256'})
+    wanted=dict(schema='z1_pilot_eval_supervisor_claim_v1',parent=ctx['parent'],allocation=hardware['allocation'],intent_binding_sha256=digest(binding),slot=index,retry_allowed=False)
+    need(canonical(sup)==canonical(wanted),'supervisor claim content/binding/parent differs')
+    return dict(physical=physical_ref,supervisor=supervisor_ref,hardware_guard=guards[0])
+
+def audit_case(request):
+    need(type(request)is dict and set(request)=={'schema','raw_root','intent','expected_policy','independent_backup','pilot_contract'}
+         and request['schema']=='z1_pilot_case32_audit_request_v1','closed pilot case32 audit request required')
+    w=dependencies();root=Path(request['raw_root']);need(root.is_absolute()and root.is_dir()and root.parent.name=='runs'
+        and root.parent.parent.name.startswith('z1-pilot-evaluation-'),'fresh pilot raw namespace required')
+    before=w.inventory(root);metadata=w.metadata(root)
+    need(bound(request['intent'],root)==root/'intent.json','actual intent reference differs')
+    intent=read(root/'intent.json');p=request['expected_policy']
+    contract_path=bound(request['pilot_contract']);need(request['pilot_contract']['sha256']==CONTRACT_SHA,'pilot contract source pin differs')
+    contract=source(contract_path,CONTRACT_SHA,'pilot_file_only_contract');contract.validate_record(p)
+    need(intent.get('schema')=='z1_pilot_cpu32_intent_v1'and intent.get('status')=='ADMITTED_ONCE'and intent.get('scope')=='pilot_science32'
+         and intent.get('attempts')==32 and type(intent['attempts'])is int and intent.get('cases')==[CASE]and intent.get('device')=='cpu'
+         and intent.get('retry_allowed')is False and intent.get('resume_allowed')is False,'finite CPU32 pilot intent differs')
+    need(canonical(intent.get('policy'))==canonical(p)and intent.get('output_root')==str(root)and root.name==p['policy_id'],'closed expected policy differs')
+    bank=read(bound(intent['reset_bank']));need(intent['reset_bank']['sha256']==BANK_SHA and bank['tag']==2026103001 and intent.get('evaluation_seed')==bank['tag'],'shared prospective bank/seed differs')
+    for group in ('source_files','runtime_files','asset_files','package_files'):
+        refs=intent[group];need(type(refs)is list and refs,'complete closure group required')
+        need(len({r['path']for r in refs})==len(refs),'duplicate closure files')
+        for ref in refs:bound(ref)
+    need(request['pilot_contract']in intent['package_files']and intent['bank_adapter']in intent['package_files'],'contract/bank module escaped package closure')
+    bound(intent['bank_adapter'])
+    evidence=[read(bound(ref))for ref in intent['training_evidence']];need(len(evidence)==4,'complete ordered training evidence required')
+    manifest,complete,terminal_train,preservation_train=evidence
+    need(intent['training_evidence'][1]['sha256']==p['training_completion_sha256'],'actual training references differ')
+    manifest_file_sha=intent['training_evidence'][0]['sha256']
+    artifacts=validate_training_metadata(p,manifest,manifest_file_sha,complete,terminal_train,read(root/'training-audit.json'))
+    need(sha(p['checkpoint_path'])==p['checkpoint_sha256'],'actual final checkpoint file differs')
+    source_map={str(Path(r['path']).relative_to(intent['source_root'])):r['sha256']for r in intent['source_files']}
+    need(source_map==manifest['source_files']and digest(source_map)==SOURCE_WIRE_SHA,'training source map differs')
+    for group in ('runtime_files','asset_files'):need({r['path']:r['sha256']for r in intent[group]}==manifest[group],'runtime/assets differ from training')
+    hardware=read(root/'hardware-prolog.json');terminal=read(root/'supervisor-terminal.json');worker=read(root/'worker-result.json')
+    need(terminal.get('status')=='RAW_REVIEW_REQUIRED'and terminal.get('returncode')==0 and terminal.get('reason')is None
+         and terminal.get('cleanup_error')is None and terminal.get('measurement_errors')=={} and terminal.get('retry_allowed')is False and terminal.get('allocation')==hardware.get('allocation'),'clean complete supervisor terminal required')
+    need(worker.get('status')=='RAW_REVIEW_REQUIRED'and worker.get('attempts')==32 and worker.get('checkpoint_contract_validated_before_overlay')is True
+         and worker.get('final_contract_restored')is True and worker.get('reset_frames_sampled')==0
+         and worker.get('hardware_prolog_sha256')==sha(root/'hardware-prolog.json')and worker.get('pilot_policy_id')==p['policy_id']
+         and worker.get('reset_bank')==intent['reset_bank'],'actual worker contract/identity differs')
+    need(read(root/'actual-runtime.json')==intent['runtime_identity'],'actual runtime identity differs')
+    claims=hardware_and_claims(intent,root,request['intent']['sha256'],hardware)
+    ownership=read(root/'process-group-ownership.json');need(ownership.get('intent_sha256')==request['intent']['sha256']and ownership.get('parent')==intent['supervisor_context']['parent'],'worker parent/intent ownership differs')
+    result=audit_measurements(w,intent,root,bank)
+    backup_receipt(request['independent_backup'],root,before)
+    for ref in claims.values():bound(ref)
+    after=w.inventory(root);after_metadata=w.metadata(root)
+    need(before==after and metadata.keys()==after_metadata.keys()and all(all(metadata[k][f]==after_metadata[k][f]for f in metadata[k]if f!='st_atime_ns')for k in metadata),'raw content/metadata changed during audit')
+    result.update(status='PASS_PILOT_CASE32_FILE_AUDIT_NOT_A_SEAL',raw_root=str(root),intent_sha256=request['intent']['sha256'],policy_id=p['policy_id'],
+        raw_tree_sha256=digest(before),source_pins=dict(PINS,pilot_contract=CONTRACT_SHA),qualification_seal_created=False,physical_attempts_created=0,new_tensor_deserialization=False,
+        preservation_receipt=request['independent_backup'],consumption_claims=claims)
+    return result
+
+
+def verify_canary(receipt,release):
+    need(type(receipt)is dict and 'request'in receipt,'bound completed canary audit request required')
+    req=receipt['request'];p=release['slots'][0]['policy']
+    need(req['expected_policy']==p and p['setting']=='vic_baseline'and p['training_seed']==2026102902,'first baseline seed2902 canary required')
+    need(req['raw_root']==str(Path(release['campaign_root'])/'runs'/p['policy_id']),'canary raw root differs')
+    intent=read(bound(req['intent']));need(intent['reset_bank']==release['reset_bank'],'canary shared bank differs')
+    refs=[v for v in intent['package_files']if Path(v['path']).name=='finite_contract.py']
+    need(len(refs)==1 and refs[0]['sha256']==FINITE_CONTRACT_SHA,'one pinned finite allocation contract required')
+    finite=source(bound(refs[0]),FINITE_CONTRACT_SHA,'_pilot_canary_finite_contract')
+    ctx=intent['supervisor_context']
+    original=read(bound(dict(path=ctx['release_path'],sha256=ctx['release_sha256'])))
+    finite.validate_release(original);finite.validate_release(release)
+    need(original['canary_receipt']is None,'original canary release must be first phase')
+    need(finite.allocation_digest(original)==finite.allocation_digest(release),'canary physical allocation differs')
+    expected=finite.build_intent(release,0,deadline=intent['deadline_epoch'],context=ctx)
+    need(canonical(intent)==canonical(expected),'canary intent is not exactly main-derived slot0')
+    result=audit_case(req)
+    need(result['denominators']['all_first_episodes']==32,'full canary32 required')
+    return dict(status='PASS',policy_id=p['policy_id'],reset_bank=release['reset_bank'],audit=result,physical_attempts_created=0)

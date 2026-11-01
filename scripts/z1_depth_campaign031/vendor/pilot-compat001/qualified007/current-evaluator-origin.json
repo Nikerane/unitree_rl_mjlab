@@ -1,0 +1,5 @@
+{
+  "patch": "Narrow horizon adapter seams; physical/native done split; no-autoreset pending assertion; first-completion accumulator; bounded .22s frame allowance; exact checkpoint validator retained; adapter route-summary scope only (ordinary routes unchanged)",
+  "path": "scripts/evaluate_impact_speed.py",
+  "sha256": "bff5c2d703bcf491a032aa7ebeb4458d1906dbd8cc0f5c82c7c7901549e5d23e"
+}

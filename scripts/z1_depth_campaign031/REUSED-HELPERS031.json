@@ -1,0 +1,13 @@
+{
+  "schema": "z1_depth031_code_reuse_not_authority",
+  "old_authority_imported": false,
+  "helpers": [
+    {"source": "scripts/z1_timing_noise020/processes.py", "sha256": "b7c330c516ab73fbb3c1f2c74032d5dcd891aa57484c5450455244a2ba8be806", "destination": "lifecycle.py", "change": "strict-helper import only; process_identity through tree_bytes"},
+    {"source": "scripts/z1_timing_noise020/compiler.py", "sha256": "7d71f1cdd05cbc51dcc16631eaf3d21382bbecd6c47fd69255c2bf3cca597791", "destination": "compiler.py", "change": "031 schema and strict-helper/scientific-dispatch identities; pinned PCH/cache behavior retained"},
+    {"source": "scripts/z1_timing_noise020/artifacts.py", "sha256": "d4cbbf650e364f98756d2173f1b26942cbf352da8df7cf2eac1c9b8ddba7d228", "destination": "worker.py", "change": "only population numeric/censoring validator; encoded replaced by strict canonical; no old admission"},
+    {"source": "evaluation-draft/z1_thirty_streaming_evaluation029/integration.py", "sha256": "2c21f17146503ee6c04eec3afd39dab0f76645b00d2abbfe43c62750811a34f7", "destination": "evaluation.py", "change": "only make_adapter_class and exact one-assignment AST configuration seam; new031 record/factory/binding authority"}
+  ],
+  "physical_measurement_closure": "COPIED-SOURCES031.json",
+  "physical_measurement_files": 25,
+  "physical_measurement_bytes": 413171
+}
