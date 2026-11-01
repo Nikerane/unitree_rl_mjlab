@@ -8,14 +8,22 @@ from copy import deepcopy
 import json
 import math
 import torch
-from src.tasks.hammer.rl.split_credit_training_trace import _SplitCreditTrace, _need, _LIMIT
+from src.tasks.hammer.rl.split_credit_training_trace import _SplitCreditTrace, _need, _LIMIT as _SPLIT_LIMIT
 from src.tasks.hammer.rl.depth_reward031_contract import depth_identity031, validate_depth_identity031
 from src.tasks.hammer.mdp.depth_reward031 import NativeDepthCreditObserver031
 
 
+_LIMIT = 160 * 1024**2
+
+
 class _DepthTrace031(_SplitCreditTrace):
     def __init__(self, runner, path, world_ids, max_bytes, max_updates):
-        super().__init__(runner, path, world_ids, max_bytes, max_updates)
+        _need(type(max_bytes) is int and 0 < max_bytes <= _LIMIT,
+              'depth031 trace byte cap must be1..160MiB')
+        # Reuse the legacy initializer under its96MiB admission limit; this
+        # subclass explicitly owns a separately validated160MiB stream cap.
+        super().__init__(runner, path, world_ids, min(max_bytes, _SPLIT_LIMIT), max_updates)
+        self.cap = max_bytes
         owner = getattr(self.env, '_z1_depth_credit031', None)
         _need(type(owner) is NativeDepthCreditObserver031 and owner.call_index == 0,
               'depth031 trace requires fresh exact observer')

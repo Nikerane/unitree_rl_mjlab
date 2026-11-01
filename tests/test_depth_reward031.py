@@ -459,3 +459,57 @@ def test_treatment_gate_requires_durable_a0_reference_before_entering_generic_ga
     m=importlib.import_module('scripts.z1_depth_reward_training031')
     with pytest.raises(ValueError):m.matched_initial_state_gate(index,tmp_path,enable_trace=False)
     assert not list(tmp_path.iterdir())
+
+
+def test_production_gate_constructs_real500_update_collectors_with_explicit160mib_budget(monkeypatch,tmp_path):
+    from src.tasks.hammer.rl.runner import HammerOnPolicyRunner
+    from src.tasks.hammer.rl import impact_speed_contract
+    from src.tasks.hammer.rl.depth_reward031_contract import depth_metadata031,split_metadata
+    from src.tasks.hammer.rl.depth_reward031_trace import _DepthTrace031
+    from src.tasks.hammer.rl.velocity_population_trace import _Population
+    m=importlib.import_module('scripts.z1_depth_reward_training031');r=training_runner(0)
+    r.alg.storage=SimpleNamespace(num_transitions_per_env=24,step=0)
+    r.alg.compute_returns=lambda *a:None
+    hook=r.env.unwrapped.metrics_manager.cfg['cat_soft'].func
+    hook._vel_detection='substep';hook._robot_cfg.joint_names=tuple(f'joint{i}' for i in range(1,7))
+    monkeypatch.setattr(impact_speed_contract,'build_impact_speed_metadata',lambda e,clip:{
+        'spline_depth_reward031':depth_metadata031(e),'spline_split_credit':split_metadata(e)})
+    seen=[]
+    def learn(r,n,init_at_random_ep_len=False):
+        population=r.env.unwrapped.metrics_manager.compute.__self__
+        depth=population.saved[0][2].__self__
+        assert type(population) is _Population and population.max_updates==500 and population.cap==16*1024**2
+        assert type(depth) is _DepthTrace031 and depth.max_updates==500 and depth.cap==160*1024**2
+        assert (tmp_path/'initial-state.json').is_file() and n==500
+        seen.append(True)
+    monkeypatch.setattr(HammerOnPolicyRunner,'learn',learn)
+    with m.matched_initial_state_gate(0,tmp_path,enable_trace=True):HammerOnPolicyRunner.learn(r,500)
+    assert seen==[True]
+    assert (tmp_path/'training-trace.jsonl').stat().st_size==0
+    assert (tmp_path/'velocity-population.jsonl').is_file()
+
+
+def test_160mib_covers_pessimistic500_update_serialization_with_all_production_fields(tmp_path):
+    import json
+    m=api('rl.depth_reward031_trace');r,p,depth=trace_setup();path=tmp_path/'bound'
+    with m.attach_credit_training_trace(r,path,max_bytes=160*1024**2):
+        collect_depth_trace(r,p,depth);r.alg.compute_returns(None)
+    row=json.loads(path.read_text())
+    cfg=api('config.z1.spline_depth_reward031_cfg').depth_env_cfg(play=False,arm='A3')
+    for record in row['steps']:
+        pre=record['pre_reset']
+        pre['reward_components']={name:[0.,0.] for name in cfg.rewards}
+        pre['native_causes']={name:{'time_out':term.time_out,'flags':[False,False]} for name,term in cfg.terminations.items()}
+    # Finite Python binary64 numeric repr needs at most24 bytes. All actual
+    # float32/64 leaves and bounded500-update integers fit this deliberately
+    # excessive token. Preserve fixed strings, configured names and all shapes.
+    def pessimistic(value):
+        if type(value) in (int,float):return -1.7976931348623157e+308
+        if type(value) is bool:return False
+        if type(value) is list:return [pessimistic(v) for v in value]
+        if type(value) is dict:return {k:pessimistic(v) for k,v in value.items()}
+        return value
+    upper_row_bytes=len((json.dumps(pessimistic(row),sort_keys=True,separators=(',',':'),allow_nan=False)+'\n').encode())
+    assert upper_row_bytes*500 < 160*1024**2
+    assert upper_row_bytes*500 > 96*1024**2
+    (tmp_path/'bound-proof.json').write_text(json.dumps({'upper_row_bytes':upper_row_bytes,'updates':500,'upper_total_bytes':upper_row_bytes*500}))

@@ -67,7 +67,8 @@ def matched_initial_state_gate(index, output_dir, *, enable_trace=True, referenc
     return _initial_gate(cell, output_dir, enable_trace=enable_trace,
         reference_initial_state=reference_initial_state, reference_cell=cell_for_index(index // 4 * 4),
         recipe=_live_recipe, marker_key='spline_depth_reward031',
-        trace_module='src.tasks.hammer.rl.depth_reward031_trace', full_reference=True)
+        trace_module='src.tasks.hammer.rl.depth_reward031_trace', full_reference=True,
+        trace_max_bytes=160 * 1024**2)
 
 
 def selected_checkpoint_saves(index, output_dir):
