@@ -42,8 +42,19 @@ def public_reset_census(source):
                 assert isinstance(node.value.args[0], ast.Name), 'unknown constructor configuration'
                 assert target.id not in environments, 'environment reassigned'
                 environments[target.id] = configs[node.value.args[0].id]
+    # The only reviewed indirect environment accesses are these non-callable
+    # accumulator data reads. Unknown getattr forms could hide another reset.
+    data_reads = {ast.dump(ast.parse(expression, mode='eval').body) for expression in (
+        'getattr(imp_env, _ENV_SUBSTEP_IMPULSE_ATTR)',
+        'getattr(imp_env, _ENV_SUBSTEP_ROWS_ATTR, None)',
+    )}
     resets = []
     for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'getattr'
+                and node.args and isinstance(node.args[0], ast.Name) and node.args[0].id in environments):
+            owner = parents[node]
+            assert (ast.dump(node) in data_reads and isinstance(owner, ast.Assign)
+                    and owner.value is node), 'indirect environment access requires review'
         if not isinstance(node, ast.Attribute) or node.attr != 'reset':
             continue
         call = parents[node]
@@ -94,6 +105,18 @@ def test_census_follows_changed_literal_loop_multiplicity():
     changed = CANONICAL.read_text().replace('(0.063, 0.10)', '(0.063, 0.10, 0.12)')
     _, resets = public_reset_census(changed)
     assert sum(m * worlds for _, m, worlds in resets) == 12
+
+
+@pytest.mark.parametrize('extra_reset', [
+    '  getattr(env, "reset")()',
+    '  method = "reset"\n  getattr(env, method)()',
+    '  saved_reset = getattr(env, "reset")\n  saved_reset()',
+])
+def test_census_rejects_extra_indirect_reset_inside_main(extra_reset):
+    # These execute in main under the canonical harness, unlike __main__ guards.
+    changed = CANONICAL.read_text().replace('  env.reset()', '  env.reset()\n' + extra_reset, 1)
+    with pytest.raises(AssertionError, match='indirect environment access'):
+        public_reset_census(changed)
 
 
 def controller_row():
