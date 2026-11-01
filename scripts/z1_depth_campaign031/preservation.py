@@ -70,29 +70,9 @@ def verify_archive(receipt):
     return dict(status='VERIFIED_MEMBERS',identity=receipt['identity'],archive_sha256=receipt['archive']['sha256'],members_sha256=digest(actual))
 
 
-def final_join(manifest, training, evaluations, backups):
-    """One read/hash per saved audit and archive identity; retain explicit missing/failure."""
-    need(len(training)==12 and len(evaluations)==24,'all planned031 outcomes required')
-    verified={};members={}
-    for ref in backups:
-        verify_ref(ref);receipt=read_json(ref['path']);identity=receipt['identity']
-        need(identity not in verified,'duplicate preservation identity')
-        verified[identity]=verify_archive(receipt);members[identity]=receipt['members']
-    joined=[]
-    for kind,rows in (('training',training),('evaluation',evaluations)):
-        for index,ref in enumerate(rows):
-            identity=('cell-' if kind=='training' else 'case-')+f'{index:02d}'
-            if ref is None:
-                joined.append(dict(identity=identity,status='MISSING',scientific_outcome='UNKNOWN'));continue
-            verify_ref(ref);audit=read_json(ref['path'])
-            need(audit.get('manifest_sha256')==digest(manifest) and audit.get('index')==index,'saved audit identity differs')
-            if identity in members:
-                for name,row in audit.get('raw_files',{}).items():need(members[identity].get(name)==row,'audit/raw backup member differs')
-            joined.append(dict(identity=identity,status=audit['status'],audit=ref,preserved=identity in verified,
-                backup=verified.get(identity),scientific_outcome='SEE_SAVED_AUDIT' if audit['status'] in ('COMPLETE','PASS_FILE_AUDIT_ONLY') else 'UNKNOWN'))
-    return dict(schema='z1_depth_final_join031',manifest_sha256=digest(manifest),outcomes=joined,
-        all_evidence_preserved=all(x.get('preserved',False) for x in joined),
-        scientific_qualification=False,old029_evidence_unchanged=True,immutable_audits_checked_once=True)
+def final_join(manifest, training, evaluations, backups, *, downloads=None):
+    from .join import final_join as join
+    return join(manifest,training,evaluations,backups,downloads=downloads)
 
 
 def verify_ssd(manifest,destination):

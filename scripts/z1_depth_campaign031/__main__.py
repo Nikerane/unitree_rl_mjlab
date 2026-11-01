@@ -60,7 +60,9 @@ def main():
         write_once(args.receipt,result)
     elif args.action=='join':
         from .preservation import final_join
-        inputs=read_json(args.inputs);result=final_join(manifest,inputs['training'],inputs['evaluations'],inputs['backups']);write_once(args.output,result)
+        inputs=read_json(args.inputs)
+        need(set(inputs)=={'schema','training','evaluations','backups','downloads'} and inputs['schema']=='z1_depth_join_inputs031','discriminated031 join inputs required')
+        result=final_join(manifest,inputs['training'],inputs['evaluations'],inputs['backups'],downloads=inputs['downloads']);write_once(args.output,result)
     else:
         grant=read_json(args.grant)
         if args.action=='qualify':result=worker.qualify(manifest,grant)

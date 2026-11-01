@@ -352,6 +352,7 @@ def audit_case(intent):
     context=measurement_context(intent)
     measured=reader.audit_measurements(reader.dependencies(),context,root,read_json(context['reset_bank']['path']))
     need(measured.get('denominators',{}).get('all_first_episodes')==32,'exact32 denominator required')
-    return dict(schema='z1_depth_measurement_audit031',status='PASS_FILE_AUDIT_ONLY',index=intent['index'],
+    return dict(schema='z1_depth_measurement_audit031',status='PASS_FILE_AUDIT_ONLY',kind='evaluation',index=intent['index'],
+        cell=record['training_cell'],record=record,binding=intent['binding'],reset_bank=context['reset_bank'],evaluation_seed=EVALUATION_SEED,
         manifest_sha256=digest(intent['manifest']),checkpoint_sha256=record['checkpoint_sha256'],
         claim_sha256=intent['claim']['sha256'],raw_files=files,measurement=measured)

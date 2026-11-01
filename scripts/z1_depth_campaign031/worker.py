@@ -79,6 +79,18 @@ def _check_tree_caps(output,private,kind):
         need(life.tree_bytes(output)-checkpoints-logs-named<=LIMITS['other'],'other training output cap exceeded')
 
 
+def producer_refs(output,claim,intent):
+    """Archive exact operational proof bytes without relocating their identities."""
+    refs={}
+    for key,path in (('claim',claim),('intent',intent),('child_consumed',claim.with_suffix('.child.json'))):
+        if key=='child_consumed' and not path.exists():continue
+        ref=reference(path);target=output/('producer-'+key.replace('_','-')+'.json')
+        if not target.exists():write_once(target,read_json(path))
+        need(sha_file(target)==ref['sha256'] and target.stat().st_size==ref['size'],'producer proof copy differs')
+        refs[key]=ref
+    return refs
+
+
 def run_one(manifest,grant,kind,index,allocation,deadline,*,binding=None):
     """Exclusive consumption; all errors after claim stay consumed, no retries."""
     deadline=min(deadline,grant['expires_epoch'])
@@ -137,9 +149,12 @@ def run_one(manifest,grant,kind,index,allocation,deadline,*,binding=None):
             gpu=read_json(output/'gpu-runtime.json');need(gpu==dict(logical_device=0,gpu_uuid=allocation['gpu_uuid']),'actual child GPU UUID differs')
         result=read_json(output/'child-result.json')
         need(result.get('intent_sha256')==sha_file(path) and result.get('manifest_sha256')==digest(manifest),'child result lineage differs')
+        proof_refs=producer_refs(output,claim,path)
+        _check_tree_caps(output,private,kind)
+        need('child_consumed' in proof_refs,'consumed child proof missing')
         need(time.time()<deadline,'finalization deadline exceeded')
         write_once(output/'terminal.json',dict(schema='z1_depth_terminal031',status='COMPLETE',index=index,kind=kind,
-            manifest_sha256=digest(manifest),claim=reference(claim),result=reference(output/'child-result.json')))
+            manifest_sha256=digest(manifest),**proof_refs,result=reference(output/'child-result.json')))
         return result
     except BaseException as exc:
         error=exc
@@ -148,7 +163,7 @@ def run_one(manifest,grant,kind,index,allocation,deadline,*,binding=None):
             except BaseException as cleanup:error=RuntimeError(str(exc)+'; cleanup UNKNOWN: '+str(cleanup))
         if not (output/'terminal.json').exists():
             write_once(output/'terminal.json',dict(schema='z1_depth_terminal031',status='FAILED_NO_RETRY',index=index,kind=kind,
-                manifest_sha256=digest(manifest),claim=reference(claim),error=str(error),scientific_outcome='UNKNOWN'))
+                manifest_sha256=digest(manifest),**producer_refs(output,claim,path),error=str(error),scientific_outcome='UNKNOWN'))
         raise error
     finally:
         selector.close()
@@ -225,7 +240,7 @@ def audit_training(manifest,index,output):
         population_rows=[json.loads(line) for line in stream]
     validate_population(population_rows,threshold=3.1415)
     population=len(population_rows)
-    return dict(schema='z1_depth_training_audit031',status='COMPLETE',index=index,manifest_sha256=digest(manifest),
+    return dict(schema='z1_depth_training_audit031',status='COMPLETE',kind='training',cell=training_cell(index),index=index,manifest_sha256=digest(manifest),
         checkpoints=seals,trace_rows=rows,population_rows=population,raw_files={name:ref for name,ref in inventory(output,LIMITS['training_output']).items() if name not in ('stdout.log','stderr.log')})
 
 
@@ -266,6 +281,7 @@ def execute_child(path,sha):
             execute(intent);result=audit_case(intent);write_once(output/'audit.json',result)
         compiler.verify_configured(manifest,private);verify_import_origins(manifest)
         need(time.time()<intent['deadline_epoch'],'child completion exceeded deadline')
+        if kind!='qualification':result['audit']=reference(output/'audit.json')
         result.update(manifest_sha256=digest(manifest),intent_sha256=sha,started_epoch=started,finished_epoch=time.time())
         write_once(output/'child-result.json',result)
         return result

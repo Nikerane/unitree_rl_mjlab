@@ -143,7 +143,7 @@ def prepare(workspace, destination, evidence):
         need(sha_file(workspace/relative_name(name))==required.get(name,sha),'unreviewed source delta: '+name)
     names=list(content)
     names.extend(required)
-    names.extend(('src/tasks/hammer/mdp/depth_credit031.py','tests/test_depth_credit031.py','tests/test_depth_campaign031.py'))
+    names.extend(('src/tasks/hammer/mdp/depth_credit031.py','tests/test_depth_credit031.py','tests/test_depth_campaign031.py','tests/test_depth_join031.py'))
     for p in (workspace/'scripts/z1_depth_campaign031').rglob('*'):
         if p.is_file() and '__pycache__' not in p.parts:names.append(str(p.relative_to(workspace)))
     destination.mkdir()
