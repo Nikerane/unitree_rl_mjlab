@@ -100,27 +100,40 @@ def checkpoint_seal(manifest, index, label, output=None):
         impact_speed_contract=initial['contract'])
 
 
+def _publish_seal(path,expected):
+    """Only seals are idempotent: authenticate the exact immutable race winner.
+
+    Claims/intents/submissions continue to use strictly exclusive write_once.
+    """
+    if not path.exists():
+        try:write_once(path,expected)
+        except FileExistsError:pass  # A competing sealed publication must match below.
+    before=reference(path)
+    need(canonical(read_json(path))==canonical(expected),'conflicting immutable seal: '+str(path))
+    for key in ('initial','claim','checkpoint','live'):
+        if key in expected:verify_ref(expected[key])
+    after=durable_reference(path)
+    need(after==before,'seal changed during winner authentication')
+    return after
+
+
 def publish_seals(manifest, index):
-    """Only hashes already durably published live receipts; never waits for499."""
+    """Publish complete live receipts; concurrent identical publishers agree."""
     root=Path(manifest['cells'][index]['output']);results=[]
     if not (root/'initial-state.json').is_file():return results
-    initial_path=root/'initial-seal.json'
-    if not initial_path.exists():
-        try:initial=read_json(root/'initial-state.json')
-        except (json.JSONDecodeError,UnicodeDecodeError):return results
-        need(initial['cell']==training_cell(index) and initial['actual_counter']==0,'initial identity differs')
-        validate_initial(initial,index)
-        claim=reference(Path(manifest['root'])/'claims'/f'cell-{index:02d}.json')
-        write_once(initial_path,dict(schema='z1_depth_initial_seal031',manifest_sha256=digest(manifest),
-            cell=index,initial=durable_reference(root/'initial-state.json'),claim=claim))
+    try:initial=read_json(root/'initial-state.json')
+    except (json.JSONDecodeError,UnicodeDecodeError):return results
+    need(initial['cell']==training_cell(index) and initial['actual_counter']==0,'initial identity differs')
+    validate_initial(initial,index)
+    claim=reference(Path(manifest['root'])/'claims'/f'cell-{index:02d}.json')
+    _publish_seal(root/'initial-seal.json',dict(schema='z1_depth_initial_seal031',manifest_sha256=digest(manifest),
+        cell=index,initial=durable_reference(root/'initial-state.json'),claim=claim))
     for label in (99,499):
-        seal_path=root/f'model-{label}-seal.json'
-        if (root/f'checkpoint-{label}-live.json').is_file() and not seal_path.exists():
-            try:seal=checkpoint_seal(manifest,index,label)
-            except (json.JSONDecodeError,UnicodeDecodeError):continue
-            seal['claim']=reference(Path(manifest['root'])/'claims'/f'cell-{index:02d}.json')
-            write_once(seal_path,seal)
-        if seal_path.is_file():results.append(reference(seal_path))
+        if not (root/f'checkpoint-{label}-live.json').is_file():continue
+        try:seal=checkpoint_seal(manifest,index,label)
+        except (json.JSONDecodeError,UnicodeDecodeError):continue
+        seal['claim']=claim
+        results.append(_publish_seal(root/f'model-{label}-seal.json',seal))
     return results
 
 

@@ -137,6 +137,7 @@ def run_one(manifest,grant,kind,index,allocation,deadline,*,binding=None):
             gpu=read_json(output/'gpu-runtime.json');need(gpu==dict(logical_device=0,gpu_uuid=allocation['gpu_uuid']),'actual child GPU UUID differs')
         result=read_json(output/'child-result.json')
         need(result.get('intent_sha256')==sha_file(path) and result.get('manifest_sha256')==digest(manifest),'child result lineage differs')
+        need(time.time()<deadline,'finalization deadline exceeded')
         write_once(output/'terminal.json',dict(schema='z1_depth_terminal031',status='COMPLETE',index=index,kind=kind,
             manifest_sha256=digest(manifest),claim=reference(claim),result=reference(output/'child-result.json')))
         return result
@@ -334,9 +335,11 @@ def run_evaluation(manifest,grant,index):
     need(type(index) is int and 0<=index<24,'exact evaluation case0..23 required')
     verify_package(manifest);verify_qualification(manifest)
     alloc=life.allocation(os.environ['SLURM_JOB_ID'],f'depth031-eval-{index}')
+    clock=read_json(Path(ROOT)/'clock.json')
+    deadline=life.admit_evaluation_time(manifest,clock,alloc,grant,now=time.time())
     d=manifest['cases'][index]
     binding=read_json(Path(manifest['cells'][d['cell']]['output'])/f"model-{d['label']}-seal.json")
-    run_one(manifest,grant,'evaluation',index,alloc,alloc['end_epoch'],binding=binding)
+    run_one(manifest,grant,'evaluation',index,alloc,deadline,binding=binding)
 
 
 def submission_plan(manifest,clock=None):

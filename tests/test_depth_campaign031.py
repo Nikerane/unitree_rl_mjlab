@@ -303,3 +303,125 @@ def test_cpu_case_deadline_is_independent_of_controller_liveness():
     assert plan['slurm_cpu_case_deadline_utc']=='2026-11-01T18:57:00'
     for job in plan['jobs']:
         if job['kind']=='evaluation':assert '--deadline=2026-11-01T18:57:00' in job['command']
+
+
+def _publication_fixture(tmp_path):
+    # Reuse the complete regular-file031 checkpoint fixture; no native imports.
+    test_seal_independent_model99_and_refuses_wrong_live(tmp_path)
+    m=module('manifest');f=module('files');r=m.template()
+    r['root']=str(tmp_path);r['cells'][0]['output']=str(tmp_path/'cell')
+    (tmp_path/'claims').mkdir()
+    f.write_once(tmp_path/'claims/cell-00.json',dict(schema='z1_depth_claim031',manifest_sha256=f.digest(r),kind='training',index=0))
+    initial=dict(schema='z1_depth_initial_seal031',manifest_sha256=f.digest(r),cell=0,
+        initial=f.reference(tmp_path/'cell/initial-state.json'),claim=f.reference(tmp_path/'claims/cell-00.json'))
+    return r,tmp_path/'cell',initial
+
+
+@pytest.mark.parametrize('target',['initial-seal.json','model-99-seal.json'])
+def test_concurrent_identical_seal_publishers_both_succeed(tmp_path,monkeypatch,target):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    e=module('evaluation');f=module('files');r,out,initial=_publication_fixture(tmp_path)
+    if target=='model-99-seal.json':f.write_once(out/'initial-seal.json',initial)
+    barrier=threading.Barrier(2);original=e.write_once
+    def simultaneous(path,value):
+        if Path(path).name==target:barrier.wait(timeout=5)
+        return original(path,value)
+    monkeypatch.setattr(e,'write_once',simultaneous)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures=[pool.submit(e.publish_seals,r,0) for _ in range(2)]
+        results=[future.result(timeout=10) for future in futures]
+    assert results[0]==results[1]
+    assert f.read_json(out/'initial-seal.json')==initial
+    expected=e.checkpoint_seal(r,0,99);expected['claim']=initial['claim']
+    assert f.read_json(out/'model-99-seal.json')==expected
+    assert not list(out.glob('*.pending'))
+
+
+@pytest.mark.parametrize('target',['initial-seal.json','model-99-seal.json'])
+def test_conflicting_preexisting_seal_is_fatal_without_replacement(tmp_path,target):
+    e=module('evaluation');f=module('files');r,out,initial=_publication_fixture(tmp_path)
+    if target!='initial-seal.json':f.write_once(out/'initial-seal.json',initial)
+    wrong=dict(initial,manifest_sha256='0'*64)
+    f.write_once(out/target,wrong);before=f.reference(out/target)
+    with pytest.raises(ValueError,match='seal'):e.publish_seals(r,0)
+    assert f.reference(out/target)==before
+
+
+def test_asset_copy_plan_matches_pinned_native_resolver_without_import(tmp_path):
+    m=module('manifest');f=module('files');r=m.template()
+    native=Path('src/tasks/hammer/nail_block.py');source=tmp_path/'source'
+    target=source/'src/tasks/hammer/nail_block.py';target.parent.mkdir(parents=True);target.write_bytes(native.read_bytes())
+    r['source_files']={'src/tasks/hammer/nail_block.py':f.sha_file(target)}
+    rows=[dict(path='/old/immutable/assets/nail_block_scene.xml',sha256='a'*64)]
+    plan=m.asset_copy_plan(rows,r['source_root'])
+    destination=m.ROOT+'/safe_impact_manipulation/hammer_z1_env/assets/nail_block_scene.xml'
+    assert plan['files'][0]['destination']==destination
+    r['asset_files']={destination:'a'*64}
+    assert m.verify_asset_layout(r,source_tree=source)==Path(destination).parent
+    r['asset_files']={m.ROOT+'/source/safe_impact_manipulation/hammer_z1_env/assets/nail_block_scene.xml':'a'*64}
+    with pytest.raises(ValueError,match='asset'):m.verify_asset_layout(r,source_tree=source)
+    r['asset_files']={destination:'a'*64}
+    target.write_text(target.read_text().replace('parents[4]','parents[3]'))
+    r['source_files']['src/tasks/hammer/nail_block.py']=f.sha_file(target)
+    with pytest.raises(ValueError,match='resolver'):m.verify_asset_layout(r,source_tree=source)
+
+
+def _cpu_row(deadline='2026-11-01T18:57:00'):
+    return dict(JobName='depth031-eval-0',UserId='eunikhilr(1)',JobState='RUNNING',Requeue='0',Restarts='0',
+        Account='d2026d06-166-users',QOS='normal',Partition='cpu',NumCPUs='2',NumNodes='1',
+        AllocTRES='cpu=2,mem=8G,node=1',TimeLimit='02:15:00',StartTime='2026-11-01T01:00:00',
+        EndTime='2026-11-01T03:15:00',Deadline=deadline)
+
+
+@pytest.mark.parametrize('deadline',[None,'N/A','Unknown',''])
+def test_cpu_allocation_requires_effective_scheduler_deadline(monkeypatch,deadline):
+    l=module('lifecycle');row=_cpu_row(deadline)
+    if deadline is None:row.pop('Deadline')
+    monkeypatch.setenv('SLURM_JOB_ID','123');monkeypatch.setattr(l,'remote_host',lambda:'vcpu0001')
+    monkeypatch.setattr(l,'slurm_job',lambda _:row)
+    with pytest.raises(ValueError,match='Deadline'):l.allocation('123','depth031-eval-0')
+
+
+def test_cpu_allocation_reports_actual_deadline_and_time_limit(monkeypatch):
+    from datetime import datetime,timezone
+    l=module('lifecycle');monkeypatch.setenv('SLURM_JOB_ID','123')
+    monkeypatch.setattr(l,'remote_host',lambda:'vcpu0001');monkeypatch.setattr(l,'slurm_job',lambda _: _cpu_row())
+    allocation=l.allocation('123','depth031-eval-0')
+    assert allocation['deadline_epoch']==datetime(2026,11,1,18,57,tzinfo=timezone.utc).timestamp()
+    assert allocation['time_limit_seconds']==8100
+
+
+@pytest.mark.parametrize('fault',['missing','wrong','late','valid'])
+def test_cpu_entry_clamps_to_immutable_clock_before_any_claim(tmp_path,monkeypatch,fault):
+    w=module('worker');l=module('lifecycle');m=module('manifest');f=module('files');r=m.template()
+    clock=dict(schema='z1_depth_global_clock031',manifest_sha256=f.digest(r),first_allocation_epoch=1000,
+        deadline_epoch=29800,clock_domain='Vega_Slurm_epoch')
+    cutoff=1000+64800-180
+    f.write_once(tmp_path/'clock.json',clock);monkeypatch.setattr(w,'ROOT',str(tmp_path))
+    monkeypatch.setattr(w,'verify_package',lambda _:None);monkeypatch.setattr(w,'verify_qualification',lambda _:None)
+    monkeypatch.setenv('SLURM_JOB_ID','123')
+    alloc=dict(job_id='123',end_epoch=cutoff+100000,deadline_epoch=cutoff,time_limit_seconds=8100)
+    if fault=='missing':alloc.pop('deadline_epoch')
+    if fault=='wrong':alloc['deadline_epoch']+=1
+    monkeypatch.setattr(l,'allocation',lambda *args:alloc)
+    monkeypatch.setattr(w.time,'time',lambda:cutoff-7259 if fault=='late' else cutoff-8000)
+    original=w.read_json
+    monkeypatch.setattr(w,'read_json',lambda path:original(path) if Path(path).name=='clock.json' else {'fixture':'selected binding'})
+    calls=[];monkeypatch.setattr(w,'run_one',lambda *args,**kwargs:calls.append((args,kwargs)))
+    grant={'expires_epoch':cutoff+180}
+    if fault=='valid':
+        w.run_evaluation(r,grant,0)
+        assert len(calls)==1 and calls[0][0][5]==cutoff
+    else:
+        with pytest.raises(ValueError):w.run_evaluation(r,grant,0)
+        assert calls==[]
+
+
+def test_controller_allocation_has_no_scheduler_deadline_requirement(monkeypatch):
+    l=module('lifecycle');row=_cpu_row('N/A')
+    row.update(JobName='depth031-controller',NumCPUs='1',AllocTRES='cpu=1,mem=2G,node=1',TimeLimit='18:00:00')
+    monkeypatch.setenv('SLURM_JOB_ID','123');monkeypatch.setattr(l,'remote_host',lambda:'vcpu0001')
+    monkeypatch.setattr(l,'slurm_job',lambda _:row)
+    allocation=l.allocation('123','depth031-controller')
+    assert 'deadline_epoch' not in allocation

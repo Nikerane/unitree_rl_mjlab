@@ -1,5 +1,6 @@
 """Closed matrix, resource envelope and actual-workspace source freeze."""
 from pathlib import Path
+import ast
 import os
 import shutil
 from .files import canonical, digest, need, read_json, reference, relative_name, safe_path, sha_file, sync_dir, write_once
@@ -87,6 +88,36 @@ def copy_sources(source, destination, names):
     return pins
 
 
+def native_asset_root(source_root):
+    """The unchanged nail_block resolver reaches the campaign's sibling tree."""
+    module=Path(source_root)/'src/tasks/hammer/nail_block.py'
+    return module.parents[4]/'safe_impact_manipulation/hammer_z1_env/assets'
+
+
+def asset_copy_plan(rows,source_root):
+    root=native_asset_root(source_root)
+    return dict(authority=False,files=[dict(source=row['path'],
+        destination=str(root/relative_name(row['path'].split('/assets/',1)[1])),sha256=row['sha256']) for row in rows])
+
+
+def verify_asset_layout(manifest,*,source_tree=None):
+    """Authenticate and inspect the resolver AST without importing native code."""
+    relative='src/tasks/hammer/nail_block.py'
+    native=Path(manifest['source_root'] if source_tree is None else source_tree)/relative
+    need(sha_file(native)==manifest['source_files'][relative],'pinned asset resolver bytes differ')
+    tree=ast.parse(native.read_bytes())
+    values=[node.value for node in tree.body if isinstance(node,ast.AnnAssign)
+            and isinstance(node.target,ast.Name) and node.target.id=='_SCENE_XML']
+    expected=ast.parse("Path(__file__).resolve().parents[4] / 'safe_impact_manipulation' / 'hammer_z1_env' / 'assets' / 'nail_block_scene.xml'",mode='eval').body
+    need(len(values)==1 and ast.dump(values[0],include_attributes=False)==ast.dump(expected,include_attributes=False),
+         'native asset resolver expression changed; independent review required')
+    root=native_asset_root(manifest['source_root'])
+    need(root==Path(manifest['root'])/'safe_impact_manipulation/hammer_z1_env/assets','asset root differs from native resolver')
+    need(all(Path(path).is_relative_to(root) and Path(path)!=root for path in manifest['asset_files'])
+         and str(root/'nail_block_scene.xml') in manifest['asset_files'],'asset pins do not cover the native resolver layout')
+    return root
+
+
 def prepare(workspace, destination, evidence):
     """Local unissued package. Never creates the remote/SSD campaign namespaces."""
     workspace=safe_path(workspace);evidence=safe_path(evidence);destination=safe_path(destination)
@@ -119,7 +150,9 @@ def prepare(workspace, destination, evidence):
     pins=copy_sources(workspace,destination/'source',names)
     manifest=template();manifest['source_files']=pins
     manifest['runtime_files']={r['path']:r['sha256'] for r in groups['runtime_files']['files']}
-    manifest['asset_files']={ROOT+'/source/safe_impact_manipulation/hammer_z1_env/assets/'+r['path'].split('/assets/',1)[1]:r['sha256'] for r in groups['asset_files']['files']}
+    copy_plan=asset_copy_plan(groups['asset_files']['files'],manifest['source_root'])
+    manifest['asset_files']={row['destination']:row['sha256'] for row in copy_plan['files']}
+    verify_asset_layout(manifest,source_tree=destination/'source')
     from .compiler import policy
     compiler_observation=read_json(evidence/'compiler-content-preflight031.json')
     need(compiler_observation['all_match'] is True and {r['path']:r['sha256'] for r in compiler_observation['files']}==policy()['runtime_files'],'refreshed compiler bytes differ')
@@ -135,9 +168,7 @@ def prepare(workspace, destination, evidence):
     validate(manifest)
     write_once(destination/'manifest.json',manifest)
     write_once(destination/'qualification-recipe.json',manifest['qualification_recipe'])
-    write_once(destination/'asset-copy-plan.json',dict(authority=False,files=[dict(source=r['path'],
-        destination=ROOT+'/source/safe_impact_manipulation/hammer_z1_env/assets/'+r['path'].split('/assets/',1)[1],
-        sha256=r['sha256']) for r in groups['asset_files']['files']]))
+    write_once(destination/'asset-copy-plan.json',copy_plan)
     return manifest
 
 
@@ -145,12 +176,20 @@ def verify_package(manifest):
     validate(manifest)
     need(len(manifest['runtime_files'])==375 and len(manifest['asset_files'])==32,'exact runtime/assets closure required')
     source=Path(manifest['source_root'])
-    expected=set(manifest['source_files'])|{str(Path(p).relative_to(source)) for p in manifest['asset_files']}
+    asset_root=verify_asset_layout(manifest)
+    expected=set(manifest['source_files'])
     actual=set()
     for path in source.rglob('*'):
         safe_path(path)
         if path.is_file():actual.add(str(path.relative_to(source)))
-    need(actual==expected,'source/assets closure has missing or injected members')
+    need(actual==expected,'source closure has missing or injected members')
+    asset_members=set()
+    for path in asset_root.rglob('*'):
+        safe_path(path)
+        if not path.is_dir():
+            need(path.is_file(),'nonregular asset member refused')
+            asset_members.add(str(path))
+    need(asset_members==set(manifest['asset_files']),'asset closure has missing or injected members')
     for rel,sha in manifest['source_files'].items():
         need(sha_file(Path(manifest['source_root'])/relative_name(rel))==sha,'frozen source differs: '+rel)
     for key in ('runtime_files','asset_files'):

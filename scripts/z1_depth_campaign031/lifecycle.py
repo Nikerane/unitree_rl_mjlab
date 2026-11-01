@@ -355,6 +355,22 @@ def admit_time(clock, *, now, allocation_end, bound):
     return deadline
 
 
+def admit_evaluation_time(manifest,clock,allocation,grant,*,now):
+    need(clock.get('schema')=='z1_depth_global_clock031' and clock.get('clock_domain')=='Vega_Slurm_epoch'
+         and clock.get('manifest_sha256')==digest(manifest),'031 evaluation global clock required')
+    first=clock['first_allocation_epoch']
+    need(type(first) in (int,float) and math.isfinite(first) and first>0
+         and clock['deadline_epoch']==first+28800,'global deadline drift')
+    cutoff=first+64800-180
+    need(allocation.get('deadline_epoch')==cutoff and allocation.get('time_limit_seconds')==8100,
+         'CPU effective scheduler Deadline/TimeLimit differs')
+    bounds=(now,allocation['end_epoch'],grant['expires_epoch'])
+    need(all(type(value) in (int,float) and math.isfinite(value) for value in bounds),'finite CPU clock bounds required')
+    deadline=min(cutoff,allocation['end_epoch'],grant['expires_epoch'])
+    need(first<=now and now+7200+60<=deadline,'HOLD_UNCLAIMED: CPU case plus finalization cannot fit')
+    return deadline
+
+
 def slurm_job(job_id):
     need(bool(re.fullmatch('[1-9][0-9]*',job_id)),'exact scalar Slurm ID required')
     env=dict(os.environ,TZ='UTC')
@@ -384,6 +400,9 @@ def allocation(job_id, expected_name):
     if expected_name.startswith('depth031-slot-'):
         need(row.get('TimeLimit')=='04:30:00' and row.get('Deadline') not in (None,'N/A','Unknown'),'fixed slot TimeLimit and Slurm Deadline required')
         result.update(deadline_epoch=parse('Deadline'),time_limit_seconds=16200)
+    if expected_name.startswith('depth031-eval-'):
+        need(row.get('Deadline') not in (None,'','N/A','Unknown'),'CPU Slurm Deadline required')
+        result.update(deadline_epoch=parse('Deadline'),time_limit_seconds=8100)
     if expected_name=='depth031-qualification' or expected_name.startswith('depth031-slot-'):
         result.update(gpu_allocation_identity())
     return result
