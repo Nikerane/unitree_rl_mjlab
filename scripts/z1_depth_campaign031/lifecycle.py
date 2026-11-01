@@ -522,10 +522,18 @@ def verify_cuda_device(torch, identity):
 
 
 def require_resource_shape(row,name):
-    from .manifest import SLURM_ACCOUNT,SLURM_QOS
+    from .manifest import LIMITS,SLURM_ACCOUNT,SLURM_QOS
     gpu=name=='depth031-qualification' or name.startswith('depth031-slot-')
     controller=name=='depth031-controller'
-    cpus,memory,limit=(4,32,'00:44:00' if name=='depth031-qualification' else '04:30:00') if gpu else ((1,2,'18:00:00') if controller else (2,8,'02:15:00'))
+    if gpu:
+        cpus,memory,limit=4,32,'00:44:00' if name=='depth031-qualification' else '04:30:00'
+    elif controller:
+        cpus,memory=LIMITS['controller_cpus'],LIMITS['controller_memory_gib']
+        hours,remainder=divmod(LIMITS['controller_seconds'],3600)
+        minutes,seconds=divmod(remainder,60)
+        limit=f'{hours:02d}:{minutes:02d}:{seconds:02d}'
+    else:
+        cpus,memory,limit=2,8,'02:15:00'
     need(row.get('Account')==SLURM_ACCOUNT and row.get('QOS')==SLURM_QOS and row.get('Partition')==('gpu' if gpu else 'cpu'),'Slurm account/QOS/partition differs')
     need(row.get('NumCPUs')==str(cpus) and row.get('NumNodes')=='1' and row.get('TimeLimit')==limit,'Slurm CPU/node/time allocation differs')
     tres=dict(item.split('=',1) for item in row.get('AllocTRES',row.get('TRES','')).split(',') if '=' in item)

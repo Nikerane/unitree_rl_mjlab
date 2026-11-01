@@ -22,8 +22,10 @@ LIMITS = dict(training_output=256*MIB, trace=160*MIB, population=16*MIB, logs=32
     gpu_concurrency=6, eval_concurrency=7, policy_seconds=7200, slot_seconds=16200,
     slot_required_seconds=16030, anchor_wait_seconds=600, global_gpu_seconds=28800, scheduler_exit_margin_seconds=180,
     qualification_seconds=2880, eval_seconds=7200, eval_allocation_seconds=8100,
-    eval_cpus=2, eval_memory_gib=8, controller_seconds=64800, controller_cpus=1,
-    controller_memory_gib=2, maximum_case_cpu_hours=108, maximum_controller_cpu_hours=18)
+    eval_cpus=2, eval_memory_gib=8, controller_seconds=64800, controller_cpus=2,
+    controller_memory_gib=2, maximum_case_cpu_hours=108)
+# Proposed allocation shape; local metadata does not establish runtime qualification.
+LIMITS['maximum_controller_cpu_hours'] = LIMITS['controller_cpus']*LIMITS['controller_seconds']/3600
 
 
 def training_cell(index):
@@ -59,7 +61,9 @@ def validate(value):
 
 
 def qualification_recipe():
-    specs = [('validate_rewards',300,2,10,97,'ALL PHASES PASSED'),
+    # Full public reset-world requests, excluding native in-step autoresets.
+    # validate_rewards: eight direct + two overshoot iterations + one impulse reset.
+    specs = [('validate_rewards',300,2,11,97,'ALL PHASES PASSED'),
              ('verify_contact_sensor',300,4,4,800,'ContactSensor verified.'),
              ('verify_reward_setup',600,16,48,6480,'Reward setup verified. Safe to start training.')]
     gates=[dict(name=n,seconds=t,constructor_worlds=c,reset_worlds=r,world_transitions=w,

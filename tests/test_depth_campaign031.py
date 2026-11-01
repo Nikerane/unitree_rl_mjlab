@@ -78,7 +78,8 @@ def test_qualification_budget_includes_1024_smoke():
     m=module('manifest'); recipe=m.qualification_recipe()
     assert sum(x['seconds'] for x in recipe['gates'])+4*70+270==2470
     assert [x['constructor_worlds'] for x in recipe['gates'][:3]]==[2,4,16]
-    assert [x['reset_worlds'] for x in recipe['gates'][:3]]==[10,4,48]
+    # Gate0 is independently derived from its real source in test_depth_census_cpu031.
+    assert [x['reset_worlds'] for x in recipe['gates'][1:3]]==[4,48]
     assert [x['world_transitions'] for x in recipe['gates'][:3]]==[97,800,6480]
     assert recipe['gates'][-1]['production']['worlds']==1024
     assert recipe['gates'][-1]['production']['updates']==1
@@ -428,7 +429,7 @@ def test_cpu_entry_clamps_to_immutable_clock_before_any_claim(tmp_path,monkeypat
 
 def test_controller_allocation_has_no_scheduler_deadline_requirement(monkeypatch):
     l=module('lifecycle');row=_cpu_row('N/A')
-    row.update(JobName='depth031-controller',NumCPUs='1',AllocTRES='cpu=1,mem=2G,node=1',TimeLimit='18:00:00')
+    row.update(JobName='depth031-controller',NumCPUs='2',AllocTRES='cpu=2,mem=2G,node=1',TimeLimit='18:00:00')
     monkeypatch.setenv('SLURM_JOB_ID','123');monkeypatch.setattr(l.socket,'gethostname',lambda:'cn0001')
     monkeypatch.setattr(l,'slurm_job',lambda _:row)
     allocation=l.allocation('123','depth031-controller')

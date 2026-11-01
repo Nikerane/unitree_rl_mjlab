@@ -174,7 +174,12 @@ def _validate_child(intent,path,sha):
 
 
 def run_canonical(manifest,gate,output):
-    """Canonical argv and bodies unchanged; observe native start/reset counts."""
+    """Observe full public reset requests separately from in-step autoresets.
+
+    Hooks count attempted constructor/reset worlds before calling native methods;
+    canonical public resets request every world. In-step _reset_idx calls count
+    only in native_autoreset_worlds and do not add public reset_worlds.
+    """
     from mjlab.envs import ManagerBasedRlEnv
     counts=dict(constructor_worlds=0,reset_worlds=0,world_transitions=0,native_autoreset_worlds=0,learned_forwards=0,updates=0)
     active={'step':False};original={key:getattr(ManagerBasedRlEnv,key) for key in ('__init__','reset','step','_reset_idx')}
@@ -370,9 +375,11 @@ def submission_plan(manifest,clock=None):
             sbatch+=['--wrap','exec '+shlex.join(command)]
             jobs.append(dict(kind=kind,index=index,name=name,command=sbatch))
     return dict(schema='z1_depth_submission031',manifest_sha256=sha,jobs=jobs,training_slots=6,evaluation_cases=24,
-        gpu_concurrency=6,eval_concurrency=7,controller_seconds=64800,controller_cpus=1,controller_memory_gib=2,
+        gpu_concurrency=6,eval_concurrency=7,controller_seconds=LIMITS['controller_seconds'],
+        controller_cpus=LIMITS['controller_cpus'],controller_memory_gib=LIMITS['controller_memory_gib'],
         gpu_deadline_seconds=28800,retry=False,requeue=False,initial_slots=[0,2,4],paired_slots_require_initial_anchor=True,
-        qualification_requires_terminal_completed=True,slurm_gpu_deadline_utc=gpu_deadline,slurm_cpu_case_deadline_utc=cpu_deadline,scheduler_exit_margin_seconds=180,case_cpu_hours_bound=108,controller_cpu_hours_bound=18)
+        qualification_requires_terminal_completed=True,slurm_gpu_deadline_utc=gpu_deadline,slurm_cpu_case_deadline_utc=cpu_deadline,scheduler_exit_margin_seconds=180,
+        case_cpu_hours_bound=LIMITS['maximum_case_cpu_hours'],controller_cpu_hours_bound=LIMITS['maximum_controller_cpu_hours'])
 
 
 def _submit_once(manifest,plan,kind,index):
