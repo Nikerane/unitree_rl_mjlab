@@ -14,28 +14,9 @@ import sys
 import time
 import uuid
 from . import lifecycle as life
+from .import_policy import runtime_site,verify_import_origins
 from .files import canonical,digest,inventory,need,read_json,reference,sha_file,verify_ref,write_once
 from .manifest import LIMITS,ROOT,EVAL_ROOT,training_cell,validate,verify_package
-
-
-def verify_import_origins(manifest):
-    source=Path(manifest['source_root'])
-    runtime=manifest['runtime_files']
-    roles=('mjlab','mujoco','mujoco_warp','rsl_rl','torch')
-    for name,module in tuple(sys.modules.items()):
-        origin=getattr(module,'__file__',None)
-        if name=='scripts' and origin is None:
-            need(set(map(str,module.__path__))=={str(source/'scripts')},'ambient scripts namespace')
-        elif name=='src' or name.startswith(('src.','scripts.')):
-            if origin is None:continue
-            path=Path(origin);need(path.is_relative_to(source) and sha_file(path)==manifest['source_files'].get(str(path.relative_to(source))), 'scientific origin escaped freeze: '+name)
-        elif any(name==role or name.startswith(role+'.') for role in roles) and origin:
-            path=str(Path(origin))
-            if path in runtime:need(sha_file(path)==runtime[path],'runtime origin bytes differ: '+name)
-            else:
-                # The curated375 closure does not claim every native extension.
-                site=str(Path(manifest['python']['path']).parent.parent/'lib/python3.12/site-packages')
-                need(path.startswith(site+'/'),'runtime origin escaped pinned install: '+name)
 
 
 def child_command(manifest,intent,sha):
@@ -251,7 +232,8 @@ def execute_child(path,sha):
         parent=intent['parent'],intent_sha256=sha,manifest_sha256=digest(manifest),nonce=intent['nonce']))
     verify_package(manifest)
     private=Path(intent['private']);output=Path(intent['output']);os.chdir(private)
-    site=Path(manifest['python']['path']).parent.parent/'lib/python3.12/site-packages';sys.path.append(str(site))
+    site=runtime_site(manifest);sys.path.append(str(site))
+    verify_import_origins(manifest)
     from . import compiler
     compiler.configure(manifest,private,output,f"{intent['kind']}-{intent['index']}")
     kind=intent['kind'];index=intent['index'];started=time.time()
@@ -265,7 +247,7 @@ def execute_child(path,sha):
             if index<3:result=run_canonical(manifest,gate,output)
             else:
                 from .probe import execute_probe
-                result=execute_probe(output,manifest['qualification_recipe'])
+                result=execute_probe(output,manifest['qualification_recipe'],before_science=lambda:verify_import_origins(manifest))
         elif kind=='training':
             from scripts.z1_depth_reward_training031 import build_train_config,matched_initial_state_gate,selected_checkpoint_saves
             from scripts.train import run_train

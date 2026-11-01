@@ -119,6 +119,16 @@ def verify_asset_layout(manifest,*,source_tree=None):
     return root
 
 
+def runtime_files_with_virtual_owners(runtime,python):
+    """Add only the two installed Torch implementations omitted by baseline375."""
+    from .import_policy import runtime_site
+    site=runtime_site(dict(runtime_files=runtime,python=python))
+    extra={str(site/'torch/_ops.py'):'c3d561d13aa4dede4525a5df8b47e38a54135653d1907101211c843df467a519',
+        str(site/'torch/_classes.py'):'0db3dc302e28fd085065ea2883ce33fa4af406b9fd1439f2a431f053e9a764b9'}
+    need(all(path not in runtime or runtime[path]==sha for path,sha in extra.items()),'virtual runtime pins differ')
+    return {**runtime,**extra}
+
+
 def prepare(workspace, destination, evidence):
     """Local unissued package. Never creates the remote/SSD campaign namespaces."""
     workspace=safe_path(workspace);evidence=safe_path(evidence);destination=safe_path(destination)
@@ -144,7 +154,7 @@ def prepare(workspace, destination, evidence):
         need(sha_file(workspace/relative_name(name))==required.get(name,sha),'unreviewed source delta: '+name)
     names=list(content)
     names.extend(required)
-    names.extend(('src/tasks/hammer/mdp/depth_credit031.py','tests/test_depth_credit031.py','tests/test_depth_campaign031.py','tests/test_depth_join031.py','tests/test_depth_admission031.py'))
+    names.extend(('src/tasks/hammer/mdp/depth_credit031.py','tests/test_depth_credit031.py','tests/test_depth_campaign031.py','tests/test_depth_join031.py','tests/test_depth_admission031.py','tests/test_depth_import_ownership031.py'))
     for p in (workspace/'scripts/z1_depth_campaign031').rglob('*'):
         if p.is_file() and '__pycache__' not in p.parts:names.append(str(p.relative_to(workspace)))
     from .admission import ORIGIN_REF, validate_origin_record
@@ -154,7 +164,8 @@ def prepare(workspace, destination, evidence):
     destination.mkdir()
     pins=copy_sources(workspace,destination/'source',names)
     manifest=template();manifest['source_files']=pins
-    manifest['runtime_files']={r['path']:r['sha256'] for r in groups['runtime_files']['files']}
+    manifest['runtime_files']=runtime_files_with_virtual_owners(
+        {r['path']:r['sha256'] for r in groups['runtime_files']['files']},identities['remote']['python'])
     copy_plan=asset_copy_plan(groups['asset_files']['files'],manifest['source_root'])
     manifest['asset_files']={row['destination']:row['sha256'] for row in copy_plan['files']}
     verify_asset_layout(manifest,source_tree=destination/'source')
@@ -182,7 +193,9 @@ def verify_package(manifest):
     from .admission import authenticate_origin, ORIGIN_REF
     need(manifest['provenance']['first_allocation']==ORIGIN_REF,'origin provenance differs')
     authenticate_origin()
-    need(len(manifest['runtime_files'])==375 and len(manifest['asset_files'])==32,'exact runtime/assets closure required')
+    need(len(manifest['runtime_files'])==377 and len(manifest['asset_files'])==32,'exact runtime/assets closure required')
+    need(manifest['runtime_files']==runtime_files_with_virtual_owners(manifest['runtime_files'],manifest['python']),
+         'virtual runtime closure differs')
     source=Path(manifest['source_root'])
     asset_root=verify_asset_layout(manifest)
     expected=set(manifest['source_files'])

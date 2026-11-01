@@ -314,6 +314,7 @@ def execute(intent):
     bank=load_pinned(VENDOR/'reset-bank001/reset_bank.py',BANK_ADAPTER_SHA,'depth031_bank')
     origin=read_json(q/'current-evaluator-origin.json')
     need(sha_file(Path(manifest['source_root'])/'scripts/evaluate_impact_speed.py')==origin['sha256'],'measured scientific origin differs')
+    verify_import_origins(manifest)
     pilot.adapt_pilot_condition(evaluator,q/'current_evaluator_candidate.py')
     adapt_family_configuration(evaluator,q/'current_evaluator_candidate.py',factory)
     case=output/'pilot-bank32';case.mkdir(exist_ok=False)

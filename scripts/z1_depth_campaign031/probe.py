@@ -337,10 +337,11 @@ def synthetic_fixture(raw,arm,counts):
     finally:counts['synthetic_active']=False
 
 
-def execute_probe(output,qualification_recipe):
+def execute_probe(output,qualification_recipe,*,before_science=None):
     import torch
     from scripts.z1_depth_reward_training031 import build_train_config
     from scripts.train import run_train
+    from scripts import z1_split_credit_training021  # Baseline setup must precede the origin check.
     need(torch.cuda.is_available(),'CUDA probe requires actual GPU')
     expected=qualification_recipe['gates'][3]['probe']
     need(expected==recipe(),'reviewed exact probe budget differs')
@@ -348,6 +349,7 @@ def execute_probe(output,qualification_recipe):
     results=[];baselines=[];initial=None;bounds=None;active=[]
     try:
         with counters(counts) as runners:
+            if before_science is not None:before_science()
             for name in recipe()['tiny_profiles']:
                 arm='baseline' if name.startswith('baseline') else name
                 task,cfg,raw,vec=make_tiny(arm);active.append(vec)

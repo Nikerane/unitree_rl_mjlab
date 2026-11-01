@@ -2,6 +2,8 @@
 import argparse
 import hashlib
 import json
+from importlib.machinery import ModuleSpec
+from types import ModuleType
 from pathlib import Path
 import sys
 
@@ -23,6 +25,21 @@ def bootstrap():
         path=root/name
         if path.is_symlink() or any(p.is_symlink() for p in path.parents) or not path.is_file():raise ValueError('bootstrap nonsymlink source required')
         if hashlib.sha256(path.read_bytes()).hexdigest()!=sha:raise ValueError('bootstrap source bytes differ: '+name)
+    actual=set()
+    for path in root.rglob('*'):
+        if path.is_symlink():raise ValueError('bootstrap nonsymlink source required')
+        if path.is_file():actual.add(str(path.relative_to(root)))
+        elif not path.is_dir():raise ValueError('bootstrap regular source required')
+    if actual!=set(value['source_files']):raise ValueError('bootstrap source closure differs')
+    # Own this verified namespace before site-packages can contribute portions.
+    if any(name=='scripts' or name.startswith('scripts.') for name in sys.modules):
+        raise ValueError('preexisting scripts package')
+    scripts=ModuleType('scripts')
+    scripts.__package__='scripts'
+    scripts.__path__=(str(root/'scripts'),)
+    scripts.__spec__=ModuleSpec('scripts',loader=None,is_package=True)
+    scripts.__spec__.submodule_search_locations=scripts.__path__
+    sys.modules['scripts']=scripts
     sys.path.insert(0,str(root))
     globals()['__package__']='scripts.z1_depth_campaign031'
 
