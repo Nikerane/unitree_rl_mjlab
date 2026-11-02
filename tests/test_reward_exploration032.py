@@ -175,7 +175,8 @@ def test_opt_in_tasks_visible_to_existing_train_and_evaluation_registry():
     import subprocess,sys
     subprocess.run([sys.executable,'-B','-c',
         "import src.tasks;from mjlab.tasks.registry import list_tasks;assert 'Unitree-Z1-Hammer-RewardExploration032-gsde' in list_tasks()"],
-        check=True,capture_output=True,text=True,timeout=40)
+        # Full task registration is slower on a shared cluster filesystem.
+        check=True,capture_output=True,text=True,timeout=180)
     import src.tasks
     from mjlab.tasks.registry import list_tasks,load_runner_cls
     from src.tasks.hammer.config.z1.spline_reward_exploration032_cfg import task_id
