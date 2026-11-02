@@ -1,6 +1,6 @@
 # Z1 code preservation and Karolina handoff — 2 November 2026
 
-Branch: `z1-full-depth-reward-learning`.
+Branch: `z1-safe-striking`.
 
 This branch preserves the current Z1 reward/training/evaluation implementation
 and compact scientific reports while Vega is unavailable. It does not submit
