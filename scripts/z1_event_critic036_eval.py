@@ -133,6 +133,8 @@ def record_for_checkpoint(index, checkpoint, initial_state, *, technical=False, 
     if technical:
         cell['updates'] = 1
     checkpoint, initial_state = Path(checkpoint).resolve(), Path(initial_state).resolve()
+    _need(checkpoint.parent == initial_state.parent/'train',
+          'checkpoint must belong to the initial-state run train directory')
     initial_sha = _sha(initial_state)
     initial = json.loads(initial_state.read_text())
     if technical:
@@ -153,11 +155,29 @@ def record_for_checkpoint(index, checkpoint, initial_state, *, technical=False, 
     match = re.fullmatch(r'model_(0)\.pt' if technical else r'model_(99|499)\.pt', checkpoint.name)
     _need(match is not None, 'checkpoint filename differs from selected technical/study scope')
     label = int(match.group(1))
+    checkpoint_sha = _sha(checkpoint)
+    receipt_path = initial_state.parent/('technical-result.json' if technical else f'checkpoint-{label}-live.json')
+    _need(receipt_path.is_file() and not receipt_path.is_symlink(), 'same-run checkpoint receipt required')
+    receipt = json.loads(receipt_path.read_text())
+    _need(type(receipt) is dict
+          and type(receipt.get('common_step_counter')) is int
+          and receipt['common_step_counter'] == (label+1)*24
+          and receipt.get('checkpoint_sha256') == checkpoint_sha, 'checkpoint receipt clock/SHA differs')
+    if technical:
+        _need(receipt.get('schema') == _schema(study, 'result', technical=True)
+              and receipt.get('status') == 'PASS_UPDATE_SAVE_FULL_RELOAD_ONLY'
+              and _canonical(receipt.get('cell')) == _canonical(cell)
+              and type(receipt.get('checkpoint_label')) is int and receipt['checkpoint_label'] == label
+              and type(receipt.get('completed_updates')) is int and receipt['completed_updates'] == 1,
+              'technical checkpoint receipt identity/status differs')
+    else:
+        _need(type(receipt.get('iteration')) is int and receipt['iteration'] == label,
+              'checkpoint receipt iteration differs')
     record = dict(schema=_schema(study, 'policy', technical=technical),
                   policy_id=('technical-' if technical else '') + f'cell-{index:02d}-model-{label}',
                   training_cell=cell, checkpoint_label=label, completed_updates=label+1,
                   common_step_counter=(label+1)*24, task=_task_id(cell, study),
-                  checkpoint_path=str(checkpoint), checkpoint_sha256=_sha(checkpoint),
+                  checkpoint_path=str(checkpoint), checkpoint_sha256=checkpoint_sha,
                   initial_state_sha256=initial_sha, impact_speed_contract=initial.get('contract'))
     _need(_sha(initial_state) == initial_sha, 'initial evidence changed while reading')
     return validate_record(record, technical=technical, study=study)

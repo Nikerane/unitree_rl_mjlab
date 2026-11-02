@@ -170,7 +170,10 @@ def test_actual_initial_evidence_feeds_new_record_and_full_tensor_validation(tmp
                  hashes={name:'a'*64 for name in ('actor','critic',*entry().COMMON_INITIAL_HASHES)},
                  initial_observations={'actor_shape':[1024,43],'critic_shape':[1024,47]},contract=row['impact_speed_contract'])
     initial_path=tmp_path/'initial-state.json';initial_path.write_text(json.dumps(initial))
-    checkpoint=tmp_path/'model_499.pt';checkpoint.write_bytes(b'no deserialization')
+    checkpoint=tmp_path/'train/model_499.pt';checkpoint.parent.mkdir()
+    checkpoint.write_bytes(b'no deserialization')
+    from tests.test_event_critic036_entry import write_checkpoint_receipt
+    write_checkpoint_receipt(checkpoint,row,study='reward037')
     actual=m.record_for_checkpoint(3,checkpoint,initial_path,study='reward037')
     from scripts.z1_thirty_evaluation023.records import expected_state_shapes
     payload=dict(iter=499,infos={'env_state':{'common_step_counter':12000},'impact_speed_contract':actual['impact_speed_contract']},

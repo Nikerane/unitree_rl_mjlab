@@ -3,6 +3,8 @@ from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
 import importlib
+import json
+import sys
 from copy import deepcopy
 from types import SimpleNamespace
 
@@ -159,13 +161,31 @@ def test_real_021_initial_gate_output_feeds_study_record_reader(monkeypatch,tmp_
         HammerOnPolicyRunner.learn(r,500)
     assert len(rows) == 1
     for label in (99,499):
-        checkpoint = tmp_path/f'model_{label}.pt'; checkpoint.write_bytes(b'no checkpoint deserialization')
+        checkpoint = tmp_path/'train'/f'model_{label}.pt'
+        checkpoint.parent.mkdir(exist_ok=True)
+        checkpoint.write_bytes(b'no checkpoint deserialization')
+        write_checkpoint_receipt(checkpoint, evaluation_record(index, label))
         record = eval_api().record_for_checkpoint(index,checkpoint,tmp_path/'initial-state.json')
         assert record['impact_speed_contract'] == metadata and record['common_step_counter'] == (label+1)*24
 
 
 def eval_api():
     return importlib.import_module('scripts.z1_event_critic036_eval')
+
+
+def write_checkpoint_receipt(checkpoint, row, *, technical=False, study='event036'):
+    receipt = dict(common_step_counter=row['common_step_counter'],
+                   checkpoint_sha256=eval_api()._sha(checkpoint))
+    if technical:
+        receipt.update(schema=eval_api()._schema(study, 'result', technical=True),
+                       status='PASS_UPDATE_SAVE_FULL_RELOAD_ONLY', cell=row['training_cell'],
+                       completed_updates=1, checkpoint_label=0)
+        path = checkpoint.parent.parent/'technical-result.json'
+    else:
+        receipt['iteration'] = row['checkpoint_label']
+        path = checkpoint.parent.parent/f"checkpoint-{row['checkpoint_label']}-live.json"
+    path.write_text(json.dumps(receipt))
+    return path
 
 
 def evaluation_record(index=0, label=99):
@@ -303,7 +323,22 @@ def test_evaluation_cli_delegates_one_checkpoint_without_running_rollout(monkeyp
     assert kwargs == dict(deadline_epoch=1234.,max_output_bytes=128*1024**2)
 
 
-def test_preserved_frontend_import_bank_config_and_constructor_only(tmp_path):
+@pytest.fixture
+def isolated_preserved_imports():
+    before = dict(sys.modules)
+    search_path = sys.path[:]
+    try:
+        yield
+    finally:
+        vendor = eval_api().VENDOR.resolve()
+        for name, module in list(sys.modules.items()):
+            path = getattr(module, '__file__', None)
+            if name not in before and path and Path(path).resolve().is_relative_to(vendor):
+                sys.modules.pop(name, None)
+        sys.path[:] = search_path
+
+
+def test_preserved_frontend_import_bank_config_and_constructor_only(tmp_path, isolated_preserved_imports):
     m = eval_api()
     pilot, qualified, evaluator, bank, pins = m._load_frontend()
     assert m._sha(m.BANK) == m.BANK_SHA
@@ -376,7 +411,8 @@ def test_technical_record_uses_actual_model0_initial_evidence_and_payload(tmp_pa
     m = eval_api()
     from scripts.z1_thirty_evaluation023.records import expected_state_shapes
     row = technical_record(3)
-    checkpoint = tmp_path/'model_0.pt'
+    checkpoint = tmp_path/'train/model_0.pt'
+    checkpoint.parent.mkdir()
     checkpoint.write_bytes(b'actual technical model0')
     initial = dict(schema='z1_event_critic036_technical_initial_v1', cell=row['training_cell'],
                    phase='BEFORE_UPDATE_0_AND_FIRST_ROLLOUT',actual_counter=0,critic_width=47,
@@ -386,6 +422,7 @@ def test_technical_record_uses_actual_model0_initial_evidence_and_payload(tmp_pa
                    contract=row['impact_speed_contract'])
     initial_path = tmp_path/'initial-state.json'
     initial_path.write_text(json.dumps(initial))
+    write_checkpoint_receipt(checkpoint, row, technical=True)
     actual = m.record_for_checkpoint(3,checkpoint,initial_path,technical=True)
     assert actual['checkpoint_label'] == 0 and actual['common_step_counter'] == 24
     with pytest.raises(ValueError): m.record_for_checkpoint(3,checkpoint,initial_path)
@@ -394,6 +431,60 @@ def test_technical_record_uses_actual_model0_initial_evidence_and_payload(tmp_pa
                    critic_state_dict={k:torch.ones(v) for k,v in expected_state_shapes(47).items()})
     assert m.validate_payload(payload,actual,technical=True)['common_step_counter'] == 24
     with pytest.raises(ValueError): m.validate_payload(payload,actual)
+
+
+@pytest.mark.parametrize('study', ['event036', 'reward037'])
+@pytest.mark.parametrize('technical', [False, True])
+def test_checkpoint_binding_requires_same_run_and_current_save_receipt(tmp_path, study, technical):
+    m = eval_api()
+    label = 0 if technical else 499
+    if study == 'reward037':
+        from tests.test_reward037_entry_eval import policy
+        row = policy(0, label, technical=technical)
+    else:
+        row = technical_record(0) if technical else evaluation_record(0, label)
+    initial = dict(cell=row['training_cell'], phase='BEFORE_UPDATE_0_AND_FIRST_ROLLOUT',
+                   actual_counter=0, critic_width=47,
+                   model_initialization_seed=row['training_cell']['seed'],
+                   collection_seed=row['training_cell']['seed'],
+                   hashes={name:'a'*64 for name in ('actor','critic',*api().COMMON_INITIAL_HASHES)},
+                   initial_observations={'actor_shape':[1024,43],'critic_shape':[1024,47]},
+                   contract=row['impact_speed_contract'])
+    if technical:
+        initial['schema'] = m._schema(study, 'initial', technical=True)
+    initial_path = tmp_path/'initial-state.json'
+    initial_path.write_text(json.dumps(initial))
+    checkpoint = tmp_path/'train'/f'model_{label}.pt'
+    checkpoint.parent.mkdir()
+    checkpoint.write_bytes(b'checkpoint bytes, never deserialized')
+    receipt_path = write_checkpoint_receipt(checkpoint, row, technical=technical, study=study)
+    def read(path=checkpoint):
+        return m.record_for_checkpoint(0, path, initial_path, technical=technical, study=study)
+    assert read()['checkpoint_sha256'] == m._sha(checkpoint)
+    # Even an identical checkpoint with the same contract/seed/shape is another run.
+    other = tmp_path/'other-run/train'/checkpoint.name
+    other.parent.mkdir(parents=True)
+    other.write_bytes(checkpoint.read_bytes())
+    with pytest.raises(ValueError, match='run'):
+        read(other)
+    receipt = json.loads(receipt_path.read_text())
+    label_key = 'checkpoint_label' if technical else 'iteration'
+    changes = [(label_key,label+1), (label_key,float(label)),
+               ('common_step_counter',0), ('common_step_counter',float(row['common_step_counter'])),
+               ('checkpoint_sha256','0'*64)]
+    if technical:
+        changes += [('schema','wrong'), ('status','FAIL'), ('cell',dict(row['training_cell'],seed=0))]
+    for key, value in changes:
+        receipt_path.write_text(json.dumps(dict(receipt, **{key:value})))
+        with pytest.raises(ValueError, match='receipt'):
+            read()
+    receipt_path.write_text(json.dumps(receipt))
+    checkpoint.write_bytes(b'replaced checkpoint after receipt')
+    with pytest.raises(ValueError, match='receipt'):
+        read()
+    receipt_path.unlink()
+    with pytest.raises(ValueError, match='receipt'):
+        read()
 
 
 def test_technical_loop_cap_is_exactly_three_steps_without_running_a_frontend():
