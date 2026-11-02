@@ -3,9 +3,9 @@
 Branch: `z1-safe-striking`.
 
 This branch preserves the current Z1 reward/training/evaluation implementation
-and compact scientific reports while Vega is unavailable. It does not submit
-jobs, transfer campaigns to Karolina, or establish that the latest code has
-been qualified on Karolina.
+and compact scientific reports while Vega is unavailable. The code is now
+installed on Karolina in the workspace below. Scientific campaign data remains
+in the verified backups; no new training or evaluation jobs were launched.
 
 ## Current completed experiment
 
@@ -64,19 +64,41 @@ independent backup verification; its entire archive set was not rehashed in
 this preservation pass. Both original029 combined closure jobs remain failed
 without `closure.json`.
 
-## Karolina preparation still required
+## Karolina workspace
 
-1. Check out this branch in a fresh source directory, preserving the existing
-   Karolina release and all historical outputs.
-2. Restore the matching external Z1 assets and selected checkpoints from the
-   verified backups. `src/assets/robots/unitree_z1/z1_constants.py` expects the
-   sibling `safe_impact_manipulation/hammer_z1_env/assets` directory; cloning
-   this repository alone does not provide that external asset tree.
-3. Confirm the software environment and local account/partition/cache paths.
-   The [October Karolina environment record](../results/2026-10-01_z1-karolina-environment.md)
-   documents an earlier qualification, not qualification of this branch.
-4. Run focused CPU checks, then a separately authorized current-source GPU
-   technical check and checkpoint reload before scientific training.
+Current checkout: `/scratch/project/eu-26-66/nikhil/z1/z1-safe-striking/source`.
+The existing October releases and historical outputs remain unchanged.
+
+```bash
+source /scratch/project/eu-26-66/nikhil/z1/env/bin/activate
+cd /scratch/project/eu-26-66/nikhil/z1/z1-safe-striking/source
+export PYTHONPATH="$PWD:$PWD/scripts"
+export PYTHONDONTWRITEBYTECODE=1
+```
+
+The sibling `safe_impact_manipulation` link reuses the existing external Z1
+assets. All 32 asset files match the saved reward037 manifest. All 289 relevant
+mjlab/mujoco-warp/rsl_rl Python files match the saved Vega runtime source
+manifest. Compiled libraries, GPU behavior and physical trajectories are not
+established by those source checks.
+
+The [migration review](../results/2026-11-02-z1-karolina-migration-review.md)
+records the CPU checks, named-model review outcomes and narrow fixes. The
+[October environment record](../results/2026-10-01_z1-karolina-environment.md)
+remains historical; it is not current-source GPU qualification.
+
+## Before new experiments
+
+Run a current-source GPU update/save/reload technical check before scientific
+training. Verify the allocated GPU is exposed through `CUDA_VISIBLE_DEVICES`
+and use the existing cluster-specific cache/bootstrap settings. Reuse the
+existing trainer and checker; do not reuse dated Vega job paths.
+
+For saved-policy evaluation, restore the same-run `initial-state.json`,
+`train/model_<label>.pt` and `checkpoint-<label>-live.json`. Technical model0
+instead requires that run's `technical-result.json`. The evaluator now checks
+the existing receipt and run directory to prevent cross-run input mixups.
+No new provenance format or launch framework was added.
 
 No new scheduler wrapper is needed. Reuse the existing pipeline and adapt only
 the cluster-specific execution settings after checking the current environment.
