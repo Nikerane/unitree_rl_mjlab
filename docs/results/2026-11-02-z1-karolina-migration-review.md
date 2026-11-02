@@ -2,8 +2,9 @@
 
 The current `z1-safe-striking` code is installed on Karolina. The final focused
 CPU run passed **243 tests**, with **one historical-evidence check skipped**.
-No current-source GPU learning update, checkpoint reload on GPU, or physical
-evaluation has been run there during this migration.
+The subsequent [GPU compatibility check](2026-11-02-z1-karolina-gpu-check.md)
+also passed one learning update, actor/critic reload and the three-step CPU
+binding check. No training campaign or full policy evaluation was launched.
 
 Active workspace: `/scratch/project/eu-26-66/nikhil/z1/current/source`.
 It points to `z1-safe-striking/source` under the same Z1 project directory.
@@ -36,7 +37,7 @@ Optional032 exploration code is present, but this migration runs no gSDE study.
 | Backend Python source | All 289 relevant mjlab/mujoco-warp/rsl_rl files match the saved Vega prepared031-v9 runtime manifest |
 | Final Karolina CPU run | 243 passed, 1 skipped, 0 failed; 259.70 s at implementation commit `c4bf79b` |
 | New binding regressions | Both evaluation test files together: 47 passed locally and on Karolina |
-| GPU and physical behavior | Not checked in this migration; Python-source identity does not establish binary, kernel or trajectory equivalence |
+| GPU technical execution | Follow-up job5322192 passed one base-recipe update/save/reload and three-step CPU binding; no cross-cluster trajectory or safety equivalence claim |
 
 The preservation commit intentionally excluded unrelated dirty legacy
 controller/campaign edits and large evidence trees from the local worktree.
@@ -111,12 +112,14 @@ Provider packets predate the narrow fixes; independent native and Ultra
 follow-up reviews cover those changes. Model review is advice, not experimental
 safety evidence.
 
-## Remaining boundary before new experiments
+## Follow-up GPU check and remaining scope
 
-The next operational check is a current-source GPU update/save/reload check on
-Karolina using the existing pipeline and correct allocated-GPU environment.
-The technical checker qualifies actor/critic and environment-clock reload; it
-does not qualify optimizer resume. Current training remains fresh-only.
+The current-source base reward037 GPU update/save/reload and CPU binding check
+passed in job5322192 using the existing pipeline and allocated-GPU environment.
+The [technical report](2026-11-02-z1-karolina-gpu-check.md) records its one-update
+scope, source commit and verified backups. The technical checker verifies
+actor/critic and environment-clock reload; it does not qualify optimizer resume.
+Current training remains fresh-only. No new scientific campaign was started.
 
 These focused checks are not a full-repository test-suite claim. The previously
 documented older exact global task-catalog assertion remains stale outside this

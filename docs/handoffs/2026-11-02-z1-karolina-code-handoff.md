@@ -87,12 +87,14 @@ records the CPU checks, named-model review outcomes and narrow fixes. The
 [October environment record](../results/2026-10-01_z1-karolina-environment.md)
 remains historical; it is not current-source GPU qualification.
 
-## Before new experiments
+## GPU compatibility and new experiments
 
-Run a current-source GPU update/save/reload technical check before scientific
-training. Verify the allocated GPU is exposed through `CUDA_VISIBLE_DEVICES`
-and use the existing cluster-specific cache/bootstrap settings. Reuse the
-existing trainer and checker; do not reuse dated Vega job paths.
+The base reward037 GPU update/save/reload and three-step CPU binding check
+passed in [job5322192](../results/2026-11-02-z1-karolina-gpu-check.md). This was one
+technical update, not a scientific training run or safety evaluation. For new
+experiments, retain the allocated-GPU environment and existing cluster-specific
+cache/bootstrap settings. Reuse the existing trainer and checker; do not reuse
+dated Vega job paths.
 
 For saved-policy evaluation, restore the same-run `initial-state.json`,
 `train/model_<label>.pt` and `checkpoint-<label>-live.json`. Technical model0
