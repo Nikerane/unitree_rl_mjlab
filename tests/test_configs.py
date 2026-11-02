@@ -669,6 +669,7 @@ class TestCartesianGuidelineStudy:
             "Unitree-Z1-Hammer-Quintic-M20-Pilot",
             "Unitree-Z1-Hammer-Quintic-M20-ImpactSpeed",
             "Unitree-Z1-Hammer-Quintic-ThreeStarts-ImpactSpeed",
+            "Unitree-Z1-Hammer-Quintic-ThreeStarts-SplineSpeedCurriculum",
         }
 
     @pytest.mark.parametrize("play", (False, True), ids=("train", "play"))

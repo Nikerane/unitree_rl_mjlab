@@ -85,6 +85,7 @@ class FirstStrikeEventTracker(ManagerTermBase):
     self._finalized = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
     self._productive = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
     self._v_precontact = torch.zeros(env.num_envs, device=env.device)
+    self._onset_head_w = torch.zeros(env.num_envs, 3, device=env.device)
     self._delivered = torch.zeros(env.num_envs, device=env.device)
     self._delivered_transverse = torch.zeros(env.num_envs, device=env.device)
     self._peak_depth = torch.zeros(env.num_envs, device=env.device)
@@ -129,6 +130,11 @@ class FirstStrikeEventTracker(ManagerTermBase):
     return self._v_precontact
 
   @property
+  def onset_head_w(self) -> torch.Tensor:
+    """Immutable first accepted physics-onset head position until episode reset."""
+    return self._onset_head_w.clone()
+
+  @property
   def delivered(self) -> torch.Tensor:
     return self._delivered
 
@@ -159,6 +165,7 @@ class FirstStrikeEventTracker(ManagerTermBase):
     self._finalized[idx] = False
     self._productive[idx] = False
     self._v_precontact[idx] = 0.0
+    self._onset_head_w[idx] = 0.0
     self._delivered[idx] = 0.0
     self._delivered_transverse[idx] = 0.0
     self._peak_depth[idx] = 0.0
@@ -196,6 +203,19 @@ class FirstStrikeEventTracker(ManagerTermBase):
   @property
   def first_contact_time_s(self) -> torch.Tensor:
     return self._first_contact_time_s
+
+  @property
+  def elapsed_since_contact_s(self) -> torch.Tensor:
+    """Physics time since accepted onset, zero before onset or after reset.
+
+    The reset-relative physics counter continues after event finalization and
+    is independent of randomized training episode-length counters.
+    """
+    elapsed = (
+      self._substep_count.to(dtype=self._first_contact_time_s.dtype)
+      * self._env.physics_dt - self._first_contact_time_s
+    )
+    return torch.where(self.started, elapsed, torch.zeros_like(elapsed))
 
   @property
   def contact_normal_axiality(self) -> torch.Tensor:
@@ -251,6 +271,7 @@ class FirstStrikeEventTracker(ManagerTermBase):
     velocity = ((head - self._prev_head) / env.physics_dt * self._axis).sum(dim=-1)
     velocity = velocity.clamp_min(0.0)
     self._v_precontact = torch.where(onset, velocity, self._v_precontact)
+    self._onset_head_w = torch.where(onset[:, None], head, self._onset_head_w)
     self._depth_at_contact = torch.where(onset, self._prev_depth, self._depth_at_contact)
     self._first_contact_time_s = torch.where(
       onset,

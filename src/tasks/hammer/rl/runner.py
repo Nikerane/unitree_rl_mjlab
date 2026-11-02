@@ -14,6 +14,7 @@ from mjlab.rl import RslRlVecEnvWrapper
 from mjlab.rl.exporter_utils import attach_metadata_to_onnx
 from mjlab.rl.runner import MjlabOnPolicyRunner
 
+from src.tasks.hammer.cat.velocity_pressure import pressure_hook, require_counter
 from src.tasks.hammer.config.z1.joint_position_contract import (
     JOINT_NAMES,
     JointPositionContract,
@@ -230,7 +231,7 @@ def _require_banked_vic_position_action(
 
 
 def _joint_observation_metadata(
-    env, *, scalar_tail: tuple[str, ...] = ()
+    env, *, scalar_tail: tuple[str, ...] = (), critic_extra_tail: tuple[str, ...] = ()
 ) -> dict[str, object]:
     """Resolve one of the two qualified joint-policy schemas from live managers."""
     observation_manager = env.observation_manager
@@ -239,16 +240,16 @@ def _joint_observation_metadata(
         raise ValueError("joint metadata requires exactly actor and critic observations")
     actor_terms = tuple(active_terms["actor"])
     critic_terms = tuple(active_terms["critic"])
-    if actor_terms != critic_terms:
-        raise ValueError("joint metadata requires identical actor and critic observation terms")
+    if critic_terms != (*actor_terms, *critic_extra_tail):
+        raise ValueError("joint metadata requires identical actor and critic observation terms except declared critic tail")
 
     group_obs_dim = observation_manager.group_obs_dim
     if set(group_obs_dim) != {"actor", "critic"}:
         raise ValueError("joint metadata requires exactly actor and critic observation widths")
     actor_dim = tuple(group_obs_dim["actor"])
     critic_dim = tuple(group_obs_dim["critic"])
-    if actor_dim != critic_dim:
-        raise ValueError("joint metadata requires identical actor and critic observation widths")
+    if len(actor_dim) != 1 or len(critic_dim) != 1 or critic_dim != (actor_dim[0] + len(critic_extra_tail),):
+        raise ValueError("joint metadata requires identical actor and critic observation widths except declared critic tail")
     if len(actor_dim) != 1:
         raise ValueError("joint metadata requires flat actor and critic observations")
 
@@ -296,6 +297,7 @@ def _joint_observation_metadata(
         )
     return {
         "observation_names": list(actor_terms),
+        **({"critic_observation_names": list(critic_terms)} if critic_extra_tail else {}),
         "observation_widths": {
             "actor": actor_dim[0],
             "critic": critic_dim[0],
@@ -757,34 +759,84 @@ class HammerOnPolicyRunner(MjlabOnPolicyRunner):
 
   def __init__(self, env, train_cfg: dict, log_dir=None, device="cpu"):
     self._impact_speed_phase_transition = None
+    self._cat_pressure_weights_only = False
+    hook = pressure_hook(env.unwrapped)
+    if hook is not None:
+      steps = train_cfg.get("num_steps_per_env")
+      if isinstance(steps, bool) or not isinstance(steps, int) or steps != 24:
+        raise ValueError("opt-in velocity pressure requires the declared 24-step rollout")
     if "strike_speed" in env.unwrapped.action_manager.active_terms:
       # Grouped model tensors cannot reveal a semantically swapped goal/pending.
       # Check the live managers before the base runner can construct its models.
-      build_impact_speed_metadata(env.unwrapped, env.clip_actions)
+      metadata = build_impact_speed_metadata(env.unwrapped, env.clip_actions)
     super().__init__(env, train_cfg, log_dir, device)
+    if hook is not None:
+      from src.tasks.hammer.rl.cat_ppo import CatPPO
+      if not isinstance(self.alg, CatPPO):
+        raise ValueError("opt-in velocity pressure requires CatPPO")
     if "strike_speed" in env.unwrapped.action_manager.active_terms:
-      validate_impact_speed_models(self.alg.actor, self.alg.critic)
+      validate_impact_speed_models(self.alg.actor, self.alg.critic, metadata)
 
   def load(self, path: str, load_cfg=None, strict=True, map_location=None):
+    # Inspect before super().load mutates models/optimizer or restores the env clock.
+    checkpoint = torch.load(path, map_location=map_location, weights_only=False)
+    saved_infos = checkpoint.get("infos") or {}
+    hook = pressure_hook(self.env.unwrapped)
+    resume = load_cfg is None or bool(load_cfg.get("iteration", False))
+    pressure_state = saved_infos.get("cat_pressure_treatment")
+    if hook is None and resume and pressure_state is not None:
+      raise ValueError("pressure checkpoint resume requires its opt-in live pressure contract")
+    if hook is not None:
+      if resume and load_cfg is not None and not all(
+        load_cfg.get(key, False) for key in ("actor", "critic", "optimizer")
+      ):
+        raise ValueError("pressure resume requires actor, critic, optimizer and iteration together")
+      counter = (saved_infos.get("env_state") or {}).get("common_step_counter")
+      hook.validate_pressure_state(pressure_state, counter)
+      saved_iteration = checkpoint.get("iter")
+      if (isinstance(saved_iteration, bool) or not isinstance(saved_iteration, int) or
+          saved_iteration != max(0, counter // 24 - 1)):
+        raise ValueError("pressure checkpoint iteration differs from its completed update count")
     if "strike_speed" in self.env.unwrapped.action_manager.active_terms:
       expected = build_impact_speed_metadata(self.env.unwrapped, self.env.clip_actions)
-      validate_impact_speed_models(self.alg.actor, self.alg.critic)
-      checkpoint = torch.load(path, map_location=map_location, weights_only=False)
-      infos = checkpoint.get("infos") or {}
-      validate_impact_speed_metadata(infos.get("impact_speed_contract"), expected)
+      validate_impact_speed_models(self.alg.actor, self.alg.critic, expected)
+      validate_impact_speed_metadata(saved_infos.get("impact_speed_contract"), expected)
     infos = super().load(path, load_cfg, strict, map_location)
+    if hook is not None:
+      hook.restore_pressure_state(pressure_state, self.env.unwrapped.common_step_counter)
+      # Actor-only inference may inspect pressure state; it is not a training resume.
+      self._cat_pressure_weights_only = not resume
     if "strike_speed" in self.env.unwrapped.action_manager.active_terms:
       self._impact_speed_phase_transition = (infos or {}).get("impact_speed_phase_transition")
     return infos
 
+  def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False):
+    hook = pressure_hook(self.env.unwrapped)
+    if hook is not None:
+      counter = require_counter(self.env.unwrapped.common_step_counter)
+      if self._cat_pressure_weights_only:
+        raise ValueError("actor-only pressure checkpoint load cannot resume training")
+      if counter != hook.pressure_counter or counter % 24:
+        raise ValueError("pressure learning must start at its restored rollout boundary")
+      if (isinstance(num_learning_iterations, bool) or
+          not isinstance(num_learning_iterations, int) or num_learning_iterations <= 0 or
+          counter + 24 * num_learning_iterations > hook.pressure_total_steps):
+        raise ValueError("requested learning exceeds the declared pressure transition budget")
+      # RSL saves the just-completed label, then otherwise resumes at that same label.
+      # Use the persisted transition clock to label the NEXT update in opt-in runs.
+      self.current_learning_iteration = counter // 24
+    return super().learn(num_learning_iterations, init_at_random_ep_len)
+
   def load_qualification_checkpoint(self, path: str) -> None:
     """Transfer qualified weights into a fresh autonomous runner, not its optimizer."""
+    if pressure_hook(self.env.unwrapped) is not None:
+      raise ValueError("qualification transfer is not an opt-in pressure training resume")
     if "strike_speed" not in self.env.unwrapped.action_manager.active_terms:
       raise ValueError("qualification transfer requires the impact speed experiment")
     expected = build_impact_speed_metadata(self.env.unwrapped, self.env.clip_actions)
     if expected["speed_mode"] != "policy":
       raise ValueError("qualification transfer requires policy destination mode")
-    validate_impact_speed_models(self.alg.actor, self.alg.critic)
+    validate_impact_speed_models(self.alg.actor, self.alg.critic, expected)
     if self.current_learning_iteration != 0 or self.alg.optimizer.state:
       raise ValueError("qualification transfer requires a fresh runner and optimizer")
     checkpoint = torch.load(path, map_location=self.device, weights_only=False)
@@ -807,16 +859,22 @@ class HammerOnPolicyRunner(MjlabOnPolicyRunner):
     action_terms = tuple(self.env.unwrapped.action_manager.active_terms)
     if "strike_speed" in action_terms:
       metadata = build_impact_speed_metadata(self.env.unwrapped, self.env.clip_actions)
-      validate_impact_speed_models(self.alg.actor, self.alg.critic)
+      validate_impact_speed_models(self.alg.actor, self.alg.critic, metadata)
       infos = {} if infos is None else dict(infos)
       infos["impact_speed_contract"] = metadata
       if self._impact_speed_phase_transition is not None:
         infos["impact_speed_phase_transition"] = dict(self._impact_speed_phase_transition)
       else:
         infos.pop("impact_speed_phase_transition", None)
-      telemetry = summarize_impact_speed_rollout(
-        self.alg.storage, tuple(metadata["speed_bounds_mps"])
-      )
+      pilot = metadata.get("spline_exploration_pilot")
+      if pilot is not None:
+        telemetry = summarize_impact_speed_rollout(
+          self.alg.storage, tuple(metadata["speed_bounds_mps"]), pilot_metadata=pilot
+        )
+      else:
+        telemetry = summarize_impact_speed_rollout(
+          self.alg.storage, tuple(metadata["speed_bounds_mps"])
+        )
       if telemetry is not None:
         if "sampled_pd" in metadata:
           telemetry["gain_action_interpretation"] = (
@@ -855,6 +913,14 @@ class HammerOnPolicyRunner(MjlabOnPolicyRunner):
       if telemetry is not None:
         infos = {} if infos is None else dict(infos)
         infos["vic_rollout_telemetry"] = telemetry
+    hook = pressure_hook(self.env.unwrapped)
+    if hook is not None:
+      if self._cat_pressure_weights_only:
+        raise ValueError("actor-only pressure load cannot issue training checkpoints")
+      infos = {} if infos is None else dict(infos)
+      infos["cat_pressure_treatment"] = hook.pressure_state(
+        self.env.unwrapped.common_step_counter
+      )
     super().save(path, infos)
     policy_dir, filename, onnx_path = self._get_export_paths(path)
     # The logger backend is initialized by learn(); a pre-rollout save is valid.

@@ -14,8 +14,21 @@ from src.tasks.hammer.mdp.impact_speed import (
 IMPACT_SPEED_ACTION_SIGNATURE = ("joint_position", "joint_stiffness", "strike_speed")
 
 
+def _require_pilot_controller(cfg, sampled_pd500, gain_mode):
+  from src.tasks.hammer.mdp.spline_exploration_pilot import pilot_setting
+  setting = pilot_setting(cfg)
+  if setting is not None:
+    expected = 'fixed' if setting == 'fixed_nominal' else 'variable'
+    if sampled_pd500 is not True or gain_mode != expected:
+      raise ValueError('pilot requires its declared sampled controller gain mode')
+
+
 def configure_impact_speed_controller(env_cfg, *, sampled_pd500: bool, gain_mode: str) -> None:
   """Select the physical controller before constructing the environment."""
+  _require_pilot_controller(env_cfg, sampled_pd500, gain_mode)
+  from src.tasks.hammer.mdp.spline_learning_variants import learning_variant
+  if learning_variant(env_cfg) is not None and (not sampled_pd500 or gain_mode != "variable"):
+    raise ValueError("learning treatment requires sampled variable-impedance control")
   if gain_mode not in ("fixed", "variable"):
     raise ValueError("sampled PD gain mode must be fixed or variable")
   if not sampled_pd500:
@@ -28,9 +41,15 @@ def configure_impact_speed_controller(env_cfg, *, sampled_pd500: bool, gain_mode
 
 def install_impact_speed_controller(env, *, sampled_pd500: bool, gain_mode: str):
   """Install torque authority before environment wrapping and runner creation."""
+  _require_pilot_controller(env.cfg, sampled_pd500, gain_mode)
+  from src.tasks.hammer.mdp.spline_learning_variants import learning_variant
+  variant = learning_variant(env.cfg)
+  if variant is not None and (not sampled_pd500 or gain_mode != "variable"):
+    raise ValueError("learning treatment requires sampled variable-impedance control")
   if sampled_pd500:
     from src.tasks.hammer.mdp.sampled_pd500 import install_sampled_pd500
-    return install_sampled_pd500(env, gain_mode=gain_mode)
+    return install_sampled_pd500(
+      env, gain_mode=gain_mode, startup_ramp_s=.1 if variant == "R" else 0.)
   return None
 
 

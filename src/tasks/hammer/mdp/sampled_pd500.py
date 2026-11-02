@@ -1,6 +1,8 @@
 """Opt-in sampled joint impedance: 500 Hz torque hold, 4 kHz physics, 50 Hz policy."""
 from __future__ import annotations
 
+from numbers import Real
+
 import mujoco
 import numpy as np
 import torch
@@ -10,6 +12,8 @@ from .variable_impedance import _variable_impedance_gains_unchecked, variable_im
 
 ARM_KP = (256., 384., 384., 256., 192., 128.)
 ARM_KD = (6.4,) * 6
+STARTUP_DURATION_S = .1
+PHYSICS_DT_S = .00025
 
 
 def _check_gain_mode(gain_mode):
@@ -32,9 +36,16 @@ def configure_sampled_pd500(cfg, *, gain_mode="fixed") -> None:
 class SampledPD500:
     """Own the torque hold at the simulation-step seam, without host sync."""
 
-    def __init__(self, env, *, gain_mode="fixed"):
+    def __init__(self, env, *, gain_mode="fixed", startup_ramp_s=0.):
         _check_gain_mode(gain_mode)
+        if (isinstance(startup_ramp_s, bool) or not isinstance(startup_ramp_s, Real)
+                or startup_ramp_s not in (0., STARTUP_DURATION_S)):
+            raise ValueError("startup_ramp_s must be 0 or the approved 0.1 seconds")
+        if startup_ramp_s and gain_mode != "variable":
+            raise ValueError("startup_ramp_s requires variable sampled impedance")
         self.gain_mode = gain_mode
+        self.startup_ramp_s = float(startup_ramp_s)
+        self._startup_ramp_substeps = round(self.startup_ramp_s / PHYSICS_DT_S)
         if env.cfg.sim.mujoco.timestep != .00025 or env.cfg.decimation != 80:
             raise ValueError("sampled PD pilot requires .00025 physics / decimation 80")
         self.env = env
@@ -49,6 +60,8 @@ class SampledPD500:
             or not np.array_equal(model.actuator_gear, np.tile([1.,0,0,0,0,0], (7,1)))):
             raise ValueError("sampled PD requires seven unit-gear, affine joint actuators")
         self.gains = env.action_manager.get_term("joint_stiffness")
+        self.position = env.action_manager.get_term("joint_position")
+        self.joint_ids = tuple(self.position.target_ids.detach().cpu().tolist())
         self.ids = self.gains.control_ids
         self.C = self.gains._C
         self.kp = self.sim.model.actuator_gainprm[:, :, 0].clone()
@@ -75,6 +88,12 @@ class SampledPD500:
         self.original_process = self.gains.process_actions
         self.original_reset = self.gains.reset
         self.original_env_reset = env.reset
+        self.original_reset_idx = env._reset_idx
+        self.physics_substeps_since_reset = torch.zeros(
+            env.num_envs, dtype=torch.long, device=env.device)
+        self.reset_joint_position = self.sim.data.qpos[:, self.qids[self.ids]].clone()
+        self.requested_joint_position = self.reset_joint_position.clone()
+        self.applied_joint_position = self.reset_joint_position.clone()
         self.count = self.updates = 0
         self.torque = None
         self.requested_torque = None
@@ -138,6 +157,23 @@ class SampledPD500:
         self.gains._kp[:] = self.arm_kp
         self.gains._kd[:] = self.arm_kd
 
+    @property
+    def startup_age(self):
+        """Actual elapsed physics time, normalized identically for A/N/R."""
+        return (self.physics_substeps_since_reset.to(self.kp.dtype)
+                * (PHYSICS_DT_S / STARTUP_DURATION_S)).clamp_max(1.)
+
+    def reset_idx(self, env_ids=None):
+        """Capture the physical pose only after all actual reset writers finish."""
+        result = self.original_reset_idx(env_ids)
+        ids = slice(None) if env_ids is None else env_ids
+        self.physics_substeps_since_reset[ids] = 0
+        reset = self.sim.data.qpos[:, self.qids[self.ids]]
+        self.reset_joint_position[ids] = reset[ids]
+        self.requested_joint_position[ids] = reset[ids]
+        self.applied_joint_position[ids] = reset[ids]
+        return result
+
     def process_actions(self, actions):
         self.original_process(actions)
         if self.gain_mode == "fixed":
@@ -156,6 +192,10 @@ class SampledPD500:
                     snapshot[ids] = 0
 
     def reset_env(self, *args, **kwargs):
+        # A manual partial reset must not erase another world's sampled torque
+        # or ramp history. Auto-reset already enters through reset_idx directly.
+        if self.startup_ramp_s and kwargs.get("env_ids") is not None:
+            return self.original_env_reset(*args, **kwargs)
         self.count = self.updates = 0
         self.torque = None
         self.requested_torque = None
@@ -176,7 +216,20 @@ class SampledPD500:
                 sampled_kd[:, self.ids] = mapped.kd
             self.applied_kp = sampled_kp[:, self.ids].clone()
             self.applied_kd = sampled_kd[:, self.ids].clone()
-            requested = (sampled_kp * (self.sim.data.ctrl[:] - self.sim.data.qpos[:, self.qids])
+            desired = self.sim.data.ctrl[:]
+            self.requested_joint_position = desired[:, self.ids].clone()
+            self.applied_joint_position = self.requested_joint_position.clone()
+            if self.startup_ramp_s:
+                alpha = self.startup_age.unsqueeze(-1)
+                self.applied_joint_position = torch.where(
+                    alpha >= 1., self.requested_joint_position,
+                    self.reset_joint_position + alpha * (
+                        self.requested_joint_position - self.reset_joint_position))
+                # Keep both raw action buffers and sim.ctrl untouched. Reward
+                # and trace readers explicitly consume the delivered snapshot.
+                desired = desired.clone()
+                desired[:, self.ids] = self.applied_joint_position
+            requested = (sampled_kp * (desired - self.sim.data.qpos[:, self.qids])
                          - sampled_kd * self.sim.data.qvel[:, self.vids])
             self.requested_torque = requested.clone()
             self.torque = torch.maximum(torch.minimum(requested, self.limits[:, 1]), self.limits[:, 0])
@@ -189,6 +242,7 @@ class SampledPD500:
         self.sim.model.actuator_biasprm[:, :, 0].copy_(self.torque)
         self.original_step()
         self.count += 1
+        self.physics_substeps_since_reset += 1
 
     def metadata(self):
         self.validate_physics()
@@ -200,8 +254,13 @@ class SampledPD500:
         ):
             raise ValueError("sampled variable impedance C, joint order, or mapping changed")
         if (self.sim.step != self.step or self.gains.process_actions != self.process_actions
-            or self.gains.reset != self.reset_gains or self.env.reset != self.reset_env):
+            or self.gains.reset != self.reset_gains or self.env.reset != self.reset_env
+            or self.env._reset_idx != self.reset_idx):
             raise ValueError("sampled PD controller hooks are not installed")
+        if (self.startup_ramp_s not in (0., STARTUP_DURATION_S)
+            or self._startup_ramp_substeps != round(self.startup_ramp_s / PHYSICS_DT_S)
+            or self.joint_ids != tuple(self.position.target_ids.detach().cpu().tolist())):
+            raise ValueError("sampled PD startup ramp or joint mapping drift")
         live_dt = self.sim.model.opt.timestep.detach().cpu()
         if (self.env.cfg.sim.mujoco.timestep != .00025 or self.env.cfg.decimation != 80
             or live_dt.ndim != 1 or live_dt.shape[0] not in (1, self.env.num_envs)
@@ -220,18 +279,29 @@ class SampledPD500:
             metadata["C"] = 1.25
             metadata["p_bounds"] = [-1., 1.]
             metadata.pop("ignored_action_indices")
+        if self.startup_ramp_s:
+            metadata["startup_target_ramp"] = dict(
+                version="reset_pose_linear_pd_sample_v1",
+                duration_s=self.startup_ramp_s,
+                anchor="actual_physical_qpos_after_reset",
+                clock="per_environment_physics_substeps",
+                target_space="physical_after_offset_clip_and_encoder_correction",
+                raw_target_preserved=True,
+                trackability_target="last_sampled_applied_joint_position",
+            )
         return metadata
 
 
-def install_sampled_pd500(env, *, gain_mode="fixed") -> SampledPD500:
+def install_sampled_pd500(env, *, gain_mode="fixed", startup_ramp_s=0.) -> SampledPD500:
     if hasattr(env, "_sampled_pd500"):
         raise ValueError("sampled PD already installed")
-    controller = SampledPD500(env, gain_mode=gain_mode)
+    controller = SampledPD500(env, gain_mode=gain_mode, startup_ramp_s=startup_ramp_s)
     env._sampled_pd500 = controller
     env.sim.step = controller.step
     controller.gains.process_actions = controller.process_actions
     controller.gains.reset = controller.reset_gains
     env.reset = controller.reset_env
+    env._reset_idx = controller.reset_idx
     if gain_mode == "fixed":
         controller.fixed_gains()
     return controller

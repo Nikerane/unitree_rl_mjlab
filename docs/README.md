@@ -1,8 +1,19 @@
-# Docs index — current truth map (2026-09-22)
+# Docs index — current truth map (2026-11-02)
 
 **Authority rule: code > this index > the living docs it lists.** `docs/archive/**` and dated
 records are historical evidence — never act on them without checking here first. When a doc and
 the code disagree, the checked-out code wins; fix the doc.
+
+## Z1 maintenance handoff — 2 November 2026
+
+Start with the [Karolina code handoff](handoffs/2026-11-02-z1-karolina-code-handoff.md)
+for the preserved branch, current pipeline entry points, external assets and
+verified backup locations. The [reward037 report](results/2026-11-02-z1-reward037-analysis.md)
+and [mechanism deep dive](results/2026-11-02-z1-reward037-mechanism-deep-dive.md)
+cover the completed eight-policy study; the [critic036 report](results/2026-11-02-z1-event-critic036.md)
+covers its historical controls. The custom depth031 launcher remains retired.
+Karolina qualification of this latest source remains to be done; this code
+preservation does not launch any work.
 
 ## 1. Current truth map (the living set)
 

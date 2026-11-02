@@ -54,6 +54,10 @@ def _hook(max_p=0.5, tau=0.95, min_p=0.0, vel_detection="control_rate"):
     _imp_cmax=torch.full((1, 6), 1e-3),
     _imp_seeded=torch.zeros(1, 6, dtype=torch.bool),
     _last_impulse=None,
+    _velocity_pressure=None,
+    _pressure_last_counter=0,
+    _pressure_frames=[],
+    _pressure_definition=None,
   )
 
 
@@ -75,6 +79,10 @@ def _ihook(imp_max_p=0.0, imp_seed=0.2, imp_limit=0.1, use_vel=False, tau=0.95, 
     _imp_seed=imp_seed,
     _imp_cmax=torch.full((1, J), imp_seed),
     _imp_seeded=torch.zeros(1, J, dtype=torch.bool),
+    _velocity_pressure=None,
+    _pressure_last_counter=0,
+    _pressure_frames=[],
+    _pressure_definition=None,
     _last_impulse=None,
   )
 
@@ -147,7 +155,23 @@ def test_speed_goal_is_a_known_negative_excluded_from_positive_return():
   )
   _hook()(env)
   torch.testing.assert_close(env.extras[CAT_R_POS_KEY], torch.tensor([0.08]))
-  assert _OPTIONAL_NEG_TERMS == ("speed_goal",)
+  assert _OPTIONAL_NEG_TERMS == ("speed_goal", "spline_path_cost")
+
+
+def test_spline_path_penalty_is_not_discounted_as_positive_task_return():
+  step = torch.tensor([[4.0, -2.0, -0.5]])
+  weights = {"spline_progress": 1.0, "spline_path_cost": -0.2, "action_rate": -0.01}
+  rm = SimpleNamespace(_step_reward=step, active_terms=list(weights),
+    get_term_cfg=lambda name: SimpleNamespace(weight=weights[name]), _scale_by_dt=True)
+  env = SimpleNamespace(
+    scene={"robot": SimpleNamespace(data=SimpleNamespace(joint_vel=torch.full((1, 6), 5.0)))},
+    reward_manager=rm, step_dt=0.02, extras={})
+  _hook()(env)
+  torch.testing.assert_close(env.extras[CAT_R_POS_KEY], torch.tensor([0.08]))
+  delta = env.extras[CAT_DELTA_KEY]
+  assert bool((delta > 0).all())
+  discounted = step.sum(dim=1) * env.step_dt - delta * env.extras[CAT_R_POS_KEY]
+  torch.testing.assert_close(discounted, (1-delta) * 0.08 - 0.05)
 
 
 def test_r_pos_equals_reward_minus_negatives_identity():

@@ -1,0 +1,9 @@
+# Z1 Karolina software environment
+
+2026-10-01. Software qualification passed on Karolina A100, job5134271, oneGPU,16:59:57–17:04:53 Berlin, exit0:0. The745 frozen Z1 code/assets files match Vega identity `c2fb5022a99683113f701341cc3514c5946d9504406b9be4429c0f7b9eb1d4bd`. Installed mjlab/mujoco-warp/rsl-rl Python code matches289 Vega files. Python3.12.13 and the pinned Vega package versions installed successfully; PyTorch2.12.0+cu130, MuJoCo3.8.1, mjlab1.4.0.
+
+All35 focused tests passed. B/O/P each completed a fresh2update32world GPU smoke and small evaluation. Strict own reloads passed and all six wrong-variant reloads were rejected. The original Vega O21 model499 checkpoint, SHA `58f515120986b054a476a9700db71ed79c4f63ad9088dd5839919db3ac6a6745`, reloaded and completed an8world smoke rollout. These are software checks, not trajectory equivalence, task efficacy, safe competence or hardware validation. No new500update experiment was launched.
+
+Use `~/nikhil/z1`, linked to `/scratch/project/eu-26-66/nikhil/z1`. Activate `~/nikhil/z1/env/bin/activate`, work in `~/nikhil/z1/release-20261001/source`, and set `PYTHONPATH` to that source directory. Logs and manifests belong under the sibling `~/nikhil/logs` and `~/nikhil/manifests` links. Existing VLA21GB workspace and old home scheduler logs were deleted on explicit user authorization after ownership/inactive-job checks; verified persistent old-log backups remain. Account configuration files remain in home.
+
+Source/archive/runtime setup backups are independently hashed under `/mnt/proj1/eu-26-66/nikhil/z1/release-20261001-portability`. Software PASS is `~/nikhil/z1/KAROLINA_SOFTWARE_PASS.json`. Karolina uses its own Slurm account/partition configuration; [official job-submission guidance](https://docs.it4i.cz/en/docs/general/run-jobs/job-sub-exec/karolina-slurm) documents GPU allocation. Additional cross-cluster scientific experiments require a matched design and common measurement protocol.

@@ -30,6 +30,19 @@ _ROBOT_CFG = SimpleNamespace(name="robot", site_ids=[0])
 _NAIL_CFG = SimpleNamespace(name="nail_block", joint_ids=[0], site_ids=[0])
 
 
+def test_accepted_onset_head_snapshot_survives_rebound_and_clears_on_reset():
+  tracker, step = _tracker(quality_instrumentation=False)
+  step(head_z=.104, depth=0., contact_on=False)
+  step(head_z=.102, depth=0., contact_on=False)
+  step(head_z=.100, depth=0., contact_on=True)
+  assert hasattr(tracker, "onset_head_w"), "accepted contact needs its physics-onset position"
+  torch.testing.assert_close(tracker.onset_head_w, torch.tensor([[0., 0., .1]]))
+  step(head_z=.15, depth=0., contact_on=False)
+  torch.testing.assert_close(tracker.onset_head_w, torch.tensor([[0., 0., .1]]))
+  tracker.reset(None)
+  assert torch.equal(tracker.onset_head_w, torch.zeros(1, 3))
+
+
 def _values(value, batch: int, *, dtype=torch.float32) -> torch.Tensor:
   tensor = torch.as_tensor(value, dtype=dtype)
   if tensor.ndim == 0:
@@ -52,6 +65,7 @@ def _tracker(
   window: int = 25,
   progress_eps: float = 5e-4,
   quality_instrumentation: bool = True,
+  physics_dt: float = DT,
 ):
   robot = SimpleNamespace(data=SimpleNamespace(site_pos_w=torch.zeros(batch, 1, 3)))
   nail = SimpleNamespace(
@@ -87,7 +101,7 @@ def _tracker(
   env = SimpleNamespace(
     num_envs=batch,
     device="cpu",
-    physics_dt=DT,
+    physics_dt=physics_dt,
     sim=SimpleNamespace(mj_model=SimpleNamespace(geom=geom)),
     scene=scene,
   )
@@ -151,6 +165,32 @@ def _tracker(
 def _arm(step, *, head_z=(0.100, 0.096), depth=(0.001, 0.002)) -> None:
   step(head_z=head_z[0], depth=depth[0], contact_on=False)
   step(head_z=head_z[1], depth=depth[1], contact_on=False)
+
+
+def test_curriculum_window_uses_physics_time_after_onset_even_after_finalization():
+  from src.tasks.hammer.mdp.spline_curriculum import accepted_strike_window_complete
+
+  tracker, step = _tracker(batch=2, window=1, quality_instrumentation=False, physics_dt=.001)
+  env = SimpleNamespace(_hammer_first_strike=tracker, step_dt=.02,
+                        episode_length_buf=torch.tensor([100, 100]))
+  _arm(step)
+  assert not accepted_strike_window_complete(env).any()
+  step(head_z=.090, depth=.003, contact_on=[True, False])
+  assert tracker.finalized[0]
+  assert not accepted_strike_window_complete(env).any()
+  torch.testing.assert_close(tracker.elapsed_since_contact_s, torch.zeros(2))
+  onset_time = tracker.first_contact_time_s.clone()
+  for _ in range(49):
+    step(head_z=.1, depth=.003, contact_on=False)
+  assert tracker.elapsed_since_contact_s[0].item() == pytest.approx(.049)
+  assert not accepted_strike_window_complete(env).any()
+  step(head_z=.1, depth=.003, contact_on=False)
+  assert tracker.elapsed_since_contact_s[0].item() == pytest.approx(.050)
+  assert torch.equal(accepted_strike_window_complete(env), torch.tensor([True, False]))
+  assert torch.equal(tracker.first_contact_time_s, onset_time)
+  tracker.reset(None)
+  torch.testing.assert_close(tracker.elapsed_since_contact_s, torch.zeros(2))
+  assert not accepted_strike_window_complete(env).any()
 
 
 def test_event_config_adds_dedicated_quality_sensor_without_changing_contact_shape():

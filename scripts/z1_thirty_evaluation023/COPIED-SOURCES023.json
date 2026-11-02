@@ -1,0 +1,102 @@
+{
+  "pilot-compat001/pilot_contract.py": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/pilot-compat001/pilot_contract.py",
+    "sha256": "22b18f1e057cd72873f417ef8a7aedb7ddca1b0c7d20ad8c0d8f9e35f5ff2aaa"
+  },
+  "pilot-compat001/pilot_integration.py": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/pilot-compat001/pilot_integration.py",
+    "sha256": "d73cb9bf2d003830a31491264b32f689a0b2f6e5e5ef9e1b7519a845264bdb17"
+  },
+  "pilot-compat001/qualified007/continuation_tools.py": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/pilot-compat001/qualified007/continuation_tools.py",
+    "sha256": "0b6484499258ee0e1b03feae81a533b0bfad35d0d2810dc8e78031a858f7c902"
+  },
+  "pilot-compat001/qualified007/current-evaluator-origin.json": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/pilot-compat001/qualified007/current-evaluator-origin.json",
+    "sha256": "482b4259654b822db5d3f54863d742494d14f29398c45fa2e6d338d19d2a86d9"
+  },
+  "pilot-compat001/qualified007/current_evaluator_candidate.py": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/pilot-compat001/qualified007/current_evaluator_candidate.py",
+    "sha256": "1002720dbf69427b0173acd6b90eb23b58909b19f955aca37d520e201ba9a2e3"
+  },
+  "pilot-compat001/qualified007/horizon_eval_preflight.py": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/pilot-compat001/qualified007/horizon_eval_preflight.py",
+    "sha256": "2fdd315f2978e7079d33a40421a89b038918b166720b457a2eef2548fe60bd3d"
+  },
+  "pilot-compat001/qualified007/horizon_integration.py": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/pilot-compat001/qualified007/horizon_integration.py",
+    "sha256": "ed9d28c7781ed5bb776049d9cca52536f51c405215bd0c3d18395defc35ee3d7"
+  },
+  "pilot-compat001/qualified007/horizon_worker.py": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/pilot-compat001/qualified007/horizon_worker.py",
+    "sha256": "3f15e8d56e2c52d916c1f2195460fc6e59bbd42840738be37acf67358be79ff9"
+  },
+  "pilot-compat001/qualified007/onset_trace.py": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/pilot-compat001/qualified007/onset_trace.py",
+    "sha256": "16137ae895ec33f9898b4621b067eb6b10f665d997d14fabf062fc42488b147e"
+  },
+  "pilot-compat001/qualified007/reset_pose.py": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/pilot-compat001/qualified007/reset_pose.py",
+    "sha256": "1d10a5f7abd1efb63ff736025d8414a240d953be68ede3cbac6651d3b5b25d81"
+  },
+  "pilot-compat001/qualified007/safety_observer.py": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/pilot-compat001/qualified007/safety_observer.py",
+    "sha256": "b6c361499315bb5ccbf7780c2a9c52802e35e9fd27853694d8651137340e4f95"
+  },
+  "pilot-compat001/qualified007/supervisor/cpu_supervisor.py": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/pilot-compat001/qualified007/supervisor/cpu_supervisor.py",
+    "sha256": "b6a2d726bb58ed63451567089ec5e9b295bed3b979f427091d42becb5c03c757"
+  },
+  "pilot-compat001/test_pilot_contract.py": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/pilot-compat001/test_pilot_contract.py",
+    "sha256": "55d0ee49e49810ef3a2c78778fabce58e19e6b958397b32f93642b80c429a6bc"
+  },
+  "reset-bank001/BANK32-BALANCED-PROSPECTIVE002.json": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/reset-bank001/BANK32-BALANCED-PROSPECTIVE002.json",
+    "sha256": "b0baebc9dee774c89091a16ed7ba6ce5bfb3df4e4a639b6faabf56ec9da43f22"
+  },
+  "reset-bank001/reset_bank.py": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/reset-bank001/reset_bank.py",
+    "sha256": "63cb613f85f7e3121690fd15b56eb3c3816ad3ac03c154e0385cb9010ab44379"
+  },
+  "sealer001/PRESERVED-PILOT-READER-c791.py.txt": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/sealer001/PRESERVED-PILOT-READER-c791.py.txt",
+    "sha256": "c791b265944f6bb9f17d30bfb5216dccf5e9446c0c74cd2057b1b1749916c0e9"
+  },
+  "sealer001/measurement_reader.py": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/sealer001/measurement_reader.py",
+    "sha256": "fac921e434abb107bb4f45ec637e5e9662a50d6ebfd1b84f0ae13343d83d366d"
+  },
+  "sealer001/qualified-origin/audit_own32_007.py": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/sealer001/qualified-origin/audit_own32_007.py",
+    "sha256": "15e220f75ae3bdf1d16454dfb68a5b98b47d27192e035f44c8afdaabcfed6e45"
+  },
+  "sealer001/qualified-origin/audit_science_bank019.py": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/sealer001/qualified-origin/audit_science_bank019.py",
+    "sha256": "83b7f8e583c71ad42e57602afd027358b7e4a57ee5ca1ab1cf0a3e452b419600"
+  },
+  "sealer001/qualified-origin/build_own32_seal.py": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/sealer001/qualified-origin/build_own32_seal.py",
+    "sha256": "e1bc82fe9feb7a57ce6ea220fd502d07474eeb1397bd46da80af530e1ee52641"
+  },
+  "sealer001/qualified-origin/fixture014/audit_science_bank014.py": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/sealer001/qualified-origin/fixture014/audit_science_bank014.py",
+    "sha256": "d7030182bc2e84b0c9a9f5be986c495bf815eb01bae6d3cfc01a4e7a775fa2dc"
+  },
+  "sealer001/test_measurement_reader.py": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/sealer001/test_measurement_reader.py",
+    "sha256": "a60507a43b89dd294139cf2b9f20cb53b6ef0be497614bc40071682c7929dc1e"
+  },
+  "sealer001/test_screen_couplings.py": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/sealer001/test_screen_couplings.py",
+    "sha256": "352284c5cf4a2e4b45eee7cccc39af49461cbdd7054c4e3698b58be64edde77c"
+  },
+  "sealer001/test_screen_guards.py": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/sealer001/test_screen_guards.py",
+    "sha256": "2e59e30289abb830e06571070ef7d4701a9e7b32d93444ed7fbd35284ba518d7"
+  },
+  "sealer001/test_screen_metadata.py": {
+    "origin": ".superpowers/sdd/2026-10-29-z1-credit-critic-screen001/overnight-analysis001/eight-screen-evaluation-prep001/checkpoint-state-repair003/package/sealer001/test_screen_metadata.py",
+    "sha256": "95bb7cfa8629fe7206ef842dae8160c661b382bf57f710ddd66aab0652dab6e7"
+  }
+}

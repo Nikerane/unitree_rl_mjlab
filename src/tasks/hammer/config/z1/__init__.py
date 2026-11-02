@@ -868,3 +868,116 @@ register_mjlab_task(
     rl_cfg=z1_impact_speed_ppo_runner_cfg(),
     runner_cls=HammerOnPolicyRunner,
 )
+
+
+def _spline_speed_curriculum_env_cfg(*, play: bool):
+    from src.tasks.hammer.mdp.spline_curriculum import (
+        DISABLED_REWARDS, SplinePathDeviationCost, SplineProgressReward,
+        AcceptedSplineStrikeReward, accepted_strike_window_complete,
+    )
+    cfg = _impact_speed_env_cfg(play=play, route_mode="three_starts")
+    for name in DISABLED_REWARDS:
+        cfg.rewards[name].weight = 0.
+    cfg.actions["strike_speed"].bounds = (1., 1.5)
+    cfg.rewards["speed_goal"].weight = -.8493676
+    params = {"robot_cfg": SceneEntityCfg("robot", site_names=("hammer_head_site",)), "width_m": .01}
+    cfg.rewards["spline_path_cost"] = RewardTermCfg(
+        func=SplinePathDeviationCost, weight=-.2, params={**params, "clamp_cost": 4.})
+    cfg.rewards["spline_progress"] = RewardTermCfg(func=SplineProgressReward, weight=1., params=dict(params))
+    cfg.rewards["accepted_spline_strike"] = RewardTermCfg(func=AcceptedSplineStrikeReward, weight=1., params=dict(params))
+    # Retain the legacy key consumed by evaluation protocols; success now means
+    # accepted first-strike observation window complete, independent of nail depth.
+    cfg.terminations["nail_driven"].func = accepted_strike_window_complete
+    cfg.terminations["nail_driven"].params = {"window_s": .05}
+    return cfg
+
+
+register_mjlab_task(
+    task_id="Unitree-Z1-Hammer-Quintic-ThreeStarts-SplineSpeedCurriculum",
+    env_cfg=_spline_speed_curriculum_env_cfg(play=False),
+    play_env_cfg=_spline_speed_curriculum_env_cfg(play=True),
+    rl_cfg=z1_impact_speed_ppo_runner_cfg(), runner_cls=HammerOnPolicyRunner,
+)
+
+
+def _spline_speed_variant_env_cfg(*, play: bool, variant: str):
+    from mjlab.managers.metrics_manager import MetricsTermCfg
+    from src.tasks.hammer.mdp.spline_speed_variants import (
+        current_height_phase, current_height_error,
+        SplineBinVisitMetric, VisitedBinsProgressReward,
+    )
+    cfg = _spline_speed_curriculum_env_cfg(play=play)
+    if variant == "O":
+        for group in ("actor", "critic"):
+            cfg.observations[group].terms["strike_phase"].func = current_height_phase
+            cfg.observations[group].terms["strike_ref_error"].func = current_height_error
+    elif variant == "P":
+        cfg.rewards["spline_progress"] = RewardTermCfg(func=VisitedBinsProgressReward, weight=1.)
+        cfg.metrics["spline_bin_visits"] = MetricsTermCfg(func=SplineBinVisitMetric,
+            params={"robot_cfg": SceneEntityCfg("robot", site_names=("hammer_head_site",))},
+            per_substep=True, reduce="last")
+    else:
+        raise ValueError("isolated spline variant must be O or P")
+    return cfg
+
+
+for _variant, _suffix in (("O", "Observation"), ("P", "VisitedBins")):
+    register_mjlab_task(
+        task_id="Unitree-Z1-Hammer-Quintic-ThreeStarts-SplineSpeedCurriculum-" + _suffix,
+        env_cfg=_spline_speed_variant_env_cfg(play=False, variant=_variant),
+        play_env_cfg=_spline_speed_variant_env_cfg(play=True, variant=_variant),
+        rl_cfg=z1_impact_speed_ppo_runner_cfg(), runner_cls=HammerOnPolicyRunner,
+    )
+
+
+from src.tasks.hammer.config.z1.spline_path_weight_cfg import (
+    TASKS as _SPLINE_PATH_WEIGHT_TASKS,
+    WEIGHTS as _SPLINE_PATH_WEIGHTS,
+)
+
+
+def _spline_path_weight_env_cfg(*, play: bool, weight: float):
+    if weight not in _SPLINE_PATH_WEIGHTS.values():
+        raise ValueError("spline path weight must be one of the frozen screen levels")
+    cfg = _spline_speed_variant_env_cfg(play=play, variant="O")
+    cfg.rewards["spline_path_cost"].weight = weight
+    return cfg
+
+
+for _weight_arm, _weight_task in _SPLINE_PATH_WEIGHT_TASKS.items():
+    _weight = _SPLINE_PATH_WEIGHTS[_weight_arm]
+    register_mjlab_task(
+        task_id=_weight_task,
+        env_cfg=_spline_path_weight_env_cfg(play=False, weight=_weight),
+        play_env_cfg=_spline_path_weight_env_cfg(play=True, weight=_weight),
+        rl_cfg=z1_impact_speed_ppo_runner_cfg(), runner_cls=HammerOnPolicyRunner,
+    )
+
+
+from src.tasks.hammer.config.z1.spline_learning_cfg import register_spline_learning_tasks
+
+register_spline_learning_tasks()
+
+from src.tasks.hammer.config.z1.spline_horizon_cfg import register_spline_horizon_tasks
+
+register_spline_horizon_tasks()
+
+from src.tasks.hammer.config.z1.spline_credit_critic_cfg import register_credit_critic_tasks
+
+register_credit_critic_tasks()
+
+
+# Opt-in task IDs for existing train/evaluation CLIs; old defaults stay intact.
+from src.tasks.hammer.config.z1.spline_reward_exploration032_cfg import register_tasks as _register_reward_exploration032
+
+_register_reward_exploration032()
+
+
+# Four opt-in critic-first recipes; existing task defaults remain unchanged.
+from src.tasks.hammer.config.z1.spline_event_study036_cfg import register_event_study_tasks
+
+register_event_study_tasks()
+
+from src.tasks.hammer.config.z1.spline_reward037_cfg import register_reward037_tasks
+
+register_reward037_tasks()

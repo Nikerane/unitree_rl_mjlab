@@ -56,6 +56,13 @@ def _validated_joint_state(
 
   robot = env.scene[robot_cfg.name]
   applied = robot.data.joint_pos_target[:, list(joint_ids)]
+  sampled = getattr(env, "_sampled_pd500", None)
+  if sampled is not None and sampled.startup_ramp_s:
+    if _id_tuple(sampled.joint_ids) != joint_ids:
+      raise ValueError("sampled startup target joint order must match trackability joints")
+    # R changes physical target delivery. Preserve the same next-state error
+    # formula against the last target actually sampled by PD, not the raw wish.
+    applied = sampled.applied_joint_position
   actual = robot.data.joint_pos[:, list(joint_ids)]
   if applied.ndim != 2 or applied.shape != actual.shape:
     raise ValueError(

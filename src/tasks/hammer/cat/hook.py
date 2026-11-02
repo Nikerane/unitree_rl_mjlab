@@ -14,6 +14,9 @@ See docs/research/reward-design/FAITHFUL_SOFT_CAT_IMPL_PLAN.md §4 + the C3 desi
 
 from __future__ import annotations
 
+import copy
+import hashlib
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import torch
@@ -24,6 +27,12 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from src.tasks.hammer.cat.constraint_manager import CaT
 from src.tasks.hammer.cat.constraints import joint_impulse_excess, joint_velocity_excess
 from src.tasks.hammer.cat.keys import CAT_DELTA_KEY, CAT_R_POS_KEY
+from src.tasks.hammer.cat.velocity_pressure import (
+  PRESSURE_STATE_SCHEMA,
+  VelocityPressure,
+  contract_digest,
+  require_counter,
+)
 from src.tasks.hammer.mdp.impulse_bound import (
   Z1_JOINT_IMPULSE_LIMIT,
   _ENV_SUBSTEP_IMPULSE_ATTR,
@@ -45,7 +54,7 @@ if TYPE_CHECKING:
 _NEG_TERMS: tuple[str, ...] = ("action_rate", "joint_pos_limits", "r_tt")
 # Keep the legacy tuple stable: the frozen FIC evaluator checks its historical identity.
 # Experimental costs are explicitly allowed when present, never inferred by sign alone.
-_OPTIONAL_NEG_TERMS: tuple[str, ...] = ("speed_goal",)
+_OPTIONAL_NEG_TERMS: tuple[str, ...] = ("speed_goal", "spline_path_cost")
 
 # Where the velocity margin |q̇_j| is sampled. "control_rate" is the shipped signal (post-decimation
 # joint_vel — it ALIASES the within-window strike spike). "substep" reads the per-joint 500 Hz peak
@@ -197,6 +206,172 @@ class CatSoftHook(ManagerTermBase):
     # Negative-term column indices into reward_manager._step_reward. Resolved LAZILY on first __call__
     # (manager build order is not guaranteed, so the reward manager may not be fully built in __init__).
     self._neg_idx: list[int] | None = None
+    self._velocity_pressure = None
+    self._pressure_last_counter = 0
+    self._pressure_frames: list[dict] = []
+    if "velocity_pressure" in p:
+      pressure = VelocityPressure.from_config(p["velocity_pressure"])
+      if pressure.total_steps % 24:
+        raise ValueError("velocity_pressure total_steps must contain whole 24-step rollouts")
+      if not (self._use_vel and self._use_impulse):
+        raise ValueError("velocity_pressure requires the combined velocity/impulse hook")
+      if pressure.final != self._max_p or pressure.initial < self._cat.min_p:
+        raise ValueError("velocity_pressure must end at max_p and start at or above min_p")
+      if require_counter(env.common_step_counter) != 0:
+        raise ValueError("construct velocity_pressure at counter 0; restore through runner.load")
+      self._velocity_pressure = pressure
+      ids = self._normalized_joint_ids(self._robot_cfg.joint_ids, robot.data.joint_pos.shape[1])
+      source_files = (Path(__file__), Path(__file__).with_name("velocity_pressure.py"),
+                      Path(__file__).with_name("constraint_manager.py"))
+      self._pressure_definition = {
+        "velocity_pressure": pressure.to_dict(),
+        "joint_names": [robot.joint_names[i] for i in ids],
+        "velocity_limit": self._limit,
+        "velocity_detection": self._vel_detection,
+        "impulse_limit": self._imp_limit.detach().cpu().tolist(),
+        "impulse_max_p": self._imp_max_p,
+        "impulse_seed": self._imp_seed,
+        "min_p": self._cat.min_p,
+        "tau": self._cat.tau,
+        "rollout_steps": 24,
+        "source_sha256": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in source_files},
+      }
+
+  @property
+  def velocity_pressure_enabled(self) -> bool:
+    return self._velocity_pressure is not None
+
+  @property
+  def pressure_counter(self) -> int:
+    return self._pressure_last_counter
+
+  @property
+  def pressure_total_steps(self) -> int:
+    return self._velocity_pressure.total_steps
+
+  def pressure_state(self, counter: int) -> dict:
+    """Checkpoint only persistent learning state, not physical/RNG resume state."""
+    counter = require_counter(counter)
+    if not self.velocity_pressure_enabled or counter != self._pressure_last_counter:
+      raise ValueError("velocity pressure checkpoint counter differs from last hook call")
+    if counter % 24 or counter > self._velocity_pressure.total_steps:
+      raise ValueError("velocity pressure checkpoints require an in-budget rollout boundary")
+    velocity = self._cat.running_maxes.get("joint_velocity_excess")
+    state = {
+      "schema": PRESSURE_STATE_SCHEMA,
+      "definition": copy.deepcopy(self._pressure_definition),
+      "definition_sha256": contract_digest(self._pressure_definition),
+      "common_step_counter": counter,
+      "last_applied": self._velocity_pressure.describe(counter - 1) if counter else None,
+      "next_transition": self._velocity_pressure.describe(counter),
+      "velocity_cmax": None if velocity is None else velocity.detach().cpu().clone(),
+      "impulse_cmax": self._imp_cmax.detach().cpu().clone(),
+      "impulse_seeded": self._imp_seeded.detach().cpu().clone(),
+      "last_rollout_step_telemetry": [
+        {k: v.detach().cpu().clone() if isinstance(v, torch.Tensor) else v for k, v in frame.items()}
+        for frame in self._pressure_frames
+      ],
+      "resume_scope": "learning clock and CaT normalizers; physical state and RNG not restored",
+    }
+    self.validate_pressure_state(state, counter)
+    return state
+
+  def validate_pressure_state(self, state: object, counter: object) -> None:
+    """Check opt-in resume metadata before any model/optimizer or live hook mutation."""
+    counter = require_counter(counter)
+    if not isinstance(state, dict) or state.get("schema") != PRESSURE_STATE_SCHEMA:
+      raise ValueError("opt-in velocity pressure resume requires pressure checkpoint state")
+    if (state.get("definition") != self._pressure_definition or
+        state.get("definition_sha256") != contract_digest(self._pressure_definition)):
+      raise ValueError("velocity pressure checkpoint definition/source/joint identity mismatch")
+    if (state.get("common_step_counter") != counter or counter % 24 or
+        counter > self._velocity_pressure.total_steps):
+      raise ValueError("velocity pressure checkpoint clock is inconsistent or off rollout boundary")
+    last = self._velocity_pressure.describe(counter - 1) if counter else None
+    if state.get("last_applied") != last or state.get("next_transition") != self._velocity_pressure.describe(counter):
+      raise ValueError("velocity pressure checkpoint applied/next pressure mismatch")
+    shape = self._imp_cmax.shape
+    # _imp_cmax is the RAW EMA; only delta_map's input is clamped to imp_seed.
+    # Preserve legitimate sub-seed values instead of changing the resumed treatment.
+    for name, floor in (("velocity_cmax", 0.0), ("impulse_cmax", 0.0)):
+      value = state.get(name)
+      if name == "velocity_cmax" and counter == 0 and value is None:
+        continue
+      if (not isinstance(value, torch.Tensor) or value.shape != shape or
+          value.dtype != self._imp_cmax.dtype or
+          not bool(torch.isfinite(value).all() and (value > floor).all())):
+        raise ValueError(f"invalid velocity pressure checkpoint {name}")
+    seeded = state.get("impulse_seeded")
+    if not isinstance(seeded, torch.Tensor) or seeded.shape != shape or seeded.dtype != torch.bool:
+      raise ValueError("invalid velocity pressure checkpoint impulse_seeded")
+    frames = state.get("last_rollout_step_telemetry")
+    if not isinstance(frames, list) or len(frames) != min(counter, 24):
+      raise ValueError("invalid velocity pressure checkpoint telemetry length")
+    for expected, frame in zip(range(counter - len(frames) + 1, counter + 1), frames):
+      if not isinstance(frame, dict) or frame.get("common_step_counter") != expected:
+        raise ValueError("invalid velocity pressure checkpoint telemetry clock")
+      if frame.get("velocity_max_p") != self._velocity_pressure.at(expected - 1):
+        raise ValueError("invalid velocity pressure checkpoint telemetry ceiling")
+      for value in frame.values():
+        if isinstance(value, torch.Tensor) and not bool(torch.isfinite(value).all()):
+          raise ValueError("nonfinite velocity pressure checkpoint telemetry")
+
+  def restore_pressure_state(self, state: dict, counter: int) -> None:
+    self.validate_pressure_state(state, counter)
+    velocity = state["velocity_cmax"]
+    self._cat.running_maxes.clear()
+    if velocity is not None:
+      self._cat.running_maxes["joint_velocity_excess"] = velocity.to(self.device).clone()
+    self._imp_cmax = state["impulse_cmax"].to(self.device).clone()
+    self._imp_seeded = state["impulse_seeded"].to(self.device).clone()
+    self._pressure_last_counter = counter
+    self._pressure_frames = [
+      {k: v.to(self.device).clone() if isinstance(v, torch.Tensor) else v for k, v in frame.items()}
+      for frame in state["last_rollout_step_telemetry"]
+    ]
+    self.reset()
+
+  def _record_pressure(self, env, counter: int, ceiling: float) -> None:
+    """Bounded detached per-transition evidence; logging never recomputes a constraint."""
+    # Reduce the authoritative buffers without the full (B,J) diagnostic snapshot.
+    # Only the small detached summaries are retained; all three new arms share this path.
+    velocity = self._cat.probs["joint_velocity_excess"].max(dim=1).values
+    impulse = self._cat.probs["joint_impulse_excess"].max(dim=1).values
+    delta_by_term = {"velocity": velocity, "impulse": impulse}
+    active = torch.maximum(velocity, impulse) > 0.0
+    winners = {
+      "velocity": active & (velocity > impulse),
+      "impulse": active & (impulse > velocity),
+      "tie": active & (velocity == impulse),
+    }
+    frame = {"common_step_counter": counter, "velocity_max_p": ceiling}
+    log = env.extras.setdefault("log", {})
+    log["CaTPressure/velocity_max_p_applied"] = ceiling
+    log["CaTPressure/impulse_max_p_applied"] = self._imp_max_p
+    first_k = ((counter - 1) // 24) * 24
+    log["CaTPressure/velocity_max_p_rollout_first"] = self._velocity_pressure.at(first_k)
+    log["CaTPressure/velocity_max_p_rollout_last"] = self._velocity_pressure.at(first_k + 23)
+    log["CaTPressure/plateau_fraction"] = float(
+      self._velocity_pressure.mode == "constant" or counter - 1 >= self._velocity_pressure.ramp_steps
+    )
+    for term in ("velocity", "impulse"):
+      delta = delta_by_term[term]
+      for name, value in (("mean", delta.mean()), ("step_max", delta.max()),
+                          ("active_fraction", (delta > 0).float().mean())):
+        frame[f"{term}_delta_{name}"] = value.detach().clone()
+        log[f"CaTPressure/{term}_delta_{name}"] = frame[f"{term}_delta_{name}"]
+      frame[f"{term}_margin_batch_max_per_joint"] = self._cat.raw_constraints[
+        f"joint_{term}_excess"].max(dim=0).values.detach().clone()
+    for name, mask in winners.items():
+      value = mask.float().mean()
+      frame[f"winner_{name}_fraction"] = value.detach().clone()
+      log[f"CaTPressure/winner_{name}_fraction"] = frame[f"winner_{name}_fraction"]
+    frame["velocity_cmax"] = self._cat.running_maxes["joint_velocity_excess"].detach().clone()
+    frame["impulse_cmax"] = self._imp_cmax.detach().clone()
+    frame["delta_step_max"] = torch.maximum(velocity, impulse).max().detach().clone()
+    self._pressure_frames.append(frame)
+    self._pressure_frames = self._pressure_frames[-24:]
+    self._pressure_last_counter = counter
 
   def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
     # Clears the per-step probs/raw buffers; running_maxes (the EMA normalizer) intentionally persists
@@ -358,15 +533,25 @@ class CatSoftHook(ManagerTermBase):
 
   def __call__(self, env: "ManagerBasedRlEnv", **params) -> torch.Tensor:
     # δ: feed each enabled constraint's RAW per-joint margin into the CaT math (soft-OR over terms/cols).
+    ceiling = self._max_p
+    if self.velocity_pressure_enabled:
+      if params.get("velocity_pressure") != self._velocity_pressure.to_dict():
+        raise ValueError("velocity_pressure configuration changed after hook construction")
+      counter = require_counter(env.common_step_counter)
+      if counter != self._pressure_last_counter + 1:
+        raise ValueError("velocity pressure clock skipped/repeated a transition; restore its state")
+      ceiling = self._velocity_pressure.at(counter - 1)
     if self._use_vel:
       c = self._vel_margin(env)                     # (B, J), control-rate or 500 Hz substep peak
-      self._cat.add("joint_velocity_excess", c, max_p=self._max_p)
+      self._cat.add("joint_velocity_excess", c, max_p=ceiling)
     if self._use_impulse:
       self._add_impulse_constraint(env)
     delta = self._cat.get_probs()                   # (B,) ∈ [min_p, max_p] on violation, else 0
     # Deliver to CatPPO via top-level extras (survives wrapper -> runner -> alg unmodified).
     env.extras[CAT_DELTA_KEY] = delta
     env.extras[CAT_R_POS_KEY] = self._compute_r_pos(env)
+    if self.velocity_pressure_enabled:
+      self._record_pressure(env, counter, ceiling)
     return delta                                    # logged as Episode_Metrics/cat_soft mean
 
   def constraint_telemetry(self) -> dict[str, torch.Tensor]:

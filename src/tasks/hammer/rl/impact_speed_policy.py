@@ -64,6 +64,8 @@ class ImpactSpeedGaussian(GaussianDistribution):
 class ImpactSpeedModel(MLPModel):
     """One model type for 13-output actor or 1-output critic."""
 
+    observation_width = 42
+
     def __init__(
         self,
         obs: TensorDict,
@@ -79,8 +81,8 @@ class ImpactSpeedModel(MLPModel):
             obs, obs_groups, obs_set, output_dim, hidden_dims, activation,
             obs_normalization, distribution_cfg,
         )
-        if self.obs_dim != 42:
-            raise ValueError(f"ImpactSpeedModel requires 42 observations, got {self.obs_dim}")
+        if self.obs_dim != self.observation_width:
+            raise ValueError(f"{type(self).__name__} requires {self.observation_width} observations, got {self.obs_dim}")
         if not obs_normalization:
             raise ValueError("ImpactSpeedModel requires observation normalization")
         if self.distribution is not None and (output_dim != 13 or not isinstance(self.distribution, ImpactSpeedGaussian)):
@@ -102,6 +104,35 @@ class ImpactSpeedModel(MLPModel):
                 raise ValueError("raw pending flag must be binary")
             self.distribution.activity_mask = torch.cat((torch.ones_like(raw[..., :12]), pending), dim=-1)
         return super().get_latent(obs, masks, hidden_state)
+
+
+class ImpactSpeedAgeModel(ImpactSpeedModel):
+    """Physical40 + raw startup age + goal + pending; preserve the last-bit mask."""
+
+    observation_width = 43
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        distribution = self.distribution
+        if distribution is not None and (
+                distribution.std_type != "scalar"
+                or distribution.std_param.shape != (13,)
+                or not distribution.std_param.requires_grad
+                or not torch.equal(distribution.std_param.detach(), torch.ones_like(distribution.std_param))):
+            raise ValueError("age treatment requires thirteen learnable unit-initialized scalar stds")
+
+
+class ImpactSpeedLowNoiseModel(ImpactSpeedAgeModel):
+    """Initialize only motion/gain exploration differently from the age control."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        distribution = self.distribution
+        if (distribution is None
+                or not distribution.std_range[0] <= .3 <= distribution.std_range[1]):
+            raise ValueError("low-noise treatment requires an actor supporting standard deviation 0.3")
+        with torch.no_grad():
+            distribution.std_param[:12].fill_(.3)
 
 
 def _require_zero_pending_input(model: ImpactSpeedModel) -> None:

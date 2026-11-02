@@ -1,1 +1,1 @@
-"""Finite, source-pinned depth031 campaign. Importing never launches work."""
+"""Retired custom031 launcher; science lives in the existing training pipeline."""
