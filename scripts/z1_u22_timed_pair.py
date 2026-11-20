@@ -29,6 +29,24 @@ def reference_exhausted(env, clip_steps):
     return env.episode_length_buf >= clip_steps
 
 
+def configure_termination(cfg, clip_steps, mode):
+    """Keep B's native contact+200ms/5s limits, or add the legacy clip cutoff."""
+    from mjlab.managers.termination_manager import TerminationTermCfg
+    from src.tasks.hammer.mdp.spline_horizon import horizon_window_complete
+
+    if mode not in ("reference", "contact"):
+        raise ValueError("Unknown termination mode")
+    native = cfg.terminations["nail_driven"]
+    assert native.func is horizon_window_complete and native.params == {"window_s": .2}
+    assert native.time_out is False and cfg.episode_length_s == 5.
+    cfg.terminations.pop("reference_exhausted", None)
+    if mode == "reference":
+        cfg.terminations["reference_exhausted"] = TerminationTermCfg(
+            func=reference_exhausted, params={"clip_steps": clip_steps}, time_out=True)
+        return clip_steps
+    return math.ceil(cfg.episode_length_s / (cfg.decimation * cfg.sim.mujoco.timestep))
+
+
 def recorded_time_phase(step, step_dt, duration):
     """DeepMimic's wrapped clock phase, using the loaded recording period."""
     if duration <= 0:
@@ -44,7 +62,6 @@ def main():
     import warp
     from mjlab.envs import ManagerBasedRlEnv
     from mjlab.rl.runner import MjlabOnPolicyRunner
-    from mjlab.managers.termination_manager import TerminationTermCfg
     from rsl_rl.modules import EmpiricalNormalization
     from scripts.z1_safety_factorial import build_config
     from src.tasks.hammer.mdp.human_reference import reference_spec
@@ -68,17 +85,21 @@ def main():
     parser.add_argument("--worlds", type=int, default=1024)
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--evaluate", type=Path)
+    parser.add_argument("--termination", choices=("contact", "reference"), default=None,
+                        help="Training defaults to contact+200ms with a 5s cap; evaluation follows the checkpoint unless overridden")
     parser.add_argument("--recorded-phase", action=argparse.BooleanOptionalAction, default=None,
                         help="Enabled by default for training; evaluation follows checkpoint metadata")
     args = parser.parse_args()
     preview = args.arm == "preview"
     phase_enabled = args.recorded_phase is not False
+    training_termination = args.termination or "contact"
     normalization = dict(method="empirical", eps=1e-2, scope="all_coordinates",
                          separate_actor_critic=True, update_timing="per_environment_step")
     # Historical evaluations retain their original observation preprocessing.
     if args.evaluate:
         saved = torch.load(args.evaluate, map_location="cpu", weights_only=False)
         saved_objective = saved["infos"]["optimized_objective"]
+        training_termination = saved_objective.get("termination", {}).get("mode", "reference")
         phase_enabled = "recorded_time_phase" in saved_objective
         if args.recorded_phase is not None and args.recorded_phase != phase_enabled:
             parser.error("The recorded-phase option must match the evaluated checkpoint")
@@ -91,6 +112,7 @@ def main():
                 **expected, "update_timing": "per_environment_step",
             }
         del saved
+    termination = args.termination or training_termination
     if phase_enabled:
         normalization["scope"] = "all_except_recorded_phase"
     updates = 1 if args.smoke else 200
@@ -106,9 +128,7 @@ def main():
     step_dt = cfg.env.decimation * cfg.env.sim.mujoco.timestep
     clip_steps = math.ceil(duration / step_dt)
     phase_indices = {"actor": 54 if preview else 42, "critic": 59 if preview else 47}
-    cfg.env.terminations["reference_exhausted"] = TerminationTermCfg(
-        func=reference_exhausted, params={"clip_steps": clip_steps}, time_out=True,
-    )
+    max_steps = configure_termination(cfg.env, clip_steps, termination)
     cfg.env.is_finite_horizon = True
     cfg.env.scene.num_envs = args.worlds
     cfg.agent.save_interval = 100
@@ -274,6 +294,11 @@ def main():
                      reward_weights={"timed_head_position": .5}, coefficient_per_m2=args.coefficient,
                      effective_cat_delta=0., reference_duration_s=duration,
                      episode_steps=clip_steps, finite_horizon=True)
+    if training_termination == "contact":
+        objective.update(episode_steps=math.ceil(cfg.env.episode_length_s / env.step_dt),
+                         reference_steps=clip_steps,
+                         termination=dict(mode="contact", window_s=.2, timeout_s=5.,
+                                          reward_after_reference="clamped_endpoint_tracking"))
     if normalization is not None:
         objective["observation_normalization"] = normalization
     if phase_enabled:
@@ -283,7 +308,7 @@ def main():
             clock="episode_steps_times_policy_dt", reset_phase=0.,
             source_commit="1f915c52fcd4b95b5f5f15b759ae91bd81e9a801")
     captured = {}
-    terminal_counts = {"contact": 0, "reference_exhausted": 0}
+    terminal_counts = {"contact": 0, "reference_exhausted": 0, "time_out": 0}
     reset_idx = env._reset_idx
     metrics = env.metrics_manager.compute
     hook = env.metrics_manager.cfg["cat_soft"].func
@@ -295,9 +320,12 @@ def main():
         error = errors(env.episode_length_buf, points.new_zeros(1))[:, 0]
         captured["vectors"] = errors(env.episode_length_buf, frame_offsets)
         captured["step"] = env.episode_length_buf.clone()
-        captured["reference_exhausted"] = env.reset_time_outs.clone()
-        captured["contact_termination"] = env.reset_terminated.clone()
-        torch.testing.assert_close(captured["reference_exhausted"], captured["step"] == clip_steps)
+        captured["reference_endpoint"] = captured["step"] == clip_steps
+        captured["reference_exhausted"] = (
+            env.termination_manager.get_term("reference_exhausted").clone()
+            if termination == "reference" else torch.zeros_like(env.reset_time_outs))
+        captured["contact_termination"] = env.termination_manager.get_term("nail_driven").clone()
+        captured["time_out"] = env.termination_manager.get_term("time_out").clone()
         captured["error_m"] = error.norm(dim=-1)
         captured["reward"] = position_reward(error, env.step_dt, args.coefficient)
         if phase_enabled:
@@ -313,6 +341,8 @@ def main():
                 contact_time_s=strike.first_contact_time_s.clone(),
                 axial_speed_m_s=strike.v_precontact.clone(),
                 delivered_impulse_ns=strike.delivered.clone(),
+                impulse_window_complete=strike.finalized.clone(),
+                depth_at_contact_m=strike.depth_at_contact.clone(),
                 peak_depth_m=strike.peak_depth.clone(),
                 productive=strike.productive.clone(),
                 constraint_excess={
@@ -343,6 +373,7 @@ def main():
             torch.testing.assert_close(env.episode_length_buf[ended], torch.zeros_like(captured["step"][ended]))
             terminal_counts["reference_exhausted"] += int(captured["reference_exhausted"].sum())
             terminal_counts["contact"] += int(captured["contact_termination"].sum())
+            terminal_counts["time_out"] += int(captured["time_out"].sum())
         expected = captured["vectors"].clone()
         if ended.any():
             expected[ended] = errors(env.episode_length_buf, frame_offsets)[ended]
@@ -366,12 +397,17 @@ def main():
     if args.evaluate:
         info = runner.load(str(args.evaluate), load_cfg={"actor": True, "critic": True}, strict=True)
         assert info["optimized_objective"] == objective
+        (args.output / "evaluation-protocol.json").write_text(json.dumps(dict(
+            training_termination=training_termination, termination=termination,
+            max_episode_steps=max_steps, reference_steps=clip_steps,
+            contact_window_s=.2, timeout_s=cfg.env.episode_length_s,
+            checkpoint_objective_preserved=True), indent=2))
         policy = runner.get_inference_policy(device=device)
         obs = observe(wrapped.reset()[0])
         finished = torch.zeros(args.worlds, dtype=torch.bool, device=device)
         trace = []
         with torch.inference_mode():
-            for _ in range(clip_steps):
+            for _ in range(max_steps):
                 obs, _, done, _ = wrapped.step(policy(obs))
                 trace.append({"active": (~finished).cpu(), **{
                     key: value.cpu() for key, value in captured.items() if isinstance(value, torch.Tensor) and key not in ("vectors", "step")
@@ -390,18 +426,33 @@ def main():
             return float(1000 * errors_m[mask].square().mean().sqrt()) if mask.any() else None
 
         contact = torch.stack([row["contact"] for row in trace]) & active
+        final_step = active.long().sum(0) - 1
+        worlds = torch.arange(args.worlds)
+        complete = torch.stack([row["impulse_window_complete"] for row in trace])[final_step, worlds]
+        impulse = torch.stack([row["delivered_impulse_ns"] for row in trace])[final_step, worlds]
+        complete_impulse = impulse[complete]
+        reference_prefix = torch.arange(len(trace))[:, None] < clip_steps
         summary = {
             "attempts": args.worlds,
             "checked_terminal_transitions": {
                 "reference_exhausted": int((active & torch.stack([row["reference_exhausted"] for row in trace])).sum()),
                 "contact": int((active & torch.stack([row["contact_termination"] for row in trace])).sum()),
+                "time_out": int((active & torch.stack([row["time_out"] for row in trace])).sum()),
             },
             "contacts": int(contact.any(dim=0).sum()),
             "productive": int((torch.stack([row["productive"] for row in trace]) & active).any(dim=0).sum()),
-            "full_clip_rmse_mm": rmse(active),
+            "full_clip_rmse_mm": rmse(active & reference_prefix),
+            "full_episode_rmse_mm": rmse(active),
+            "post_reference_rmse_mm": rmse(active & ~reference_prefix),
             "moving_rmse_mm": rmse(active & (time <= duration)),
             "descent_rmse_mm": rmse(active & (apex <= time) & (time <= duration)),
-            "endpoint_rmse_mm": rmse(active & torch.stack([row["reference_exhausted"] for row in trace])),
+            "endpoint_rmse_mm": rmse(active & torch.stack([row["reference_endpoint"] for row in trace])),
+            "completed_impulse_windows": int(complete.sum()),
+            "censored_contacts": int((contact.any(0) & ~complete).sum()),
+            "complete_window_impulse_ns": dict(
+                count=len(complete_impulse),
+                mean=float(complete_impulse.mean()) if len(complete_impulse) else None,
+                median=float(complete_impulse.quantile(.5)) if len(complete_impulse) else None),
         }
         (args.output / "summary.json").write_text(json.dumps(summary, indent=2, allow_nan=False))
         return
@@ -414,7 +465,7 @@ def main():
         index = runner.alg.storage.step
         expected = captured["reward"].clone()
         counts = [model.obs_normalizer.count.clone() for model in (runner.alg.actor, runner.alg.critic)]
-        assert "time_outs" not in extras, "The clip endpoint must not bootstrap PPO returns"
+        assert "time_outs" not in extras, "Finite-horizon episodes must not bootstrap PPO returns"
         process(obs, reward, dones, extras)
         for model, count in zip((runner.alg.actor, runner.alg.critic), counts):
             torch.testing.assert_close(model.obs_normalizer.count, count + args.worlds)
