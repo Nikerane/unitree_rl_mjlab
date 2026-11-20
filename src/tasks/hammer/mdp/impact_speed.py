@@ -174,7 +174,12 @@ class ImpactSpeedCost(ManagerTermBase):
   """Event-unit speed cost exposed as a rate for dt-scaled RewardManager."""
 
   def __init__(self, cfg: ManagerTermBaseCfg, env: ManagerBasedRlEnv):
-    validate_speed_goal_weight(cfg.weight)
+    from src.tasks.hammer.rl.demo_progress_campaign import configured
+    from src.tasks.hammer.rl.reward_grid_campaign import configured as grid_configured
+    from src.tasks.hammer.rl.split_impulse_campaign import configured as split_configured
+    env_cfg = getattr(env, 'cfg', None)
+    validate_speed_goal_weight(cfg.weight, allow_zero=(
+      configured(env_cfg) is not None or grid_configured(env_cfg) is not None or split_configured(env_cfg) is not None))
     super().__init__(env)
 
   def __call__(self, env: ManagerBasedRlEnv, **params) -> torch.Tensor:
@@ -210,11 +215,11 @@ class ImpactSpeedCost(ManagerTermBase):
     return cost / env.step_dt
 
 
-def validate_speed_goal_weight(weight: float) -> None:
+def validate_speed_goal_weight(weight: float, *, allow_zero=False) -> None:
   if (
     isinstance(weight, bool)
     or not isinstance(weight, Real)
     or not math.isfinite(float(weight))
-    or weight >= 0
+    or (weight > 0 if allow_zero else weight >= 0)
   ):
     raise ValueError("speed_goal weight must be an explicit finite negative coefficient")

@@ -19,9 +19,13 @@ class ImpactSpeedNormalization(nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self.physical = EmpiricalNormalization(40)
+        self.mask_lookahead = False
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.cat((self.physical(x[..., :40]), x[..., 40:]), dim=-1)
+        normalized = torch.cat((self.physical(x[..., :40]), x[..., 40:]), dim=-1)
+        if self.mask_lookahead:
+            normalized[..., 31:34] = 0.
+        return normalized
 
     @torch.jit.unused
     def update(self, x: torch.Tensor) -> None:

@@ -1,0 +1,57 @@
+{
+  "source_files": 172,
+  "source_inventory": "CPU-loaded modules and opened reference files, matched against preserved Vega bundle",
+  "asset_files": 32,
+  "asset_hashes_match": true,
+  "tests": {
+    "command": "python -m pytest -q tests/test_timed_reference_phase.py tests/test_impact_progress_reward.py tests/test_impulse_bound.py tests/test_impulse_constraint.py tests/test_delivered_impulse_reward.py tests/test_cat_soft_hook.py",
+    "passed": 150
+  },
+  "local_package_versions": {
+    "torch": "2.12.0",
+    "warp-lang": "1.13.0",
+    "mujoco": "3.8.1",
+    "mujoco-warp": "3.8.1",
+    "mjlab": "1.4.0"
+  },
+  "cpu_smoke": {
+    "arm": "preview",
+    "coefficient": 100,
+    "worlds": 4,
+    "updates": 1,
+    "checkpoint_reload": true
+  },
+  "production": {
+    "array": "50583990",
+    "completed": 18,
+    "updates_each": 200,
+    "evaluation_episodes_each": 32,
+    "reference_end_resets": 576
+  },
+  "observed_gpu_packages": {
+    "torch": "2.12.0",
+    "warp_lang": "1.14.0",
+    "mujoco": "3.8.1",
+    "mujoco_warp": "3.8.1",
+    "mjlab": "1.4.0"
+  },
+  "production_source_archive_sha256": "ea6e58ea804ca7288e9f6c07b81a5994c4c49afb5998652ce4ebbd259facabee",
+  "cpu_saved_production_checkpoint_evaluation": {
+    "checkpoint": "k100/preview-0/production/model_199.pt",
+    "cpu_tensor_remap_only": true,
+    "summary": {
+      "attempts": 4,
+      "checked_terminal_transitions": {
+        "reference_exhausted": 4,
+        "contact": 0
+      },
+      "contacts": 4,
+      "productive": 0,
+      "full_clip_rmse_mm": 2.6888153553009033,
+      "moving_rmse_mm": 2.7111032009124756,
+      "descent_rmse_mm": 2.85268235206604,
+      "endpoint_rmse_mm": 2.1960582733154297
+    }
+  },
+  "all_final_checkpoints_finite": 18
+}

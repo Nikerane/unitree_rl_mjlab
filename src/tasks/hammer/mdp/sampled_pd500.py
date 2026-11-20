@@ -13,6 +13,7 @@ from .variable_impedance import _variable_impedance_gains_unchecked, variable_im
 ARM_KP = (256., 384., 384., 256., 192., 128.)
 ARM_KD = (6.4,) * 6
 STARTUP_DURATION_S = .1
+HUMAN_STARTUP_RAMP_S = .05
 PHYSICS_DT_S = .00025
 
 
@@ -39,8 +40,8 @@ class SampledPD500:
     def __init__(self, env, *, gain_mode="fixed", startup_ramp_s=0.):
         _check_gain_mode(gain_mode)
         if (isinstance(startup_ramp_s, bool) or not isinstance(startup_ramp_s, Real)
-                or startup_ramp_s not in (0., STARTUP_DURATION_S)):
-            raise ValueError("startup_ramp_s must be 0 or the approved 0.1 seconds")
+                or startup_ramp_s not in (0., HUMAN_STARTUP_RAMP_S, STARTUP_DURATION_S)):
+            raise ValueError("startup_ramp_s must be 0, 0.05 or 0.1 seconds")
         if startup_ramp_s and gain_mode != "variable":
             raise ValueError("startup_ramp_s requires variable sampled impedance")
         self.gain_mode = gain_mode
@@ -220,7 +221,9 @@ class SampledPD500:
             self.requested_joint_position = desired[:, self.ids].clone()
             self.applied_joint_position = self.requested_joint_position.clone()
             if self.startup_ramp_s:
-                alpha = self.startup_age.unsqueeze(-1)
+                # Delivery duration is independent of the legacy 100ms actor clock.
+                alpha = (self.physics_substeps_since_reset.to(self.kp.dtype)
+                         * (PHYSICS_DT_S / self.startup_ramp_s)).clamp_max(1.).unsqueeze(-1)
                 self.applied_joint_position = torch.where(
                     alpha >= 1., self.requested_joint_position,
                     self.reset_joint_position + alpha * (
@@ -257,7 +260,7 @@ class SampledPD500:
             or self.gains.reset != self.reset_gains or self.env.reset != self.reset_env
             or self.env._reset_idx != self.reset_idx):
             raise ValueError("sampled PD controller hooks are not installed")
-        if (self.startup_ramp_s not in (0., STARTUP_DURATION_S)
+        if (self.startup_ramp_s not in (0., HUMAN_STARTUP_RAMP_S, STARTUP_DURATION_S)
             or self._startup_ramp_substeps != round(self.startup_ramp_s / PHYSICS_DT_S)
             or self.joint_ids != tuple(self.position.target_ids.detach().cpu().tolist())):
             raise ValueError("sampled PD startup ramp or joint mapping drift")

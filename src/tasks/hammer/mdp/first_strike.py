@@ -32,8 +32,9 @@ class FirstStrikeEventTracker(ManagerTermBase):
 
   After reset, two consecutive off-contact physics substeps are required before
   the first rising edge can start an event.  The event then spans wall time,
-  including contact gaps, and finalizes inclusively on success or on its window
-  boundary.  A finalized environment cannot rearm until reset.
+  including contact gaps, and finalizes inclusively on its window boundary.
+  Historical configurations also finalize on depth success (finalize_on_depth).
+  A finalized environment cannot rearm until reset.
   """
 
   def __init__(self, cfg: ManagerTermBaseCfg, env: "ManagerBasedRlEnv"):
@@ -70,6 +71,9 @@ class FirstStrikeEventTracker(ManagerTermBase):
     if self._window < 1:
       raise ValueError(f"window_substeps must be >= 1, got {self._window}")
     self._progress_eps = float(params.get("progress_eps", 5e-4))
+    self._finalize_on_depth = params.get("finalize_on_depth", True)
+    if type(self._finalize_on_depth) is not bool:
+      raise ValueError("finalize_on_depth must be a bool")
 
     self._state = torch.full(
       (env.num_envs,), _STATE_UNARMED, dtype=torch.long, device=env.device
@@ -371,7 +375,7 @@ class FirstStrikeEventTracker(ManagerTermBase):
       active_now, torch.maximum(self._peak_depth, depth), self._peak_depth
     )
 
-    success = active_now & (depth >= NAIL_SUCCESS_THRESHOLD)
+    success = active_now & (depth >= NAIL_SUCCESS_THRESHOLD) & self._finalize_on_depth
     window_done = active_now & (self._event_age >= self._window)
     finalize = success | window_done
     self._productive = torch.where(

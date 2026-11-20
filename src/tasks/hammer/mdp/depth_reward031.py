@@ -64,6 +64,9 @@ class NativeDepthCreditObserver031(ManagerTermBase):
         self.ledger.observe(depth)
         return depth.clamp(0., .032)
 
+    def _horizon_complete(self,elapsed):
+        return self._env._hammer_first_strike.started & (elapsed >= 800)
+
     @torch.no_grad()
     def collect(self):
         env = self._env
@@ -74,7 +77,7 @@ class NativeDepthCreditObserver031(ManagerTermBase):
         elapsed = elapsed_contact_ticks(env)
         if env.physics_dt != .00025 or env.step_dt != .02:
             raise ValueError('depth031 requires 4kHz physics and 20ms policy clock')
-        horizon = env._hammer_first_strike.started & (elapsed >= 800)
+        horizon = self._horizon_complete(elapsed)
         snap = self.ledger.collect(horizon_complete=horizon, native_reset=env.reset_buf)
         snap.update(previous_progress_potential=self._previous_potential.clone(),
                     completion_paid_before=self._completion_paid.clone(),

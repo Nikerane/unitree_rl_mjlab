@@ -754,6 +754,19 @@ def _summarize_gain_rollout(
     return telemetry
 
 
+def _validate_cat_reward_transform_checkpoint(alg, infos: dict) -> None:
+  """Reject cross-transform loads before weights, optimizer or environment state change."""
+  from src.tasks.hammer.rl.cat_ppo import CatPPO
+  if isinstance(alg, CatPPO):
+    # Historical checkpoints were produced by the unchanged scale-positives transform.
+    saved = infos.get("cat_reward_transform", "preserve_negative")
+    if type(saved) is not str or saved != alg.cat_reward_transform:
+      raise ValueError(
+        f"checkpoint cat_reward_transform {saved!r} differs from live "
+        f"cat_reward_transform {alg.cat_reward_transform!r}"
+      )
+
+
 class HammerOnPolicyRunner(MjlabOnPolicyRunner):
   env: RslRlVecEnvWrapper
 
@@ -775,12 +788,23 @@ class HammerOnPolicyRunner(MjlabOnPolicyRunner):
       if not isinstance(self.alg, CatPPO):
         raise ValueError("opt-in velocity pressure requires CatPPO")
     if "strike_speed" in env.unwrapped.action_manager.active_terms:
+      from src.tasks.hammer.rl.demo_progress_campaign import install_model_mask
+      install_model_mask(self.alg.actor, self.alg.critic, metadata)
+      from src.tasks.hammer.rl.reward_grid_campaign import install_model_mask as install_grid_mask
+      install_grid_mask(self.alg.actor, self.alg.critic, metadata)
+      from src.tasks.hammer.rl.split_impulse_campaign import install_model_mask as install_impulse_mask
+      install_impulse_mask(self.alg.actor, self.alg.critic, metadata)
+      from src.tasks.hammer.rl.safety_factorial_campaign import install_model_mask as install_factorial_mask
+      install_factorial_mask(self.alg.actor, self.alg.critic, metadata)
+      from src.tasks.hammer.rl.recovery_budget_campaign import install_model_mask as install_recovery_mask
+      install_recovery_mask(self.alg.actor, self.alg.critic, metadata)
       validate_impact_speed_models(self.alg.actor, self.alg.critic, metadata)
 
   def load(self, path: str, load_cfg=None, strict=True, map_location=None):
     # Inspect before super().load mutates models/optimizer or restores the env clock.
     checkpoint = torch.load(path, map_location=map_location, weights_only=False)
     saved_infos = checkpoint.get("infos") or {}
+    _validate_cat_reward_transform_checkpoint(self.alg, saved_infos)
     hook = pressure_hook(self.env.unwrapped)
     resume = load_cfg is None or bool(load_cfg.get("iteration", False))
     pressure_state = saved_infos.get("cat_pressure_treatment")
@@ -841,6 +865,7 @@ class HammerOnPolicyRunner(MjlabOnPolicyRunner):
       raise ValueError("qualification transfer requires a fresh runner and optimizer")
     checkpoint = torch.load(path, map_location=self.device, weights_only=False)
     infos = checkpoint.get("infos") or {}
+    _validate_cat_reward_transform_checkpoint(self.alg, infos)
     saved = infos.get("impact_speed_contract")
     if not isinstance(saved, dict) or saved.get("speed_mode") != "external":
       raise ValueError("qualification checkpoint must be in external mode")
@@ -856,6 +881,10 @@ class HammerOnPolicyRunner(MjlabOnPolicyRunner):
     }
 
   def save(self, path: str, infos=None):
+    from src.tasks.hammer.rl.cat_ppo import CatPPO
+    if isinstance(self.alg, CatPPO):
+      infos = {} if infos is None else dict(infos)
+      infos["cat_reward_transform"] = self.alg.cat_reward_transform
     action_terms = tuple(self.env.unwrapped.action_manager.active_terms)
     if "strike_speed" in action_terms:
       metadata = build_impact_speed_metadata(self.env.unwrapped, self.env.clip_actions)
@@ -867,7 +896,14 @@ class HammerOnPolicyRunner(MjlabOnPolicyRunner):
       else:
         infos.pop("impact_speed_phase_transition", None)
       pilot = metadata.get("spline_exploration_pilot")
-      if pilot is not None:
+      exploration = metadata.get("spline_exploration038")
+      if exploration is not None:
+        timing = metadata.get("human_reference", {}).get("timing", {})
+        telemetry = summarize_impact_speed_rollout(
+          self.alg.storage, tuple(metadata["speed_bounds_mps"]), exploration_metadata=exploration,
+          selector_also_controls_clock=timing.get("mode") == "adaptive",
+        )
+      elif pilot is not None:
         telemetry = summarize_impact_speed_rollout(
           self.alg.storage, tuple(metadata["speed_bounds_mps"]), pilot_metadata=pilot
         )

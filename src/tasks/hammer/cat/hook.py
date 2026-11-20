@@ -546,6 +546,9 @@ class CatSoftHook(ManagerTermBase):
       self._cat.add("joint_velocity_excess", c, max_p=ceiling)
     if self._use_impulse:
       self._add_impulse_constraint(env)
+    peak_update = getattr(self, "_peak_contact_update", None)
+    if peak_update is not None:
+      peak_update()
     delta = self._cat.get_probs()                   # (B,) ∈ [min_p, max_p] on violation, else 0
     # Deliver to CatPPO via top-level extras (survives wrapper -> runner -> alg unmodified).
     env.extras[CAT_DELTA_KEY] = delta

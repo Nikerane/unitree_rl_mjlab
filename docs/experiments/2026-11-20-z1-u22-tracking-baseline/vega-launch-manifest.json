@@ -1,0 +1,51 @@
+{
+  "source_archive": "/tmp/u22-width-k10-100-200-W118mp-source.tar.gz",
+  "source_sha256": "ea6e58ea804ca7288e9f6c07b81a5994c4c49afb5998652ce4ebbd259facabee",
+  "runtime_archive": "/tmp/u22-runtime-NzSo6I/python-runtime.tar.gz",
+  "runtime_sha256": "ce6a21f84ec53e14d0222f07cd8cdc4767793eeb2656acc456cd62e0e5554c6e",
+  "reference": "U22",
+  "arms": [
+    "control",
+    "preview"
+  ],
+  "seed_indices": [
+    0,
+    1,
+    2
+  ],
+  "seeds": [
+    2026110201,
+    2026110202,
+    2026110203
+  ],
+  "updates": 200,
+  "worlds": 1024,
+  "normalization": "full actor/critic empirical normalization, eps .01, standard per-step RSL-RL timing",
+  "dependency_source": "preserved previous U22 source bundle; physics/controller unchanged",
+  "qualification": "fresh gates then all18 rollout/evaluation checks and matched initial weights",
+  "cache_preservation": {
+    "local_backup": "/Users/nikerane/.codex/worktrees/a370/unitree_rl_mjlab/.superpowers/sdd/2026-11-19-z1-u22-standard-normalization/cache-preservation/warp-1.14.0.tar.gz",
+    "login_tmp_backup": "/tmp/u22-preserved-warp-cache-k2HLfZ.tar.gz",
+    "sha256": "3bc3054107965fdc5225e28c4f8941eb051f5272e2368b6a7edfb7c85ff1e2b0"
+  },
+  "excluded_nodes": [
+    "gn40"
+  ],
+  "base_source_archive": "/tmp/u22-standard-norm-k2HLfZ-source.tar.gz",
+  "base_source_sha256": "f9fe7928efc8527c2833989f8813e05e8fccd7f71709d28d55ce28a8e5ed75c0",
+  "coefficients": [
+    10,
+    100,
+    200
+  ],
+  "recorded_phase": true,
+  "overlay_sha256": {
+    "vega_u22_timed_pair.sbatch": "01851e7f0c429e0c0b7c4533b4f52509bcc6505c1def25bc13973de015249b2e",
+    "check_phase.py": "7aa778d1cefdcd3c22944bace5da603db97a3c732a447fa1c1c30b41eb08ad50",
+    "z1_u22_timed_pair.py": "64f7e73881b67b32e7d4ba0d919dc7ed97fe9c59971c1a52b0cd008762cd21aa",
+    "source/scripts/z1_u22_timed_pair.py": "64f7e73881b67b32e7d4ba0d919dc7ed97fe9c59971c1a52b0cd008762cd21aa",
+    "source/tests/test_timed_reference_phase.py": "bf19eecbeffe576a248bf6d4a5dc8c7872f15a28c8297c4ba68c22bcdba94592"
+  },
+  "array": "0-17%6",
+  "expected_runs": 18
+}

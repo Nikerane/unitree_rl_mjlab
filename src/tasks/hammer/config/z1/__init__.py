@@ -981,3 +981,12 @@ register_event_study_tasks()
 from src.tasks.hammer.config.z1.spline_reward037_cfg import register_reward037_tasks
 
 register_reward037_tasks()
+
+
+from src.tasks.hammer.config.z1.spline_exploration038_cfg import register_exploration038_tasks
+
+register_exploration038_tasks()
+
+from src.tasks.hammer.config.z1.human_reference_cfg import register_human_reference_tasks
+
+register_human_reference_tasks()

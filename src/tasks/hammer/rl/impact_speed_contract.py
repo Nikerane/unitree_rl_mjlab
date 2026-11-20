@@ -58,6 +58,8 @@ def _spline_reward_profile(env) -> dict:
     success_semantics = "accepted_strike_50ms_window_complete_not_nail_depth"
     if termination.params.get("window_s") == .2:
         success_semantics = "accepted_strike_200ms_window_complete_not_nail_depth"
+    if identity(termination.func) == "src.tasks.hammer.mdp.recovery_budget.recovery_window_complete":
+        success_semantics = "native_first_contact_500ms_window_complete_not_nail_depth"
     profile = {"name": "bounded_spline_speed_v1", "terms": terms,
             "progress_units": "dimensionless_per_episode_total_at_most_one",
             "accepted_strike_units": "dimensionless_once_per_accepted_first_contact",
@@ -65,6 +67,14 @@ def _spline_reward_profile(env) -> dict:
             "completion_semantics": "accepted_downward_first_contact_within_10mm_of_frozen_nail_and_spline",
             "termination": {"impl": identity(termination.func), "params": serial(termination.params),
                             "success_semantics": success_semantics}}
+    from src.tasks.hammer.rl.reward_grid_campaign import configured as grid_configured
+    from src.tasks.hammer.rl.split_impulse_campaign import configured as split_configured
+    from src.tasks.hammer.rl.safety_factorial_campaign import configured as factorial_configured
+    from src.tasks.hammer.rl.recovery_budget_campaign import configured as recovery_configured
+    if grid_configured(env.cfg) is not None or split_configured(env.cfg) is not None or factorial_configured(env.cfg) is not None or recovery_configured(env.cfg) is not None:
+        from src.tasks.hammer.rl.exploration038_contract import metadata038
+        profile['credit_timing'] = metadata038(env)['credit_timing']
+        return profile
     from src.tasks.hammer.mdp.spline_boundary_credit import BoundarySplineStrikeReward
     credit = env.reward_manager.get_term_cfg("accepted_spline_strike")
     if isinstance(credit.func, BoundarySplineStrikeReward):
@@ -86,6 +96,11 @@ def _spline_reward_profile(env) -> dict:
             "reset": "clear_eligibility_and_unpaid_credit_per_world",
             "observability": "unchanged_N_partial_observability",
         }
+    from src.tasks.hammer.rl.exploration038_contract import metadata038
+    exploration038 = metadata038(env)
+    if exploration038 is not None:
+        profile["credit_timing"] = exploration038["credit_timing"]
+        return profile
     from src.tasks.hammer.rl.spline_credit_critic_contract import credit_critic_metadata
     experiment = credit_critic_metadata(env)
     if experiment is not None:
@@ -130,42 +145,47 @@ def _sampled_vic_treatment_metadata(env) -> dict:
             raise ValueError(f"sampled VIC runtime load {name} is heterogeneous across worlds; unsupported checkpoint identity")
         return values[0].tolist()
 
+    from src.tasks.hammer.mdp.human_reference import human_metadata
+    human = human_metadata(env)
     reward = env.reward_manager.get_term_cfg("r_imit")
-    reference_keys = ("path_shape", "overshoot", "followthrough_mode", "horizontal_detour_m")
-    reference = {key: reward.params.get(key, 0.0 if key == "horizontal_detour_m" else None)
-                 for key in reference_keys}
-    if (not math.isfinite(reward.weight) or reward.weight < 0
-        or env.cfg.rewards["r_imit"].weight != reward.weight or reference != {
-        "path_shape": "quintic", "overshoot": .02,
-        "followthrough_mode": "vertical", "horizontal_detour_m": 0.0,
-    } or "r_imit_anneal" in env.cfg.curriculum):
-        raise ValueError("sampled VIC guidance must preserve the persistent quintic treatment")
-    for group in ("actor", "critic"):
-        for name in ("strike_phase", "strike_ref_error"):
-            params = env.observation_manager.get_term_cfg(group, name).params
-            if any(params.get(key, 0.0 if key == "horizontal_detour_m" else None) != value
-                   for key, value in reference.items()):
-                raise ValueError("sampled VIC observation path differs from guidance")
-    sampler = env.cfg.events["sample_strike_route_signs"].params
-    if any(sampler.get(key, 0.0 if key == "horizontal_detour_m" else None) != value
-           for key, value in reference.items()):
-        raise ValueError("sampled VIC reset path differs from guidance")
-    fixed_route_sign = sampler.get("fixed_route_sign")
-    if fixed_route_sign not in (-1, None):
-        raise ValueError("sampled VIC route must be left-only or three-start sampled")
-    width = reward.params.get("sigma", .05)
-    if (not math.isfinite(width) or width <= 0
-        or env.cfg.rewards["r_imit"].params.get("sigma", .05) != width):
-        raise ValueError("sampled VIC guidance width must be finite and positive")
-    route_positions = env.cfg.events["reset_strike_route_joints"].params["route_joint_positions"]
-    return {
-        "reference": {
+    if human is None:
+        reference_keys = ("path_shape", "overshoot", "followthrough_mode", "horizontal_detour_m")
+        reference = {key: reward.params.get(key, 0.0 if key == "horizontal_detour_m" else None)
+                     for key in reference_keys}
+        if (not math.isfinite(reward.weight) or reward.weight < 0
+            or env.cfg.rewards["r_imit"].weight != reward.weight or reference != {
+            "path_shape": "quintic", "overshoot": .02,
+            "followthrough_mode": "vertical", "horizontal_detour_m": 0.0,
+        } or "r_imit_anneal" in env.cfg.curriculum):
+            raise ValueError("sampled VIC guidance must preserve the persistent quintic treatment")
+        for group in ("actor", "critic"):
+            for name in ("strike_phase", "strike_ref_error"):
+                params = env.observation_manager.get_term_cfg(group, name).params
+                if any(params.get(key, 0.0 if key == "horizontal_detour_m" else None) != value
+                       for key, value in reference.items()):
+                    raise ValueError("sampled VIC observation path differs from guidance")
+        sampler = env.cfg.events["sample_strike_route_signs"].params
+        if any(sampler.get(key, 0.0 if key == "horizontal_detour_m" else None) != value
+               for key, value in reference.items()):
+            raise ValueError("sampled VIC reset path differs from guidance")
+        fixed_route_sign = sampler.get("fixed_route_sign")
+        if fixed_route_sign not in (-1, None):
+            raise ValueError("sampled VIC route must be left-only or three-start sampled")
+        reference_payload = {
             "path_shape": reference["path_shape"], "overshoot_m": reference["overshoot"],
             "followthrough_mode": reference["followthrough_mode"],
             "horizontal_detour_m": reference["horizontal_detour_m"],
             "fixed_route_sign": fixed_route_sign,
-            "route_joint_positions_rad": route_positions,
-        },
+            "route_joint_positions_rad": env.cfg.events["reset_strike_route_joints"].params["route_joint_positions"],
+        }
+    else:
+        reference_payload = {"path_shape":"human_polyline", **human}
+    width = reward.params.get("sigma", .05)
+    if (not math.isfinite(width) or width <= 0
+        or env.cfg.rewards["r_imit"].params.get("sigma", .05) != width):
+        raise ValueError("sampled VIC guidance width must be finite and positive")
+    return {
+        "reference": reference_payload,
         "guidance": {"weight": float(reward.weight), "width_m": float(width),
                      "impl": f"{type(reward.func).__module__}.{type(reward.func).__qualname__}"},
         "load": {
@@ -180,6 +200,10 @@ def _sampled_vic_treatment_metadata(env) -> dict:
 
 
 def _observation_metadata(env) -> dict:
+    from src.tasks.hammer.rl.exploration038_contract import metadata038, observation_metadata038
+    exploration038 = metadata038(env)
+    if exploration038 is not None:
+        return observation_metadata038(env, exploration038)
     # Shared validation is imported lazily to keep the legacy runner's public
     # dispatch small without introducing a second copy of its controller rules.
     from src.tasks.hammer.rl.runner import _DIRECT_JOINT_OBSERVATIONS, _joint_observation_metadata
@@ -269,8 +293,16 @@ def build_impact_speed_metadata(env, raw_policy_clip: float) -> dict:
     if axis != [0.0, 0.0, -1.0]:
         raise ValueError("impact speed axis must be the world-frame nail approach axis [0, 0, -1]")
     cost = env.reward_manager.get_term_cfg("speed_goal")
-    validate_speed_goal_weight(cost.weight)
-    if type(cost.func) is not ImpactSpeedCost or cost.params:
+    from src.tasks.hammer.rl.demo_progress_campaign import configured
+    from src.tasks.hammer.rl.reward_grid_campaign import configured as grid_configured
+    from src.tasks.hammer.rl.split_impulse_campaign import configured as split_configured
+    from src.tasks.hammer.rl.safety_factorial_campaign import configured as factorial_configured
+    from src.tasks.hammer.rl.recovery_budget_campaign import configured as recovery_configured
+    validate_speed_goal_weight(cost.weight, allow_zero=configured(env.cfg) is not None or grid_configured(env.cfg) is not None or split_configured(env.cfg) is not None or factorial_configured(env.cfg) is not None or recovery_configured(env.cfg) is not None)
+    from src.tasks.hammer.rl.safety_factorial_campaign import FactorialSpeedCost
+    from src.tasks.hammer.rl.recovery_budget_campaign import RecoverySpeedCost
+    expected_speed_cost = RecoverySpeedCost if recovery_configured(env.cfg) is not None else FactorialSpeedCost if factorial_configured(env.cfg) is not None else ImpactSpeedCost
+    if type(cost.func) is not expected_speed_cost or cost.params:
         raise ValueError("impact speed cost must use the exact event-unit implementation")
 
     metadata = _joint_position_metadata(
@@ -318,6 +350,43 @@ def build_impact_speed_metadata(env, raw_policy_clip: float) -> dict:
     })
     if "spline_path_cost" in env.reward_manager.active_terms:
         metadata["reward_profile"] = _spline_reward_profile(env)
+        from src.tasks.hammer.rl.exploration038_contract import MARKER, metadata038
+        exploration038 = metadata038(env)
+        if exploration038 is not None:
+            metadata[MARKER] = exploration038
+            from src.tasks.hammer.mdp.human_reference import human_metadata
+            human = human_metadata(env)
+            if human is not None:
+                metadata["human_reference"] = human
+            from src.tasks.hammer.rl.u22_lookahead import MARKER as LOOKAHEAD_MARKER
+            lookahead = getattr(env, LOOKAHEAD_MARKER, None)
+            if lookahead is not None:
+                if not human or human.get("reference_id") != "U22" or human.get("timing", {}).get("mode") != "path":
+                    raise ValueError("lookahead ablation requires U22 path following")
+                metadata[LOOKAHEAD_MARKER] = lookahead
+            from src.tasks.hammer.rl.demo_progress_campaign import MARKER as DEMO_MARKER, live as demo_live
+            demo = demo_live(env)
+            if demo is not None:
+                metadata[DEMO_MARKER] = demo
+            from src.tasks.hammer.rl.reward_grid_campaign import MARKER as GRID_MARKER, live as grid_live
+            grid = grid_live(env)
+            if grid is not None:
+                metadata[GRID_MARKER] = grid
+            from src.tasks.hammer.rl.split_impulse_campaign import MARKER as SPLIT_MARKER, live as split_live
+            split = split_live(env)
+            if split is not None:
+                metadata[SPLIT_MARKER] = split
+            from src.tasks.hammer.rl.recovery_budget_campaign import MARKER as RECOVERY_MARKER, live as recovery_live
+            recovery = recovery_live(env)
+            if recovery is not None:metadata[RECOVERY_MARKER] = recovery
+            from src.tasks.hammer.rl.safety_factorial_campaign import MARKER as FACTORIAL_MARKER, live as factorial_live
+            factorial = factorial_live(env)
+            if factorial is not None:
+                metadata[FACTORIAL_MARKER] = factorial
+            metadata["controller_identity"] = ("sampled_pd500_v1"
+                if exploration038["gain_mode"] == "fixed" else "sampled_vic500_v1")
+            metadata["split_physical_treatment"] = _sampled_vic_treatment_metadata(env)
+            return json.loads(json.dumps(metadata, allow_nan=False))
         from src.tasks.hammer.mdp.spline_speed_variants import variant_metadata
         variant = variant_metadata(env)
         if variant is not None:
@@ -369,6 +438,10 @@ def build_impact_speed_metadata(env, raw_policy_clip: float) -> dict:
 
 def validate_impact_speed_models(actor, critic, expected_metadata: dict | None = None) -> None:
     """Require exact observation width, model treatment and fixed-tail normalization."""
+    if "spline_exploration038" in (expected_metadata or {}):
+        from src.tasks.hammer.rl.exploration038_contract import validate_models
+        validate_models(actor, critic, expected_metadata)
+        return
     if "spline_reward037" in (expected_metadata or {}):
         from src.tasks.hammer.rl.spline_reward037_contract import validate_reward_models
         validate_reward_models(actor, critic, expected_metadata)
@@ -430,6 +503,17 @@ def validate_impact_speed_metadata(
         raise ValueError("impact speed checkpoint metadata is missing or has the wrong schema")
     if not isinstance(expected, dict) or expected.get("schema_version") != _SCHEMA:
         raise ValueError("expected impact speed metadata has the wrong schema")
+    if "human_reference" in saved or "human_reference" in expected:
+        from src.tasks.hammer.mdp.human_reference import validate_human_identity
+        validate_human_identity(saved)
+        validate_human_identity(expected)
+    if "spline_exploration038" in saved or "spline_exploration038" in expected:
+        from src.tasks.hammer.rl.exploration038_contract import validate_metadata
+        for value in (saved, expected):
+            validate_metadata(value)
+        if not _same_exploration038_metadata(saved, expected, allow_phase_transfer):
+            raise ValueError("impact speed checkpoint metadata mismatch: exploration038")
+        return
     if "spline_reward037" in saved or "spline_reward037" in expected:
         from src.tasks.hammer.rl.spline_reward037_contract import validate_reward_metadata
         for value in (saved, expected):
@@ -457,11 +541,25 @@ def validate_impact_speed_metadata(
         raise ValueError(f"impact speed checkpoint metadata mismatch: {different}")
 
 
-def summarize_impact_speed_rollout(storage, bounds: tuple[float, float], *, pilot_metadata=None) -> dict | None:
+def _same_exploration038_metadata(saved, expected, allow_phase_transfer):
+    candidate = dict(saved)
+    if allow_phase_transfer and candidate.get("speed_mode") == "external" and expected.get("speed_mode") == "policy":
+        candidate["speed_mode"] = "policy"
+    return json.dumps(candidate, allow_nan=False, sort_keys=True) == json.dumps(expected, allow_nan=False, sort_keys=True)
+
+
+def summarize_impact_speed_rollout(storage, bounds: tuple[float, float], *, pilot_metadata=None,
+                                  exploration_metadata=None, selector_also_controls_clock=False) -> dict | None:
     """Summarize gains and only genuinely selected (saved-mask) speed actions."""
     from src.tasks.hammer.rl.runner import _summarize_gain_rollout
 
     pilot = None
+    exploration = None
+    if exploration_metadata is not None:
+        from src.tasks.hammer.rl.exploration038_contract import validate_identity
+        if pilot_metadata is not None:
+            raise ValueError("rollout telemetry cannot mix pilot and038 identities")
+        exploration = validate_identity(exploration_metadata)
     if pilot_metadata is not None:
         from src.tasks.hammer.rl.spline_exploration_pilot_contract import validate_pilot_identity
         pilot = validate_pilot_identity(pilot_metadata)
@@ -479,10 +577,14 @@ def summarize_impact_speed_rollout(storage, bounds: tuple[float, float], *, pilo
         not isinstance(masks, torch.Tensor) or masks.shape != storage.actions.shape
         or not torch.all((masks == 0) | (masks == 1))
         or not torch.all(masks[..., :6] == 1)
-        or not torch.all(masks[..., 6:12] == (pilot["likelihood_gain_mask"] if pilot is not None else 1))
+        or not torch.all(masks[..., 6:12] == (
+            exploration["likelihood_gain_mask"] if exploration is not None
+            else pilot["likelihood_gain_mask"] if pilot is not None else 1))
     ):
         raise ValueError("impact speed telemetry requires aligned binary masks with all motor actions active")
     selected = masks[..., 12].bool()
+    if selector_also_controls_clock:
+        selected = storage.observations['actor'][..., 42].bool()
     sampled = storage.actions[..., 12][selected].detach().to(device="cpu", dtype=torch.float64).clamp(-1, 1)
     lo, hi = checked.bounds
     physical = lo + (sampled + 1) * 0.5 * (hi - lo)
@@ -510,5 +612,12 @@ def summarize_impact_speed_rollout(storage, bounds: tuple[float, float], *, pilo
         if pilot["setting"] == "fixed_nominal":
             telemetry["applied_fixed_nominal_gains_kp"] = pilot["fixed_nominal_kp"]
             telemetry["applied_fixed_nominal_gains_kd"] = pilot["fixed_nominal_kd"]
+    if exploration is not None:
+        telemetry["spline_exploration038"] = exploration
+        telemetry["requested_gain_actions"] = {name: telemetry.pop(name) for name in (
+            "deterministic_gaussian_mean", "sampled_action", "gaussian_exploration_std")}
+        telemetry["requested_gain_semantics"] = (
+            "IGNORED_OUTPUTS_FIXED_NOMINAL_GAINS" if exploration["gain_mode"] == "fixed"
+            else "POLICY_REQUESTS_NOT_APPLIED_GAIN_MEASUREMENTS")
     json.dumps(telemetry, allow_nan=False)
     return telemetry

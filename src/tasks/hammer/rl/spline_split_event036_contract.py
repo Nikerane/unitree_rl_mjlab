@@ -67,8 +67,13 @@ def validate_native_constraints(env):
     from src.tasks.hammer.mdp.impulse_bound import SubstepImpulseAccumulator
     from src.tasks.hammer.mdp.velocity_bound import SubstepPeakJointVel
 
+    from src.tasks.hammer.rl.safety_factorial_campaign import configured as factorial_configured
+    factorial = factorial_configured(env.cfg)
+    from src.tasks.hammer.rl.recovery_budget_campaign import configured as recovery_configured
+    recovery = recovery_configured(env.cfg)
+    load_max_p = recovery['load_max_p'] if recovery is not None else .2 if factorial is None else factorial['load_max_p']
     params = dict(use_vel=True, use_impulse=True, imp_limit=[.369,.246,.738,.369,.246,.0164],
-                  imp_max_p=.2, imp_seed=.001, limit=3.1415, max_p=.5, min_p=0., tau=.95,
+                  imp_max_p=load_max_p, imp_seed=.001, limit=3.1415, max_p=.5, min_p=0., tau=.95,
                   vel_detection='substep')
     metrics = getattr(env.metrics_manager, 'cfg', None)
     _need(type(metrics) is dict and 'cat_soft' in metrics, 'event036 requires live constraint manager configs')
@@ -99,7 +104,7 @@ def validate_native_constraints(env):
           'event036 live reaction impulse owner/window differs')
     hook = metrics['cat_soft'].func
     _need(type(hook) is CatSoftHook and hook._use_vel and hook._use_impulse
-          and hook._max_p == .5 and hook._imp_max_p == .2 and hook._limit == 3.1415
+          and hook._max_p == .5 and hook._imp_max_p == load_max_p and hook._limit == 3.1415
           and hook._imp_seed == .001 and hook._vel_detection == 'substep'
           and hook._velocity_pressure is None and hook._cat.tau == .95 and hook._cat.min_p == 0.,
           'event036 live velocity/impulse CaT treatment differs')

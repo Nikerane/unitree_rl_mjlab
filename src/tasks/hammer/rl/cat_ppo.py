@@ -5,8 +5,8 @@ installed package; inject via the ``algorithm.class_name`` config string, resolv
 ``OnPolicyRunner`` at ``on_policy_runner.py:39``). Overrides three seams:
 
   • ``construct_algorithm`` — inject the float-dones :class:`CatRolloutStorage` (C1) so δ survives.
-  • ``process_env_step``    — apply the SCALE-POSITIVES reward discount ``r_total − δ·r_pos`` (Decision 1;
-    NO clip) and carry δ into the storage's soft-done buffer.
+  • ``process_env_step``    — apply the selected reward transform (default: scale positives,
+    ``r_total − δ·r_pos`` without clipping) and carry δ into the storage's soft-done buffer.
   • ``compute_returns``     — DUAL-MASK GAE bootstrap ``γ·(1−δ)·(1−true_done)`` (Decisions 3–4).
 
 See docs/research/reward-design/FAITHFUL_SOFT_CAT_IMPL_PLAN.md §4.
@@ -27,6 +27,17 @@ from src.tasks.hammer.rl.cat_storage import CatRolloutStorage
 class CatPPO(PPO):
   """PPO with the faithful soft-CaT reward discount + dual-mask bootstrap."""
 
+  # Class default also describes legacy instances/checkpoints without an explicit selector.
+  cat_reward_transform = "preserve_negative"
+
+  def __init__(self, *args, cat_reward_transform: str = "preserve_negative", **kwargs) -> None:
+    if type(cat_reward_transform) is not str or cat_reward_transform not in (
+      "preserve_negative", "reference_clipped"
+    ):
+      raise ValueError("cat_reward_transform must be 'preserve_negative' or 'reference_clipped'")
+    self.cat_reward_transform = cat_reward_transform
+    super().__init__(*args, **kwargs)
+
   # Keys the CaT env hook (CatSoftHook) stashes into ``extras`` each step (shared via cat.keys).
   DELTA_KEY = CAT_DELTA_KEY   # δ ∈ [0, max_p], shape (B,)
   R_POS_KEY = CAT_R_POS_KEY   # dt-scaled sum of the positive reward terms, shape (B,)
@@ -43,10 +54,15 @@ class CatPPO(PPO):
     rp = r_pos.reshape(-1)
     return rewards - (d * rp).reshape(rewards.shape)
 
+  @staticmethod
+  def _cat_reference_reward(rewards: torch.Tensor, delta: torch.Tensor) -> torch.Tensor:
+    """Reference immediate reward: ``max(0, (1−δ)·r_total)``, before timeout bootstrap."""
+    return (rewards * (1.0 - delta.reshape(rewards.shape))).clamp_min(0.0)
+
   def process_env_step(
     self, obs: TensorDict, rewards: torch.Tensor, dones: torch.Tensor, extras: dict[str, torch.Tensor]
   ) -> None:
-    """Scale-positives discount + a soft-CaT-consistent timeout bootstrap; carry δ; then defer to
+    """Selected immediate reward + the unchanged soft-CaT timeout bootstrap; carry δ; then defer to
     stock PPO bookkeeping."""
     delta = extras.get(self.DELTA_KEY)
     if not getattr(self, "_cat_checked", False):
@@ -67,7 +83,10 @@ class CatPPO(PPO):
     # Scale-positives discount (Decision 1), applied on EVERY step incl. terminals (convention 2,
     # faithful to cat_env.py reward*(1-δ)). At a true terminal the dual mask cuts the bootstrap, so a
     # violating success is worth (1-δ)*reward -- the intended safety incentive (user-confirmed).
-    rewards = self._cat_scale_reward(rewards, delta, extras[self.R_POS_KEY])
+    if self.cat_reward_transform == "reference_clipped":
+      rewards = self._cat_reference_reward(rewards, delta)
+    else:
+      rewards = self._cat_scale_reward(rewards, delta, extras[self.R_POS_KEY])
     self.transition.soft_dones = d
 
     # Soft-CaT-consistent time-limit bootstrap. rsl_rl injects the FULL gamma*V_t at a timeout

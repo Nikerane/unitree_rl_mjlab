@@ -39,7 +39,8 @@ def configure_impact_speed_controller(env_cfg, *, sampled_pd500: bool, gain_mode
   configure_sampled_pd500(env_cfg, gain_mode=gain_mode)
 
 
-def install_impact_speed_controller(env, *, sampled_pd500: bool, gain_mode: str):
+def install_impact_speed_controller(env, *, sampled_pd500: bool, gain_mode: str,
+                                    startup_ramp_s: float | None = None):
   """Install torque authority before environment wrapping and runner creation."""
   _require_pilot_controller(env.cfg, sampled_pd500, gain_mode)
   from src.tasks.hammer.mdp.spline_learning_variants import learning_variant
@@ -48,8 +49,13 @@ def install_impact_speed_controller(env, *, sampled_pd500: bool, gain_mode: str)
     raise ValueError("learning treatment requires sampled variable-impedance control")
   if sampled_pd500:
     from src.tasks.hammer.mdp.sampled_pd500 import install_sampled_pd500
+    if startup_ramp_s is None:
+      # No implicit smoothing in training/evaluation, including human paths.
+      # Preserve the named historical R treatment; archived ramp-trained
+      # checkpoints require an explicit duration before strict loading.
+      startup_ramp_s = .1 if variant == "R" else 0.
     return install_sampled_pd500(
-      env, gain_mode=gain_mode, startup_ramp_s=.1 if variant == "R" else 0.)
+      env, gain_mode=gain_mode, startup_ramp_s=startup_ramp_s)
   return None
 
 
@@ -83,7 +89,12 @@ def require_impact_speed_experiment_cfg(env_cfg) -> None:
     raise ValueError("impact speed bounds must be supplied explicitly")
   # Share the action state's strict domain validation without creating a native environment.
   ImpactSpeedState(1, "cpu", speed.bounds, speed.mode)
-  validate_speed_goal_weight(env_cfg.rewards["speed_goal"].weight)
+  from src.tasks.hammer.rl.demo_progress_campaign import configured
+  from src.tasks.hammer.rl.reward_grid_campaign import configured as grid_configured
+  from src.tasks.hammer.rl.split_impulse_campaign import configured as split_configured
+  from src.tasks.hammer.rl.safety_factorial_campaign import configured as factorial_configured
+  from src.tasks.hammer.rl.recovery_budget_campaign import configured as recovery_configured
+  validate_speed_goal_weight(env_cfg.rewards["speed_goal"].weight, allow_zero=configured(env_cfg) is not None or grid_configured(env_cfg) is not None or split_configured(env_cfg) is not None or factorial_configured(env_cfg) is not None or recovery_configured(env_cfg) is not None)
 
 
 def configure_impact_speed_experiment(
@@ -109,6 +120,11 @@ def configure_impact_speed_experiment(
   if mode is not None:
     speed.mode = mode
   if cost is not None:
-    validate_speed_goal_weight(-cost)
+    from src.tasks.hammer.rl.demo_progress_campaign import configured
+    from src.tasks.hammer.rl.reward_grid_campaign import configured as grid_configured
+    from src.tasks.hammer.rl.split_impulse_campaign import configured as split_configured
+    from src.tasks.hammer.rl.safety_factorial_campaign import configured as factorial_configured
+    from src.tasks.hammer.rl.recovery_budget_campaign import configured as recovery_configured
+    validate_speed_goal_weight(-cost, allow_zero=configured(env_cfg) is not None or grid_configured(env_cfg) is not None or split_configured(env_cfg) is not None or factorial_configured(env_cfg) is not None or recovery_configured(env_cfg) is not None)
     env_cfg.rewards["speed_goal"].weight = -cost
   require_impact_speed_experiment_cfg(env_cfg)
