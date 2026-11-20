@@ -1,0 +1,182 @@
+[
+  {
+    "arm": "control",
+    "seed_index": 0,
+    "phases": {
+      "original_prefix": {
+        "load_exceeding_attempts": 0,
+        "speed_exceeding_attempts": 32,
+        "max_joint_speed_rad_s": [
+          0.9329046010971069,
+          4.769555568695068,
+          3.630496025085449,
+          5.322116851806641,
+          1.4595507383346558,
+          1.22945237159729
+        ]
+      },
+      "continuation": {
+        "load_exceeding_attempts": 12,
+        "speed_exceeding_attempts": 0,
+        "max_joint_speed_rad_s": [
+          0.5950032472610474,
+          2.465847969055176,
+          1.0874152183532715,
+          2.1187376976013184,
+          1.229085087776184,
+          0.8380974531173706
+        ]
+      }
+    }
+  },
+  {
+    "arm": "control",
+    "seed_index": 1,
+    "phases": {
+      "original_prefix": {
+        "load_exceeding_attempts": 0,
+        "speed_exceeding_attempts": 32,
+        "max_joint_speed_rad_s": [
+          0.861073911190033,
+          4.596398830413818,
+          3.5391507148742676,
+          4.8166985511779785,
+          1.8436181545257568,
+          0.9612818360328674
+        ]
+      },
+      "continuation": {
+        "load_exceeding_attempts": 5,
+        "speed_exceeding_attempts": 21,
+        "max_joint_speed_rad_s": [
+          0.6266713738441467,
+          2.3706769943237305,
+          1.8687856197357178,
+          4.562159061431885,
+          0.9668359160423279,
+          0.7480325102806091
+        ]
+      }
+    }
+  },
+  {
+    "arm": "control",
+    "seed_index": 2,
+    "phases": {
+      "original_prefix": {
+        "load_exceeding_attempts": 0,
+        "speed_exceeding_attempts": 31,
+        "max_joint_speed_rad_s": [
+          0.8796543478965759,
+          4.125311851501465,
+          3.145035982131958,
+          6.032020092010498,
+          1.5078908205032349,
+          0.5268378853797913
+        ]
+      },
+      "continuation": {
+        "load_exceeding_attempts": 20,
+        "speed_exceeding_attempts": 0,
+        "max_joint_speed_rad_s": [
+          0.45150628685951233,
+          2.6971662044525146,
+          1.4077681303024292,
+          2.4796090126037598,
+          0.4741516411304474,
+          0.3414422273635864
+        ]
+      }
+    }
+  },
+  {
+    "arm": "preview",
+    "seed_index": 0,
+    "phases": {
+      "original_prefix": {
+        "load_exceeding_attempts": 0,
+        "speed_exceeding_attempts": 32,
+        "max_joint_speed_rad_s": [
+          1.1825906038284302,
+          5.392485618591309,
+          3.941553831100464,
+          6.734772682189941,
+          2.169708728790283,
+          1.4167087078094482
+        ]
+      },
+      "continuation": {
+        "load_exceeding_attempts": 3,
+        "speed_exceeding_attempts": 4,
+        "max_joint_speed_rad_s": [
+          0.7168703079223633,
+          3.1308958530426025,
+          1.6950825452804565,
+          3.769073724746704,
+          1.3555234670639038,
+          0.5663946270942688
+        ]
+      }
+    }
+  },
+  {
+    "arm": "preview",
+    "seed_index": 1,
+    "phases": {
+      "original_prefix": {
+        "load_exceeding_attempts": 0,
+        "speed_exceeding_attempts": 16,
+        "max_joint_speed_rad_s": [
+          0.5774710178375244,
+          3.4174795150756836,
+          2.569021701812744,
+          2.5047378540039062,
+          1.5430028438568115,
+          1.1936308145523071
+        ]
+      },
+      "continuation": {
+        "load_exceeding_attempts": 10,
+        "speed_exceeding_attempts": 1,
+        "max_joint_speed_rad_s": [
+          0.5300650596618652,
+          1.4954819679260254,
+          1.3090391159057617,
+          3.3815531730651855,
+          1.166135311126709,
+          0.7855879664421082
+        ]
+      }
+    }
+  },
+  {
+    "arm": "preview",
+    "seed_index": 2,
+    "phases": {
+      "original_prefix": {
+        "load_exceeding_attempts": 0,
+        "speed_exceeding_attempts": 31,
+        "max_joint_speed_rad_s": [
+          0.5471276044845581,
+          4.721136569976807,
+          2.684260129928589,
+          2.966562032699585,
+          1.2820045948028564,
+          0.9959627389907837
+        ]
+      },
+      "continuation": {
+        "load_exceeding_attempts": 15,
+        "speed_exceeding_attempts": 1,
+        "max_joint_speed_rad_s": [
+          0.26784124970436096,
+          3.2396514415740967,
+          1.0974987745285034,
+          2.622115135192871,
+          0.8546444773674011,
+          0.9367562532424927
+        ]
+      }
+    }
+  }
+]

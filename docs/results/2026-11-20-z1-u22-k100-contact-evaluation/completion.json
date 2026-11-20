@@ -1,0 +1,50 @@
+{
+  "phase": "all-six-rollouts-measured-with-two-strict-prefix-check-failures",
+  "rollouts_completed": 6,
+  "evaluation_episodes": 192,
+  "complete_J50_windows": 192,
+  "productive_episodes": 192,
+  "training": false,
+  "checkpoint_hashes_unchanged": 6,
+  "prefix_tolerance_um": 10,
+  "prefix_checks_passed": 4,
+  "prefix_checks": [
+    {
+      "arm": "control",
+      "seed": 2026110201,
+      "passed": true,
+      "max_head_difference_um": 1.9669532775878906
+    },
+    {
+      "arm": "control",
+      "seed": 2026110202,
+      "passed": true,
+      "max_head_difference_um": 5.125999450683594
+    },
+    {
+      "arm": "control",
+      "seed": 2026110203,
+      "passed": true,
+      "max_head_difference_um": 1.3262033462524414
+    },
+    {
+      "arm": "preview",
+      "seed": 2026110201,
+      "passed": false,
+      "max_head_difference_um": 16.311765648424625
+    },
+    {
+      "arm": "preview",
+      "seed": 2026110202,
+      "passed": true,
+      "max_head_difference_um": 0.4172325134277344
+    },
+    {
+      "arm": "preview",
+      "seed": 2026110203,
+      "passed": false,
+      "max_head_difference_um": 22.91053533554077
+    }
+  ],
+  "interpretation": "Completed saved-policy rollouts retained. Original10um threshold unchanged; failed flags retained; no outcome-selected reruns. Exact historical replay not claimed for flagged policies."
+}

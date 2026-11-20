@@ -1,0 +1,68 @@
+{
+  "training": false,
+  "coefficient_per_m2": 100,
+  "arms": [
+    "control",
+    "preview"
+  ],
+  "seed_indices": [
+    0,
+    1,
+    2
+  ],
+  "worlds": 32,
+  "termination": "first_nail_contact_plus200ms_policy_boundary_or5s_cap",
+  "reference_duration_s": 0.41,
+  "source_commit": "21bc51163cec028cf26cfdd743cbc0d3ee281f4c",
+  "source_overlay": "evaluation-only exact load/velocity logging",
+  "source_sha256": "6e2b161d481a6316540aecc381b276998fbe7f3839a55ce83e75e50831b6ad3f",
+  "checkpoints": {
+    "control-0": {
+      "sha256": "ea87f8ff53f0d3e6144982f3788e239293f114286b51abd43151b7af86b44a33",
+      "canonical_vega_path": "/ceph/hpc/home/eunikhilr/z1-checks/u22-width-k10-100-200-W118mp/k100/control-0/production/model_199.pt",
+      "seed": 2026110201
+    },
+    "control-1": {
+      "sha256": "19bc31ee31a41a2b77078a72cd995d6a71e82bff8d357ebb9f3b97b5d9d24bd9",
+      "canonical_vega_path": "/ceph/hpc/home/eunikhilr/z1-checks/u22-width-k10-100-200-W118mp/k100/control-1/production/model_199.pt",
+      "seed": 2026110202
+    },
+    "control-2": {
+      "sha256": "83bb86abbdceb63b859d90dc77127dd3b962b20ac4417754dfbbf016aa7b0050",
+      "canonical_vega_path": "/ceph/hpc/home/eunikhilr/z1-checks/u22-width-k10-100-200-W118mp/k100/control-2/production/model_199.pt",
+      "seed": 2026110203
+    },
+    "preview-0": {
+      "sha256": "fb6067a2c8ab4bfc6371b3e69ff5cc3d4109816e929508197f922a5d5acb244f",
+      "canonical_vega_path": "/ceph/hpc/home/eunikhilr/z1-checks/u22-width-k10-100-200-W118mp/k100/preview-0/production/model_199.pt",
+      "seed": 2026110201
+    },
+    "preview-1": {
+      "sha256": "3f1dc68b0ad3602763c95b5f3ca455ba58e7eb05aff5ec03aa3b5dee03efec07",
+      "canonical_vega_path": "/ceph/hpc/home/eunikhilr/z1-checks/u22-width-k10-100-200-W118mp/k100/preview-1/production/model_199.pt",
+      "seed": 2026110202
+    },
+    "preview-2": {
+      "sha256": "1459ea9e7cc315ade76894711cf851798a9cb8c2251e81dda21c4551ec3f58a2",
+      "canonical_vega_path": "/ceph/hpc/home/eunikhilr/z1-checks/u22-width-k10-100-200-W118mp/k100/preview-2/production/model_199.pt",
+      "seed": 2026110203
+    }
+  },
+  "prefix_head_tolerance_m": 1e-05,
+  "native_joint_load_definition": "Contact-masked rolling50ms integral of absolute baseline-subtracted qfrc_constraint; per-policy-step maximum. Not isolated target-contact torque.",
+  "effective_cat_delta": 0.0,
+  "action_mode": "mean-policy with original observation noise; unchanged from saved evaluations",
+  "source_archive": "/tmp/u22-k100-eval-QPQk9y-inputs.tar.gz",
+  "runtime_archive": "/tmp/u22-eval-runtime-_i4s3y7d/python-runtime.tar.gz",
+  "runtime_sha256": "22f0c6231311149a26fb688d456e3d45486800e28333de05c2842fc566fe8e2e",
+  "runtime_login_host": "vglogin0007.vega.izum.si",
+  "historical_runtime_sha256": "ce6a21f84ec53e14d0222f07cd8cdc4767793eeb2656acc456cd62e0e5554c6e",
+  "evaluation_runtime_package_versions": {
+    "torch": "2.12.0",
+    "warp-lang": "1.14.0",
+    "mujoco": "3.8.1",
+    "mujoco-warp": "3.8.1",
+    "mjlab": "1.4.0"
+  },
+  "strict_prefix_validation": "Original10um threshold retained;two failed flags retained;all completedrollouts summarized without selectingreruns."
+}

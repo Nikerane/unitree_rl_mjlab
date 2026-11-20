@@ -332,6 +332,7 @@ def main():
             captured["recorded_time_phase"] = recorded_time_phase(captured["step"], env.step_dt, duration)
         if args.evaluate:
             strike = env._hammer_first_strike
+            telemetry = hook.constraint_telemetry()
             head = robot.data.site_pos_w[:, robot_cfg.site_ids].squeeze(1).clone()
             captured.update(
                 time_s=env.episode_length_buf * env.step_dt,
@@ -345,6 +346,8 @@ def main():
                 depth_at_contact_m=strike.depth_at_contact.clone(),
                 peak_depth_m=strike.peak_depth.clone(),
                 productive=strike.productive.clone(),
+                joint_load_nms=telemetry["lambda_per_joint"],
+                joint_speed_peak_rad_s=hook._substep_tracker(env).peak_qv_joint.clone(),
                 constraint_excess={
                     key: hook._cat.raw_constraints[key].clone()
                     for key in ("joint_impulse_excess", "joint_velocity_excess")
@@ -401,6 +404,10 @@ def main():
             training_termination=training_termination, termination=termination,
             max_episode_steps=max_steps, reference_steps=clip_steps,
             contact_window_s=.2, timeout_s=cfg.env.episode_length_s,
+            joint_load_caps_nms=list(env.metrics_manager.cfg["cat_soft"].params["imp_limit"]),
+            joint_speed_limit_rad_s=env.metrics_manager.cfg["cat_soft"].params["limit"],
+            joint_load_window_s=env.metrics_manager.cfg["substep_impulse"].params["event_window_substeps"] * env.physics_dt,
+            joint_load_subtract_baseline=env.metrics_manager.cfg["substep_impulse"].params.get("subtract_baseline", False),
             checkpoint_objective_preserved=True), indent=2))
         policy = runner.get_inference_policy(device=device)
         obs = observe(wrapped.reset()[0])
