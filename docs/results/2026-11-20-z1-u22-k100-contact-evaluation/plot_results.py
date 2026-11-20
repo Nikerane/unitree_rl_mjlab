@@ -56,7 +56,7 @@ for row in rows:
  m=row['measurements']
  flat.append(dict(arm=row['arm'],seed=row['seed'],attempts=m['attempts'],complete_J50=m['complete_windows'],productive=m['productive'],J50_mean_ns=m['J50_ns']['mean'],J50_median_ns=m['J50_ns']['median'],clip_rmse_mm=m['full_clip_rmse_mm'],tail_rmse_mm=m['post_reference_rmse_mm'],episode_rmse_mm=m['full_episode_rmse_mm'],load_exceeding_attempts=m['load_exceeding_attempts'],speed_exceeding_attempts=m['speed_exceeding_attempts']))
 with (root/'policy-summary.csv').open('w') as f:
- w=csv.DictWriter(f,fieldnames=list(flat[0]));w.writeheader();w.writerows(flat)
+ w=csv.DictWriter(f,fieldnames=list(flat[0]),lineterminator="\n");w.writeheader();w.writerows(flat)
 summary={}
 for arm in ('control','preview'):
  selected=[r for r in rows if r['arm']==arm];ms=[r['measurements'] for r in selected]
